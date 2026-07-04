@@ -185,6 +185,10 @@ public final class AppEnvironment: ObservableObject {
     ///   MOZZ_AUTOPLAY=1  → start playing the first album after activation.
     public func runLaunchAutomationIfNeeded() async {
         let env = ProcessInfo.processInfo.environment
+        if env["MOZZ_BENCH"] == "1" {
+            await runBenchmark()
+            return
+        }
         guard env["MOZZ_AUTODEMO"] == "1" else { return }
         if active == nil {
             try? await activateDemo(size: .init(artists: 50, albums: 300, tracks: 3_000))
@@ -196,6 +200,79 @@ public final class AppEnvironment: ObservableObject {
                 if !tracks.isEmpty { playback.play(tracks: tracks.map { $0.toDomain() }) }
             }
         }
+    }
+
+    /// Full performance run on-device: generate the 100k-track catalog, measure
+    /// the read path, and time first audio. Results print with a `MOZZ_BENCH`
+    /// marker so they can be captured from the simulator console for
+    /// ARCHITECTURE.md. Triggered by `MOZZ_BENCH=1`.
+    private func runBenchmark() async {
+        let serverId = "demo"
+        // Honest generation timing: only counts when the catalog is generated
+        // (fresh install). On a warm container this is nil and we skip it.
+        let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        let genStart = Date()
+        try? await activateDemo(size: .large)
+        let generationSeconds: Double? = existing == 0 ? Date().timeIntervalSince(genStart) : nil
+
+        guard active?.connection.id != nil else {
+            print("MOZZ_BENCH_RESULT\nno active server"); return
+        }
+
+        // True cold-open: open a *fresh* pool on the same on-disk file and time
+        // the first count query — the real "launch and read" cost on device.
+        var coldOpenMs: Double?
+        if let dbURL = try? FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
+        ).appendingPathComponent("mozz.sqlite"),
+           let coldDB = try? MusicDatabase.open(at: dbURL) {
+            let coldRepo = LibraryRepository(coldDB)
+            let coldStart = Date()
+            _ = try? await coldRepo.trackCount(serverId: serverId)
+            coldOpenMs = Date().timeIntervalSince(coldStart) * 1000
+        }
+
+        let harness = PerformanceHarness(database)
+        let metrics = try? await harness.measureReads(
+            serverId: serverId, iterations: 5,
+            generationSeconds: generationSeconds, coldOpenMs: coldOpenMs
+        )
+
+        var ttfaMs: Double?
+        if let album = try? await repository.albumsPage(serverId: serverId, offset: 0, limit: 1).first {
+            let tracks = (try? await repository.tracks(forAlbumRemoteId: album.remoteId, serverId: serverId)) ?? []
+            if !tracks.isEmpty {
+                let start = Date()
+                playback.play(tracks: tracks.map { $0.toDomain() })
+                ttfaMs = await waitUntilPlaying(startedAt: start, timeout: 8)
+            }
+        }
+
+        var out = metrics?.summary ?? "no metrics"
+        if let ttfaMs {
+            out += String(format: "\ntime-to-first-audio (local file): %.1f ms", ttfaMs)
+        } else {
+            out += "\ntime-to-first-audio: (did not reach playing)"
+        }
+        print("MOZZ_BENCH_RESULT\n\(out)\nMOZZ_BENCH_END")
+        // Also persist to a file — simulator stdout capture is unreliable in
+        // this toolchain, so ARCHITECTURE.md numbers are read back from here.
+        if let caches = try? FileManager.default.url(
+            for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        ).appendingPathComponent("mozz_bench.txt") {
+            try? out.write(to: caches, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func waitUntilPlaying(startedAt: Date, timeout: TimeInterval) async -> Double? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if playback.snapshot.status == .playing {
+                return Date().timeIntervalSince(startedAt) * 1000
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return nil
     }
 
     // MARK: Sync
