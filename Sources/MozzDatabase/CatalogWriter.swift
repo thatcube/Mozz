@@ -113,6 +113,47 @@ public struct CatalogWriter: Sendable {
         }
     }
 
+    // MARK: Pruning (delete rows a full sync no longer saw)
+
+    /// Delete rows for `serverId` whose `remoteId` is not in `keeping`. UPSERT
+    /// updates and inserts but never removes, so a full sync calls this to drop
+    /// items deleted on the server. The kept ids are staged into a temp table so
+    /// this stays one bounded DELETE rather than a giant `NOT IN (?, ?, …)`.
+    /// Returns the number of rows deleted.
+    public func pruneArtists(serverId: ServerID, keeping ids: [String]) async throws -> Int {
+        try await prune(table: "artist", serverId: serverId, keeping: ids)
+    }
+
+    public func pruneAlbums(serverId: ServerID, keeping ids: [String]) async throws -> Int {
+        try await prune(table: "album", serverId: serverId, keeping: ids)
+    }
+
+    public func pruneTracks(serverId: ServerID, keeping ids: [String]) async throws -> Int {
+        try await prune(table: "track", serverId: serverId, keeping: ids)
+    }
+
+    public func prunePlaylists(serverId: ServerID, keeping ids: [String]) async throws -> Int {
+        try await prune(table: "playlist", serverId: serverId, keeping: ids)
+    }
+
+    private func prune(table: String, serverId: ServerID, keeping ids: [String]) async throws -> Int {
+        try await database.write { db in
+            try db.execute(sql: "CREATE TEMP TABLE IF NOT EXISTS _sync_keep (remoteId TEXT PRIMARY KEY)")
+            try db.execute(sql: "DELETE FROM _sync_keep")
+            let insert = try db.makeStatement(sql: "INSERT OR IGNORE INTO _sync_keep (remoteId) VALUES (?)")
+            for id in ids {
+                try insert.execute(arguments: [id])
+            }
+            try db.execute(
+                sql: "DELETE FROM \(table) WHERE serverId = ? AND remoteId NOT IN (SELECT remoteId FROM _sync_keep)",
+                arguments: [serverId]
+            )
+            let deleted = db.changesCount
+            try db.execute(sql: "DELETE FROM _sync_keep")
+            return deleted
+        }
+    }
+
     // MARK: - SQL builders
 
     /// Build an `INSERT … ON CONFLICT(serverId, remoteId) DO UPDATE` statement.
