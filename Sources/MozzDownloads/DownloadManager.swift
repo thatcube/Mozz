@@ -72,6 +72,20 @@ public final class DownloadManager: NSObject, ObservableObject {
         let relativePath = fileStore.relativePath(serverId: serverId, remoteId: track.id, fileExtension: ext)
         progress[internalId] = 0
 
+        // Local-file sources (the demo backend, or an already-local server)
+        // don't go through the background session — copy directly so offline
+        // works even in the simulator.
+        if url.isFileURL {
+            let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            do {
+                try FileManager.default.copyItem(at: url, to: temp)
+                handleCompletedFile(at: temp, taskDescription: TaskInfo(trackId: internalId, relativePath: relativePath).encoded)
+            } catch {
+                try await store.markFailed(trackId: internalId, error: error.localizedDescription)
+            }
+            return
+        }
+
         let info = TaskInfo(trackId: internalId, relativePath: relativePath)
         let task = session.downloadTask(with: url)
         task.taskDescription = info.encoded

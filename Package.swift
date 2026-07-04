@@ -99,7 +99,8 @@ let package = Package(
                 "MozzCore", "MozzNetworking", "MozzDatabase",
                 "MozzPlex", "MozzJellyfin", "MozzSync",
                 "MozzPlayback", "MozzDownloads",
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
 
         // MARK: - Tests

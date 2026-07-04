@@ -1,33 +1,56 @@
 import SwiftUI
 
-/// The app's root SwiftUI scene. Kept in the package (not the executable target)
-/// so the composition root is a testable library. The real feature UI is wired
-/// in during the app/UI phase; this compiles cleanly on both iOS and the macOS
-/// host used for fast unit testing.
+/// The app's root SwiftUI scene. Builds the composition root once and injects it
+/// into the environment, then routes between onboarding and the main UI.
 public struct MozzRootScene: Scene {
-    public init() {}
+    @StateObject private var env: AppEnvironment
+
+    public init() {
+        // Fall back to an in-memory environment if the on-disk one can't open,
+        // so the app always launches.
+        let environment = (try? AppEnvironment.makeDefault()) ?? AppEnvironment.makeInMemoryFallback()
+        _env = StateObject(wrappedValue: environment)
+    }
 
     public var body: some Scene {
         WindowGroup {
-            MozzRootView()
+            RootView()
+                .environmentObject(env)
+                .environmentObject(env.playback)
+                .environmentObject(env.downloads)
+                .task {
+                    await env.restoreSession()
+                    await env.runLaunchAutomationIfNeeded()
+                }
         }
     }
 }
 
-/// Placeholder root view, replaced by the composed feature UI during the
-/// app/UI phase.
-public struct MozzRootView: View {
-    public init() {}
+/// Switches between the restore splash, onboarding, and the main tabbed UI.
+struct RootView: View {
+    @EnvironmentObject private var env: AppEnvironment
 
-    public var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "music.note.list")
-                .font(.system(size: 48))
-            Text("Mozz")
-                .font(.largeTitle.bold())
-            Text("Offline-first music for Plex & Jellyfin")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+    var body: some View {
+        Group {
+            if env.isRestoring {
+                SplashView()
+            } else if env.active == nil {
+                OnboardingView()
+            } else {
+                MainTabsView()
+            }
         }
+        .animation(.default, value: env.active == nil)
+        .animation(.default, value: env.isRestoring)
+    }
+}
+
+struct SplashView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "music.note.list").font(.system(size: 44))
+            ProgressView()
+        }
+        .foregroundStyle(.secondary)
     }
 }
