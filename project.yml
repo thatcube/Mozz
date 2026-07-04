@@ -1,0 +1,70 @@
+name: Mozz
+options:
+  bundleIdPrefix: com.mozz
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  minimumXcodeGenVersion: "2.40.0"
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Language mode 5 (toolchain is newer). Candidate B favours pragmatic,
+    # high-performance code with opt-in Sendable/actors rather than repo-wide
+    # Swift 6 strict concurrency (that is Candidate C's thesis).
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # Simulator builds need no signing; device builds set DEVELOPMENT_TEAM locally.
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+
+packages:
+  MozzKit:
+    path: .
+
+targets:
+  Mozz:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App/Mozz
+    dependencies:
+      - package: MozzKit
+        product: MozzApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mozz.app
+        TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad (tvOS is a later, thin-UI target)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    info:
+      path: App/Mozz/Info.plist
+      properties:
+        CFBundleDisplayName: Mozz
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen:
+          UIColorName: ""
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # CRITICAL for a music app: keep audio playing in the background.
+        UIBackgroundModes:
+          - audio
+        # Plex/Jellyfin servers are frequently self-hosted on the LAN over plain
+        # HTTP; allow arbitrary + local-network loads. (A production build could
+        # tighten this to per-host exceptions once a server is chosen.)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        # iOS 14+ requires a purpose string before touching the local network
+        # (LAN server discovery / direct-play from a home server).
+        NSLocalNetworkUsageDescription: "Mozz connects to Plex and Jellyfin media servers on your local network."
+        NSBonjourServices:
+          - _jellyfin._tcp
