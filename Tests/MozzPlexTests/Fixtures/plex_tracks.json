@@ -1,0 +1,40 @@
+{
+  "MediaContainer": {
+    "size": 1,
+    "totalSize": 1,
+    "offset": 0,
+    "Metadata": [
+      {
+        "ratingKey": "3001",
+        "type": "track",
+        "title": "Roygbiv",
+        "titleSort": "Roygbiv",
+        "parentRatingKey": "2001",
+        "parentTitle": "Music Has the Right to Children",
+        "grandparentRatingKey": "1001",
+        "grandparentTitle": "Boards of Canada",
+        "index": 8,
+        "parentIndex": 1,
+        "duration": 161000,
+        "thumb": "/library/metadata/2001/thumb/1600000001",
+        "addedAt": 1600000000,
+        "Media": [
+          {
+            "container": "flac",
+            "audioCodec": "flac",
+            "bitrate": 900,
+            "audioChannels": 2,
+            "Part": [
+              {
+                "key": "/library/parts/5001/1600000000/file.flac",
+                "file": "/data/music/roygbiv.flac",
+                "size": 18874368,
+                "container": "flac"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

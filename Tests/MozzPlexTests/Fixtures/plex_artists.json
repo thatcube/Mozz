@@ -1,0 +1,18 @@
+{
+  "MediaContainer": {
+    "size": 1,
+    "totalSize": 1,
+    "offset": 0,
+    "Metadata": [
+      {
+        "ratingKey": "1001",
+        "type": "artist",
+        "title": "Boards of Canada",
+        "titleSort": "Boards of Canada",
+        "thumb": "/library/metadata/1001/thumb/1600000000",
+        "childCount": 3,
+        "Genre": [{ "tag": "IDM" }, { "tag": "Electronic" }]
+      }
+    ]
+  }
+}

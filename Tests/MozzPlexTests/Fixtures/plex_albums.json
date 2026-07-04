@@ -1,0 +1,22 @@
+{
+  "MediaContainer": {
+    "size": 1,
+    "totalSize": 1,
+    "offset": 0,
+    "Metadata": [
+      {
+        "ratingKey": "2001",
+        "type": "album",
+        "title": "Music Has the Right to Children",
+        "titleSort": "Music Has the Right to Children",
+        "parentRatingKey": "1001",
+        "parentTitle": "Boards of Canada",
+        "year": 1998,
+        "thumb": "/library/metadata/2001/thumb/1600000001",
+        "leafCount": 17,
+        "addedAt": 1600000000,
+        "Genre": [{ "tag": "IDM" }]
+      }
+    ]
+  }
+}

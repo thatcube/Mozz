@@ -1,0 +1,41 @@
+{
+  "Items": [
+    {
+      "Id": "t1",
+      "Name": "Xtal",
+      "SortName": "Xtal",
+      "Type": "Audio",
+      "Album": "Selected Ambient Works 85-92",
+      "AlbumId": "al1",
+      "AlbumArtist": "Aphex Twin",
+      "ArtistItems": [{ "Name": "Aphex Twin", "Id": "a1" }],
+      "Artists": ["Aphex Twin"],
+      "IndexNumber": 1,
+      "ParentIndexNumber": 1,
+      "RunTimeTicks": 3150000000,
+      "Genres": ["Ambient"],
+      "NormalizationGain": -6.5,
+      "DateCreated": "2021-05-01T12:00:00.0000000Z",
+      "ImageTags": { "Primary": "ttrk1" },
+      "MediaSources": [
+        {
+          "Container": "flac",
+          "Size": 31457280,
+          "Bitrate": 900000,
+          "MediaStreams": [
+            {
+              "Type": "Audio",
+              "Codec": "flac",
+              "BitRate": 900000,
+              "SampleRate": 44100,
+              "Channels": 2,
+              "BitDepth": 16
+            }
+          ]
+        }
+      ],
+      "UserData": { "IsFavorite": true }
+    }
+  ],
+  "TotalRecordCount": 1
+}

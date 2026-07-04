@@ -1,0 +1,13 @@
+{
+  "Items": [
+    {
+      "Id": "pl1",
+      "Name": "Late Night",
+      "Type": "Playlist",
+      "ChildCount": 42,
+      "RunTimeTicks": 90000000000,
+      "ImageTags": { "Primary": "tagPL" }
+    }
+  ],
+  "TotalRecordCount": 1
+}
