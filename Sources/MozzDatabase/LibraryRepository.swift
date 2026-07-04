@@ -1,0 +1,242 @@
+import Foundation
+import GRDB
+import MozzCore
+
+/// Combined full-text search results across the three catalog entity types.
+public struct SearchResults: Sendable {
+    public var artists: [ArtistRecord]
+    public var albums: [AlbumRecord]
+    public var tracks: [TrackRecord]
+
+    public var isEmpty: Bool { artists.isEmpty && albums.isEmpty && tracks.isEmpty }
+
+    public init(artists: [ArtistRecord] = [], albums: [AlbumRecord] = [], tracks: [TrackRecord] = []) {
+        self.artists = artists
+        self.albums = albums
+        self.tracks = tracks
+    }
+}
+
+/// The read side of the source-of-truth database — the *only* thing the UI
+/// reads from. Every method is paginated or bounded so no query ever loads the
+/// whole library, which is what keeps memory flat and scrolling smooth at
+/// 100k+ tracks. All reads run on GRDB's WAL reader pool, off the main thread.
+public struct LibraryRepository: Sendable {
+    private let database: MusicDatabase
+
+    public init(_ database: MusicDatabase) {
+        self.database = database
+    }
+
+    // MARK: Servers & capabilities
+
+    public func servers() async throws -> [ServerConnection] {
+        try await database.read { db in
+            try ServerRecord.fetchAll(db).compactMap(\.connection)
+        }
+    }
+
+    public func capabilities(serverId: ServerID) async throws -> ServerCapabilities? {
+        try await database.read { db in
+            try CapabilitiesRecord
+                .filter(Column("serverId") == serverId)
+                .fetchOne(db)?
+                .capabilities
+        }
+    }
+
+    // MARK: Counts (for section headers / progress)
+
+    public func artistCount(serverId: ServerID? = nil) async throws -> Int {
+        try await count(table: ArtistRecord.self, serverId: serverId)
+    }
+
+    public func albumCount(serverId: ServerID? = nil) async throws -> Int {
+        try await count(table: AlbumRecord.self, serverId: serverId)
+    }
+
+    public func trackCount(serverId: ServerID? = nil) async throws -> Int {
+        try await count(table: TrackRecord.self, serverId: serverId)
+    }
+
+    private func count<R: TableRecord>(table: R.Type, serverId: ServerID?) async throws -> Int {
+        try await database.read { db in
+            var request = R.all()
+            if let serverId { request = request.filter(Column("serverId") == serverId) }
+            return try request.fetchCount(db)
+        }
+    }
+
+    // MARK: Paginated browse (alphabetical)
+
+    public func artistsPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [ArtistRecord] {
+        try await database.read { db in
+            try ArtistRecord.fetchAll(db, sql: """
+                SELECT * FROM artist
+                \(Self.serverClause(serverId))
+                ORDER BY sortName COLLATE NOCASE, name COLLATE NOCASE
+                LIMIT ? OFFSET ?
+                """, arguments: Self.serverArgs(serverId) + [limit, offset])
+        }
+    }
+
+    public func albumsPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [AlbumRecord] {
+        try await database.read { db in
+            try AlbumRecord.fetchAll(db, sql: """
+                SELECT * FROM album
+                \(Self.serverClause(serverId))
+                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                LIMIT ? OFFSET ?
+                """, arguments: Self.serverArgs(serverId) + [limit, offset])
+        }
+    }
+
+    public func tracksPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                \(Self.serverClause(serverId))
+                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                LIMIT ? OFFSET ?
+                """, arguments: Self.serverArgs(serverId) + [limit, offset])
+        }
+    }
+
+    // MARK: Detail
+
+    /// Albums by an artist, newest first (then alphabetical).
+    public func albums(forArtistRemoteId artistRemoteId: String, serverId: ServerID) async throws -> [AlbumRecord] {
+        try await database.read { db in
+            try AlbumRecord.fetchAll(db, sql: """
+                SELECT * FROM album
+                WHERE serverId = ? AND artistRemoteId = ?
+                ORDER BY year DESC, sortTitle COLLATE NOCASE
+                """, arguments: [serverId, artistRemoteId])
+        }
+    }
+
+    /// Tracks of an album in disc/track order.
+    public func tracks(forAlbumRemoteId albumRemoteId: String, serverId: ServerID) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                WHERE serverId = ? AND albumRemoteId = ?
+                ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
+                """, arguments: [serverId, albumRemoteId])
+        }
+    }
+
+    public func track(id: Int64) async throws -> TrackRecord? {
+        try await database.read { db in try TrackRecord.fetchOne(db, key: id) }
+    }
+
+    public func track(serverId: ServerID, remoteId: String) async throws -> TrackRecord? {
+        try await database.read { db in
+            try TrackRecord
+                .filter(Column("serverId") == serverId && Column("remoteId") == remoteId)
+                .fetchOne(db)
+        }
+    }
+
+    /// Ordered tracks of a playlist, resolving membership to local track rows.
+    public func tracks(forPlaylistRemoteId playlistRemoteId: String, serverId: ServerID) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM playlistItem
+                JOIN playlist ON playlist.id = playlistItem.playlistId
+                JOIN track ON track.serverId = playlist.serverId AND track.remoteId = playlistItem.trackRemoteId
+                WHERE playlist.serverId = ? AND playlist.remoteId = ?
+                ORDER BY playlistItem.position
+                """, arguments: [serverId, playlistRemoteId])
+        }
+    }
+
+    // MARK: Full-text search
+
+    /// Search all three entity types. Returns quickly (each MATCH is bounded by
+    /// `limitPerType`) — the basis for the sub-100ms search target.
+    public func search(_ query: String, serverId: ServerID? = nil, limitPerType: Int = 20) async throws -> SearchResults {
+        guard let pattern = FTSQuery.pattern(for: query) else { return SearchResults() }
+        return try await database.read { db in
+            let serverFilter = serverId != nil
+            let artists = try ArtistRecord.fetchAll(db, sql: """
+                SELECT artist.* FROM artist
+                JOIN artist_fts ON artist_fts.rowid = artist.id
+                WHERE artist_fts MATCH ?\(serverFilter ? " AND artist.serverId = ?" : "")
+                ORDER BY bm25(artist_fts) LIMIT ?
+                """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
+            let albums = try AlbumRecord.fetchAll(db, sql: """
+                SELECT album.* FROM album
+                JOIN album_fts ON album_fts.rowid = album.id
+                WHERE album_fts MATCH ?\(serverFilter ? " AND album.serverId = ?" : "")
+                ORDER BY bm25(album_fts) LIMIT ?
+                """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
+            let tracks = try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM track
+                JOIN track_fts ON track_fts.rowid = track.id
+                WHERE track_fts MATCH ?\(serverFilter ? " AND track.serverId = ?" : "")
+                ORDER BY bm25(track_fts) LIMIT ?
+                """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
+            return SearchResults(artists: artists, albums: albums, tracks: tracks)
+        }
+    }
+
+    // MARK: Downloads (read)
+
+    public func download(trackId: Int64) async throws -> DownloadRecord? {
+        try await database.read { db in try DownloadRecord.fetchOne(db, key: trackId) }
+    }
+
+    /// All download records in the given states (default: everything).
+    public func downloads(in states: [DownloadState] = DownloadState.allCases) async throws -> [DownloadRecord] {
+        let raw = states.map(\.rawValue)
+        return try await database.read { db in
+            try DownloadRecord
+                .filter(raw.contains(Column("state")))
+                .fetchAll(db)
+        }
+    }
+
+    /// Downloaded tracks joined with their catalog rows, for the Downloads UI.
+    public func downloadedTracks() async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM track
+                JOIN download ON download.trackId = track.id
+                WHERE download.state = ?
+                ORDER BY track.artistName COLLATE NOCASE, track.albumTitle COLLATE NOCASE,
+                         track.discNumber, track.trackNumber
+                """, arguments: [DownloadState.downloaded.rawValue])
+        }
+    }
+
+    public func storageUsage() async throws -> StorageUsage {
+        try await database.read { db in
+            let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS c, COALESCE(SUM(sizeBytes), 0) AS b
+                FROM download WHERE state = ?
+                """, arguments: [DownloadState.downloaded.rawValue])
+            return StorageUsage(
+                downloadedTrackCount: row?["c"] ?? 0,
+                totalBytes: row?["b"] ?? 0
+            )
+        }
+    }
+
+    // MARK: - Helpers
+
+    private static func serverClause(_ serverId: ServerID?) -> String {
+        serverId != nil ? "WHERE serverId = ?" : ""
+    }
+
+    private static func serverArgs(_ serverId: ServerID?) -> StatementArguments {
+        serverId != nil ? [serverId] : []
+    }
+
+    private static func matchArgs(_ pattern: String, _ serverId: ServerID?, _ limit: Int) -> StatementArguments {
+        if let serverId {
+            return [pattern, serverId, limit]
+        }
+        return [pattern, limit]
+    }
+}
