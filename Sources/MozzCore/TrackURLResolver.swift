@@ -1,5 +1,4 @@
 import Foundation
-import MozzCore
 
 /// A track resolved to a concrete, playable URL plus whether it is a local
 /// (downloaded) file. The playback layer never decides *where* audio comes
