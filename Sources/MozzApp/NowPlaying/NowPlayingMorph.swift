@@ -38,12 +38,18 @@ struct NowPlayingMorphContainer: View {
     @State private var receiving = false
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
-    /// True while a finger is on the docked island — drives a subtle press-scale.
-    @State private var islandPressed = false
+    /// Live island-press state: `pressed` drives the whole-island scale, `location`
+    /// (pill-local) drives the finger-following glow. Kept in an `@Observable` so
+    /// the high-frequency `location` updates re-render ONLY the lightweight glow
+    /// layer — not this container (which builds the drawer's up-next list).
+    @State private var press = IslandPressState()
 
     /// How much the docked island grows while touched.
     private static let pressScale: CGFloat = 1.04
     private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
+    /// Horizontal bloom of the glow on release — it stretches to this multiple as
+    /// it fades, so the light diffuses left/right along the rail before vanishing.
+    private static let glowReleaseSpread: CGFloat = 4.5
 
     var body: some View {
         // Outer reader supplies the real safe-area insets; the inner reader,
@@ -60,6 +66,19 @@ struct NowPlayingMorphContainer: View {
                               isExpanded: ui.isFullPresented)
                 ZStack(alignment: .topLeading) {
                     surface(m)
+                    // Finger-following specular glow: a soft highlight on the glass
+                    // that tracks the touch point, like Apple's interactive Liquid
+                    // Glass. It reads `press.location`, so tracking the finger
+                    // re-renders ONLY this layer, never the container. (We render
+                    // our own instead of `.glassEffect(.interactive())` because that
+                    // API adds its own press-scale that fought our unified scale.)
+                    if m.p < 0.5 {
+                        IslandGlow(press: press, width: m.islandW,
+                                   height: Morph.islandHeight, radius: m.radius)
+                            .frame(width: m.islandW, height: Morph.islandHeight)
+                            .position(x: m.surfaceCenterX, y: m.miniCenterY)
+                            .allowsHitTesting(false)
+                    }
                     // The island content is a self-contained subview owning its own
                     // swipe/slide state, so swiping to change tracks re-renders ONLY
                     // the island — not the whole full-player overlay (that was a big
@@ -81,12 +100,24 @@ struct NowPlayingMorphContainer: View {
                     // finger, which lagged the scale. It observes without stealing
                     // the touch, and this transparent layer spans the ENTIRE pill,
                     // so a press anywhere — artwork, titles OR the buttons — scales
-                    // the whole island as one unit. Gated to the docked state.
+                    // the whole island as one unit and lights the glow. Gated to the
+                    // docked state.
                     Color.clear
                         .frame(width: m.islandW, height: Morph.islandHeight)
-                        .onTouchDownChanged { active in
+                        .onTouchChanged { active, loc in
                             guard m.p < 0.5 else { return }
-                            withAnimation(Self.pressSpring) { islandPressed = active }
+                            press.location = loc      // instant, tracks the finger
+                            withAnimation(Self.pressSpring) { press.pressed = active }
+                            if active {
+                                press.spread = 1      // snap back to natural width
+                                withAnimation(.easeOut(duration: 0.16)) { press.glow = 1 }
+                            } else {
+                                // Release: bloom outward left/right while fading.
+                                withAnimation(.easeOut(duration: 0.45)) {
+                                    press.glow = 0
+                                    press.spread = Self.glowReleaseSpread
+                                }
+                            }
                         }
                         .position(x: m.surfaceCenterX, y: m.miniCenterY)
                 }
@@ -95,7 +126,7 @@ struct NowPlayingMorphContainer: View {
                 // overlay around the island's centre, so glass, artwork and text
                 // grow together. When docked the rest of the overlay is
                 // transparent, so only the island is visibly affected.
-                .scaleEffect(islandPressed ? Self.pressScale : 1,
+                .scaleEffect(press.pressed ? Self.pressScale : 1,
                              anchor: UnitPoint(x: m.surfaceCenterX / max(geo.size.width, 1),
                                                y: m.miniCenterY / max(geo.size.height, 1)))
                 .onChange(of: ui.isFullPresented, initial: true) { _, want in
@@ -332,6 +363,67 @@ struct NowPlayingMorphContainer: View {
 
 /// Shared spring for the island text slide.
 private let islandTextSpring = Animation.spring(response: 0.34, dampingFraction: 1.0)
+
+/// Live press state for the docked island. `@Observable` so SwiftUI's
+/// per-property observation re-renders only the views that read a given field:
+/// the whole-island scale reads `pressed` (toggles ~twice per touch), while the
+/// finger-following glow reads `location` (updates every move) — so tracking the
+/// finger never re-renders the heavy morph container.
+@Observable @MainActor final class IslandPressState {
+    var pressed = false
+    /// Glow opacity (0…1). Fades in fast on touch, out slowly on release.
+    var glow: Double = 0
+    /// Horizontal spread of the glow (1 = natural). On release it grows so the
+    /// light blooms outward left/right along the rail as it fades — like Apple's.
+    var spread: CGFloat = 1
+    /// Touch point in island-pill-local coordinates (0…islandW, 0…islandHeight).
+    var location: CGPoint = .zero
+}
+
+/// A soft specular highlight on the island glass that follows the finger — our
+/// own take on Apple's interactive Liquid Glass glow. It brightens the glass with
+/// a radial `plusLighter` pool centred on the touch, clipped to the pill and
+/// fading with the press. Reading `press.location`/`press.pressed` here (and not
+/// in the parent) keeps finger-tracking re-renders scoped to just this view.
+private struct IslandGlow: View {
+    var press: IslandPressState
+    let width: CGFloat
+    let height: CGFloat
+    let radius: CGFloat
+
+    var body: some View {
+        // A narrow, dim core right under the finger that washes out very gradually
+        // across a wide radius — a small bright point with a long, faint, far-
+        // reaching tail (like Apple's), rather than a wide bright plateau.
+        //
+        // The centre is LOCKED to the rail vertically (y = 0.5) and clamped to the
+        // pill horizontally, so — like Apple — dragging your finger off the island
+        // never lets the highlight leave it: it just slides along the rail and
+        // stays put at the nearest edge.
+        //
+        // On release the whole gradient is stretched horizontally about the touch
+        // point (`spread`) as it fades (`glow`), so the light blooms outward to the
+        // left and right along the rail before dissipating — clipped to the pill.
+        let nx = min(max(press.location.x / max(width, 1), 0), 1)
+        return RadialGradient(
+            stops: [
+                .init(color: .white.opacity(0.15),  location: 0.0),
+                .init(color: .white.opacity(0.12),  location: 0.12),
+                .init(color: .white.opacity(0.075), location: 0.28),
+                .init(color: .white.opacity(0.038), location: 0.50),
+                .init(color: .white.opacity(0.014), location: 0.74),
+                .init(color: .white.opacity(0.0),   location: 1.0),
+            ],
+            center: UnitPoint(x: nx, y: 0.5),
+            startRadius: 0, endRadius: 280)
+        .frame(width: width, height: height)
+        .scaleEffect(x: press.spread, y: 1, anchor: UnitPoint(x: nx, y: 0.5))
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .blendMode(.plusLighter)
+        .opacity(press.glow)
+        .allowsHitTesting(false)
+    }
+}
 
 /// The docked island's content row: [artwork slot][title/artist][play][next].
 ///
@@ -700,14 +792,15 @@ private extension View {
 // MARK: - Instant touch-down reporting (UIKit)
 
 private extension View {
-    /// Reports touch-DOWN / up on this view **instantly**. SwiftUI's own
-    /// DragGesture / LongPressGesture wait to disambiguate a stationary finger
-    /// (they only fire on movement), which lagged the island press-scale. This
-    /// bridges a UIKit 0-duration long-press recognizer that fires on
-    /// `touchesBegan` and, being non-cancelling + simultaneous, observes without
-    /// stealing the touch from SwiftUI gestures/buttons underneath. No-op off iOS.
+    /// Reports touch-DOWN / move / up on this view **instantly**, with the touch
+    /// point in this view's local coordinates. SwiftUI's own DragGesture /
+    /// LongPressGesture wait to disambiguate a stationary finger (they only fire on
+    /// movement), which lagged the island press-scale. This bridges a UIKit
+    /// 0-duration long-press recognizer that fires on `touchesBegan` and, being
+    /// non-cancelling + simultaneous, observes without stealing the touch from
+    /// SwiftUI gestures/buttons underneath. No-op off iOS.
     @ViewBuilder
-    func onTouchDownChanged(_ action: @escaping (Bool) -> Void) -> some View {
+    func onTouchChanged(_ action: @escaping (Bool, CGPoint) -> Void) -> some View {
         #if canImport(UIKit)
         self.background(TouchDownReader(onChange: action))
         #else
@@ -728,7 +821,7 @@ private extension View {
 /// is always an ancestor, and `shouldReceive` re-scopes delivery to this view's
 /// bounds. `allowableMovement` is unbounded so the press survives a swipe.
 private struct TouchDownReader: UIViewRepresentable {
-    var onChange: (Bool) -> Void
+    var onChange: (Bool, CGPoint) -> Void
 
     func makeUIView(context: Context) -> PassthroughView {
         let view = PassthroughView()
@@ -764,15 +857,17 @@ private struct TouchDownReader: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var onChange: ((Bool) -> Void)?
+        var onChange: ((Bool, CGPoint) -> Void)?
         weak var view: PassthroughView?
         weak var recognizer: UIGestureRecognizer?
         weak var host: UIView?
 
         @objc func handle(_ g: UILongPressGestureRecognizer) {
+            guard let view else { return }
+            let loc = g.location(in: view)
             switch g.state {
-            case .began: onChange?(true)
-            case .ended, .cancelled, .failed: onChange?(false)
+            case .began, .changed: onChange?(true, loc)
+            case .ended, .cancelled, .failed: onChange?(false, loc)
             default: break
             }
         }
