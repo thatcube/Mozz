@@ -387,6 +387,14 @@ public struct LibraryRepository: Sendable {
     /// *with* artwork first, then the one with the most tracks — so the album's
     /// cover and identity stay stable across syncs. `column` prefixes the two
     /// referenced columns for queries that join (e.g. `"album."`).
+    ///
+    /// NOTE: this pulls *every* selected column from that one representative row
+    /// (SQLite's bare-column + single-min/max rule), so on a consolidated album
+    /// `trackCount` is the representative fragment's, NOT the sum across the
+    /// group. No UI reads `album.trackCount` today (detail derives count from the
+    /// fetched tracks), but a future "N songs" badge must use `SUM(trackCount)`
+    /// via a subquery — you cannot add a second aggregate here without making the
+    /// representative row arbitrary.
     private static func albumRepresentative(_ column: String = "") -> String {
         "MAX((CASE WHEN \(column)artworkKey IS NOT NULL AND \(column)artworkKey <> '' THEN 1 ELSE 0 END) * 1000000 + COALESCE(\(column)trackCount, 0))"
     }
