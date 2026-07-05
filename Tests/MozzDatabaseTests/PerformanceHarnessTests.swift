@@ -117,6 +117,21 @@ final class PerformanceHarnessTests: XCTestCase {
         _ = try await LibraryRepository(reopened).trackCount(serverId: serverId)
         let coldOpenMs = Date().timeIntervalSince(coldStart) * 1000
 
+        // Local footprint of a 100k-track library with NOTHING downloaded: just
+        // the catalog DB (metadata). This is the entire on-disk cost of browsing
+        // + streaming a huge server library — audio is streamed on demand and
+        // never persisted, artwork is an in-memory cache, so the phone stores
+        // only this until the user explicitly downloads. Guard it stays modest.
+        func fileSize(_ u: URL) -> Int64 {
+            (try? FileManager.default.attributesOfItem(atPath: u.path)[.size] as? Int64) ?? 0
+        }
+        let dbBytes = fileSize(url)
+            + fileSize(url.appendingPathExtension("wal"))
+            + fileSize(URL(fileURLWithPath: url.path + "-wal"))
+        let dbMB = Double(dbBytes) / 1_048_576.0
+        print(String(format: "[PERF 100k] catalog DB on disk (nothing downloaded): %.1f MB", dbMB))
+        XCTAssertLessThan(dbMB, 250, "100k-track catalog DB unexpectedly large: \(dbMB) MB")
+
         let harness = PerformanceHarness(reopened)
         let metrics = try await harness.measureReads(
             serverId: serverId, iterations: 5,
