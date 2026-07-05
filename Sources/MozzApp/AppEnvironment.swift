@@ -472,20 +472,20 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
-    /// Ensure a Plex connection has a resolved music-library section before sync.
-    /// Plex browse endpoints require a section id; activation resolves it, but if
-    /// that was missed (transient failure, older data) this recovers lazily at
-    /// sync time. On success it persists the section to the connection, DB and
-    /// keychain and refreshes the active backend so the bulk-sync backend picks it
-    /// up. If the server truly exposes no music library, it throws a clear error
-    /// naming the sections it DOES have — instead of the later cryptic
-    /// "section not resolved". No-op for non-Plex servers or when already set.
+    /// Ensure the active Plex backend is set up to sync ALL the server's music
+    /// libraries. Plex browse endpoints require a section id, and a server can
+    /// host several music libraries — the user's default is to sync them all — so
+    /// we resolve the full set of `artist` sections here (fresh each sync, so
+    /// newly-added libraries are picked up) and rebuild the active backend to span
+    /// them. On success it persists the primary section to the connection/DB/
+    /// keychain (a "music resolved" marker + back-compat). If the server exposes
+    /// no music library it throws a clear error naming the sections it DOES have,
+    /// instead of the later cryptic "section not resolved". No-op for non-Plex.
     private func ensurePlexMusicSection() async throws {
         guard let current = active, current.connection.kind == .plex,
-              (current.connection.musicSectionID?.isEmpty ?? true),
               let plex = current.backend as? PlexBackend else { return }
 
-        guard let section = try await plex.musicSections().first else {
+        guard let sections = try? await plex.musicSections(), !sections.isEmpty else {
             let summary: String
             do {
                 let all = try await plex.allLibrarySections()
@@ -498,13 +498,17 @@ public final class AppEnvironment: ObservableObject {
             throw MozzError.unsupported("No music library on ‘\(current.connection.name)’ — \(summary)")
         }
 
+        let ids = sections.map(\.id)
+        // Already spanning exactly this set — nothing to rebuild.
+        if Set(ids) == Set(plex.musicSectionIDs), current.connection.musicSectionID != nil { return }
         guard let token = SessionPersistence.load(credentials)?.token else { return }
+
         var connection = current.connection
-        connection.musicSectionID = section.id
-        let backend = PlexBackend(connection: connection, token: token, clientInfo: clientInfo)
+        connection.musicSectionID = ids.first
+        let backend = PlexBackend(connection: connection, token: token, clientInfo: clientInfo, musicSectionIDs: ids)
         try await CatalogWriter(database).saveServer(connection)
         if var stored = SessionPersistence.load(credentials) {
-            stored.musicSectionID = section.id
+            stored.musicSectionID = ids.first
             SessionPersistence.save(stored, to: credentials)
         }
         finishActivation(connection: connection, backend: backend, capabilities: current.capabilities)
@@ -523,8 +527,12 @@ public final class AppEnvironment: ObservableObject {
             return JellyfinBackend(connection: active.connection, token: stored.token,
                                    clientInfo: clientInfo, transport: bulk)
         case .plex:
+            // Span whatever set of music libraries the active backend resolved
+            // (see ensurePlexMusicSection, which runs first in syncNow).
+            let sectionIDs = (active.backend as? PlexBackend)?.musicSectionIDs
             return PlexBackend(connection: active.connection, token: stored.token,
-                               clientInfo: clientInfo, transport: bulk)
+                               clientInfo: clientInfo, transport: bulk,
+                               musicSectionIDs: sectionIDs)
         }
     }
 

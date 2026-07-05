@@ -35,6 +35,38 @@ final class PlexFixtureTransport: HTTPTransport, @unchecked Sendable {
     }
 }
 
+/// A transport that fakes an `artist` library per section id, honoring
+/// `X-Plex-Container-Start`/`Size` and capping items per response — so
+/// multi-section pagination (including short pages and boundary spans) can be
+/// exercised end to end.
+final class PlexPagingTransport: HTTPTransport, @unchecked Sendable {
+    private let sectionSizes: [String: Int]
+    private let maxPageSize: Int
+    init(sectionSizes: [String: Int], maxPageSize: Int) {
+        self.sectionSizes = sectionSizes
+        self.maxPageSize = maxPageSize
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let url = request.url!
+        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        // Path: /library/sections/{id}/all
+        let segments = url.path.split(separator: "/").map(String.init)
+        let section = segments.count >= 3 ? segments[2] : ""
+        let query = comps.queryItems ?? []
+        func intQuery(_ name: String) -> Int { Int(query.first { $0.name == name }?.value ?? "") ?? 0 }
+        let start = intQuery("X-Plex-Container-Start")
+        let size = intQuery("X-Plex-Container-Size")
+        let total = sectionSizes[section] ?? 0
+        let count = max(0, min(min(size, maxPageSize), total - start))
+        let metadata = (0..<count).map { i in
+            "{\"ratingKey\":\"\(section)-\(start + i)\",\"type\":\"artist\",\"title\":\"\(section) \(start + i)\",\"titleSort\":\"\(section) \(start + i)\"}"
+        }.joined(separator: ",")
+        let json = "{\"MediaContainer\":{\"size\":\(count),\"totalSize\":\(total),\"offset\":\(start),\"Metadata\":[\(metadata)]}}"
+        return (Data(json.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
 private let clientInfo = ClientInfo(
     product: "Mozz", version: "1.0", deviceName: "iPhone", platform: "iOS", platformVersion: "17.0"
 )
@@ -72,6 +104,50 @@ final class PlexCatalogTests: XCTestCase {
         XCTAssertEqual(artist.albumCount, 3)
         XCTAssertEqual(artist.artwork?.key, "/library/metadata/1001/thumb/1600000000")
         XCTAssertEqual(artist.genres, ["IDM", "Electronic"])
+    }
+
+    func testFetchArtistsSpansMultipleMusicSections() async throws {
+        // A server with two music libraries: a sync must span BOTH into one
+        // catalog and report the combined total (so pruning sees the true count).
+        let transport = PlexFixtureTransport([
+            .init(contains: "sections/secA/", fixture: "plex_artists"),
+            .init(contains: "sections/secB/", fixture: "plex_artists_b"),
+        ])
+        let connection = ServerConnection(
+            id: "srv", kind: .plex, name: "Home",
+            baseURL: URL(string: "https://plex.example.com")!,
+            userID: nil, clientIdentifier: "client-uuid", musicSectionID: "secA")
+        let backend = PlexBackend(connection: connection, token: "t", clientInfo: clientInfo,
+                                  transport: transport, musicSectionIDs: ["secA", "secB"])
+        let page = try await backend.fetchArtists(offset: 0, limit: 200)
+        XCTAssertEqual(page.items.map(\.name), ["Boards of Canada", "Aphex Twin"])
+        XCTAssertEqual(page.totalCount, 2)
+    }
+
+    func testMultiSectionPaginationCoversEveryItemAcrossShortPages() async throws {
+        // Two music libraries (A: 3 artists, B: 2), a small page size AND a server
+        // that returns short pages. Driving the paging exactly as LibrarySyncEngine
+        // does must visit every item once, span the A→B boundary, and terminate.
+        let transport = PlexPagingTransport(sectionSizes: ["secA": 3, "secB": 2], maxPageSize: 2)
+        let connection = ServerConnection(
+            id: "srv", kind: .plex, name: "Home",
+            baseURL: URL(string: "https://plex.example.com")!,
+            userID: nil, clientIdentifier: "client-uuid", musicSectionID: "secA")
+        let backend = PlexBackend(connection: connection, token: "t", clientInfo: clientInfo,
+                                  transport: transport, musicSectionIDs: ["secA", "secB"])
+
+        var seen: [String] = []
+        var offset = 0
+        while true {
+            let page = try await backend.fetchArtists(offset: offset, limit: 2)
+            XCTAssertEqual(page.totalCount, 5, "combined total spans both sections")
+            if page.items.isEmpty { break }
+            seen.append(contentsOf: page.items.map(\.id))
+            offset += page.items.count
+            XCTAssertLessThan(offset, 20, "paging must terminate")
+        }
+        XCTAssertEqual(seen.sorted(), ["secA-0", "secA-1", "secA-2", "secB-0", "secB-1"])
+        XCTAssertEqual(Set(seen).count, seen.count, "no duplicates across the section boundary")
     }
 
     func testDecodesAlbums() async throws {
