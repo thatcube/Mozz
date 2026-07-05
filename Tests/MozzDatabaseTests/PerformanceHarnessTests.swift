@@ -7,6 +7,53 @@ import MozzCore
 /// `MOZZ_RUN_PERF=1` (it is heavier) and prints the numbers reported in
 /// ARCHITECTURE.md.
 final class PerformanceHarnessTests: XCTestCase {
+    /// A hi-res library (24-bit lossless, 150–400 MB/track) must account
+    /// correctly at multi-terabyte scale: `storageUsage()` sums an `Int64` byte
+    /// column, so this proves no overflow, exact totals, and TB-scale human
+    /// formatting — the concern behind "will this scale to huge FLAC libraries?".
+    /// Pure metadata: not one audio byte is written.
+    func testStorageAccountingScalesToMultipleTerabytes() async throws {
+        let db = try MusicDatabase.inMemory()
+        let serverId = "hires"
+        // ~90% hi-res 24-bit → a realistically huge audiophile library.
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId,
+            size: .init(artists: 300, albums: 1_500, tracks: 15_000, hiResFraction: 0.9)
+        )
+
+        // Mark the entire library downloaded in one statement, recording each
+        // track's real (synthetic) byte size — no files, just the accounting rows.
+        try await db.write { database in
+            try database.execute(sql: """
+                INSERT INTO download (trackId, state, sizeBytes, requestedAt, completedAt)
+                SELECT id, 'downloaded', COALESCE(fileSizeBytes, 0), 0, 0
+                FROM track WHERE serverId = ?
+                """, arguments: [serverId])
+        }
+
+        let repo = LibraryRepository(db)
+        let usage = try await repo.storageUsage()
+        XCTAssertEqual(usage.downloadedTrackCount, 15_000)
+
+        // Exact: the download SUM must equal the catalog's own byte sum.
+        let catalogBytes = try await db.read { database in
+            try Int64.fetchOne(database, sql: "SELECT COALESCE(SUM(fileSizeBytes),0) FROM track WHERE serverId = ?",
+                               arguments: [serverId]) ?? 0
+        }
+        XCTAssertEqual(usage.totalBytes, catalogBytes)
+
+        // Multi-terabyte, and Int64-safe (a wrap would go negative).
+        let tb = Double(usage.totalBytes) / 1_000_000_000_000
+        XCTAssertGreaterThan(usage.totalBytes, 1_000_000_000_000, "hi-res library should exceed 1 TB")
+        XCTAssertGreaterThan(usage.totalBytes, 0, "Int64 byte total must not overflow to negative")
+
+        // Human formatting renders terabytes (what the storage UI shows).
+        let formatted = ByteCountFormatter.string(fromByteCount: usage.totalBytes, countStyle: .file)
+        XCTAssertTrue(formatted.contains("TB"), "expected a TB-scale label, got \(formatted)")
+
+        print(String(format: "[PERF hi-res] 15k tracks @ 90%% hi-res → %.2f TB (%@)", tb, formatted))
+    }
+
     func testSearchLatencyBarAt20k() async throws {
         let db = try MusicDatabase.inMemory()
         let harness = PerformanceHarness(db)

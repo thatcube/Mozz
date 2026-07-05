@@ -135,11 +135,11 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Activate the offline demo: generate a synthetic catalog and serve a
-    /// bundled clip so playback/downloads work with no server.
+    /// full-length tone per track so playback/scrub/downloads behave like real
+    /// multi-minute audio with no server.
     public func activateDemo(size: SyntheticCatalog.Size = .init(artists: 200, albums: 2_000, tracks: 20_000)) async throws {
         let serverId = "demo"
-        let clip = try Self.demoClipURL()
-        let backend = DemoBackend(serverId: serverId, clipURL: clip)
+        let backend = DemoBackend(serverId: serverId, clipProvider: Self.makeDemoClipProvider())
         let existing = try await repository.trackCount(serverId: serverId)
         if existing == 0 {
             try await SyntheticCatalog(database).generate(serverId: serverId, size: size)
@@ -449,6 +449,24 @@ public final class AppEnvironment: ObservableObject {
             throw MozzError.unsupported("Demo clip missing from bundle")
         }
         return url
+    }
+
+    /// Build the demo's per-track clip resolver: a full-length generated tone
+    /// matching each track's duration (cached in a caches subdirectory), falling
+    /// back to the bundled short clip if the caches dir or generation is
+    /// unavailable. Generated audio is ephemeral and never committed.
+    static func makeDemoClipProvider() -> @Sendable (Track) -> URL {
+        let fallback = (try? demoClipURL())
+            ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("demo_tone.wav")
+        let caches = (try? FileManager.default.url(
+            for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = caches.appendingPathComponent("MozzDemoAudio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let provider = DemoAudioProvider(cacheDirectory: dir, fallbackURL: fallback)
+        return { track in
+            track.duration > 0 ? provider.clipURL(forDuration: track.duration) : fallback
+        }
     }
 
     private static func stableClientIdentifier(_ store: any CredentialStore) -> String {
