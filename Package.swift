@@ -37,6 +37,7 @@ let package = Package(
         .library(name: "MozzSync", targets: ["MozzSync"]),
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
+        .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
         .library(name: "MozzApp", targets: ["MozzApp"]),
     ],
     dependencies: [
@@ -92,13 +93,24 @@ let package = Package(
             dependencies: ["MozzCore", "MozzNetworking", "MozzDatabase"]
         ),
 
+        // MARK: On-device recommendations (offline-first, network-free core)
+        //
+        // Pure taste-profile + content/sonic/collaborative recommenders behind a
+        // `Recommender` port, a blender (normalize -> weighted fuse -> dedupe ->
+        // drop-heard -> exploration jitter -> rank), and a `RecommendationService`
+        // actor that persists ranked sets to the DB (instant + offline UI).
+        // Phase 1 is fully offline (in-library "Mozz Weekly"); sonic (Core ML) and
+        // collaborative (ListenBrainz) slot in as additional recommenders. See
+        // docs RECOMMENDATIONS.md + ADR-0004/0005.
+        .target(name: "MozzRecommend", dependencies: ["MozzCore", "MozzDatabase"]),
+
         // MARK: Composition root + SwiftUI feature layer (iOS)
         .target(
             name: "MozzApp",
             dependencies: [
                 "MozzCore", "MozzNetworking", "MozzDatabase",
                 "MozzPlex", "MozzJellyfin", "MozzSync",
-                "MozzPlayback", "MozzDownloads",
+                "MozzPlayback", "MozzDownloads", "MozzRecommend",
             ],
             resources: [.process("Resources")]
         ),
@@ -120,6 +132,7 @@ let package = Package(
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
+        .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
     ],
     swiftLanguageModes: [.v5]
 )
