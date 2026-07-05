@@ -35,6 +35,11 @@ struct NowPlayingMorphContainer: View {
     @State private var receiving = false
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
+    /// True while a finger is on the docked island — drives a subtle press-scale.
+    @State private var islandPressed = false
+
+    /// How much the docked island grows while touched.
+    private static let pressScale: CGFloat = 1.04
 
     var body: some View {
         // Outer reader supplies the real safe-area insets; the inner reader,
@@ -51,12 +56,14 @@ struct NowPlayingMorphContainer: View {
                               isExpanded: ui.isFullPresented)
                 ZStack(alignment: .topLeading) {
                     surface(m)
-                    // Mini controls ride the surface's top edge DOWN into the
-                    // island as it collapses (miniCenterY), then rest centered in
-                    // the island. Hidden entirely while expanding, so the drawer
-                    // opens over them. They ride the base top (no receive-grow), so
-                    // the glass can grow up past them without dragging them along.
-                    miniControls(m)
+                    // The island content is a self-contained subview owning its own
+                    // swipe/slide state, so swiping to change tracks re-renders ONLY
+                    // the island — not the whole full-player overlay (that was a big
+                    // source of jank). The parent just places it: it rides the
+                    // surface's top edge DOWN into the island on collapse
+                    // (miniCenterY), is hidden while expanding (miniOpacity), and
+                    // rides the base top so the receive-grow can rise past it.
+                    IslandContent(playback: playback, pressed: $islandPressed) { ui.isFullPresented = true }
                         .frame(width: m.islandW, height: Morph.islandHeight)
                         .position(x: m.surfaceCenterX, y: m.miniCenterY)
                         .opacity(m.miniOpacity)
@@ -64,6 +71,13 @@ struct NowPlayingMorphContainer: View {
                     travelingArtwork(m)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                // Press-scale the WHOLE island as one unit: scale the entire
+                // overlay around the island's centre, so glass, artwork and text
+                // grow together. When docked the rest of the overlay is
+                // transparent, so only the island is visibly affected.
+                .scaleEffect(islandPressed ? Self.pressScale : 1,
+                             anchor: UnitPoint(x: m.surfaceCenterX / max(geo.size.width, 1),
+                                               y: m.miniCenterY / max(geo.size.height, 1)))
                 .onChange(of: ui.isFullPresented, initial: true) { _, want in
                     animate(to: want)
                 }
@@ -106,44 +120,6 @@ struct NowPlayingMorphContainer: View {
                     radius: 18 * m.p, y: 10 * m.p)
             .position(x: m.artCenterX, y: m.artCenterY)
             .allowsHitTesting(false)
-    }
-
-    // MARK: Mini controls == the island content row (hidden until release)
-
-    private func miniControls(_ m: Morph) -> some View {
-        HStack(spacing: 10) {
-            // Reserve the artwork's slot; the traveling artwork lands here.
-            Color.clear.frame(width: Morph.islandArtSide, height: Morph.islandArtSide)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(playback.currentTrack?.title ?? "")
-                    .font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(playback.currentTrack?.artistName ?? "")
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button { playback.togglePlayPause() } label: {
-                Image(systemName: playback.snapshot.status == .playing ? "pause.fill" : "play.fill")
-                    .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button { playback.next() } label: {
-                Image(systemName: "forward.fill")
-                    .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!playback.snapshot.hasNext)
-            .opacity(playback.snapshot.hasNext ? 1 : 0.4)
-        }
-        // Artwork + titles shifted right (bigger leading inset); play/next keep
-        // the tighter trailing inset so they don't move.
-        .padding(.leading, Morph.islandArtLeading)
-        .padding(.trailing, Morph.islandContentPad)
-        // Tapping the pill (outside the buttons) expands into the drawer.
-        .contentShape(Rectangle())
-        .onTapGesture { ui.isFullPresented = true }
     }
 
     // MARK: Drawer body (everything below the top edge; fades + clips on collapse)
@@ -329,6 +305,249 @@ struct NowPlayingMorphContainer: View {
         case .off, .all: return "repeat"
         case .one: return "repeat.1"
         }
+    }
+}
+
+// MARK: - Island content (self-contained: swipe + title/artist slide)
+
+/// Shared spring for the island text slide.
+private let islandTextSpring = Animation.spring(response: 0.34, dampingFraction: 1.0)
+
+/// The docked island's content row: [artwork slot][title/artist][play][next].
+///
+/// It's a self-contained view so an in-island swipe re-renders ONLY this view,
+/// not the whole full-player overlay. While swiping, the title/artist follow the
+/// thumb; on release past a threshold it changes track and the title/artist
+/// slide across (incoming always from the correct fixed side); otherwise they
+/// spring back. Only a swipe animates — every other change (opening a song,
+/// auto-advance, the buttons) swaps instantly. The traveling artwork is owned by
+/// the parent, so this only reserves its slot.
+private struct IslandContent: View {
+    @ObservedObject var playback: PlaybackEngine
+    @Binding var pressed: Bool
+    var onExpand: () -> Void
+
+    @State private var dragX: CGFloat = 0        // live thumb-follow (0 at rest)
+    @State private var navDir = 1                // +1 next, -1 previous
+    @State private var animateSwipe = false      // true only for a swipe commit
+    @State private var commitStart: CGFloat = 0  // finger offset at commit
+    @State private var zoneW: CGFloat = 220      // measured text-zone width
+    @State private var commitTick = 0            // bumped to fire a haptic pop
+    @State private var armedDir = 0              // side currently past the threshold
+
+    private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // The artwork + titles zone owns all island touch handling (press,
+            // tap-open, swipe). A single high-priority gesture claims the touch
+            // immediately, so there's no scroll/tap disambiguation delay — press
+            // feedback is instant. The play/next buttons are SIBLINGS (outside
+            // this gesture) so they keep working.
+            HStack(spacing: 10) {
+                Color.clear.frame(width: Morph.islandArtSide, height: Morph.islandArtSide)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    IslandSlideText(text: playback.currentTrack?.title ?? "",
+                                    dir: navDir, zoneW: zoneW, animate: animateSwipe,
+                                    liveDrag: dragX, commitStart: commitStart,
+                                    font: .subheadline.weight(.semibold), secondary: false)
+                    IslandSlideText(text: playback.currentTrack?.artistName ?? "",
+                                    dir: navDir, zoneW: zoneW, animate: animateSwipe,
+                                    liveDrag: dragX, commitStart: commitStart,
+                                    font: .caption2, secondary: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: IslandTitleWidthKey.self, value: g.size.width)
+                })
+                .clipped()
+                .onPreferenceChange(IslandTitleWidthKey.self) { zoneW = max($0, 1) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .highPriorityGesture(islandGesture)
+
+            Button { playback.togglePlayPause() } label: {
+                Image(systemName: playback.snapshot.status == .playing ? "pause.fill" : "play.fill")
+                    .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                // Skip button runs the same slide as a swipe (from rest).
+                commitTick &+= 1
+                changeTrack(goNext: true, from: 0)
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!playback.snapshot.hasNext)
+            .opacity(playback.snapshot.hasNext ? 1 : 0.4)
+        }
+        .padding(.leading, Morph.islandArtLeading)
+        .padding(.trailing, Morph.islandContentPad)
+        // Subtle "pop" the instant a swipe crosses the threshold / a commit fires.
+        .sensoryFeedback(.impact(weight: .medium, intensity: 0.9), trigger: commitTick)
+    }
+
+    /// Shared slide-commit used by both the swipe and the skip button. `startX`
+    /// is where the outgoing line begins its exit (the finger's release position
+    /// for a swipe, or 0 for a button press from rest).
+    private func changeTrack(goNext: Bool, from startX: CGFloat) {
+        commitStart = startX
+        animateSwipe = true
+        navDir = goNext ? 1 : -1
+        if goNext { playback.next() } else { playback.previous() }
+        withAnimation(islandTextSpring) { dragX = 0 }
+        DispatchQueue.main.async { animateSwipe = false }
+    }
+
+    private static let commitDist: CGFloat = 55   // drag distance that arms a commit
+    private static let tapSlop: CGFloat = 8         // movement under this = a tap
+    private static let openDist: CGFloat = 40       // upward drag that opens the player
+
+    /// One high-priority gesture for the artwork+titles zone: instant press-scale
+    /// on touch, tap or swipe-up to open, horizontal swipe to change track.
+    private var islandGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if !pressed { withAnimation(Self.pressSpring) { pressed = true } }
+                let w = value.translation.width, h = value.translation.height
+                guard abs(w) > abs(h), abs(w) > Self.tapSlop else {
+                    if dragX != 0 { dragX = 0 }    // vertical / tap: don't follow
+                    armedDir = 0
+                    return
+                }
+                let canGo = w < 0
+                    ? playback.snapshot.hasNext
+                    : (playback.snapshot.hasPrevious || playback.snapshot.elapsed > 3)
+                dragX = canGo ? w : w * 0.3
+                var qual = 0
+                if w <= -Self.commitDist, playback.snapshot.hasNext { qual = 1 }
+                else if w >= Self.commitDist,
+                        playback.snapshot.hasPrevious || playback.snapshot.elapsed > 3 { qual = -1 }
+                if qual != 0, qual != armedDir { commitTick &+= 1 }
+                armedDir = qual
+            }
+            .onEnded { value in
+                withAnimation(Self.pressSpring) { pressed = false }
+                let w = value.translation.width, h = value.translation.height
+                let pw = value.predictedEndTranslation.width
+                let ph = value.predictedEndTranslation.height
+                armedDir = 0
+                // Barely moved → tap → open.
+                if abs(w) < Self.tapSlop, abs(h) < Self.tapSlop { onExpand(); return }
+                if abs(w) > abs(h) {
+                    let goNext = (w < -Self.commitDist || pw < -140) && playback.snapshot.hasNext
+                    let goPrev = (w > Self.commitDist || pw > 140)
+                        && (playback.snapshot.hasPrevious || playback.snapshot.elapsed > 3)
+                    if goNext || goPrev {
+                        commitTick &+= 1
+                        changeTrack(goNext: goNext, from: dragX)
+                    } else {
+                        withAnimation(islandTextSpring) { dragX = 0 }
+                    }
+                } else {
+                    // Vertical up → open.
+                    if h < -Self.openDist || ph < -120 { onExpand() }
+                    withAnimation(islandTextSpring) { dragX = 0 }
+                }
+            }
+    }
+}
+
+/// A single line of island text.
+///
+/// At rest / while dragging it shows one string offset by `liveDrag` (the zone
+/// follows the thumb). On a swipe-driven change (`animate`) it renders BOTH the
+/// outgoing and incoming strings: the outgoing continues off from the finger's
+/// release position (`commitStart`), the incoming ALWAYS enters from the correct
+/// fixed side (`+zoneW` for next, `-zoneW` for previous) — independent of how far
+/// you dragged, so a big swipe can't make it come from the wrong side. Both lines
+/// use the same fixed sides, so title + artist stay in sync, and computing both
+/// from the current `dir` in one pass prevents forward/back intersection. Any
+/// non-swipe change swaps instantly. `dir`: +1 next (moves left), -1 previous.
+private struct IslandSlideText: View {
+    let text: String
+    let dir: Int
+    let zoneW: CGFloat
+    let animate: Bool
+    let liveDrag: CGFloat
+    let commitStart: CGFloat
+    let font: Font
+    let secondary: Bool
+
+    @State private var current: String
+    @State private var outgoing: String?
+    @State private var currentX: CGFloat = 0
+    @State private var outgoingX: CGFloat = 0
+    @State private var transitioning = false
+    @State private var gen = 0
+
+    init(text: String, dir: Int, zoneW: CGFloat, animate: Bool,
+         liveDrag: CGFloat, commitStart: CGFloat, font: Font, secondary: Bool) {
+        self.text = text; self.dir = dir; self.zoneW = zoneW; self.animate = animate
+        self.liveDrag = liveDrag; self.commitStart = commitStart
+        self.font = font; self.secondary = secondary
+        _current = State(initialValue: text)
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            if let outgoing {
+                label(outgoing).offset(x: outgoingX)
+            }
+            label(current).offset(x: transitioning ? currentX : liveDrag)
+        }
+        .onChange(of: text) { _, new in
+            guard new != current else { return }
+            guard animate else {                 // instant swap for non-swipe changes
+                transitioning = false
+                outgoing = nil
+                current = new
+                return
+            }
+            let enter = dir > 0 ? zoneW : -zoneW  // incoming always from the correct side
+            let exit  = dir > 0 ? -zoneW : zoneW  // outgoing leaves the opposite side
+            outgoing = current
+            outgoingX = commitStart               // continue from the finger
+            current = new
+            currentX = enter
+            transitioning = true
+            gen += 1
+            let token = gen
+            // Defer one tick so the start offsets render, then slide to rest.
+            DispatchQueue.main.async {
+                withAnimation(islandTextSpring) {
+                    currentX = 0
+                    outgoingX = exit
+                } completion: {
+                    if gen == token { outgoing = nil; transitioning = false }
+                }
+            }
+        }
+    }
+
+    private func label(_ s: String) -> some View {
+        Text(s)
+            .font(font)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            // Pin each line to the zone width so long titles truncate to an
+            // ellipsis up front (no full-width overlap that snaps on arrival).
+            .frame(width: zoneW, alignment: .leading)
+    }
+}
+
+/// Publishes the island text-zone width so both title and artist share one
+/// travel distance.
+private struct IslandTitleWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
