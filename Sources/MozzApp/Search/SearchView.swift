@@ -24,6 +24,9 @@ struct SearchView: View {
     @State private var lastLatencyMs: Double?
     @FocusState private var focused: Bool
 
+    /// Shared height for the search field and the cancel ✕ so they line up.
+    private let fieldHeight: CGFloat = 44
+
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
     /// Drives the collapse of the title header and the Cancel button.
@@ -43,15 +46,17 @@ struct SearchView: View {
                             Image(systemName: "xmark")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.secondary)
+                                .frame(width: fieldHeight, height: fieldHeight)
+                                .glassCircle()
                                 .accessibilityLabel("Cancel search")
                         }
-                        .glassCircleButtonStyle()
+                        .buttonStyle(.plain)
                         .transition(.opacity)
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, isActive ? 8 : 0)
-                .padding(.bottom, 8)
+                .padding(.top, isActive ? 8 : 12)
+                .padding(.bottom, 10)
 
                 resultsList
             }
@@ -80,8 +85,8 @@ struct SearchView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .frame(height: fieldHeight)
         .glassCapsule()
     }
 

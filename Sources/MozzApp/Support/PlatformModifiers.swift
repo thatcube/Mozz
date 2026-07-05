@@ -63,17 +63,18 @@ extension View {
         #endif
     }
 
-    /// A circular Liquid Glass button (iOS 26+) — the native iOS 27 search-cancel
-    /// shape. Falls back to a bordered circle on iOS 17–25; no-op on macOS.
-    @ViewBuilder func glassCircleButtonStyle() -> some View {
+    /// A circular Liquid Glass background (iOS 26+) — sized by the caller's frame
+    /// so the search-cancel ✕ can exactly match the field height. Falls back to a
+    /// material circle on iOS 17–25 and the macOS test host.
+    @ViewBuilder func glassCircle() -> some View {
         #if os(iOS)
         if #available(iOS 26.0, *) {
-            self.buttonStyle(.glass).buttonBorderShape(.circle)
+            self.glassEffect(.regular, in: Circle())
         } else {
-            self.buttonStyle(.bordered).buttonBorderShape(.circle)
+            self.background(.regularMaterial, in: Circle())
         }
         #else
-        self
+        self.background(.regularMaterial, in: Circle())
         #endif
     }
 }
