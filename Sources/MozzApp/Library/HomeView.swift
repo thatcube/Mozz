@@ -2,25 +2,6 @@ import SwiftUI
 import MozzCore
 import MozzDatabase
 
-/// A scroll-away screen header: a large title with the Settings avatar at the
-/// trailing edge, on the same line. Placed as the first item in a screen's
-/// scrolling content so the title lands in the same spot on every tab and the
-/// avatar is always aligned with it.
-struct ScreenHeader: View {
-    let title: String
-
-    var body: some View {
-        HStack(alignment: .center) {
-            Text(title).font(.largeTitle.bold())
-            Spacer()
-            SettingsAvatar()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-    }
-}
-
 /// The Home tab: a browse surface built from data we already have — Recently
 /// Played (from the on-device play_event log) and Recently Added — with room to
 /// grow into recommendation shelves once track_features lands.
@@ -34,8 +15,6 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    ScreenHeader(title: "Home")
-
                     if !recentlyPlayed.isEmpty {
                         TrackShelf(title: "Recently Played", tracks: recentlyPlayed)
                     }
@@ -48,9 +27,11 @@ struct HomeView: View {
                             .padding(.top, 60)
                     }
                 }
+                .padding(.top, 8)
                 .padding(.bottom, 24)
             }
-            .hideNavigationBar()
+            .largeNavigationTitle("Home")
+            .settingsToolbarAvatar()
             .task { await load() }
             .refreshable { await load() }
         }

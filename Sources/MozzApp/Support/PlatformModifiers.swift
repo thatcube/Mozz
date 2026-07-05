@@ -35,14 +35,36 @@ extension View {
         #endif
     }
 
-    /// Hides the navigation bar on iOS so a custom scroll-away header (with the
-    /// Settings avatar) can stand in for it. No-op on the macOS test host, where
-    /// the `.navigationBar` ToolbarPlacement is unavailable.
-    @ViewBuilder func hideNavigationBar() -> some View {
+    /// A large navigation-bar title on iOS (the standard collapsing large title
+    /// every top-level screen shares). On the macOS test host it just sets the
+    /// title (no display-mode API).
+    @ViewBuilder func largeNavigationTitle(_ title: String) -> some View {
+        #if os(iOS) || os(tvOS)
+        self.navigationTitle(title).navigationBarTitleDisplayMode(.large)
+        #else
+        self.navigationTitle(title)
+        #endif
+    }
+
+    /// Pins the Settings avatar in the top-trailing nav-bar slot (iOS). No-op on
+    /// the macOS test host, where `.topBarTrailing` is unavailable.
+    @ViewBuilder func settingsToolbarAvatar() -> some View {
         #if os(iOS)
-        self.toolbar(.hidden, for: .navigationBar)
+        self.toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsAvatar() } }
         #else
         self
+        #endif
+    }
+
+    /// The system `.searchable` search field, kept always-visible below the
+    /// large title on iOS (the Apple Music look) via the navigation-bar drawer.
+    /// On the macOS test host it falls back to the default placement so the code
+    /// still compiles.
+    @ViewBuilder func librarySearchable(text: Binding<String>, prompt: String) -> some View {
+        #if os(iOS)
+        self.searchable(text: text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
+        #else
+        self.searchable(text: text, prompt: prompt)
         #endif
     }
 }

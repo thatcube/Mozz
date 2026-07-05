@@ -6,9 +6,10 @@ import MozzDatabase
 /// Playlists, Artists, Albums, Genres, Downloaded) with a "Recently Added" shelf
 /// at the bottom.
 ///
-/// Uses the same scroll-away `ScreenHeader` as Home and Search so the title
-/// lands in the identical spot on every tab, and a plain `ScrollView` (not an
-/// inset-grouped `List`) so nothing offsets the title downward.
+/// Uses the same native large navigation title + top-right Settings avatar as
+/// Home and Search (via `largeNavigationTitle`/`settingsToolbarAvatar`) so the
+/// title lands in the identical spot on every tab, over a plain `ScrollView`
+/// (not an inset-grouped `List`) so nothing offsets the content.
 ///
 /// This view owns the tab's single `NavigationStack`; every screen it pushes
 /// (SongsView, AlbumsView, DownloadsView, …) must NOT declare its own stack.
@@ -23,8 +24,6 @@ struct LibraryHomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    ScreenHeader(title: "Library")
-
                     VStack(spacing: 0) {
                         categoryLink("Songs", "music.note") { SongsView() }
                         rowDivider
@@ -43,9 +42,11 @@ struct LibraryHomeView: View {
                         AlbumShelf(title: "Recently Added", albums: recentlyAdded)
                     }
                 }
+                .padding(.top, 8)
                 .padding(.bottom, 24)
             }
-            .hideNavigationBar()
+            .largeNavigationTitle("Library")
+            .settingsToolbarAvatar()
             .task { await loadRecent() }
         }
     }

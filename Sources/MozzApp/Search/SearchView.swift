@@ -7,13 +7,11 @@ import MozzDatabase
 /// search hits SQLite directly, it stays well under the sub-100ms bar even at
 /// 100k tracks.
 ///
-/// Recreates Apple Music's search interaction without dropping the aligned title
-/// + avatar: at rest it shows the shared `ScreenHeader` with a search field
-/// below it; on focus (or once a query is typed) the header collapses away, the
-/// field slides to the top, and a close button appears — a spring animation that
-/// reads like the native `.searchable` presentation but keeps us in full
-/// SwiftUI control (no fragile UIKit hosting). When idle it shows a
-/// "Recently Searched" list resolved live from the catalog.
+/// Uses the system `.searchable` field (via `librarySearchable`) so we get the
+/// real iOS search experience for free: the Liquid Glass field, the native
+/// focus animation, and the system Cancel button — the exact Apple Music
+/// behavior. When the query is empty it shows a "Recently Searched" list
+/// resolved live from the catalog.
 struct SearchView: View {
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var recents = RecentSearchStore()
@@ -22,101 +20,97 @@ struct SearchView: View {
     @State private var resolvedRecents: [RecentResolved] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var lastLatencyMs: Double?
-    @FocusState private var searchFocused: Bool
 
-    /// True once the user is actively searching — focused, or a query is present.
-    /// Drives the collapse of the title/avatar header.
-    private var isSearching: Bool {
-        searchFocused || !query.trimmingCharacters(in: .whitespaces).isEmpty
-    }
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !isSearching {
-                    ScreenHeader(title: "Search")
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-
-                HStack(spacing: 10) {
-                    searchField
-                    if isSearching {
-                        Button {
-                            withAnimation(.snappy(duration: 0.28)) { cancelSearch() }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("Cancel search")
+            List {
+                if trimmedQuery.isEmpty {
+                    if !resolvedRecents.isEmpty {
+                        Section {
+                            ForEach(resolvedRecents) { recentRow($0) }
+                        } header: {
+                            HStack {
+                                Text("Recently Searched").font(.headline).textCase(nil)
+                                Spacer()
+                                Button("Clear") { recents.clear() }.font(.subheadline)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
                     }
+                } else {
+                    resultSections
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, isSearching ? 8 : 0)
-                .padding(.bottom, 8)
-
-                content
             }
-            .animation(.snappy(duration: 0.28), value: isSearching)
-            .hideNavigationBar()
+            .listStyle(.plain)
+            .largeNavigationTitle("Search")
+            .settingsToolbarAvatar()
+            .librarySearchable(text: $query, prompt: "Artists, albums, songs")
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
-        }
-    }
-
-    // MARK: Search field
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Artists, albums, songs", text: $query)
-                .focused($searchFocused)
-                .submitLabel(.search)
-                .plainTextFieldStyle()
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            .overlay { emptyState }
+            .safeAreaInset(edge: .bottom) {
+                if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
+                    Text(String(format: "found in %.1f ms", ms))
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .padding(.bottom, 4)
                 }
-                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.gray.opacity(0.15), in: Capsule())
     }
 
     // MARK: Content
 
-    @ViewBuilder private var content: some View {
-        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+    @ViewBuilder private var emptyState: some View {
+        if trimmedQuery.isEmpty {
             if resolvedRecents.isEmpty {
                 ContentUnavailableView("Search Your Library", systemImage: "magnifyingglass")
-                    .frame(maxHeight: .infinity)
-            } else {
-                recentsList
             }
-        } else {
-            resultsList
+        } else if results.isEmpty {
+            ContentUnavailableView.search(text: query)
         }
     }
 
-    private var recentsList: some View {
-        List {
-            Section {
-                ForEach(resolvedRecents) { recentRow($0) }
-            } header: {
-                HStack {
-                    Text("Recently Searched").font(.headline).textCase(nil)
-                    Spacer()
-                    Button("Clear") { recents.clear() }
-                        .font(.subheadline)
+    @ViewBuilder private var resultSections: some View {
+        if !results.artists.isEmpty {
+            Section("Artists") {
+                ForEach(results.artists) { artist in
+                    NavigationLink { ArtistDetailView(artist: artist) } label: {
+                        Label(artist.name, systemImage: "music.mic")
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
+                    })
                 }
-                .padding(.bottom, 2)
             }
         }
-        .listStyle(.plain)
+        if !results.albums.isEmpty {
+            Section("Albums") {
+                ForEach(results.albums) { album in
+                    NavigationLink { AlbumDetailView(album: album) } label: {
+                        VStack(alignment: .leading) {
+                            Text(album.title)
+                            Text(album.artistName).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        record(.album, serverId: album.serverId, remoteId: album.remoteId)
+                    })
+                }
+            }
+        }
+        if !results.tracks.isEmpty {
+            Section("Tracks") {
+                ForEach(results.tracks) { track in
+                    TrackRow(track: track, showArtist: true)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            record(.track, serverId: track.serverId, remoteId: track.remoteId)
+                            env.playback.play(tracks: [track.toDomain()])
+                        }
+                }
+            }
+        }
     }
 
     @ViewBuilder private func recentRow(_ resolved: RecentResolved) -> some View {
@@ -149,71 +143,7 @@ struct SearchView: View {
         }
     }
 
-    private var resultsList: some View {
-        List {
-            if !results.artists.isEmpty {
-                Section("Artists") {
-                    ForEach(results.artists) { artist in
-                        NavigationLink { ArtistDetailView(artist: artist) } label: {
-                            Label(artist.name, systemImage: "music.mic")
-                        }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
-                        })
-                    }
-                }
-            }
-            if !results.albums.isEmpty {
-                Section("Albums") {
-                    ForEach(results.albums) { album in
-                        NavigationLink { AlbumDetailView(album: album) } label: {
-                            VStack(alignment: .leading) {
-                                Text(album.title)
-                                Text(album.artistName).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            record(.album, serverId: album.serverId, remoteId: album.remoteId)
-                        })
-                    }
-                }
-            }
-            if !results.tracks.isEmpty {
-                Section("Tracks") {
-                    ForEach(results.tracks) { track in
-                        TrackRow(track: track, showArtist: true)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                record(.track, serverId: track.serverId, remoteId: track.remoteId)
-                                env.playback.play(tracks: [track.toDomain()])
-                            }
-                    }
-                }
-            }
-        }
-        .listStyle(.plain)
-        .overlay {
-            if results.isEmpty {
-                ContentUnavailableView.search(text: query)
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if let ms = lastLatencyMs {
-                Text(String(format: "found in %.1f ms", ms))
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .padding(.bottom, 4)
-            }
-        }
-    }
-
     // MARK: Actions
-
-    private func cancelSearch() {
-        query = ""
-        searchFocused = false
-        results = SearchResults(artists: [], albums: [], tracks: [])
-        lastLatencyMs = nil
-    }
 
     private func record(_ kind: RecentSearchItem.Kind, serverId: String, remoteId: String) {
         recents.add(RecentSearchItem(kind: kind, serverId: serverId, remoteId: remoteId))
