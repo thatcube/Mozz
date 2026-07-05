@@ -1,6 +1,9 @@
 import SwiftUI
 import MozzCore
 import MozzDatabase
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Describes the top-of-page hero for a media detail. The *style* is independent
 /// of the content type, so a caller chooses how the artwork is presented while
@@ -44,6 +47,21 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     private static var fullBleedHeight: CGFloat { 500 }
     private static var centeredArtworkSize: CGFloat { 240 }
 
+    /// The device's top safe-area inset (status bar / Dynamic Island height),
+    /// read from the key window so the full-bleed image can be pulled up under it
+    /// WITHOUT making the ScrollView ignore safe areas (which broke the
+    /// horizontal margins). 0 on macOS.
+    private var topSafeInset: CGFloat {
+        #if os(iOS)
+        (UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?.safeAreaInsets.top) ?? 0
+        #else
+        0
+        #endif
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             // Base color fills the entire screen (incl. under the status bar), so
@@ -62,13 +80,9 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                 }
             }
             .scrollIndicators(.hidden)
-            // Full-bleed hero must extend under the status bar (image behind the
-            // clock), so the ScrollView ignores the top safe area; the centered
-            // style keeps its box below the status bar.
-            .ignoresSafeArea(edges: hero.style == .fullBleed ? .top : [])
 
             // Back button stays BELOW the status bar (the ZStack respects the
-            // safe area even though the scroll content ignores it).
+            // safe area even though the full-bleed image bleeds under it).
             DetailBackButton { dismiss() }
                 .padding(.leading, 12)
                 .padding(.top, 4)
@@ -102,6 +116,9 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                         colors: [.clear, .clear, bg.opacity(0.55), bg],
                         startPoint: .top, endPoint: .bottom)
                 }
+                // Pull ONLY the image up under the status bar (the ScrollView
+                // still respects safe areas, so horizontal margins are intact).
+                .padding(.top, -topSafeInset)
             VStack(spacing: 14) {
                 titleBlock(onDark: true)
                 actions()
