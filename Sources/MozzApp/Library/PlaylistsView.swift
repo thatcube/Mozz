@@ -46,7 +46,8 @@ struct PlaylistsView: View {
     }
 }
 
-/// A playlist's tracks, in playlist order, with play/shuffle.
+/// A playlist's tracks, in playlist order, on the shared media-detail page
+/// (centered-artwork hero, vertical song list only).
 struct PlaylistDetailView: View {
     @EnvironmentObject private var env: AppEnvironment
     let playlist: PlaylistRecord
@@ -55,26 +56,39 @@ struct PlaylistDetailView: View {
     @State private var loaded = false
 
     var body: some View {
-        List {
-            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                TrackRow(track: track, showArtist: true)
-                    .contentShape(Rectangle())
-                    .onTapGesture { play(from: index) }
+        MediaDetailScaffold(
+            hero: MediaHero(style: .centeredArtwork,
+                            artwork: playlist.artworkKey.map(ArtworkRef.init(key:)),
+                            seed: playlist.title),
+            title: playlist.title,
+            subtitle: "Playlist",
+            meta: metaText,
+            actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle) },
+            content: {
+                if tracks.isEmpty && loaded {
+                    ContentUnavailableView("Empty Playlist", systemImage: "music.note.list")
+                        .padding(.top, 40)
+                } else {
+                    DetailSongRows(tracks: tracks) { play(from: $0) }
+                }
             }
-        }
-        .listStyle(.plain)
+        )
         .navigationTitle(playlist.title)
         .inlineNavigationTitle()
-        .overlay {
-            if tracks.isEmpty && loaded {
-                ContentUnavailableView("Empty Playlist", systemImage: "music.note.list")
-            }
-        }
         .task { await load() }
+    }
+
+    private var metaText: String? {
+        guard !tracks.isEmpty else { return playlist.trackCount.map { "\($0) songs" } }
+        return tracks.count == 1 ? "1 song" : "\(tracks.count) songs"
     }
 
     private func play(from index: Int) {
         env.playback.play(tracks: tracks.map { $0.toDomain() }, startAt: index)
+    }
+
+    private func shuffle() {
+        env.playback.play(tracks: tracks.map { $0.toDomain() }.shuffled(), startAt: 0)
     }
 
     private func load() async {

@@ -13,6 +13,16 @@ struct HomeView: View {
     @State private var recentlyAdded: [AlbumRecord] = []
     @State private var loaded = false
 
+    private var mozzWeeklyRep: TrackRecord? {
+        mozzWeekly.first { $0.artworkKey != nil } ?? mozzWeekly.first
+    }
+    private var mozzWeeklyArtwork: ArtworkRef? {
+        mozzWeeklyRep?.artworkKey.map(ArtworkRef.init(key:))
+    }
+    private var mozzWeeklySeed: String {
+        mozzWeeklyRep?.artworkKey ?? mozzWeeklyTitle
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -20,7 +30,16 @@ struct HomeView: View {
                     TightHeader(title: "Home")
 
                     if !mozzWeekly.isEmpty {
-                        TrackShelf(title: mozzWeeklyTitle, tracks: mozzWeekly)
+                        NavigationLink {
+                            MozzWeeklyDetailView()
+                        } label: {
+                            MozzWeeklyCard(title: mozzWeeklyTitle,
+                                           subtitle: mozzWeekly.count == 1 ? "1 song" : "\(mozzWeekly.count) songs",
+                                           artwork: mozzWeeklyArtwork,
+                                           seed: mozzWeeklySeed)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
                     }
                     if !recentlyPlayed.isEmpty {
                         TrackShelf(title: "Recently Played", tracks: recentlyPlayed)

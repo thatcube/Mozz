@@ -49,6 +49,17 @@ extension View {
         #endif
     }
 
+    /// Transparent nav bar with light (white) bar-button content, so a hero
+    /// image/color shows under the back button. iOS only; no-op on macOS.
+    @ViewBuilder func heroNavigationChrome() -> some View {
+        #if os(iOS)
+        self.toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+
     /// Real iOS 26 Liquid Glass, clipped to a capsule (for the custom search
     /// field). Falls back to a material on iOS 17–25 and the macOS test host.
     @ViewBuilder func glassCapsule() -> some View {
@@ -75,6 +86,20 @@ extension View {
         }
         #else
         self.background(.regularMaterial, in: Circle())
+        #endif
+    }
+}
+
+extension Color {
+    /// Cross-platform system background color. iOS ships the app; the macOS test
+    /// host just needs it to compile (`Color(.systemBackground)` is iOS-only).
+    static var mozzBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color.black
         #endif
     }
 }
