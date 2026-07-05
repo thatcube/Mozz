@@ -80,6 +80,15 @@ final class PerformanceHarnessTests: XCTestCase {
         XCTAssertLessThan(metrics.searchP95Ms, 100, "search p95 exceeded 100ms bar at 100k: \(metrics.searchP95Ms)")
         print("[PERF 100k]\n\(metrics.summary)")
 
+        // Recommendation candidate-generation cost at scale. Off the user's hot
+        // path (sets are precomputed off-main; the UI reads the stored result),
+        // so the budget is generous — this exists to give the ORDER BY RANDOM() +
+        // json_each scan a number and catch a pathological regression before the
+        // planned genre-normalized table turns it into an indexed join.
+        let candGenMs = try await harness.measureCandidateGenerationMs(serverId: serverId)
+        print("[PERF 100k] candidate generation: \(String(format: "%.1f", candGenMs)) ms")
+        XCTAssertLessThan(candGenMs, 1_500, "candidate generation regressed badly at 100k: \(candGenMs) ms")
+
         // Regression guard for the as-you-type hang: every synthetic track title
         // contains "the", so a short prefix matches almost the entire FTS index.
         // Ranking that with bm25 forces scoring the whole match set (~60ms at

@@ -59,6 +59,17 @@ final class TasteProfileTests: XCTestCase {
             now: now)
         XCTAssertFalse(strong.isThin)
     }
+
+    func testStrongArtistSignalIsNotThinEvenWithNoGenres() {
+        // A genre-sparse but artist-rich history must personalize, not cold-start:
+        // the thin-check takes the max of genre/artist affinity.
+        let artistOnly = TasteProfile.build(
+            from: (0..<5).map { signal("t\($0)", "completed", genres: [], artist: "ar1", ageDays: 1) },
+            now: now)
+        XCTAssertTrue(artistOnly.genreAffinity.isEmpty)
+        XCTAssertGreaterThan(artistOnly.artistAffinity["ar1"] ?? 0, 0)
+        XCTAssertFalse(artistOnly.isThin, "strong artist signal should not be treated as thin history")
+    }
 }
 
 final class ContentRecommenderTests: XCTestCase {

@@ -18,7 +18,10 @@ public struct TasteProfile: Sendable, Equatable {
     public let genreAffinity: [String: Double]
     /// artist remote id → accumulated affinity.
     public let artistAffinity: [String: Double]
-    /// Sum of positive genre affinity — the basis for the cold-start decision.
+    /// The stronger of positive genre / positive artist affinity — the basis for
+    /// the cold-start decision. Taking the max (not the sum) means a genre-sparse
+    /// but artist-rich history still personalizes, without either signal
+    /// double-counting a play that carries both.
     public let positiveSignal: Double
 
     /// Below this much positive signal we treat history as too thin to
@@ -64,8 +67,10 @@ public struct TasteProfile: Sendable, Equatable {
             for g in s.genres { genre[g, default: 0] += contribution }
             if let a = s.artistRemoteId, !a.isEmpty { artist[a, default: 0] += contribution }
         }
-        let positive = genre.values.reduce(0) { $0 + max(0, $1) }
-        return TasteProfile(genreAffinity: genre, artistAffinity: artist, positiveSignal: positive)
+        let positiveGenre = genre.values.reduce(0) { $0 + max(0, $1) }
+        let positiveArtist = artist.values.reduce(0) { $0 + max(0, $1) }
+        return TasteProfile(genreAffinity: genre, artistAffinity: artist,
+                            positiveSignal: max(positiveGenre, positiveArtist))
     }
 
     /// The `n` genres with the highest positive affinity.

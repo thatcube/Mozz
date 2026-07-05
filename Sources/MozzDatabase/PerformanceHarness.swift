@@ -106,6 +106,27 @@ public struct PerformanceHarness: Sendable {
         )
     }
 
+    /// Time the recommendation *candidate-generation* read — the taste-matched,
+    /// not-recently-played library scan (`RecommendationStore.candidateTracks`),
+    /// which uses `ORDER BY RANDOM() LIMIT` + a per-row `json_each` genre match.
+    /// This is off the user's hot path (sets are precomputed off-main and the UI
+    /// reads the stored result), but we measure it at scale so the known
+    /// `ORDER BY RANDOM()` full-sort cost has a number and can't silently regress
+    /// before the genre-normalized table replaces it. Uses catalog genres so the
+    /// match actually returns rows.
+    public func measureCandidateGenerationMs(
+        serverId: ServerID,
+        genres: [String] = ["Rock", "Jazz", "Electronic"],
+        limit: Int = 2000
+    ) async throws -> Double {
+        let store = RecommendationStore(database)
+        let notPlayedSince = Date().addingTimeInterval(-30 * 24 * 3600).timeIntervalSince1970
+        let start = Date()
+        _ = try await store.candidateTracks(serverId: serverId, genres: genres, artistIds: [],
+                                            notPlayedSince: notPlayedSince, limit: limit)
+        return Date().timeIntervalSince(start) * 1000
+    }
+
     private func percentile(_ sorted: [Double], _ p: Double) -> Double {
         guard !sorted.isEmpty else { return 0 }
         let index = Int((Double(sorted.count - 1) * p).rounded())
