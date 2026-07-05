@@ -280,10 +280,34 @@ public final class AppEnvironment: ObservableObject {
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
         guard let active else { throw MozzError.unsupported("No active server") }
-        let engine = LibrarySyncEngine(backend: active.backend, database: database)
+        // Catalog sync uses a bulk-timeout backend: a single page of a few
+        // hundred items can take tens of seconds to generate on a large/slow
+        // self-hosted server, which would blow the 12s interactive timeout and
+        // abort the sync (leaving albums/tracks unsynced). A smaller page size
+        // keeps each request well within the bulk timeout and bounds memory.
+        let backend = makeBulkSyncBackend() ?? active.backend
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 200)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         return summary
+    }
+
+    /// Rebuild the active backend with a bulk-timeout transport for catalog
+    /// sync. Returns `nil` for the demo (or if the session can't be loaded), so
+    /// the caller falls back to the interactive backend.
+    private func makeBulkSyncBackend() -> (any MusicBackend)? {
+        guard let active,
+              let stored = SessionPersistence.load(credentials),
+              !stored.isDemo else { return nil }
+        let bulk = URLSessionTransport(role: .bulk)
+        switch active.connection.kind {
+        case .jellyfin:
+            return JellyfinBackend(connection: active.connection, token: stored.token,
+                                   clientInfo: clientInfo, transport: bulk)
+        case .plex:
+            return PlexBackend(connection: active.connection, token: stored.token,
+                               clientInfo: clientInfo, transport: bulk)
+        }
     }
 
     // MARK: Downloads convenience

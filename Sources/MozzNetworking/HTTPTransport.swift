@@ -21,7 +21,11 @@ public struct URLSessionTransport: HTTPTransport {
 
     /// Build a session tuned for a role. Interactive calls (auth, browse) get
     /// tight timeouts so the UI never hangs; discovery gets very tight timeouts
-    /// so unreachable candidate connections are abandoned quickly.
+    /// so unreachable candidate connections are abandoned quickly; bulk catalog
+    /// sync gets a generous timeout because a single page of hundreds of items
+    /// can take tens of seconds to generate on a slow/large self-hosted server
+    /// (the request timeout is the inactivity gap, which spans the server's
+    /// time-to-first-byte while it builds the response).
     public init(role: Role = .interactive) {
         let config = URLSessionConfiguration.ephemeral
         switch role {
@@ -31,13 +35,16 @@ public struct URLSessionTransport: HTTPTransport {
         case .discovery:
             config.timeoutIntervalForRequest = 3
             config.timeoutIntervalForResource = 5
+        case .bulk:
+            config.timeoutIntervalForRequest = 90
+            config.timeoutIntervalForResource = 600
         }
         config.waitsForConnectivity = false
         config.httpAdditionalHeaders = ["Accept-Encoding": "gzip, deflate"]
         self.session = URLSession(configuration: config)
     }
 
-    public enum Role: Sendable { case interactive, discovery }
+    public enum Role: Sendable { case interactive, discovery, bulk }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
