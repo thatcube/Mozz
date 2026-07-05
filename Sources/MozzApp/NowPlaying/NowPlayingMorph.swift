@@ -30,6 +30,9 @@ struct NowPlayingMorphContainer: View {
     @State private var p: CGFloat = 0
     /// Live drag translation (points) while the open drawer is being pulled down.
     @State private var dragY: CGFloat = 0
+    /// True only during the collapse, so the downward receive-bounce fires on the
+    /// way into the island and never while opening or dragging.
+    @State private var receiving = false
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
 
@@ -44,9 +47,20 @@ struct NowPlayingMorphContainer: View {
             GeometryReader { geo in
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
-                              p: p, dragY: dragY)
+                              pRaw: p, dragY: dragY, receiving: receiving,
+                              isExpanded: ui.isFullPresented)
                 ZStack(alignment: .topLeading) {
                     surface(m)
+                    // Mini controls ride the surface's top edge DOWN into the
+                    // island as it collapses (miniCenterY), then rest centered in
+                    // the island. Hidden entirely while expanding, so the drawer
+                    // opens over them. They ride the base top (no receive-grow), so
+                    // the glass can grow up past them without dragging them along.
+                    miniControls(m)
+                        .frame(width: m.islandW, height: Morph.islandHeight)
+                        .position(x: m.surfaceCenterX, y: m.miniCenterY)
+                        .opacity(m.miniOpacity)
+                        .allowsHitTesting(m.p < 0.5)
                     travelingArtwork(m)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
@@ -58,7 +72,7 @@ struct NowPlayingMorphContainer: View {
         }
     }
 
-    // MARK: Surface (background + drawer body + mini controls)
+    // MARK: Surface (Liquid Glass background + fading drawer body)
 
     private func surface(_ m: Morph) -> some View {
         ZStack(alignment: .top) {
@@ -77,11 +91,6 @@ struct NowPlayingMorphContainer: View {
                 .frame(width: m.width, height: m.surfaceHExpanded, alignment: .top)
                 .opacity(m.bodyOpacity)
                 .allowsHitTesting(m.p > 0.5)
-
-            miniControls(m)
-                .frame(width: m.islandW, height: Morph.islandHeight)
-                .opacity(m.miniOpacity)
-                .allowsHitTesting(m.p < 0.5)
         }
         .frame(width: m.surfaceW, height: m.surfaceH, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
@@ -211,16 +220,25 @@ struct NowPlayingMorphContainer: View {
             }
     }
 
-    /// The single animator. `open` grows the drawer; `!open` collapses it into
-    /// the island with a gentle receive-bounce (low damping = small overshoot).
+    /// The single animator.
+    /// - `open`  grows the drawer.
+    /// - `!open` collapses it into the island. The spring itself is unchanged
+    ///   (the feel you liked); `receiving` gates a downward bounce that fires
+    ///   only during this collapse. `p` is clamped in the geometry, so the
+    ///   spring's own overshoot can't wobble the surface — the only bounce is the
+    ///   deliberate downward one.
     private func animate(to open: Bool) {
         if open {
+            receiving = false
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) {
                 p = 1; dragY = 0
             }
         } else {
-            withAnimation(.spring(response: 0.44, dampingFraction: 0.72)) {
+            receiving = true
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 p = 0; dragY = 0
+            } completion: {
+                receiving = false
             }
         }
     }
@@ -323,8 +341,18 @@ private struct Morph {
     let height: CGFloat
     let safeTop: CGFloat
     let safeBottom: CGFloat
-    let p: CGFloat
+    /// Raw spring value; may briefly leave [0,1]. Everything below uses the
+    /// clamped `p`, so the spring's overshoot can't wobble the surface.
+    let pRaw: CGFloat
     let dragY: CGFloat
+    /// True during the collapse — enables the upward receive-bounce.
+    let receiving: Bool
+    /// Target state: `true` while expanded/opening, `false` while docked/collapsing.
+    /// The mini controls are hidden whenever this is true, so the drawer opens
+    /// OVER them (they never flash during an open).
+    let isExpanded: Bool
+
+    var p: CGFloat { min(max(pRaw, 0), 1) }
 
     // MARK: tunables
     static let islandHeight: CGFloat = 56
@@ -338,6 +366,10 @@ private struct Morph {
     static let expandedRadius: CGFloat = 24
     static let expandedArtRadius: CGFloat = 10
     static let bottomOverhang: CGFloat = 120    // surface runs off-screen at p=1
+    static let receiveDepth: CGFloat = 4        // how far the island grows UP on the catch
+    static let receiveZone: CGFloat = 0.18      // last fraction of collapse the bounce lives in
+    static let miniFadeFull: CGFloat = 0.10     // p at/below which mini controls are fully shown
+    static let miniFadeEnd: CGFloat = 0.34      // p at/above which mini controls are hidden
     static let expArtTopGap: CGFloat = 39       // grabber + gap above big artwork
     static let expArtMaxSide: CGFloat = 340
 
@@ -355,28 +387,54 @@ private struct Morph {
     var expArtCenterY: CGFloat { safeTop + Self.expArtTopGap + expArtSide / 2 }
 
     // Morphing surface --------------------------------------------------------
+    // The surface is anchored by its BOTTOM edge: it lands exactly on the
+    // island's bottom and NEVER moves below it (Apple pins the bottom and grows
+    // the island UPWARD to receive the drawer). `receiveGrow` extends the TOP up
+    // for the catch bounce; the bottom stays put.
     var surfaceW: CGFloat { lerp(islandW, width, p) }
     var surfaceHExpanded: CGFloat { height + Self.bottomOverhang }
-    var surfaceH: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) }
-    /// Top edge follows the finger 1:1 at p=1, and lands on the island's top on
-    /// collapse. `dragY` is folded back to 0 by the collapse spring alongside p.
-    var topEdge: CGFloat { lerp(islandTop, 0, p) + dragY }
+    var baseH: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) }
+    /// Upward receive-bounce: a half-sine that is 0 at rest (p=0) and 0 at the
+    /// zone edge, peaking in between — so as the drawer lands the island grows
+    /// taller UPWARD by up to `receiveDepth`pt, then settles with no rebound and
+    /// without ever moving the bottom edge. Active only during the collapse.
+    var receiveGrow: CGFloat {
+        guard receiving, p < Self.receiveZone else { return 0 }
+        let u = Double(p / Self.receiveZone)   // 1 at zone edge → 0 at rest
+        return Self.receiveDepth * CGFloat(sin(.pi * u))
+    }
+    var surfaceH: CGFloat { baseH + receiveGrow }
+    /// Bottom edge. `dragY`/`p` are clamped ≥ their rest, so the bottom lands on
+    /// islandBottom and never overshoots below (or lifts above) it.
+    var bottomEdge: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) + baseH }
     var surfaceCenterX: CGFloat { width / 2 }
-    var surfaceCenterY: CGFloat { topEdge + surfaceH / 2 }
+    var surfaceCenterY: CGFloat { bottomEdge - surfaceH / 2 }
     var radius: CGFloat { lerp(islandRadius, Self.expandedRadius, p) }
+    /// The surface's top edge WITHOUT the receive-grow. The mini controls ride
+    /// this down into the island, so the grow can raise the glass above them
+    /// without carrying them up.
+    var baseTop: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) }
+    /// Center of the mini-control row: rides the top edge down, resting centered
+    /// in the island at p=0 (baseTop == islandTop ⇒ islandCenterY).
+    var miniCenterY: CGFloat { baseTop + Self.islandHeight / 2 }
 
     // Traveling artwork -------------------------------------------------------
     var artSide: CGFloat { lerp(Self.islandArtSide, expArtSide, p) }
     var artRadius: CGFloat { lerp(Self.islandArtRadius, Self.expandedArtRadius, p) }
     var artCenterX: CGFloat { lerp(islandArtCenterX, width / 2, p) }
-    var artCenterY: CGFloat { lerp(islandCenterY, expArtCenterY, p) + dragY }
+    var artCenterY: CGFloat { lerp(islandCenterY, expArtCenterY, p) + max(0, dragY) }
 
     // Opacities ---------------------------------------------------------------
     // While a finger is down `p` is pinned at 1, so anything keyed purely on `p`
     // stays put during the drag and only animates on release — the mini controls
     // must NEVER appear until you let go.
-    /// 0 for the whole drag (p==1); fades in only as the collapse runs (p→0).
-    var miniOpacity: CGFloat { clamp(1 - p) }
+    /// Mini controls are hidden while expanding/expanded (the drawer opens OVER
+    /// them — they never flash on open). While docked/collapsing they fade in as
+    /// the island forms: fully shown by `miniFadeFull`, gone by `miniFadeEnd`.
+    var miniOpacity: CGFloat {
+        guard !isExpanded else { return 0 }
+        return clamp((Self.miniFadeEnd - p) / (Self.miniFadeEnd - Self.miniFadeFull))
+    }
     /// Body fades out fast (gone by p≈0.55) so the collapse reads as a morph.
     var bodyOpacity: CGFloat { clamp((p - 0.55) / 0.45) }
     /// Frost → glass: opaque while expanded/dragging, clear by p≈0.30.
