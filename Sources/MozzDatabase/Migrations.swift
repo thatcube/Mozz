@@ -10,6 +10,7 @@ enum Schema {
         registerV2(&migrator)
         registerV3(&migrator)
         registerV4(&migrator)
+        registerV5(&migrator)
         return migrator
     }
 
@@ -257,6 +258,19 @@ enum Schema {
                     sortTitle: sortTitle
                 )
                 try update.execute(arguments: [key, row["id"] as Int64])
+            }
+        }
+    }
+
+    /// v5 — backfill synthesized artist rows for album-artists the server
+    /// referenced on albums but omitted from its artist listing, so installed
+    /// catalogs get them without a re-sync. Ongoing maintenance happens in the
+    /// sync engine; this covers what's already on disk. Derived from albums only.
+    private static func registerV5(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v5.synthesizeAlbumArtists") { db in
+            let serverIds = try String.fetchAll(db, sql: "SELECT id FROM server")
+            for serverId in serverIds {
+                _ = try AlbumArtistSynthesis.run(db, serverId: serverId)
             }
         }
     }

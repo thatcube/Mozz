@@ -47,6 +47,15 @@ public struct CatalogWriter: Sendable {
         }
     }
 
+    /// Create artist rows for album-artists an album references but the server's
+    /// artist listing omitted (see `AlbumArtistSynthesis`). Derived from
+    /// already-synced albums, so no network. Returns the synthesized remote ids
+    /// (for the sync engine to keep them out of the artist prune).
+    @discardableResult
+    public func synthesizeMissingAlbumArtists(serverId: ServerID) async throws -> [String] {
+        try await database.write { db in try AlbumArtistSynthesis.run(db, serverId: serverId) }
+    }
+
     public func upsertAlbums(_ albums: [Album], serverId: ServerID) async throws {
         guard !albums.isEmpty else { return }
         try await database.write { db in

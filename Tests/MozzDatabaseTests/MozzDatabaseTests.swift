@@ -218,6 +218,52 @@ final class SchemaAndWriteTests: XCTestCase {
             AlbumGrouping.key(artistRemoteId: nil, artistName: "Björk", sortTitle: "Homogenic"))
     }
 
+    func testSynthesizeMissingAlbumArtists() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+
+        // A real artist (came back from /Artists) + an album whose album-artist
+        // the server omitted from /Artists (only its name/id live on the album).
+        try await writer.upsertArtists([Artist(id: "real", name: "Real Artist", sortName: "Real Artist")], serverId: server.id)
+        try await writer.upsertAlbums([
+            Album(id: "al1", title: "Known", artistName: "Real Artist", artistID: "real", year: 2020),
+            Album(id: "al2", title: "Orphaned", artistName: "Steve Aoki", artistID: "aoki", year: 2019),
+        ], serverId: server.id)
+
+        // Before: "Steve Aoki" isn't in the artist list.
+        let before = try await repo.artistsPage(serverId: server.id, offset: 0, limit: 50)
+        XCTAssertFalse(before.contains { $0.remoteId == "aoki" })
+
+        let synthesized = try await writer.synthesizeMissingAlbumArtists(serverId: server.id)
+        XCTAssertEqual(synthesized, ["aoki"])
+
+        // After: it appears in the artist list and its album is browsable.
+        let after = try await repo.artistsPage(serverId: server.id, offset: 0, limit: 50)
+        let aoki = try XCTUnwrap(after.first { $0.remoteId == "aoki" })
+        XCTAssertEqual(aoki.name, "Steve Aoki")
+        let aokiAlbums = try await repo.albums(forArtistRemoteId: "aoki", serverId: server.id)
+        XCTAssertEqual(aokiAlbums.map(\.title), ["Orphaned"])
+
+        // Idempotent: a second run doesn't duplicate.
+        _ = try await writer.synthesizeMissingAlbumArtists(serverId: server.id)
+        let afterAgain = try await repo.artistsPage(serverId: server.id, offset: 0, limit: 50)
+        XCTAssertEqual(afterAgain.filter { $0.remoteId == "aoki" }.count, 1)
+
+        // If the real artist later arrives from /Artists (same id), it takes over
+        // the row — synthesis leaves it alone and the real metadata wins.
+        try await writer.upsertArtists([
+            Artist(id: "aoki", name: "Steve Aoki", sortName: "Aoki, Steve", artwork: ArtworkRef(key: "cover")),
+        ], serverId: server.id)
+        let synthesized2 = try await writer.synthesizeMissingAlbumArtists(serverId: server.id)
+        XCTAssertFalse(synthesized2.contains("aoki"))
+        let afterReal = try await repo.artistsPage(serverId: server.id, offset: 0, limit: 50)
+        let real = try XCTUnwrap(afterReal.first { $0.remoteId == "aoki" })
+        XCTAssertEqual(real.artworkKey, "cover")
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)

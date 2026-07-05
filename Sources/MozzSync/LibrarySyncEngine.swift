@@ -105,6 +105,12 @@ public struct LibrarySyncEngine: Sendable {
         )
         let playlistIDs = try await syncPlaylists(progress: progress)
 
+        // Some album-artists (DJs, producers, combined credits) are referenced by
+        // albums but never returned by the artist listing, leaving their albums
+        // unbrowsable. Derive artist rows for them from the just-synced albums —
+        // no network — and keep their ids alive through the artist prune below.
+        let synthesizedArtistIDs = try await writer.synthesizeMissingAlbumArtists(serverId: serverId)
+
         // Prune rows the server no longer has — but ONLY when EVERY phase
         // enumerated completely (all-or-nothing). A truncated/flaky sync (fewer
         // items seen than the server's reported total, or an empty result) must
@@ -119,12 +125,12 @@ public struct LibrarySyncEngine: Sendable {
         if allPhasesComplete {
             deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs.seen)
             deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs.seen)
-            deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen)
+            deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen + synthesizedArtistIDs)
             deleted += try await writer.prunePlaylists(serverId: serverId, keeping: playlistIDs.seen)
         }
 
         let summary = SyncSummary(
-            artists: artistIDs.seen.count,
+            artists: artistIDs.seen.count + synthesizedArtistIDs.count,
             albums: albumIDs.seen.count,
             tracks: trackIDs.seen.count,
             playlists: playlistIDs.seen.count,
