@@ -207,6 +207,43 @@ public struct PlaylistItemRecord: Codable, FetchableRecord, MutablePersistableRe
     }
 }
 
+// MARK: - Listening history
+
+/// An append-only listening-history event. Keyed on the stable `trackRef`
+/// ("{serverId}:{remoteId}") — NOT the catalog `Int64 id` and NOT a cascading
+/// foreign key — so history survives a catalog prune and re-add. Never mutated.
+public struct PlayEventRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable {
+    public static let databaseTableName = "play_event"
+
+    public var id: Int64?
+    public var trackRef: String
+    public var kind: String
+    public var positionSec: Double?
+    public var durationSec: Double?
+    public var context: String?
+    public var contextId: String?
+    public var device: String?
+    public var createdAt: Double
+
+    /// The table uses snake_case columns (per the shared data-model spec); map
+    /// the camelCase Swift properties onto them.
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case trackRef = "track_ref"
+        case kind
+        case positionSec = "position_sec"
+        case durationSec = "duration_sec"
+        case context
+        case contextId = "context_id"
+        case device
+        case createdAt = "created_at"
+    }
+
+    public mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
 // MARK: - Downloads
 
 /// The offline-download state for a track. Keyed by the track's internal id,

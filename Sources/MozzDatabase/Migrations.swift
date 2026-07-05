@@ -7,6 +7,7 @@ enum Schema {
     static func makeMigrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         registerV1(&migrator)
+        registerV2(&migrator)
         return migrator
     }
 
@@ -178,6 +179,31 @@ enum Schema {
                 t.tokenizer = .unicode61()
                 t.column("name")
             }
+        }
+    }
+
+    /// v2 — the append-only listening-history log (`play_event`).
+    ///
+    /// Deliberately NOT foreign-keyed to `track`: history must *survive* a
+    /// catalog prune (a track vanishing from a flaky sync, or being re-added),
+    /// so events key on the stable `track_ref` = "{serverId}:{remoteId}" and
+    /// tolerate having no matching catalog row. (This also means the sync
+    /// pruner can never cascade-delete listening history.)
+    private static func registerV2(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v2.playEvents") { db in
+            try db.create(table: "play_event") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("track_ref", .text).notNull()
+                t.column("kind", .text).notNull()
+                t.column("position_sec", .double)
+                t.column("duration_sec", .double)
+                t.column("context", .text)
+                t.column("context_id", .text)
+                t.column("device", .text)
+                t.column("created_at", .double).notNull()
+            }
+            try db.create(index: "idx_play_event_track", on: "play_event", columns: ["track_ref"])
+            try db.create(index: "idx_play_event_time", on: "play_event", columns: ["created_at"])
         }
     }
 }

@@ -17,7 +17,7 @@ final class SchemaAndWriteTests: XCTestCase {
             let names = try String.fetchAll(database, sql: "SELECT name FROM sqlite_master WHERE type IN ('table','view')")
             return Set(names)
         }
-        for expected in ["server", "artist", "album", "track", "playlist", "playlistItem", "download", "track_fts", "album_fts", "artist_fts"] {
+        for expected in ["server", "artist", "album", "track", "playlist", "playlistItem", "download", "play_event", "track_fts", "album_fts", "artist_fts"] {
             XCTAssertTrue(tables.contains(expected), "missing table \(expected)")
         }
     }
@@ -114,6 +114,37 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertEqual(Set(rock.map(\.remoteId)), ["old", "new"])
         let jazz = try await repo.albums(forGenre: "Jazz", serverId: server.id)
         XCTAssertEqual(jazz.map(\.remoteId), ["new"])
+    }
+
+    func testPlayEventStoreAppendAndRead() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlayEventStore(db)
+        let server = makeServer()
+        // History does NOT require catalog rows — the durable ref must work even
+        // for a track not currently synced.
+        try await store.append(PlayEvent(trackID: "t1", kind: .started, positionSeconds: 0, durationSeconds: 100),
+                               serverId: server.id, device: "iphone")
+        try await store.append(PlayEvent(trackID: "t1", kind: .completed, positionSeconds: 100, durationSeconds: 100),
+                               serverId: server.id, device: "iphone")
+        try await store.append(PlayEvent(trackID: "t2", kind: .skipped, positionSeconds: 5, durationSeconds: 100),
+                               serverId: server.id)
+
+        let ref = PlayEventStore.trackRef(serverId: server.id, remoteId: "t1")
+        XCTAssertEqual(ref, "srv1:t1")
+
+        let t1 = try await store.events(forTrackRef: ref)
+        XCTAssertEqual(t1.count, 2)
+        XCTAssertEqual(Set(t1.map(\.kind)), ["started", "completed"])
+        XCTAssertEqual(t1.first?.trackRef, ref)
+        XCTAssertEqual(t1.first?.device, "iphone")
+
+        let completed = try await store.count(kind: .completed)
+        XCTAssertEqual(completed, 1)
+        let skipped = try await store.count(kind: .skipped)
+        XCTAssertEqual(skipped, 1)
+
+        let recent = try await store.recentlyPlayedTrackRefs()
+        XCTAssertTrue(recent.contains(ref))
     }
 }
 

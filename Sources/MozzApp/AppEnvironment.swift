@@ -51,6 +51,7 @@ public final class AppEnvironment: ObservableObject {
     public let fileStore: DownloadFileStore
     public let downloads: DownloadManager
     public let playback: PlaybackEngine
+    public let playEvents: PlayEventStore
     public let credentials: any CredentialStore
     public let clientInfo: ClientInfo
     public let clientIdentifier: String
@@ -70,12 +71,14 @@ public final class AppEnvironment: ObservableObject {
         self.repository = LibraryRepository(database)
         self.downloads = DownloadManager(database: database, fileStore: fileStore)
         self.playback = PlaybackEngine(resolver: resolver)
+        self.playEvents = PlayEventStore(database)
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
         self.clientInfo = ClientInfo(
             product: "Mozz", version: "0.1.0",
             deviceName: "iPhone", platform: "iOS", platformVersion: "17.0"
         )
         wirePlaybackReporting()
+        wirePlayEventLogging()
         wireBackgroundDownloads()
     }
 
@@ -364,6 +367,26 @@ public final class AppEnvironment: ObservableObject {
             }
         }
     }
+
+    /// Persist the engine's listening-history events into the on-device
+    /// `play_event` log, tagged with the active server (to form the durable
+    /// track ref) and this device. Fire-and-forget; never blocks playback.
+    private func wirePlayEventLogging() {
+        playback.onPlayEvent = { [weak self] event in
+            Task { @MainActor in
+                guard let self, let serverId = self.active?.connection.id else { return }
+                try? await self.playEvents.append(event, serverId: serverId, device: Self.deviceKind)
+            }
+        }
+    }
+
+    private static let deviceKind: String = {
+        #if os(iOS)
+        return "iphone"
+        #else
+        return "mac"
+        #endif
+    }()
 
     /// Bridge the URLSession background-download completion handler (delivered to
     /// the app delegate after an out-of-process relaunch) into the download

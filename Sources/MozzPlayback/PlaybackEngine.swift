@@ -27,6 +27,11 @@ public final class PlaybackEngine: ObservableObject {
     /// Optional scrobble / progress hook. The app wires this to
     /// `MusicBackend.reportPlayback`. Never blocks playback.
     public var onReport: (@Sendable (PlaybackReport) -> Void)?
+    /// Listening-history hook. The app wires this to append to the on-device
+    /// `play_event` log. Fires `started` when a track begins, then exactly one
+    /// terminal event per track — `completed` (natural end) or `skipped` (the
+    /// user left before the end). Never blocks playback.
+    public var onPlayEvent: (@Sendable (PlayEvent) -> Void)?
     /// Called when artwork should be fetched for the lock screen.
     public var onNeedsArtwork: ((Track) -> Void)?
 
@@ -42,6 +47,9 @@ public final class PlaybackEngine: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var wasPlayingBeforeInterruption = false
+    /// The id of the track we've emitted `.started` for and not yet terminated,
+    /// so every start is paired with exactly one `completed`/`skipped`.
+    private var loggedTrackID: String?
 
     public init(resolver: TrackURLResolver) {
         self.resolver = resolver
@@ -63,6 +71,7 @@ public final class PlaybackEngine: ObservableObject {
 
     /// Load a set of tracks and start playing at `startIndex`.
     public func play(tracks: [Track], startAt startIndex: Int = 0) {
+        logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
         reload(autoplay: true)
@@ -92,11 +101,14 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     public func resume() {
-        guard currentTrack != nil else { return }
+        guard let track = currentTrack else { return }
         try? session.activate()
         player.play()
         publish(status: .playing)
         report(.playing)
+        // Covers the paused-load case (e.g. `previous()` while paused): the
+        // track was loaded without a `.started`, so log it now that it plays.
+        if loggedTrackID == nil { logStart(track) }
     }
 
     public func pause() {
@@ -106,6 +118,8 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     public func next() {
+        // User left this track before its natural end → a skip (negative signal).
+        logTerminal(.skipped, position: snapshot.elapsed)
         guard queue.advance() != nil else {
             // End of a non-repeating queue.
             stop()
@@ -120,11 +134,16 @@ public final class PlaybackEngine: ObservableObject {
             seek(to: 0)
             return
         }
+        logTerminal(.skipped, position: snapshot.elapsed)
         _ = queue.previous()
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
     }
 
     public func seek(to seconds: TimeInterval) {
+        if loggedTrackID != nil, let track = currentTrack {
+            onPlayEvent?(PlayEvent(trackID: track.id, kind: .seek,
+                                   positionSeconds: seconds, durationSeconds: track.duration))
+        }
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
             Task { @MainActor in self?.publish() }
         }
@@ -147,6 +166,10 @@ public final class PlaybackEngine: ObservableObject {
     public func toggleShuffle() { setShuffle(!queue.isShuffled) }
 
     public func stop() {
+        // A user-initiated stop mid-track is a skip. (When called at the natural
+        // end of the queue, `handleNaturalFinish` has already logged `.completed`
+        // and cleared the pending track, so this no-ops — no double count.)
+        logTerminal(.skipped, position: snapshot.elapsed)
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
@@ -176,6 +199,10 @@ public final class PlaybackEngine: ObservableObject {
         currentTrack = track
         publish(status: .buffering)
         onNeedsArtwork?(track)
+        // Emit `.started` on intent (synchronously), so it's paired correctly
+        // with the terminal event even if the async URL resolve below is slow
+        // or fails. A paused load (autoplay == false) logs its start on resume.
+        if autoplay { logStart(track) }
 
         Task { [weak self] in
             guard let self else { return }
@@ -263,18 +290,30 @@ public final class PlaybackEngine: ObservableObject {
     /// A loaded track played to its end: sync the queue and refill lookahead.
     private func itemDidFinish(_ item: AVPlayerItem?) {
         guard let item, loaded.first?.item === item else { return }
-        report(.stopped)
-        let finished = queue.trackDidFinish()
-        loaded.removeFirst()
+        handleNaturalFinish()
+    }
 
-        guard finished != nil else {
+    /// The queue-advance + history-logging half of a natural track end, split
+    /// out (and `internal`) so it can be unit-tested without a real
+    /// `AVPlayerItem` end-of-playback notification.
+    func handleNaturalFinish() {
+        report(.stopped)
+        // The track reached its natural end → a completion (positive signal).
+        logTerminal(.completed, position: currentTrack?.duration)
+        let advanced = queue.trackDidFinish()
+        if !loaded.isEmpty { loaded.removeFirst() }
+
+        guard advanced != nil else {
             // Reached the end of a non-repeating queue.
             stop()
             return
         }
         // The player already advanced to the pre-rolled next item.
         currentTrack = queue.current
-        if let track = currentTrack { onNeedsArtwork?(track) }
+        if let track = currentTrack {
+            onNeedsArtwork?(track)
+            logStart(track)
+        }
         publish(status: .playing)
         report(.playing)
         refillLookahead()
@@ -326,6 +365,27 @@ public final class PlaybackEngine: ObservableObject {
             sessionID: loaded.first?.sessionID
         )
         onReport(report)
+    }
+
+    // MARK: Listening history (play_event log)
+
+    /// Emit `.started` for a track and mark it as the pending (not-yet-
+    /// terminated) track, so it gets exactly one later `completed`/`skipped`.
+    private func logStart(_ track: Track) {
+        loggedTrackID = track.id
+        onPlayEvent?(PlayEvent(trackID: track.id, kind: .started,
+                               positionSeconds: 0, durationSeconds: track.duration))
+    }
+
+    /// Emit the terminal event for the pending track (if any) and clear it.
+    /// No-ops when there is no pending track, so it's safe to call defensively
+    /// from multiple transition sites without double-counting.
+    private func logTerminal(_ kind: PlayEventKind, position: TimeInterval?) {
+        guard let id = loggedTrackID else { return }
+        loggedTrackID = nil
+        guard let track = currentTrack, track.id == id else { return }
+        onPlayEvent?(PlayEvent(trackID: track.id, kind: kind,
+                               positionSeconds: position, durationSeconds: track.duration))
     }
 
     /// Provide artwork bytes for the lock screen (called by the app once the
