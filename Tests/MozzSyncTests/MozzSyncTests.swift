@@ -195,6 +195,30 @@ final class LibrarySyncEngineTests: XCTestCase {
         XCTAssertEqual(summary.deleted, 0)
     }
 
+    func testAllOrNothingPruneSkipsWhenAnyPhaseIncomplete() async throws {
+        // All-or-nothing: a truncated tracks phase must not authorize pruning
+        // even the fully-enumerated artists phase.
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.artists = makeArtists(5)
+        backend.tracks = makeTracks(10)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 4).sync()
+
+        let repository = LibraryRepository(database)
+        let artistsBefore = try await repository.artistCount(serverId: "srv")
+        XCTAssertEqual(artistsBefore, 5)
+
+        // Re-sync: artists complete (server truly has 3) but tracks truncated.
+        backend.artists = makeArtists(3)
+        backend.tracks = Array(makeTracks(10).prefix(4))
+        backend.trackTotalOverride = 10
+        let summary = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 4).sync()
+
+        let artistsAfter = try await repository.artistCount(serverId: "srv")
+        XCTAssertEqual(artistsAfter, 5, "a truncated tracks phase must not authorize pruning artists")
+        XCTAssertEqual(summary.deleted, 0)
+    }
+
     func testPlaylistItemsSyncedInOrder() async throws {
         let database = try MusicDatabase.inMemory()
         var backend = MockBackend()

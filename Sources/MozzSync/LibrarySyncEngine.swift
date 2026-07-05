@@ -105,24 +105,21 @@ public struct LibrarySyncEngine: Sendable {
         )
         let playlistIDs = try await syncPlaylists(progress: progress)
 
-        // Prune rows the server no longer has — but ONLY when the enumeration
-        // actually completed. A truncated/flaky sync (fewer items seen than the
-        // server's reported total, or an empty result) must never prune: the
-        // `download` row cascade-deletes from `track`, so a single bad sync
-        // could otherwise wipe the catalog AND the user's offline downloads
-        // (and orphan the files on disk). See canPrune(_:).
+        // Prune rows the server no longer has — but ONLY when EVERY phase
+        // enumerated completely (all-or-nothing). A truncated/flaky sync (fewer
+        // items seen than the server's reported total, or an empty result) must
+        // never prune: the `download` row cascade-deletes from `track`, so a
+        // single bad sync could otherwise wipe the catalog AND the user's
+        // offline downloads (and orphan the files on disk). A half-enumerated
+        // sibling type must not authorize deletes for any type either — hence
+        // the whole run is gated on `allPhasesComplete`.
         progress?(SyncProgress(phase: .pruning, itemsSynced: 0))
         var deleted = 0
-        if canPrune(trackIDs) {
+        let allPhasesComplete = [artistIDs, albumIDs, trackIDs, playlistIDs].allSatisfy(phaseCompleted)
+        if allPhasesComplete {
             deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs.seen)
-        }
-        if canPrune(albumIDs) {
             deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs.seen)
-        }
-        if canPrune(artistIDs) {
             deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen)
-        }
-        if canPrune(playlistIDs) {
             deleted += try await writer.prunePlaylists(serverId: serverId, keeping: playlistIDs.seen)
         }
 
@@ -138,12 +135,14 @@ public struct LibrarySyncEngine: Sendable {
         return summary
     }
 
-    /// A full sync only prunes when the enumeration is known to be complete.
-    /// If the server reported a total record count, we must have seen at least
-    /// that many items; if it reported no total, we at least refuse to delete
-    /// the entire catalog on an empty result. This is the guard that stops a
-    /// flaky/truncated page from wiping the DB (and cascading into downloads).
-    private func canPrune(_ enumeration: PagedEnumeration) -> Bool {
+    /// Whether a phase enumerated completely, which is the precondition for the
+    /// (all-or-nothing) prune. If the server reported a total record count, we
+    /// must have seen at least that many items; if it reported no total, we
+    /// treat a non-empty result as complete and an empty one as suspect (so an
+    /// unknown-total backend can never wipe a populated type on an empty read).
+    /// This is the guard that stops a flaky/truncated page from deleting rows
+    /// (and cascading into the user's downloads).
+    private func phaseCompleted(_ enumeration: PagedEnumeration) -> Bool {
         if let total = enumeration.reportedTotal {
             return enumeration.seen.count >= total
         }
