@@ -152,8 +152,13 @@ public final class AppEnvironment: ObservableObject {
             userID: session.userID, serverName: session.serverName,
             clientIdentifier: session.clientIdentifier, musicSectionID: nil
         )
-        try await activate(stored)
+        // Persist BEFORE activation so buildBackend's Plex section resolution can
+        // load this session, add the resolved section id and save it back (it
+        // would otherwise be a no-op on first sign-in — nothing to load — and the
+        // section would be re-resolved every launch). Do NOT re-save `stored`
+        // afterwards: that clobbered the resolved section back to nil.
         SessionPersistence.save(stored, to: credentials)
+        try await activate(stored)
     }
 
     /// Activate the offline demo: generate a synthetic catalog and serve a
@@ -344,6 +349,11 @@ public final class AppEnvironment: ObservableObject {
 
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+        guard active != nil else { throw MozzError.unsupported("No active server") }
+        // Plex can't browse without a music-library section id. Resolve it now if
+        // activation didn't (self-healing), so a plain "Sync Now" recovers without
+        // a re-login — and surfaces a clear error if the server has no music.
+        try await ensurePlexMusicSection()
         guard let active else { throw MozzError.unsupported("No active server") }
         // Catalog sync uses a bulk-timeout backend: a single page of a few
         // hundred items can take tens of seconds to generate on a large/slow
@@ -460,6 +470,39 @@ public final class AppEnvironment: ObservableObject {
                 break
             }
         }
+    }
+
+    /// Ensure a Plex connection has a resolved music-library section before sync.
+    /// Plex browse endpoints require a section id; activation resolves it, but if
+    /// that was missed (transient failure, older data) this recovers lazily at
+    /// sync time. On success it persists the section to the connection, DB and
+    /// keychain and refreshes the active backend so the bulk-sync backend picks it
+    /// up. If the server truly exposes no music library, it throws a clear error
+    /// naming the sections it DOES have — instead of the later cryptic
+    /// "section not resolved". No-op for non-Plex servers or when already set.
+    private func ensurePlexMusicSection() async throws {
+        guard let current = active, current.connection.kind == .plex,
+              (current.connection.musicSectionID?.isEmpty ?? true),
+              let plex = current.backend as? PlexBackend else { return }
+
+        guard let section = try await plex.musicSections().first else {
+            let all = (try? await plex.allLibrarySections()) ?? []
+            let summary = all.isEmpty
+                ? "the server returned no library sections"
+                : "found only " + all.map { "\($0.title ?? "?") (\($0.type ?? "?"))" }.joined(separator: ", ")
+            throw MozzError.unsupported("No music library on ‘\(current.connection.name)’ — \(summary)")
+        }
+
+        guard let token = SessionPersistence.load(credentials)?.token else { return }
+        var connection = current.connection
+        connection.musicSectionID = section.id
+        let backend = PlexBackend(connection: connection, token: token, clientInfo: clientInfo)
+        try await CatalogWriter(database).saveServer(connection)
+        if var stored = SessionPersistence.load(credentials) {
+            stored.musicSectionID = section.id
+            SessionPersistence.save(stored, to: credentials)
+        }
+        finishActivation(connection: connection, backend: backend, capabilities: current.capabilities)
     }
 
     /// Rebuild the active backend with a bulk-timeout transport for catalog

@@ -63,6 +63,23 @@ public struct PlexBackend: MusicBackend {
             }
     }
 
+    /// A library section of any kind, used only for diagnostics when no *music*
+    /// section is found — so the failure can name what the server DOES expose.
+    public struct AnySection: Sendable, Hashable {
+        public var key: String?
+        public var type: String?
+        public var title: String?
+    }
+
+    /// Every library section on the server (any type). Kept separate from
+    /// ``musicSections()`` so the happy path stays lean; called only to build a
+    /// helpful error when music resolution comes back empty.
+    public func allLibrarySections() async throws -> [AnySection] {
+        let response = try await client.send(Endpoint(path: "library/sections"), as: PlexContainerResponse.self)
+        return (response.MediaContainer.Directory ?? [])
+            .map { AnySection(key: $0.key, type: $0.type, title: $0.title) }
+    }
+
     // MARK: Capabilities
 
     public func detectCapabilities() async throws -> ServerCapabilities {

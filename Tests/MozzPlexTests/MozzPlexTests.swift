@@ -111,6 +111,15 @@ final class PlexCatalogTests: XCTestCase {
         XCTAssertEqual(sections.first?.title, "Music")
     }
 
+    func testAllLibrarySectionsForDiagnostics() async throws {
+        // Diagnostics path (used when no music section is found) must surface
+        // EVERY section with its type, not just the artist ones.
+        let all = try await makeBackend().allLibrarySections()
+        XCTAssertEqual(all.count, 2)
+        XCTAssertEqual(all.map(\.type), ["artist", "movie"])
+        XCTAssertEqual(all.map(\.title), ["Music", "Movies"])
+    }
+
     func testDetectsCapabilities() async throws {
         let transport = PlexFixtureTransport([.init(contains: "plex.example.com", fixture: "plex_identity")])
         let capabilities = try await makeBackend(transport).detectCapabilities()
