@@ -70,6 +70,20 @@ public final class AppEnvironment: ObservableObject {
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
 
+    /// Whether a catalog sync is currently running, and its latest progress.
+    /// Owned by the environment (not a view) so a sync survives navigating away
+    /// from Settings / refreshing Home, and every view reflects the true state.
+    @Published public private(set) var isSyncing = false
+    @Published public private(set) var syncProgress: SyncProgress?
+    private var syncTask: Task<Void, Never>?
+
+    /// A short human status for the sync UI, or `nil` when idle.
+    public var syncStatusText: String? {
+        guard isSyncing else { return nil }
+        guard let p = syncProgress else { return "Starting…" }
+        return "\(p.phase.rawValue): \(p.itemsSynced)"
+    }
+
     /// Single-flight guard for the favorite/rating outbox flush (see
     /// `flushFavoriteOutbox`). Main-actor state, so checked/set without races.
     private var isFlushingOutbox = false
@@ -300,6 +314,33 @@ public final class AppEnvironment: ObservableObject {
     }
 
     // MARK: Sync
+
+    /// Start a catalog sync owned by the environment (not a view), so it keeps
+    /// running when the user leaves Settings or refreshes Home, and its progress
+    /// is reflected everywhere via `isSyncing`/`syncProgress`. Single-flight: a
+    /// second tap while syncing is a no-op.
+    public func startSync() {
+        guard !isSyncing, active != nil else { return }
+        isSyncing = true
+        syncProgress = nil
+        syncTask = Task { [self] in
+            defer { isSyncing = false; syncProgress = nil }
+            do {
+                _ = try await syncNow { progress in
+                    Task { @MainActor in self.syncProgress = progress }
+                }
+            } catch is CancellationError {
+                // User cancelled — leave the partial catalog; next sync resumes.
+            } catch {
+                lastSyncSummary = "Sync failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Cancel an in-flight sync (best-effort).
+    public func cancelSync() {
+        syncTask?.cancel()
+    }
 
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {

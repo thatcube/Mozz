@@ -6,8 +6,6 @@ import MozzSync
 struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
-    @State private var isSyncing = false
-    @State private var syncProgressText: String?
     /// Persisted across launches; mirrors `PlaybackEngine.normalizationEnabled`.
     @AppStorage("mozz.normalizationEnabled") private var normalizationEnabled = true
 
@@ -35,16 +33,16 @@ struct SettingsView: View {
 
                     Section("Library") {
                         Button {
-                            Task { await sync() }
+                            env.startSync()
                         } label: {
                             HStack {
                                 Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                                 Spacer()
-                                if isSyncing { ProgressView() }
+                                if env.isSyncing { ProgressView() }
                             }
                         }
-                        .disabled(isSyncing)
-                        if let text = syncProgressText {
+                        .disabled(env.isSyncing)
+                        if let text = env.syncStatusText {
                             Text(text).font(.caption).foregroundStyle(.secondary)
                         }
                         if let summary = env.lastSyncSummary {
@@ -99,21 +97,6 @@ struct SettingsView: View {
             Spacer()
             Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
                 .foregroundStyle(enabled ? .green : .secondary)
-        }
-    }
-
-    private func sync() async {
-        isSyncing = true
-        syncProgressText = "Starting…"
-        defer { isSyncing = false; syncProgressText = nil }
-        do {
-            _ = try await env.syncNow { progress in
-                Task { @MainActor in
-                    syncProgressText = "\(progress.phase.rawValue): \(progress.itemsSynced)"
-                }
-            }
-        } catch {
-            syncProgressText = "Sync failed: \(error.localizedDescription)"
         }
     }
 }
