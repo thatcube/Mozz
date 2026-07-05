@@ -1,36 +1,15 @@
 import SwiftUI
 
-/// Small shared state that bridges the native tab-bar accessory (which the
-/// system hosts in its own context) and the custom full-screen player overlay.
+/// Shared command state for the now-playing surface.
 ///
-/// The accessory publishes the on-screen (global) frame of its artwork so the
-/// full player can fly its own artwork exactly into that slot on dismiss, and a
-/// flag so the accessory can hide its artwork while the full player owns it.
+/// Candidate **B** renders the mini island and the full drawer as a *single*
+/// morphing view (`NowPlayingMorphContainer`) that lives in the same hierarchy
+/// as everything else, so there is no cross-layer coordinate hand-off to bridge.
+/// This model therefore holds only the one bit the rest of the app needs to
+/// drive: whether the player should be expanded. The container observes it and
+/// runs the open/collapse spring; taps and the dismiss drag write to it.
 final class PlayerUIModel: ObservableObject {
-    /// The mini-player artwork's frame in global (screen) coordinates.
-    ///
-    /// Deliberately **not** `@Published`: the accessory writes this on every
-    /// layout pass, and if it were observed it would re-render `MainTabsView`,
-    /// relayout the accessory, and re-emit the frame — an infinite loop that
-    /// pegs the CPU. The full player only reads it at present/dismiss time, so a
-    /// plain stored property (updated silently) is exactly what we want.
-    var miniArtFrame: CGRect = .zero
-    /// True while the full-screen player is presented; the accessory hides its
-    /// own artwork so the full player's traveling artwork is the only one shown.
+    /// `true` ⇒ the drawer should be expanded, `false` ⇒ docked as the island.
+    /// The morph container is the single animator that reacts to this flag.
     @Published var isFullPresented: Bool = false
-}
-
-/// Reports the mini artwork's global frame up to the accessory, which copies it
-/// into `PlayerUIModel`. Global coordinates are absolute screen space, so they
-/// remain valid across the system's accessory-hosting boundary.
-struct MiniArtFrameKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        let next = nextValue()
-        if next != .zero { value = next }
-    }
-}
-
-extension CGRect {
-    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }
