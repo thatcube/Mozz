@@ -451,6 +451,45 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertEqual(pending.first?.kind, "rating")
     }
 
+    func testOutboxCompareAndDeletePreservesNewerIntent() async throws {
+        // Regression (MEDIUM): a re-toggle while a server write is in flight must
+        // not lose the newer intent. The flush deletes by (id, createdAt); if the
+        // row was re-toggled mid-flight its createdAt changed, so the stale delete
+        // no-ops and the newer intent stays queued.
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = FavoritesStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([Track(id: "t1", title: "One", artistName: "A")], serverId: server.id)
+
+        // Op A = like. Snapshot it (what an in-flight flush captured).
+        _ = try await store.applyLocally(FavoriteChange(serverId: server.id, remoteId: "t1", value: .favorite(true)))
+        let pendingA = try await store.pending(serverId: server.id)
+        let opA = try XCTUnwrap(pendingA.first)
+
+        // While "in flight", the user re-toggles to unlike — same row, new createdAt.
+        try await Task.sleep(nanoseconds: 2_000_000)   // ensure a distinct timestamp
+        _ = try await store.applyLocally(FavoriteChange(serverId: server.id, remoteId: "t1", value: .favorite(false)))
+
+        // The flush's stale compare-and-delete (opA.createdAt) must NOT remove the
+        // row that now holds the unlike.
+        let opAId = try XCTUnwrap(opA.id)
+        let deletedStale = try await store.removePending(id: opAId, ifUnchangedSince: opA.createdAt)
+        XCTAssertFalse(deletedStale, "stale delete should no-op after a mid-flight re-toggle")
+        let stillPending = try await store.pending(serverId: server.id)
+        XCTAssertEqual(stillPending.count, 1)
+        XCTAssertEqual(stillPending.first?.isLiked, false, "newer intent (unlike) survives")
+
+        // Flushing the CURRENT op (matching createdAt) removes it.
+        let current = try XCTUnwrap(stillPending.first)
+        let currentId = try XCTUnwrap(current.id)
+        let deleted = try await store.removePending(id: currentId, ifUnchangedSince: current.createdAt)
+        XCTAssertTrue(deleted)
+        let empty = try await store.pending(serverId: server.id)
+        XCTAssertTrue(empty.isEmpty)
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)

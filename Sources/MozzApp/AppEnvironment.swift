@@ -70,6 +70,11 @@ public final class AppEnvironment: ObservableObject {
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
 
+    /// Single-flight guard for the favorite/rating outbox flush (see
+    /// `flushFavoriteOutbox`). Main-actor state, so checked/set without races.
+    private var isFlushingOutbox = false
+    private var flushRequestedAgain = false
+
     public init(database: MusicDatabase, credentials: any CredentialStore, fileStore: DownloadFileStore) {
         self.database = database
         self.credentials = credentials
@@ -378,9 +383,22 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Replay queued like/rating writes to the server, removing each on success.
-    /// Stops at the first failure (offline/transient) so order is preserved and
-    /// the rest stay queued for the next attempt.
+    /// Single-flight (@MainActor guard) so a sync-triggered flush and a
+    /// toggle-triggered flush can't overlap and double-send; if a flush is
+    /// requested while one is running, it re-runs once more at the end so the
+    /// latest intent is always synced promptly.
     public func flushFavoriteOutbox() async {
+        guard active != nil else { return }
+        if isFlushingOutbox { flushRequestedAgain = true; return }
+        isFlushingOutbox = true
+        defer { isFlushingOutbox = false }
+        repeat {
+            flushRequestedAgain = false
+            await performFavoriteFlush()
+        } while flushRequestedAgain
+    }
+
+    private func performFavoriteFlush() async {
         guard let active else { return }
         let pending = (try? await favorites.pending(serverId: active.connection.id)) ?? []
         for op in pending {
@@ -391,7 +409,12 @@ public final class AppEnvironment: ObservableObject {
                 } else {
                     try await active.backend.setRating(op.value, itemID: op.remoteId, type: type)
                 }
-                if let id = op.id { try await favorites.removePending(id: id) }
+                // Compare-and-delete: if the user re-toggled this track while the
+                // (slow) server write was in flight, its createdAt changed and this
+                // no-ops, leaving the newer intent queued.
+                if let id = op.id {
+                    try await favorites.removePending(id: id, ifUnchangedSince: op.createdAt)
+                }
             } catch {
                 break
             }

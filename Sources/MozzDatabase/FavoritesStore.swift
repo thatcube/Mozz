@@ -92,6 +92,21 @@ public struct FavoritesStore: Sendable {
         _ = try await database.write { db in try FavoriteOutboxRecord.deleteOne(db, key: id) }
     }
 
+    /// Compare-and-delete: remove the pending op ONLY if it still holds the value
+    /// we just synced (its `createdAt` is unchanged). If the user re-toggled the
+    /// track while the server write was in flight, `applyLocally` bumped this
+    /// row's `createdAt` in place, so this no-ops and the newer intent stays
+    /// queued for the next flush — closing the write-back staleness race on slow
+    /// servers. Returns whether a row was actually deleted.
+    @discardableResult
+    public func removePending(id: Int64, ifUnchangedSince createdAt: Double) async throws -> Bool {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM favorite_outbox WHERE id = ? AND createdAt = ?",
+                           arguments: [id, createdAt])
+            return db.changesCount > 0
+        }
+    }
+
     /// The current liked state of a track (reads the local row).
     public func isLiked(serverId: ServerID, remoteId: String) async throws -> Bool {
         try await database.read { db in
