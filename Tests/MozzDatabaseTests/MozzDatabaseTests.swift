@@ -701,58 +701,81 @@ final class SyntheticCatalogTests: XCTestCase {
     }
 }
 
-// MARK: - v9 Jellyfin artwork repair migration
+// MARK: - v9/v10 Jellyfin artwork repair migrations
 
 final class JellyfinArtworkRepairMigrationTests: XCTestCase {
     /// Stage the schema to v8, insert data as an early (buggy) sync would have —
-    /// including a track whose `artworkKey` is a bare item id that 404s — then run
-    /// the real registered v9 migration and assert only the broken row is repaired
-    /// from album art, while correct/foreign rows are left untouched.
-    func testV9RepairsBareIdTrackArtworkFromAlbum() throws {
+    /// including tracks/albums/artists whose `artworkKey` is a bare item id that
+    /// 404s — then run the real registered v9+v10 migrations and assert the whole
+    /// repair pipeline: bare track keys inherit REAL album art where available,
+    /// every remaining bare Jellyfin key is nulled (so `!= nil` means "has art"),
+    /// real `id|tag` keys are preserved, and Plex thumb keys are untouched.
+    func testArtworkRepairPipeline() throws {
         let queue = try DatabaseQueue()
         let migrator = Schema.makeMigrator()
         try migrator.migrate(queue, upTo: "v8.favoriteOutbox")
 
         try queue.write { db in
             try db.execute(sql: """
-                INSERT INTO server (id, kind, name, baseURL, clientIdentifier)
-                VALUES ('srv1', 'jellyfin', 'Test', 'https://example.local', 'c1')
+                INSERT INTO server (id, kind, name, baseURL, clientIdentifier) VALUES
+                    ('jf', 'jellyfin', 'JF', 'https://jf.local', 'c1'),
+                    ('px', 'plex', 'PX', 'https://px.local', 'c2')
                 """)
+            // Albums: one with real art, one art-less (bare id from old mapper).
             try db.execute(sql: """
-                INSERT INTO album (serverId, remoteId, title, artistName, artworkKey)
-                VALUES ('srv1', 'al1', 'Debut', 'Björk', 'al1|talb1')
+                INSERT INTO album (serverId, remoteId, title, artistName, artworkKey) VALUES
+                    ('jf', 'alReal', 'Real', 'Band', 'alReal|tag'),
+                    ('jf', 'alBare', 'Bare', 'Band', 'alBare')
                 """)
-            // Insert tracks covering every case the repair must handle.
-            let rows = [
-                // broken: bare id (== remoteId), album has art → repair to album key
-                ("t1", "t1", "al1"),
-                // healthy: real embedded track art (id|tag) → untouched
-                ("t2", "t2|realtag", "al1"),
-                // Plex-shaped thumb key (!= remoteId) → untouched
-                ("t3", "/library/metadata/9/thumb/1", "al1"),
-                // bare id but no matching album row → untouched (nothing to copy)
-                ("t4", "t4", "alX"),
+            // Artists: bare (art-less) vs real.
+            try db.execute(sql: """
+                INSERT INTO artist (serverId, remoteId, name, artworkKey) VALUES
+                    ('jf', 'ar1', 'Bare Artist', 'ar1'),
+                    ('jf', 'ar2', 'Real Artist', 'ar2|atag')
+                """)
+            // Tracks covering every case.
+            let rows: [(String, String, String?, String)] = [
+                // bare id, album HAS real art → inherit real album art
+                ("t1", "t1", "alReal", "jf"),
+                // bare id, album is art-less → nulled
+                ("t2", "t2", "alBare", "jf"),
+                // real own art → preserved
+                ("t3", "t3|realtrk", "alReal", "jf"),
+                // bare id, no matching album → nulled
+                ("t4", "t4", "alNone", "jf"),
+                // Plex thumb key on a Plex server → untouched
+                ("p1", "/library/metadata/1/thumb/9", "alPlex", "px"),
             ]
-            for (remoteId, artworkKey, albumRemoteId) in rows {
+            for (remoteId, artworkKey, albumRemoteId, serverId) in rows {
                 try db.execute(sql: """
                     INSERT INTO track (serverId, remoteId, title, artistName, artworkKey, albumRemoteId)
-                    VALUES ('srv1', ?, 'Track', 'Björk', ?, ?)
-                    """, arguments: [remoteId, artworkKey, albumRemoteId])
+                    VALUES (?, ?, 'Track', 'Band', ?, ?)
+                    """, arguments: [serverId, remoteId, artworkKey, albumRemoteId])
             }
         }
 
-        // Run v9 (and any later migrations).
-        try migrator.migrate(queue)
+        try migrator.migrate(queue) // runs v9 then v10
 
-        let keys = try queue.read { db in
-            try Dictionary(uniqueKeysWithValues: Row.fetchAll(
-                db, sql: "SELECT remoteId, artworkKey FROM track"
-            ).map { ($0["remoteId"] as String, $0["artworkKey"] as String?) })
+        let (tracks, albums, artists) = try queue.read { db -> ([String: String?], [String: String?], [String: String?]) in
+            func keys(_ table: String) throws -> [String: String?] {
+                try Dictionary(uniqueKeysWithValues: Row.fetchAll(
+                    db, sql: "SELECT remoteId, artworkKey FROM \(table)"
+                ).map { ($0["remoteId"] as String, $0["artworkKey"] as String?) })
+            }
+            return (try keys("track"), try keys("album"), try keys("artist"))
         }
-        XCTAssertEqual(keys["t1"], "al1|talb1", "bare-id track should adopt album art")
-        XCTAssertEqual(keys["t2"], "t2|realtag", "real track art must be preserved")
-        XCTAssertEqual(keys["t3"], "/library/metadata/9/thumb/1", "Plex thumb key must be untouched")
-        XCTAssertEqual(keys["t4"], "t4", "no matching album → left as-is")
+
+        XCTAssertEqual(tracks["t1"], "alReal|tag", "bare track should inherit REAL album art")
+        XCTAssertNil(tracks["t2"] ?? nil, "bare track with art-less album should be nulled")
+        XCTAssertEqual(tracks["t3"], "t3|realtrk", "real track art must be preserved")
+        XCTAssertNil(tracks["t4"] ?? nil, "bare track with no album should be nulled")
+        XCTAssertEqual(tracks["p1"], "/library/metadata/1/thumb/9", "Plex thumb key must be untouched")
+
+        XCTAssertEqual(albums["alReal"], "alReal|tag", "real album art preserved")
+        XCTAssertNil(albums["alBare"] ?? nil, "bare album key nulled")
+
+        XCTAssertNil(artists["ar1"] ?? nil, "bare artist key nulled")
+        XCTAssertEqual(artists["ar2"], "ar2|atag", "real artist art preserved")
     }
 }
 

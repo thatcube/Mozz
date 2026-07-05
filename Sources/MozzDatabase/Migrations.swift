@@ -15,6 +15,7 @@ enum Schema {
         registerV7(&migrator)
         registerV8(&migrator)
         registerV9(&migrator)
+        registerV10(&migrator)
         return migrator
     }
 
@@ -404,6 +405,49 @@ enum Schema {
                       AND a.artworkKey IS NOT NULL AND a.artworkKey <> ''
                   )
                 """)
+        }
+    }
+
+    /// v10 — drop stale bare Jellyfin artwork keys that 404. With the mapper
+    /// fixed, a valid Jellyfin Primary-image key is ALWAYS `itemId|tag`; any
+    /// Jellyfin key without a `|` is a leftover bare id from the old mapper (an
+    /// art-less item, or a v9 copy from an art-less album) that resolves to a
+    /// 404. First upgrade any track that can still inherit REAL album art
+    /// (`album.artworkKey LIKE '%|%'`), then null every remaining bare Jellyfin
+    /// key across item types, so `artworkKey != nil` reliably means "has
+    /// resolvable art" — art-less items then show a placeholder (and pickers like
+    /// Mozz Weekly's hero skip them) instead of firing a doomed request. Scoped to
+    /// Jellyfin servers; Plex keys are thumb paths on Plex servers and are
+    /// untouched.
+    private static func registerV10(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v10.dropJellyfinBareArtworkKeys") { db in
+            let jellyfinServers = "SELECT id FROM server WHERE kind = 'jellyfin'"
+            // Prefer real album art for tracks whose own key is still bare.
+            try db.execute(sql: """
+                UPDATE track SET artworkKey = (
+                    SELECT a.artworkKey FROM album a
+                    WHERE a.serverId = track.serverId
+                      AND a.remoteId = track.albumRemoteId
+                      AND a.artworkKey LIKE '%|%'
+                )
+                WHERE serverId IN (\(jellyfinServers))
+                  AND artworkKey IS NOT NULL AND artworkKey NOT LIKE '%|%'
+                  AND albumRemoteId IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM album a
+                    WHERE a.serverId = track.serverId
+                      AND a.remoteId = track.albumRemoteId
+                      AND a.artworkKey LIKE '%|%'
+                  )
+                """)
+            // Null every remaining bare (unresolvable) Jellyfin key.
+            for table in ["artist", "album", "track", "playlist"] {
+                try db.execute(sql: """
+                    UPDATE \(table) SET artworkKey = NULL
+                    WHERE serverId IN (\(jellyfinServers))
+                      AND artworkKey IS NOT NULL AND artworkKey NOT LIKE '%|%'
+                    """)
+            }
         }
     }
 }
