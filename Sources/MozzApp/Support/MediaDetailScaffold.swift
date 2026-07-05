@@ -128,15 +128,27 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         }
     }
 
-    @ViewBuilder private var fullBleedImage: some View {
-        if let url = heroURL(pixels: 1200) {
-            CachedArtworkImage(url: url) { heroFallback }
-                .frame(maxWidth: .infinity)
-                .frame(height: Self.fullBleedHeight)
-                .clipped()
-        } else {
-            heroFallback.frame(height: Self.fullBleedHeight)
-        }
+    private var fullBleedImage: some View {
+        // A neutral, fully-flexible Color establishes the box at exactly the
+        // container width × a fixed height; the artwork is rendered as an OVERLAY
+        // that is clipped to that box. This is load-bearing: `CachedArtworkImage`
+        // fills via `.aspectRatio(.fill)`, which REPORTS a size larger than the
+        // proposal (it scales up to cover), so letting the image drive the frame
+        // dragged the whole page wider than the screen — content then centered
+        // and clipped on BOTH edges (row titles lost their first characters,
+        // durations their last). An overlay never affects its parent's size, so
+        // the layout width stays pinned to the screen regardless of the artwork.
+        Color.clear
+            .frame(height: Self.fullBleedHeight)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                if let url = heroURL(pixels: 1200) {
+                    CachedArtworkImage(url: url) { heroFallback }
+                } else {
+                    heroFallback
+                }
+            }
+            .clipped()
     }
 
     // MARK: Centered artwork
