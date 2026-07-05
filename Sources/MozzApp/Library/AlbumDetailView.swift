@@ -126,6 +126,7 @@ struct TrackRow: View {
             }
             Spacer()
             downloadIndicator
+            LikeControl(track: track)
             Text(Format.duration(track.duration))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }

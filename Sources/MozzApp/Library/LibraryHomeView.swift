@@ -30,6 +30,8 @@ struct LibraryHomeView: View {
                     VStack(spacing: 0) {
                         categoryLink("Songs", "music.note") { SongsView() }
                         rowDivider
+                        categoryLink("Liked Songs", "heart") { LikedSongsView() }
+                        rowDivider
                         categoryLink("Playlists", "music.note.list") { PlaylistsView() }
                         rowDivider
                         categoryLink("Artists", "music.mic") { ArtistsView() }
