@@ -42,7 +42,7 @@ struct MainTabsView: View {
 
     private var tabs: some View {
         TabView {
-            ArtistsView()
+            LibraryHomeView()
                 .tabItem { Label("Library", systemImage: "music.note.list") }
             SearchView()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }

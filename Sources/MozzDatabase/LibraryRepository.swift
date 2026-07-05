@@ -151,6 +151,58 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    // MARK: Library home (recently added, playlists, genres)
+
+    /// Most recently added albums (newest first) for the "Recently Added" shelf.
+    /// Albums with no known add date sort last. Bounded by `limit`.
+    public func recentlyAddedAlbums(serverId: ServerID, limit: Int = 20) async throws -> [AlbumRecord] {
+        try await database.read { db in
+            try AlbumRecord.fetchAll(db, sql: """
+                SELECT * FROM album
+                WHERE serverId = ?
+                ORDER BY addedAt DESC, sortTitle COLLATE NOCASE
+                LIMIT ?
+                """, arguments: [serverId, limit])
+        }
+    }
+
+    /// All playlists for a server, alphabetical. Playlists are few, so this is
+    /// not paginated.
+    public func allPlaylists(serverId: ServerID) async throws -> [PlaylistRecord] {
+        try await database.read { db in
+            try PlaylistRecord.fetchAll(db, sql: """
+                SELECT * FROM playlist
+                WHERE serverId = ?
+                ORDER BY title COLLATE NOCASE
+                """, arguments: [serverId])
+        }
+    }
+
+    /// Distinct genre names across the album catalog, alphabetical. Genres are
+    /// stored as a JSON array per album; `json_each` fans them out so the DB
+    /// does the de-duplication.
+    public func genres(serverId: ServerID) async throws -> [String] {
+        try await database.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT DISTINCT je.value AS genre
+                FROM album JOIN json_each(album.genres) je
+                WHERE album.serverId = ? AND je.value <> ''
+                ORDER BY genre COLLATE NOCASE
+                """, arguments: [serverId])
+        }
+    }
+
+    /// Albums tagged with a genre, alphabetical.
+    public func albums(forGenre genre: String, serverId: ServerID) async throws -> [AlbumRecord] {
+        try await database.read { db in
+            try AlbumRecord.fetchAll(db, sql: """
+                SELECT album.* FROM album JOIN json_each(album.genres) je
+                WHERE album.serverId = ? AND je.value = ?
+                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                """, arguments: [serverId, genre])
+        }
+    }
+
     // MARK: Full-text search
 
     /// Search all three entity types. Returns quickly (each MATCH is bounded by

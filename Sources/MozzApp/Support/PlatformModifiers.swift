@@ -14,6 +14,16 @@ extension View {
         #endif
     }
 
+    /// Inset-grouped list style (the rounded "card" look) on iOS/tvOS; falls
+    /// back to the default style on macOS, where `.insetGrouped` is unavailable.
+    @ViewBuilder func insetGroupedListStyle() -> some View {
+        #if os(iOS) || os(tvOS)
+        self.listStyle(.insetGrouped)
+        #else
+        self
+        #endif
+    }
+
     /// URL-entry configuration (no autocaps/autocorrect, URL keyboard) on iOS.
     @ViewBuilder func urlFieldStyle() -> some View {
         #if os(iOS)

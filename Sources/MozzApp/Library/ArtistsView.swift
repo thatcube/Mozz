@@ -16,30 +16,28 @@ struct ArtistsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                ForEach(Array(list.items.enumerated()), id: \.element.id) { index, artist in
-                    NavigationLink {
-                        ArtistDetailView(artist: artist)
-                    } label: {
-                        ArtistRow(artist: artist)
-                    }
-                    .onAppear { list.loadMoreIfNeeded(currentIndex: index) }
+        List {
+            ForEach(Array(list.items.enumerated()), id: \.element.id) { index, artist in
+                NavigationLink {
+                    ArtistDetailView(artist: artist)
+                } label: {
+                    ArtistRow(artist: artist)
                 }
-                if list.isLoading {
-                    HStack { Spacer(); ProgressView(); Spacer() }
-                }
+                .onAppear { list.loadMoreIfNeeded(currentIndex: index) }
             }
-            .listStyle(.plain)
-            .navigationTitle(navTitle)
-            .overlay {
-                if list.items.isEmpty && !list.isLoading {
-                    ContentUnavailableView("No Music", systemImage: "music.note",
-                        description: Text("Sync your library from Settings."))
-                }
+            if list.isLoading {
+                HStack { Spacer(); ProgressView(); Spacer() }
             }
-            .task { await bootstrap() }
         }
+        .listStyle(.plain)
+        .navigationTitle(navTitle)
+        .overlay {
+            if list.items.isEmpty && !list.isLoading {
+                ContentUnavailableView("No Music", systemImage: "music.note",
+                    description: Text("Sync your library from Settings."))
+            }
+        }
+        .task { await bootstrap() }
     }
 
     private var navTitle: String {

@@ -76,6 +76,45 @@ final class SchemaAndWriteTests: XCTestCase {
         let track = try await repo.track(serverId: server.id, remoteId: "t1")
         XCTAssertEqual(track?.genres, ["Rock", "Alt"])
     }
+
+    func testLibraryHomeQueries() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+
+        try await writer.upsertAlbums([
+            Album(id: "old", title: "Old One", artistName: "A", artistID: "a1", year: 2001,
+                  genres: ["Rock"], addedAt: Date(timeIntervalSince1970: 1_000)),
+            Album(id: "new", title: "New One", artistName: "B", artistID: "a2", year: 2020,
+                  genres: ["Jazz", "Rock"], addedAt: Date(timeIntervalSince1970: 9_000)),
+            Album(id: "nodate", title: "No Date", artistName: "C", artistID: "a3",
+                  genres: [], addedAt: nil),
+        ], serverId: server.id)
+        try await writer.upsertPlaylists([
+            Playlist(id: "p2", title: "Road Trip"),
+            Playlist(id: "p1", title: "Chill"),
+        ], serverId: server.id)
+
+        // Recently added: newest addedAt first, nil sorts last.
+        let recent = try await repo.recentlyAddedAlbums(serverId: server.id, limit: 10)
+        XCTAssertEqual(recent.map(\.remoteId), ["new", "old", "nodate"])
+
+        // Playlists: alphabetical.
+        let playlists = try await repo.allPlaylists(serverId: server.id)
+        XCTAssertEqual(playlists.map(\.title), ["Chill", "Road Trip"])
+
+        // Genres: distinct, alphabetical (validates SQLite JSON1 / json_each).
+        let genres = try await repo.genres(serverId: server.id)
+        XCTAssertEqual(genres, ["Jazz", "Rock"])
+
+        // Albums for a genre.
+        let rock = try await repo.albums(forGenre: "Rock", serverId: server.id)
+        XCTAssertEqual(Set(rock.map(\.remoteId)), ["old", "new"])
+        let jazz = try await repo.albums(forGenre: "Jazz", serverId: server.id)
+        XCTAssertEqual(jazz.map(\.remoteId), ["new"])
+    }
 }
 
 final class UpsertIdentityTests: XCTestCase {
