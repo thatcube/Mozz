@@ -264,6 +264,47 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertEqual(real.artworkKey, "cover")
     }
 
+    func testPruneKeepsAlbumReferencedArtists() async throws {
+        // Regression (HIGH): synthesized album-artists — which the server never
+        // lists in /Artists — must SURVIVE a complete-sync prune as long as an
+        // album still references them. Otherwise they oscillate browsable/pruned
+        // every other sync (synthesized on odd syncs, pruned on even), silently
+        // re-orphaning ~468 albums.
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+
+        try await writer.upsertArtists([Artist(id: "real", name: "Real Artist")], serverId: server.id)
+        try await writer.upsertAlbums([
+            Album(id: "al1", title: "Known", artistName: "Real Artist", artistID: "real"),
+            Album(id: "al2", title: "Orphaned", artistName: "Steve Aoki", artistID: "aoki"),
+        ], serverId: server.id)
+        _ = try await writer.synthesizeMissingAlbumArtists(serverId: server.id)   // creates "aoki"
+
+        // Simulate the NEXT complete sync's prune: the server lists only "real",
+        // and "aoki" already exists so synthesis returns nothing for it. It's in
+        // neither the keep-set nor a re-synthesis, yet must NOT be pruned because
+        // album al2 still references it.
+        _ = try await writer.pruneAlbums(serverId: server.id, keeping: ["al1", "al2"])
+        _ = try await writer.pruneArtists(serverId: server.id, keeping: ["real"])
+        let artists = try await repo.artistsPage(serverId: server.id, offset: 0, limit: 50)
+        XCTAssertTrue(artists.contains { $0.remoteId == "aoki" },
+                      "album-referenced artist must survive a prune that doesn't list it")
+        let aokiAlbums = try await repo.albums(forArtistRemoteId: "aoki", serverId: server.id)
+        XCTAssertEqual(aokiAlbums.count, 1)
+
+        // Conversely, once its last album is gone the synthesized artist SHOULD
+        // be cleaned up — the guard protects only artists a *surviving* album
+        // references, so no orphaned synthesized rows leak.
+        _ = try await writer.pruneAlbums(serverId: server.id, keeping: ["al1"])   // al2 removed
+        _ = try await writer.pruneArtists(serverId: server.id, keeping: ["real"])
+        let after = try await repo.artistsPage(serverId: server.id, offset: 0, limit: 50)
+        XCTAssertFalse(after.contains { $0.remoteId == "aoki" },
+                       "synthesized artist should be pruned once its last album is gone")
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)

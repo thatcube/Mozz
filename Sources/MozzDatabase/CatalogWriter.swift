@@ -133,7 +133,31 @@ public struct CatalogWriter: Sendable {
     /// this stays one bounded DELETE rather than a giant `NOT IN (?, ?, …)`.
     /// Returns the number of rows deleted.
     public func pruneArtists(serverId: ServerID, keeping ids: [String]) async throws -> Int {
-        try await prune(table: "artist", serverId: serverId, keeping: ids)
+        // INVARIANT: every artist a *surviving* album still references must be
+        // kept. Synthesized album-artists (see AlbumArtistSynthesis) are never
+        // returned by the server's /Artists listing, so they're absent from the
+        // caller's keep-set; without this guard they'd be pruned on the next
+        // complete sync, re-orphaning their albums every other sync. Artists are
+        // pruned AFTER albums, so `album` here already reflects the surviving
+        // set — an artist whose last album was itself pruned is (correctly) not
+        // protected and gets cleaned up.
+        try await prune(
+            table: "artist", serverId: serverId, keeping: ids,
+            alsoKeeping: """
+            SELECT DISTINCT artistRemoteId FROM album
+            WHERE serverId = ? AND artistRemoteId IS NOT NULL AND artistRemoteId <> ''
+            """
+        )
+    }
+
+    /// Total artist rows for a server (server-listed + synthesized), for the
+    /// post-sync summary. Read as a live count so it stays consistent across
+    /// syncs even though synthesized artists aren't in the sync's "seen" set.
+    public func artistCount(serverId: ServerID) async throws -> Int {
+        try await database.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM artist WHERE serverId = ?",
+                             arguments: [serverId]) ?? 0
+        }
     }
 
     public func pruneAlbums(serverId: ServerID, keeping ids: [String]) async throws -> Int {
@@ -148,13 +172,20 @@ public struct CatalogWriter: Sendable {
         try await prune(table: "playlist", serverId: serverId, keeping: ids)
     }
 
-    private func prune(table: String, serverId: ServerID, keeping ids: [String]) async throws -> Int {
+    private func prune(table: String, serverId: ServerID, keeping ids: [String],
+                       alsoKeeping subquery: String? = nil) async throws -> Int {
         try await database.write { db in
             try db.execute(sql: "CREATE TEMP TABLE IF NOT EXISTS _sync_keep (remoteId TEXT PRIMARY KEY)")
             try db.execute(sql: "DELETE FROM _sync_keep")
             let insert = try db.makeStatement(sql: "INSERT OR IGNORE INTO _sync_keep (remoteId) VALUES (?)")
             for id in ids {
                 try insert.execute(arguments: [id])
+            }
+            // Fold in any extra ids to protect (e.g. artists a surviving album
+            // still references). Bound with serverId; runs after sibling prunes.
+            if let subquery {
+                try db.execute(sql: "INSERT OR IGNORE INTO _sync_keep (remoteId) \(subquery)",
+                               arguments: [serverId])
             }
             try db.execute(
                 sql: "DELETE FROM \(table) WHERE serverId = ? AND remoteId NOT IN (SELECT remoteId FROM _sync_keep)",

@@ -108,8 +108,10 @@ public struct LibrarySyncEngine: Sendable {
         // Some album-artists (DJs, producers, combined credits) are referenced by
         // albums but never returned by the artist listing, leaving their albums
         // unbrowsable. Derive artist rows for them from the just-synced albums —
-        // no network — and keep their ids alive through the artist prune below.
-        let synthesizedArtistIDs = try await writer.synthesizeMissingAlbumArtists(serverId: serverId)
+        // no network. The artist prune keeps anything a surviving album still
+        // references (see CatalogWriter.pruneArtists), so these survive future
+        // syncs without needing to thread their ids through the keep-set here.
+        _ = try await writer.synthesizeMissingAlbumArtists(serverId: serverId)
 
         // Prune rows the server no longer has — but ONLY when EVERY phase
         // enumerated completely (all-or-nothing). A truncated/flaky sync (fewer
@@ -125,12 +127,16 @@ public struct LibrarySyncEngine: Sendable {
         if allPhasesComplete {
             deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs.seen)
             deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs.seen)
-            deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen + synthesizedArtistIDs)
+            deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen)
             deleted += try await writer.prunePlaylists(serverId: serverId, keeping: playlistIDs.seen)
         }
 
+        // Report the live artist total (server-listed + synthesized) so the
+        // count stays consistent across syncs — synthesized artists persist in
+        // the DB but aren't in this run's server-"seen" set.
+        let artistTotal = try await writer.artistCount(serverId: serverId)
         let summary = SyncSummary(
-            artists: artistIDs.seen.count + synthesizedArtistIDs.count,
+            artists: artistTotal,
             albums: albumIDs.seen.count,
             tracks: trackIDs.seen.count,
             playlists: playlistIDs.seen.count,
