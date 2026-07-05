@@ -124,11 +124,44 @@ public struct PlexAuthenticator: Sendable {
         return connections.first
     }
 
+    /// Probe candidates in preference order and return the first whose SERVER
+    /// actually has a music (`artist`) library. The account may own several
+    /// servers (e.g. a movies-only box and a separate music box); picking purely
+    /// by reachability lands the user on whichever server answers first, which
+    /// may have no music at all. We fetch `library/sections` (which also proves
+    /// reachability) and prefer a server that reports an artist section. Falls
+    /// back to the first reachable connection, then the first candidate, so login
+    /// still succeeds even if none report music — the sync then surfaces a clear
+    /// "no music library" message.
+    public func firstMusicConnection(
+        _ connections: [PlexResourceConnection],
+        perProbeTimeout: TimeInterval = 4
+    ) async -> PlexResourceConnection? {
+        var firstReachable: PlexResourceConnection?
+        for connection in connections {
+            let probe = HTTPClient(
+                baseURL: connection.uri,
+                transport: transport,
+                defaultHeaders: PlexHeaders.common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: connection.accessToken),
+                retryPolicy: .none
+            )
+            guard let response = try? await probe.send(
+                Endpoint(path: "library/sections"), as: PlexContainerResponse.self
+            ) else { continue }
+            if firstReachable == nil { firstReachable = connection }
+            if (response.MediaContainer.Directory ?? []).contains(where: { $0.type == "artist" }) {
+                return connection
+            }
+        }
+        return firstReachable ?? connections.first
+    }
+
     /// One-call convenience: discover connections, pick one, and produce the
     /// session to persist. The UI can instead call the steps individually.
     public func completeLogin(accountToken: String) async throws -> AuthenticatedSession {
         let connections = try await discoverConnections(accountToken: accountToken)
-        guard let chosen = await firstReachableConnection(connections) else {
+        // Prefer a server that has music (the account may have several servers).
+        guard let chosen = await firstMusicConnection(connections) else {
             throw MozzError.notFound
         }
         return AuthenticatedSession(

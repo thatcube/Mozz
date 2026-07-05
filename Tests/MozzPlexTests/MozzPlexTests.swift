@@ -199,6 +199,7 @@ final class PlexAuthTests: XCTestCase {
         .init(contains: "api/v2/pins/", fixture: "plex_pin_claimed"),
         .init(contains: "api/v2/pins", fixture: "plex_pin_claimed"),
         .init(contains: "api/v2/resources", fixture: "plex_resources"),
+        .init(contains: "library/sections", fixture: "plex_sections"),
         .init(contains: "identity", fixture: "plex_identity"),
     ])
 
@@ -233,5 +234,49 @@ final class PlexAuthTests: XCTestCase {
         XCTAssertEqual(session.token, "server-token-1")
         XCTAssertEqual(session.serverName, "Home Plex")
         XCTAssertTrue(session.baseURL.absoluteString.contains("plex.direct"))
+    }
+
+    func testPrefersServerThatHasMusic() async throws {
+        // Account with a movies-only box AND a music box, both reachable. Selection
+        // must NOT stop at the first reachable server — it must pick the one that
+        // actually has an artist library.
+        let transport = PlexFixtureTransport([
+            .init(contains: "movies-box", fixture: "plex_sections_movies_only"),
+            .init(contains: "music-box", fixture: "plex_sections"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport)
+        let movies = PlexResourceConnection(
+            serverName: "The Movies", clientIdentifier: "m1",
+            uri: URL(string: "https://movies-box.plex.direct:32400")!,
+            isLocal: true, isRelay: false, accessToken: "t-movies")
+        let music = PlexResourceConnection(
+            serverName: "The Music", clientIdentifier: "m2",
+            uri: URL(string: "https://music-box.plex.direct:32400")!,
+            isLocal: true, isRelay: false, accessToken: "t-music")
+
+        let chosen = await auth.firstMusicConnection([movies, music])
+        XCTAssertEqual(chosen?.serverName, "The Music")
+        XCTAssertEqual(chosen?.accessToken, "t-music")
+    }
+
+    func testFallsBackToFirstReachableWhenNoServerHasMusic() async throws {
+        // Only a movies box answers; nothing has music. Login must still resolve a
+        // connection (the reachable one) so it doesn't dead-end — the "no music"
+        // condition is reported later, at sync, with a clear message.
+        let transport = PlexFixtureTransport([
+            .init(contains: "movies-box", fixture: "plex_sections_movies_only"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport)
+        let movies = PlexResourceConnection(
+            serverName: "The Movies", clientIdentifier: "m1",
+            uri: URL(string: "https://movies-box.plex.direct:32400")!,
+            isLocal: true, isRelay: false, accessToken: "t-movies")
+        let unreachable = PlexResourceConnection(
+            serverName: "Offline", clientIdentifier: "m3",
+            uri: URL(string: "https://offline-box.plex.direct:32400")!,
+            isLocal: false, isRelay: true, accessToken: "t-offline")
+
+        let chosen = await auth.firstMusicConnection([movies, unreachable])
+        XCTAssertEqual(chosen?.serverName, "The Movies")
     }
 }
