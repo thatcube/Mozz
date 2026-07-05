@@ -446,6 +446,17 @@ private struct IslandContent: View {
     @State private var commitTick = 0            // bumped to fire a haptic pop
     @State private var armedDir = 0              // side currently past the threshold
 
+    /// Scales with Dynamic Type (10 at default) so we can subtract its growth from
+    /// the title/artist line spacing — the two lines pull together at large sizes,
+    /// where the stacked line-heights otherwise leave a big gap, while default
+    /// sizes are left untouched.
+    @ScaledMetric(relativeTo: .subheadline) private var typeUnit: CGFloat = 10
+    private var titleArtistSpacing: CGFloat { max(-8, 1 - (typeUnit - 10)) }
+    /// Upward nudge to visually centre the text glyphs (font line boxes pad the
+    /// top more than the bottom). Scales with type: ~0.5pt at default, ~0.7pt at
+    /// xxxLarge — where the ~4px imbalance is actually visible.
+    @ScaledMetric(relativeTo: .subheadline) private var textVerticalNudge: CGFloat = 0.5
+
     var body: some View {
         HStack(spacing: 10) {
             // The artwork + titles zone owns all island touch handling (press,
@@ -456,7 +467,7 @@ private struct IslandContent: View {
             HStack(spacing: 10) {
                 Color.clear.frame(width: Morph.islandArtSide, height: Morph.islandArtSide)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: titleArtistSpacing) {
                     IslandSlideText(text: playback.currentTrack?.title ?? "",
                                     dir: navDir, zoneW: zoneW, animate: animateSwipe,
                                     liveDrag: dragX, commitStart: commitStart,
@@ -471,6 +482,11 @@ private struct IslandContent: View {
                     Color.clear.preference(key: IslandTitleWidthKey.self, value: g.size.width)
                 })
                 .clipped()
+                // Nudge the text block up to correct font line-box asymmetry (the
+                // glyphs sit slightly low inside their line boxes, so the visual
+                // top gap is larger than the bottom). Scales with Dynamic Type, so
+                // it's imperceptible at default and evens out the gap at xxxLarge.
+                .offset(y: -textVerticalNudge)
                 .onPreferenceChange(IslandTitleWidthKey.self) { zoneW = max($0, 1) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -499,6 +515,10 @@ private struct IslandContent: View {
         .padding(.trailing, Morph.islandContentPad)
         // Subtle "pop" the instant a swipe crosses the threshold / a commit fires.
         .sensoryFeedback(.impact(weight: .medium, intensity: 0.9), trigger: commitTick)
+        // Cap Dynamic Type so the compact island doesn't blow up at the large
+        // accessibility sizes and overflow the pill — the same thing Apple does
+        // for the tab bar / now-playing bar. Standard sizes still scale.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
     /// Shared slide-commit used by both the swipe and the skip button. `startX`
@@ -682,14 +702,14 @@ private struct Morph {
     var p: CGFloat { min(max(pRaw, 0), 1) }
 
     // MARK: tunables
-    static let islandHeight: CGFloat = 56
-    static let islandHMargin: CGFloat = 14      // pill inset from the screen edges
+    static let islandHeight: CGFloat = BottomBar.islandHeight
+    static let islandHMargin: CGFloat = BottomBar.hMargin       // pill inset from the screen edges
     static let islandContentPad: CGFloat = 12   // trailing inset (play/next side)
     static let islandArtLeading: CGFloat = 20   // leading inset — shifts art+titles right
     static let islandArtSide: CGFloat = 34      // was 42 (−8, smaller island artwork)
     static let islandArtRadius: CGFloat = 8
-    static let islandBottomGap: CGFloat = 8     // gap between island and tab bar
-    static let tabBarHeight: CGFloat = 50       // floating tab-bar estimate
+    static let islandBottomGap: CGFloat = BottomBar.islandGap    // gap between island and tab bar
+    static let tabBarHeight: CGFloat = BottomBar.tabHeight       // floating tab-bar height
     static let expandedRadius: CGFloat = 24
     static let expandedArtRadius: CGFloat = 10
     static let bottomOverhang: CGFloat = 120    // surface runs off-screen at p=1
@@ -701,8 +721,11 @@ private struct Morph {
     static let expArtMaxSide: CGFloat = 340
 
     // Island (collapsed) frame -----------------------------------------------
+    // Anchored to the screen's bottom EDGE (matching the floating tab bar, which
+    // sits `BottomBar.edgeMargin` from the edge), so the island floats a fixed
+    // `islandBottomGap` above the tab bar regardless of the safe-area inset.
     var islandW: CGFloat { width - 2 * Self.islandHMargin }
-    var islandBottom: CGFloat { height - safeBottom - Self.tabBarHeight - Self.islandBottomGap }
+    var islandBottom: CGFloat { height - BottomBar.edgeMargin - Self.tabBarHeight - Self.islandBottomGap }
     var islandTop: CGFloat { islandBottom - Self.islandHeight }
     var islandCenterY: CGFloat { islandBottom - Self.islandHeight / 2 }
     var islandLeft: CGFloat { (width - islandW) / 2 }
