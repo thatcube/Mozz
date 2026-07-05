@@ -305,6 +305,64 @@ final class SchemaAndWriteTests: XCTestCase {
                        "synthesized artist should be pruned once its last album is gone")
     }
 
+    func testRecommendationSchemaRoundTripAndPruneSurvival() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = RecommendationStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "One", artistName: "A", genres: ["Rock"]),
+            Track(id: "t2", title: "Two", artistName: "B", genres: ["Jazz"]),
+        ], serverId: server.id)
+        let ref1 = PlayEventStore.trackRef(serverId: server.id, remoteId: "t1")
+        let ref2 = PlayEventStore.trackRef(serverId: server.id, remoteId: "t2")
+
+        // track_features round-trip, including the reserved embedding BLOB.
+        let emb = Data([1, 2, 3, 4])
+        try await store.upsertTrackFeatures(TrackFeaturesRecord(
+            trackRef: ref1, mbid: "mb1", genres: "[\"Rock\"]", bpm: 120,
+            embedding: emb, embeddingDim: 1, featureSource: "ondevice"))
+        let features = try await store.trackFeatures(forTrackRef: ref1)
+        XCTAssertEqual(features?.mbid, "mb1")
+        XCTAssertEqual(features?.bpm, 120)
+        XCTAssertEqual(features?.embedding, emb)
+        XCTAssertEqual(features?.featureSource, "ondevice")
+
+        // recommendation set + items round-trip: rank order + in-library resolve.
+        let set = RecommendationSetRecord(id: "mozz-weekly", title: "Mozz Weekly", kind: "forgotten")
+        try await store.saveRecommendationSet(set, items: [
+            RecommendationItemRecord(setId: "mozz-weekly", trackRef: ref2, rank: 1, score: 0.9, inLibrary: true, reason: "More Jazz"),
+            RecommendationItemRecord(setId: "mozz-weekly", trackRef: ref1, rank: 2, score: 0.5, inLibrary: true, reason: "More Rock"),
+            RecommendationItemRecord(setId: "mozz-weekly", trackRef: "ghost:x", rank: 3, score: 0.2, inLibrary: false, reason: "Discover"),
+        ])
+        let items = try await store.items(forSet: "mozz-weekly")
+        XCTAssertEqual(items.map(\.rank), [1, 2, 3])
+        XCTAssertEqual(items.first?.trackRef, ref2)
+        let resolved = try await store.tracks(forSet: "mozz-weekly")
+        XCTAssertEqual(resolved.map(\.remoteId), ["t2", "t1"])   // in-library only, in rank order
+        let latest = try await store.latestSet(kind: "forgotten")
+        XCTAssertEqual(latest?.id, "mozz-weekly")
+
+        // PRUNE SURVIVAL: wipe the whole catalog. features + items key on the
+        // opaque track_ref (no cascading FK), so a computed embedding / generated
+        // mix must NOT be erased by a flaky sync that drops catalog rows.
+        _ = try await writer.pruneTracks(serverId: server.id, keeping: [])
+        let survivingFeatures = try await store.trackFeatures(forTrackRef: ref1)
+        XCTAssertNotNil(survivingFeatures, "features must survive a track prune")
+        let survivingItems = try await store.items(forSet: "mozz-weekly")
+        XCTAssertEqual(survivingItems.count, 3, "recommendation items must survive a track prune")
+        let resolvedAfterPrune = try await store.tracks(forSet: "mozz-weekly")
+        XCTAssertTrue(resolvedAfterPrune.isEmpty, "resolved catalog rows are gone, but the set is intact")
+
+        // A set's items DO cascade-delete with the set (regeneration / cleanup).
+        try await db.write { database in
+            try database.execute(sql: "DELETE FROM recommendation_set WHERE id = ?", arguments: ["mozz-weekly"])
+        }
+        let afterSetDelete = try await store.items(forSet: "mozz-weekly")
+        XCTAssertTrue(afterSetDelete.isEmpty, "items cascade-delete with their set")
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)

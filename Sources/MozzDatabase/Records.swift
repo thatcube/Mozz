@@ -293,3 +293,138 @@ public struct DownloadRecord: Codable, FetchableRecord, PersistableRecord, Senda
         self.errorMessage = errorMessage
     }
 }
+
+// MARK: - Recommendations & features
+
+/// Per-track enrichment + a vector-ready sonic embedding (DATA_MODEL §2).
+///
+/// Keyed by the durable, opaque `track_ref` (NOT the catalog `Int64 id`) so a
+/// computed embedding survives a catalog prune / re-add. `embedding` is a
+/// packed little-endian `Float32` vector (L2-normalized), nil until an analyzer
+/// runs; the schema reserves it now so on-device sonic slots in with no later
+/// migration.
+public struct TrackFeaturesRecord: Codable, FetchableRecord, PersistableRecord, Sendable, Identifiable {
+    public static let databaseTableName = "track_features"
+
+    public var trackRef: String
+    public var mbid: String?
+    public var artistMbid: String?
+    /// JSON array of folksonomy genres.
+    public var genres: String?
+    /// JSON array of moods/styles.
+    public var tags: String?
+    public var bpm: Double?
+    public var replaygainDb: Double?
+    /// Packed little-endian Float32 vector (L2-normalized), nil until analyzed.
+    public var embedding: Data?
+    public var embeddingDim: Int?
+    /// Which sonic source produced `embedding`: ondevice|audiomuse|plex.
+    public var featureSource: String?
+    public var updatedAt: Double
+
+    public var id: String { trackRef }
+
+    public enum CodingKeys: String, CodingKey {
+        case trackRef = "track_ref"
+        case mbid
+        case artistMbid = "artist_mbid"
+        case genres
+        case tags
+        case bpm
+        case replaygainDb = "replaygain_db"
+        case embedding
+        case embeddingDim = "embedding_dim"
+        case featureSource = "feature_source"
+        case updatedAt = "updated_at"
+    }
+
+    public init(
+        trackRef: String,
+        mbid: String? = nil,
+        artistMbid: String? = nil,
+        genres: String? = nil,
+        tags: String? = nil,
+        bpm: Double? = nil,
+        replaygainDb: Double? = nil,
+        embedding: Data? = nil,
+        embeddingDim: Int? = nil,
+        featureSource: String? = nil,
+        updatedAt: Double = Date().timeIntervalSince1970
+    ) {
+        self.trackRef = trackRef
+        self.mbid = mbid
+        self.artistMbid = artistMbid
+        self.genres = genres
+        self.tags = tags
+        self.bpm = bpm
+        self.replaygainDb = replaygainDb
+        self.embedding = embedding
+        self.embeddingDim = embeddingDim
+        self.featureSource = featureSource
+        self.updatedAt = updatedAt
+    }
+}
+
+/// A precomputed, ranked recommendation set (DATA_MODEL §3), persisted so the UI
+/// is instant + offline and never computes on the main thread / on view load.
+public struct RecommendationSetRecord: Codable, FetchableRecord, PersistableRecord, Sendable, Identifiable {
+    public static let databaseTableName = "recommendation_set"
+
+    public var id: String
+    public var title: String
+    /// daily_mix|discover|artist_radio|forgotten
+    public var kind: String
+    public var generatedAt: Double
+    /// JSON: seed, weights, filters.
+    public var params: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case kind
+        case generatedAt = "generated_at"
+        case params
+    }
+
+    public init(id: String, title: String, kind: String,
+                generatedAt: Double = Date().timeIntervalSince1970, params: String? = nil) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.generatedAt = generatedAt
+        self.params = params
+    }
+}
+
+/// One ranked entry in a ``RecommendationSetRecord``. Keys on the durable
+/// `track_ref`; `inLibrary == false` marks an out-of-library discovery pick.
+/// Cascade-deleted with its set (a regenerated set replaces its items).
+public struct RecommendationItemRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
+    public static let databaseTableName = "recommendation_item"
+
+    public var setId: String
+    public var trackRef: String
+    public var rank: Int
+    public var score: Double
+    public var inLibrary: Bool
+    public var reason: String?
+
+    public enum CodingKeys: String, CodingKey {
+        case setId = "set_id"
+        case trackRef = "track_ref"
+        case rank
+        case score
+        case inLibrary = "in_library"
+        case reason
+    }
+
+    public init(setId: String, trackRef: String, rank: Int, score: Double,
+                inLibrary: Bool, reason: String? = nil) {
+        self.setId = setId
+        self.trackRef = trackRef
+        self.rank = rank
+        self.score = score
+        self.inLibrary = inLibrary
+        self.reason = reason
+    }
+}

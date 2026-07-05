@@ -11,6 +11,7 @@ enum Schema {
         registerV3(&migrator)
         registerV4(&migrator)
         registerV5(&migrator)
+        registerV6(&migrator)
         return migrator
     }
 
@@ -272,6 +273,62 @@ enum Schema {
             for serverId in serverIds {
                 _ = try AlbumArtistSynthesis.run(db, serverId: serverId)
             }
+        }
+    }
+
+    /// v6 — recommendation seams: `track_features` (enrichment + a vector-ready
+    /// sonic embedding), plus precomputed `recommendation_set`/`recommendation_item`
+    /// (see DATA_MODEL §2/§3, ADR-0004/0005).
+    ///
+    /// These are added EARLY, before the sonic analyzer ships, so on-device
+    /// embeddings slot into the reserved `embedding` BLOB with no later migration,
+    /// and listening-derived features have a home from day one.
+    ///
+    /// CRITICAL: `track_features` and `recommendation_item` key on the durable,
+    /// OPAQUE `track_ref` (= PlayEventStore.trackRef) — NOT the catalog `Int64 id`
+    /// and NOT a cascading FK. A computed embedding / a generated mix must SURVIVE
+    /// a catalog prune (a track briefly vanishing from a flaky sync, or being
+    /// re-added). Joins back to the catalog reconstruct the ref
+    /// (`serverId || ':' || remoteId`); consumers tolerate a ref with no current
+    /// catalog row. `recommendation_item` DOES cascade from its set (a regenerated
+    /// set replaces its items) — that's disposable derived data, unlike history.
+    private static func registerV6(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v6.recommendationSeams") { db in
+            try db.create(table: "track_features") { t in
+                t.primaryKey("track_ref", .text)
+                t.column("mbid", .text)
+                t.column("artist_mbid", .text)
+                t.column("genres", .text)          // JSON array (folksonomy tags)
+                t.column("tags", .text)            // JSON array (moods/styles)
+                t.column("bpm", .double)
+                t.column("replaygain_db", .double) // client-applied loudness normalization
+                t.column("embedding", .blob)       // Float32 vector (L2-normalized), nil until analyzed
+                t.column("embedding_dim", .integer)
+                t.column("feature_source", .text)  // ondevice|audiomuse|plex
+                t.column("updated_at", .double).notNull()
+            }
+
+            try db.create(table: "recommendation_set") { t in
+                t.primaryKey("id", .text)          // e.g. "mozz-weekly", "discover", "radio:{seed}"
+                t.column("title", .text).notNull()
+                t.column("kind", .text).notNull()  // daily_mix|discover|artist_radio|forgotten
+                t.column("generated_at", .double).notNull()
+                t.column("params", .text)          // JSON (seed, weights, filters)
+            }
+
+            try db.create(table: "recommendation_item") { t in
+                t.column("set_id", .text).notNull()
+                    .references("recommendation_set", onDelete: .cascade)
+                t.column("track_ref", .text).notNull()
+                t.column("rank", .integer).notNull()
+                t.column("score", .double).notNull()
+                t.column("in_library", .boolean).notNull() // 0 = discovery ("add to your server")
+                t.column("reason", .text)                  // "because you played X" / "sounds like Y"
+                t.primaryKey(["set_id", "track_ref"])
+            }
+            // Stream a set's items in rank order without a sort step.
+            try db.create(index: "idx_rec_item_rank", on: "recommendation_item",
+                          columns: ["set_id", "rank"])
         }
     }
 }
