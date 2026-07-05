@@ -31,8 +31,6 @@ struct MozzWeeklyDetailView: View {
                 }
             }
         )
-        .navigationTitle(title)
-        .inlineNavigationTitle()
         .task { await load() }
     }
 

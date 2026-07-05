@@ -73,8 +73,6 @@ struct PlaylistDetailView: View {
                 }
             }
         )
-        .navigationTitle(playlist.title)
-        .inlineNavigationTitle()
         .task { await load() }
     }
 

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Cross-platform view shims. The app ships for iOS, but the package also builds
 /// for macOS so the pure-logic and engine modules can be unit-tested quickly on
@@ -107,3 +110,35 @@ extension Color {
     /// media detail page, below the colored hero.
     static var mozzDetailBackground: Color { Color(white: 0.07) }
 }
+
+#if os(iOS)
+/// Keeps the interactive swipe-to-go-back gesture working on a screen that hides
+/// the system navigation bar (hiding the bar otherwise disables the edge-swipe).
+/// Re-enables the `UINavigationController`'s pop gesture with a permissive
+/// delegate; safe on pushed detail screens, which always have a parent to pop to.
+private struct InteractivePopEnabler: UIViewControllerRepresentable {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { true }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIViewController(context: Context) -> UIViewController { UIViewController() }
+    func updateUIViewController(_ vc: UIViewController, context: Context) {
+        DispatchQueue.main.async {
+            guard let gesture = vc.navigationController?.interactivePopGestureRecognizer else { return }
+            gesture.isEnabled = true
+            gesture.delegate = context.coordinator
+        }
+    }
+}
+
+extension View {
+    /// Preserve swipe-back after `hideNavigationBar()`. No-op on macOS.
+    @ViewBuilder func enableInteractivePop() -> some View {
+        self.background(InteractivePopEnabler().frame(width: 0, height: 0).allowsHitTesting(false))
+    }
+}
+#else
+extension View {
+    @ViewBuilder func enableInteractivePop() -> some View { self }
+}
+#endif

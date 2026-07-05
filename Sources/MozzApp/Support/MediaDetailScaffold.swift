@@ -37,6 +37,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
     @State private var bg: Color = Color(white: 0.12)
     @State private var resolvedColor = false
 
@@ -62,7 +63,17 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         // always-dark detail pages and white hero text stays legible.
         .background(bg.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
-        .heroNavigationChrome()
+        // Fully custom chrome: the system nav bar (translucent background +
+        // duplicate title) fights the hero, so hide it and float our own back
+        // button — matching the app's custom tab bar / TightHeader. Keep the
+        // swipe-back gesture (hiding the bar would otherwise disable it).
+        .hideNavigationBar()
+        .enableInteractivePop()
+        .overlay(alignment: .topLeading) {
+            DetailBackButton { dismiss() }
+                .padding(.leading, 12)
+                .padding(.top, 4)
+        }
         .task(id: hero.seed) {
             resolvedColor = false
             let color = await DominantColor.background(
@@ -224,5 +235,23 @@ struct DetailSongRows: View {
                 }
             }
         }
+    }
+}
+
+/// The floating circular back button for the detail page's custom chrome — a
+/// translucent glass circle with a white chevron over the hero, matching the
+/// app's custom navigation look (the system bar is hidden on this page).
+struct DetailBackButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.backward")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
     }
 }
