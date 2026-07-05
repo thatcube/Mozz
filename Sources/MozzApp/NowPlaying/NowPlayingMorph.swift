@@ -13,15 +13,15 @@ import MozzPlayback
 //   • `p`     ∈ [0,1]  expand progress. 0 = island, 1 = full drawer. Only the
 //                      open/collapse springs move it — never the drag.
 //   • `dragY` ≥ 0      live finger translation while dragging the open drawer
-//                      down. The whole surface (and its welded mini controls)
-//                      rides the finger 1:1; the morph/fade happens on release.
+//                      down. The whole surface rides the finger 1:1, fully
+//                      opaque; the morph/fade happens ONLY on release.
 //
 // Because `p` stays pinned at 1 for the entire drag, the surface is full-size
-// the whole time a finger is down — so nothing clips or glasses mid-drag; a slow
-// drag to the bottom just slides the drawer off-screen with the mini controls
-// parked on the island spot. Letting go animates `p` → 0, which shrinks the
-// surface up to the island frame (clipping the body away), fades the body,
-// dissolves the frost into Liquid Glass and lands the artwork in the slot.
+// and fully opaque the whole time a finger is down — nothing clips, glasses, or
+// fades mid-drag, and the mini controls stay hidden. Letting go animates `p` → 0,
+// which shrinks the surface up to the island frame (clipping the body away),
+// fades the body out, fades the mini controls in, dissolves the frost into
+// Liquid Glass and lands the artwork in the slot.
 struct NowPlayingMorphContainer: View {
     @ObservedObject var playback: PlaybackEngine
     @ObservedObject var ui: PlayerUIModel
@@ -58,7 +58,7 @@ struct NowPlayingMorphContainer: View {
         }
     }
 
-    // MARK: Surface (background + drawer body + welded mini controls)
+    // MARK: Surface (background + drawer body + mini controls)
 
     private func surface(_ m: Morph) -> some View {
         ZStack(alignment: .top) {
@@ -99,7 +99,7 @@ struct NowPlayingMorphContainer: View {
             .allowsHitTesting(false)
     }
 
-    // MARK: Welded mini controls == the island content row
+    // MARK: Mini controls == the island content row (hidden until release)
 
     private func miniControls(_ m: Morph) -> some View {
         HStack(spacing: 10) {
@@ -368,16 +368,17 @@ private struct Morph {
     var artCenterY: CGFloat { lerp(islandCenterY, expArtCenterY, p) + dragY }
 
     // Opacities ---------------------------------------------------------------
-    /// Mini controls fade in over the first ~110pt of the drag.
-    var dragFade: CGFloat { clamp(dragY / 110) }
-    /// 0 at the expanded rest, → dragFade while dragging, → 1 as the island.
-    var miniOpacity: CGFloat { clamp(dragFade * p + (1 - p)) }
+    // While a finger is down `p` is pinned at 1, so anything keyed purely on `p`
+    // stays put during the drag and only animates on release — the mini controls
+    // must NEVER appear until you let go.
+    /// 0 for the whole drag (p==1); fades in only as the collapse runs (p→0).
+    var miniOpacity: CGFloat { clamp(1 - p) }
     /// Body fades out fast (gone by p≈0.55) so the collapse reads as a morph.
     var bodyOpacity: CGFloat { clamp((p - 0.55) / 0.45) }
     /// Frost → glass: opaque while expanded/dragging, clear by p≈0.30.
     var solidBgOpacity: CGFloat { clamp((p - 0.30) / 0.70) }
-    /// Grabber crossfades out as the mini controls fade in during the drag.
-    var grabberOpacity: CGFloat { bodyOpacity * (1 - dragFade) }
+    /// Grabber rides with the drawer body and fades out with it on collapse.
+    var grabberOpacity: CGFloat { bodyOpacity }
 }
 
 private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
