@@ -44,4 +44,25 @@ extension View {
         self.autocorrectionDisabled()
         #endif
     }
+
+    /// Hides the navigation bar on iOS so a custom scroll-away header (with the
+    /// Settings avatar) can stand in for it. No-op on the macOS test host, where
+    /// the `.navigationBar` ToolbarPlacement is unavailable.
+    @ViewBuilder func hideNavigationBar() -> some View {
+        #if os(iOS)
+        self.toolbar(.hidden, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+
+    /// Pins the Settings avatar in the top-trailing nav-bar slot on iOS (used on
+    /// Search, whose `.searchable` field requires the nav bar). No-op on macOS.
+    @ViewBuilder func trailingSettingsAvatar() -> some View {
+        #if os(iOS)
+        self.toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsAvatar() } }
+        #else
+        self
+        #endif
+    }
 }

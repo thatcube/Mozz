@@ -19,6 +19,13 @@ struct LibraryHomeView: View {
         NavigationStack {
             List {
                 Section {
+                    ScreenHeader(title: "Library")
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+
+                Section {
                     NavigationLink { SongsView() } label: {
                         LibraryCategoryRow(title: "Songs", systemImage: "music.note")
                     }
@@ -34,6 +41,9 @@ struct LibraryHomeView: View {
                     NavigationLink { GenresView() } label: {
                         LibraryCategoryRow(title: "Genres", systemImage: "guitars")
                     }
+                    NavigationLink { DownloadsView() } label: {
+                        LibraryCategoryRow(title: "Downloaded", systemImage: "arrow.down.circle")
+                    }
                 }
 
                 if !recentlyAdded.isEmpty {
@@ -45,7 +55,7 @@ struct LibraryHomeView: View {
                 }
             }
             .insetGroupedListStyle()
-            .navigationTitle("Library")
+            .hideNavigationBar()
             .task { await loadRecent() }
         }
     }

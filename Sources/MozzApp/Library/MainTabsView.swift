@@ -42,14 +42,12 @@ struct MainTabsView: View {
 
     private var tabs: some View {
         TabView {
+            HomeView()
+                .tabItem { Label("Home", systemImage: "house") }
             LibraryHomeView()
                 .tabItem { Label("Library", systemImage: "music.note.list") }
             SearchView()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
-            DownloadsView()
-                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .miniAccessory(env: env, playback: playback, ui: ui, hasTrack: hasTrack)
     }

@@ -116,6 +116,34 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertEqual(jazz.map(\.remoteId), ["new"])
     }
 
+    func testRecentlyPlayedTracks() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = PlayEventStore(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "One", artistName: "A"),
+            Track(id: "t2", title: "Two", artistName: "B"),
+            Track(id: "t3", title: "Three", artistName: "C"),
+        ], serverId: server.id)
+
+        func at(_ t: TimeInterval) -> Date { Date(timeIntervalSince1970: t) }
+        // t1 played (started + completed, latest at 150); t2 played (started, 300 = newest);
+        // t3 only skipped (must be excluded); t4 played but NOT in the catalog (inner join omits it).
+        try await store.append(PlayEvent(trackID: "t1", kind: .started, createdAt: at(100)), serverId: server.id)
+        try await store.append(PlayEvent(trackID: "t1", kind: .completed, createdAt: at(150)), serverId: server.id)
+        try await store.append(PlayEvent(trackID: "t2", kind: .started, createdAt: at(300)), serverId: server.id)
+        try await store.append(PlayEvent(trackID: "t3", kind: .skipped, createdAt: at(500)), serverId: server.id)
+        try await store.append(PlayEvent(trackID: "t4", kind: .completed, createdAt: at(400)), serverId: server.id)
+
+        let recent = try await repo.recentlyPlayedTracks(serverId: server.id, limit: 10)
+        // Ordered by most-recent play: t2 (300) before t1 (150). t3 (skip-only) and
+        // t4 (no catalog row) are excluded.
+        XCTAssertEqual(recent.map(\.remoteId), ["t2", "t1"])
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)

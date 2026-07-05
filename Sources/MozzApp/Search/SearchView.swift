@@ -49,6 +49,10 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .navigationTitle("Search")
+            // Search keeps its navigation bar to host the `.searchable` field, so
+            // the avatar is pinned here rather than scrolling away like on
+            // Home/Library.
+            .trailingSettingsAvatar()
             .searchable(text: $query, prompt: "Artists, albums, songs")
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .overlay {

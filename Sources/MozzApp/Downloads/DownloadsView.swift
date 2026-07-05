@@ -11,39 +11,37 @@ struct DownloadsView: View {
     @State private var usage = StorageUsage()
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    HStack {
-                        Label("Storage Used", systemImage: "internaldrive")
-                        Spacer()
-                        Text(Format.bytes(usage.totalBytes)).foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Offline Tracks")
-                        Spacer()
-                        Text("\(usage.downloadedTrackCount)").foregroundStyle(.secondary)
-                    }
+        List {
+            Section {
+                HStack {
+                    Label("Storage Used", systemImage: "internaldrive")
+                    Spacer()
+                    Text(Format.bytes(usage.totalBytes)).foregroundStyle(.secondary)
                 }
-                Section("Downloaded") {
-                    ForEach(tracks) { track in
-                        TrackRow(track: track, downloadState: .downloaded, showArtist: true)
-                            .contentShape(Rectangle())
-                            .onTapGesture { env.playback.play(tracks: [track.toDomain()]) }
-                    }
-                    .onDelete(perform: delete)
+                HStack {
+                    Text("Offline Tracks")
+                    Spacer()
+                    Text("\(usage.downloadedTrackCount)").foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Downloads")
-            .overlay {
-                if tracks.isEmpty {
-                    ContentUnavailableView("No Downloads", systemImage: "arrow.down.circle",
-                        description: Text("Download albums to play them offline."))
+            Section("Downloaded") {
+                ForEach(tracks) { track in
+                    TrackRow(track: track, downloadState: .downloaded, showArtist: true)
+                        .contentShape(Rectangle())
+                        .onTapGesture { env.playback.play(tracks: [track.toDomain()]) }
                 }
+                .onDelete(perform: delete)
             }
-            .task { await refresh() }
-            .refreshable { await refresh() }
         }
+        .navigationTitle("Downloads")
+        .overlay {
+            if tracks.isEmpty {
+                ContentUnavailableView("No Downloads", systemImage: "arrow.down.circle",
+                    description: Text("Download albums to play them offline."))
+            }
+        }
+        .task { await refresh() }
+        .refreshable { await refresh() }
     }
 
     private func refresh() async {

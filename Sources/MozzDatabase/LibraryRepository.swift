@@ -203,6 +203,29 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// The most recently played tracks for the "Recently Played" shelf, newest
+    /// first. Joins the append-only `play_event` log back to the catalog by
+    /// *constructing* the durable track ref (serverId || ':' || remoteId) — the
+    /// ref is opaque and never split. A track counts as played when it
+    /// `started` or `completed` (a pure skip doesn't). Tracks no longer in the
+    /// catalog are naturally omitted (inner join).
+    public func recentlyPlayedTracks(serverId: ServerID, limit: Int = 20) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM track
+                JOIN (
+                    SELECT track_ref, MAX(created_at) AS lastPlayed
+                    FROM play_event
+                    WHERE kind IN ('started', 'completed')
+                    GROUP BY track_ref
+                ) pe ON (track.serverId || ':' || track.remoteId) = pe.track_ref
+                WHERE track.serverId = ?
+                ORDER BY pe.lastPlayed DESC
+                LIMIT ?
+                """, arguments: [serverId, limit])
+        }
+    }
+
     // MARK: Full-text search
 
     /// Search all three entity types. Returns quickly (each MATCH is bounded by

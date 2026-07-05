@@ -5,6 +5,7 @@ import MozzSync
 /// Server info, capability report, sync control, benchmarks entry, and sign-out.
 struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
     @State private var isSyncing = false
     @State private var syncProgressText: String?
     /// Persisted across launches; mirrors `PlaybackEngine.normalizationEnabled`.
@@ -80,6 +81,11 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
             .onAppear { env.playback.normalizationEnabled = normalizationEnabled }
             .onChange(of: normalizationEnabled) { _, enabled in
                 env.playback.normalizationEnabled = enabled
