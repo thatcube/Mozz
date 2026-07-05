@@ -43,8 +43,7 @@ struct SearchView: View {
                 }
             }
             .listStyle(.plain)
-            .largeNavigationTitle("Search")
-            .settingsToolbarAvatar()
+            .musicNavigationBar("Search")
             .librarySearchable(text: $query, prompt: "Artists, albums, songs")
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }

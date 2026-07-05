@@ -30,8 +30,7 @@ struct HomeView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 24)
             }
-            .largeNavigationTitle("Home")
-            .settingsToolbarAvatar()
+            .musicNavigationBar("Home")
             .task { await load() }
             .refreshable { await load() }
         }

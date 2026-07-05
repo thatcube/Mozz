@@ -46,13 +46,35 @@ extension View {
         #endif
     }
 
-    /// Pins the Settings avatar in the top-trailing nav-bar slot (iOS). No-op on
-    /// the macOS test host, where `.topBarTrailing` is unavailable.
-    @ViewBuilder func settingsToolbarAvatar() -> some View {
+    /// The Apple Music-style top bar: the large title with the Settings avatar
+    /// aligned to its trailing edge, on the same line. iOS 26's
+    /// `ToolbarItemPlacement.largeTitle` hosts custom content *in* the large-title
+    /// row, so we lay out the title + avatar there ourselves to get exact
+    /// alignment (a lone item would center and drop the text). `.navigationTitle`
+    /// still drives the collapsed/inline title and pushed-view back button.
+    /// On iOS 17–25 we fall back to a standard large title with the avatar in the
+    /// top-trailing slot; on the macOS test host it's just the title.
+    @ViewBuilder func musicNavigationBar(_ title: String) -> some View {
         #if os(iOS)
-        self.toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsAvatar() } }
+        if #available(iOS 26.0, *) {
+            self.navigationTitle(title)
+                .toolbar {
+                    ToolbarItem(placement: .largeTitle) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(title).font(.largeTitle.bold())
+                            Spacer(minLength: 12)
+                            SettingsAvatar().alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+        } else {
+            self.navigationTitle(title)
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsAvatar() } }
+        }
         #else
-        self
+        self.navigationTitle(title)
         #endif
     }
 
