@@ -12,27 +12,59 @@ import UIKit
 /// seed string, matching `ArtworkView`'s placeholder so the page still feels
 /// intentional rather than grey.
 enum DominantColor {
-    /// Resolve + load the artwork and extract a hero background color, or fall
-    /// back to the seed color. Runs off the main thread (image decode is in
-    /// `ArtworkImageLoader`).
-    static func background(for artwork: ArtworkRef?, seed: String,
-                           backend: (any MusicBackend)?, pixelSize: CGFloat = 240) async -> Color {
+    /// A media-detail page's two-tone background. `hero` is the rich color the
+    /// artwork fades into at the top; `deep` is a near-black, same-hue tone the
+    /// page darkens into a few rows down so the white song text stays legible.
+    /// Sharing the artwork's hue is what makes the image → list fade seamless.
+    struct Palette: Equatable {
+        var hero: Color
+        var deep: Color
+    }
+
+    /// Resolve + decode the artwork (decode is off the main thread in
+    /// `ArtworkImageLoader`) and derive the palette, or fall back to a
+    /// deterministic seed palette when there's no artwork.
+    static func palette(for artwork: ArtworkRef?, seed: String,
+                        backend: (any MusicBackend)?, pixelSize: CGFloat = 240) async -> Palette {
         #if canImport(UIKit)
         if let artwork, let backend, let url = backend.artworkURL(for: artwork, size: Int(pixelSize)),
            let image = await ArtworkImageLoader.shared.image(for: url),
            let average = image.mozzAverageColor() {
-            return Color(average.mozzHeroAdjusted())
+            return palette(from: average)
         }
         #endif
-        return seedColor(seed)
+        return seedPalette(seed)
     }
 
-    /// Deterministic fallback color from a seed string (mirrors the hue used by
-    /// `ArtworkView`'s gradient placeholder, darkened for a hero background).
-    static func seedColor(_ seed: String) -> Color {
-        let hue = Double(abs(seed.hashValue) % 360) / 360.0
-        return Color(hue: hue, saturation: 0.5, brightness: 0.42)
+    /// The palette IF the artwork is already decoded in the in-memory cache, so a
+    /// preloaded hero resolves its colors on the very first frame (no fade-in).
+    /// Returns nil when nothing is cached so the caller can await the async path.
+    /// The average-color step is a cheap 1x1 draw, fine to run on the main thread.
+    static func cachedPalette(for artwork: ArtworkRef?, seed: String,
+                              backend: (any MusicBackend)?, pixelSize: CGFloat = 240) -> Palette? {
+        #if canImport(UIKit)
+        if let artwork, let backend, let url = backend.artworkURL(for: artwork, size: Int(pixelSize)),
+           let image = ArtworkImageLoader.shared.cached(url),
+           let average = image.mozzAverageColor() {
+            return palette(from: average)
+        }
+        #endif
+        return nil
     }
+
+    /// Deterministic fallback palette from a seed string (mirrors `ArtworkView`'s
+    /// placeholder hue) for the offline demo / art-less servers.
+    static func seedPalette(_ seed: String) -> Palette {
+        let hue = Double(abs(seed.hashValue) % 360) / 360.0
+        return Palette(hero: Color(hue: hue, saturation: 0.5, brightness: 0.42),
+                       deep: Color(hue: hue, saturation: 0.45, brightness: 0.08))
+    }
+
+    #if canImport(UIKit)
+    private static func palette(from average: UIColor) -> Palette {
+        Palette(hero: Color(average.mozzHeroAdjusted()), deep: Color(average.mozzDeepAdjusted()))
+    }
+    #endif
 }
 
 #if canImport(UIKit)
@@ -60,7 +92,16 @@ extension UIColor {
     func mozzHeroAdjusted() -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
-        return UIColor(hue: h, saturation: min(1, s * 1.15), brightness: min(b, 0.5), alpha: 1)
+        return UIColor(hue: h, saturation: min(1, s * 1.15), brightness: min(b, 0.46), alpha: 1)
+    }
+
+    /// Adjust an extracted color into the page's deep base tone: the same hue,
+    /// pushed to a near-black brightness so the song list is high-contrast while
+    /// staying tinted by — and seamless with — the hero color above it.
+    func mozzDeepAdjusted() -> UIColor {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
+        return UIColor(hue: h, saturation: min(s, 0.5), brightness: 0.08, alpha: 1)
     }
 }
 #endif

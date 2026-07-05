@@ -42,7 +42,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var bg: Color = Color(white: 0.12)
-    @State private var resolvedColor = false
+    @State private var deepBg: Color = .mozzDetailBackground
 
     private static var fullBleedHeight: CGFloat { 500 }
     private static var centeredArtworkSize: CGFloat { 240 }
@@ -64,9 +64,10 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Base color fills the entire screen (incl. under the status bar), so
-            // there's never a white band.
-            bg.ignoresSafeArea()
+            // Deep, same-hue base fills the whole screen (incl. under the status
+            // bar) — it's the dark end of the seamless bleed and the high-contrast
+            // backdrop the song list settles onto.
+            deepBg.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -76,7 +77,12 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                         .padding(.top, 12)
                         .padding(.bottom, 40)
                         .frame(maxWidth: .infinity)
-                        .background(Color.mozzDetailBackground)
+                        // Seamless bleed: the hero's color continues at the very
+                        // top of the list, then darkens into `deepBg` a few rows
+                        // down (closure form, so it's a decorative layer that
+                        // never affects layout width — see the horizontal-overflow
+                        // history above).
+                        .background { contentBackground }
                 }
             }
             .scrollIndicators(.hidden)
@@ -91,10 +97,16 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         .hideNavigationBar()
         .enableInteractivePop()
         .task(id: hero.seed) {
-            resolvedColor = false
-            let color = await DominantColor.background(
-                for: hero.artwork, seed: hero.seed, backend: env.active?.backend)
-            withAnimation(.easeOut(duration: 0.35)) { bg = color; resolvedColor = true }
+            // If the artwork was preloaded, resolve the palette synchronously so
+            // it's correct on the first frame; otherwise fade it in when it lands.
+            if let p = DominantColor.cachedPalette(
+                for: hero.artwork, seed: hero.seed, backend: env.active?.backend) {
+                bg = p.hero; deepBg = p.deep
+            } else {
+                let p = await DominantColor.palette(
+                    for: hero.artwork, seed: hero.seed, backend: env.active?.backend)
+                withAnimation(.easeOut(duration: 0.35)) { bg = p.hero; deepBg = p.deep }
+            }
         }
     }
 
@@ -166,10 +178,10 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 18)
-        .background(
-            LinearGradient(colors: [bg, bg, bg.opacity(0)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
-        )
+        // Solid extracted color behind the centered artwork, bleeding up under the
+        // status bar; the list below continues from this exact color, so the fade
+        // into the deep base is seamless. Closure form keeps it decorative-only.
+        .background { bg.ignoresSafeArea(edges: .top) }
     }
 
     // MARK: Shared bits
@@ -196,6 +208,16 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                     .multilineTextAlignment(.center)
             }
         }
+    }
+
+    /// The seamless page background behind the scrolling content: the hero's
+    /// extracted color at the very top (so the artwork blends straight into the
+    /// list with no seam) darkening into `deepBg` within ~260pt, which keeps the
+    /// white song text high-contrast a few rows down.
+    private var contentBackground: some View {
+        LinearGradient(colors: [bg, deepBg], startPoint: .top, endPoint: .bottom)
+            .frame(height: 260)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var heroFallback: some View {

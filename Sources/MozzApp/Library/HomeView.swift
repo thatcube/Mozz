@@ -68,9 +68,20 @@ struct HomeView: View {
         await env.ensureMozzWeekly()
         mozzWeekly = (try? await env.recommendations.mozzWeeklyTracks()) ?? []
         if let set = try? await env.recommendations.mozzWeeklySet() { mozzWeeklyTitle = set.title }
+        prefetchMozzWeeklyHero()
         recentlyPlayed = (try? await env.repository.recentlyPlayedTracks(serverId: serverId, limit: 20)) ?? []
         recentlyAdded = (try? await env.repository.recentlyAddedAlbums(serverId: serverId, limit: 20)) ?? []
         loaded = true
+    }
+
+    /// Warm the shared media-detail hero (and its color swatch) for Mozz Weekly so
+    /// the artwork is on-screen the instant the card is tapped — no pop-in. Sizes
+    /// match the detail's hero (1200) and `DominantColor`'s swatch (240).
+    private func prefetchMozzWeeklyHero() {
+        guard let key = mozzWeeklyRep?.artworkKey, let backend = env.active?.backend else { return }
+        let art = ArtworkRef(key: key)
+        if let hero = backend.artworkURL(for: art, size: 1200) { ArtworkImageLoader.shared.prefetch(hero) }
+        if let swatch = backend.artworkURL(for: art, size: 240) { ArtworkImageLoader.shared.prefetch(swatch) }
     }
 }
 
