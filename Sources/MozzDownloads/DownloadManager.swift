@@ -45,7 +45,7 @@ public final class DownloadManager: NSObject, ObservableObject {
     public init(
         database: MusicDatabase,
         fileStore: DownloadFileStore,
-        sessionIdentifier: String = "com.mozz.downloads"
+        sessionIdentifier: String = "com.thatcube.Mozz.downloads"
     ) {
         self.store = DownloadStore(database)
         self.repository = LibraryRepository(database)

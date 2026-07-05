@@ -23,5 +23,5 @@ xcodebuild \
 APP_PATH=$(find .build/dd-ios/Build/Products -name "Mozz.app" -type d | head -n1)
 echo "▸ App: $APP_PATH"
 xcrun simctl install "$UDID" "$APP_PATH"
-xcrun simctl launch "$UDID" com.mozz.app
-echo "✓ Launched Mozz (com.mozz.app) on $UDID"
+xcrun simctl launch "$UDID" com.thatcube.Mozz
+echo "✓ Launched Mozz (com.thatcube.Mozz) on $UDID"

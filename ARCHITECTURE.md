@@ -444,7 +444,7 @@ xcodebuild build -project Mozz.xcodeproj -scheme Mozz \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -skipPackagePluginValidation
 
 # In-app 100k benchmark on the simulator (writes results to Caches/mozz_bench.txt):
-SIMCTL_CHILD_MOZZ_BENCH=1 xcrun simctl launch <booted-udid> com.mozz.app
+SIMCTL_CHILD_MOZZ_BENCH=1 xcrun simctl launch <booted-udid> com.thatcube.Mozz
 ```
 
 **Try it with no server:** launch the app and pick **Demo** in onboarding — it generates a

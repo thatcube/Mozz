@@ -11,7 +11,7 @@ import Security
 public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable {
     private let service: String
 
-    public init(service: String = "com.mozz.app.credentials") {
+    public init(service: String = "com.thatcube.Mozz.credentials") {
         self.service = service
     }
 
