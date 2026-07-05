@@ -18,11 +18,8 @@ struct FullPlayerView: View {
     /// life). Flipping it drives the whole grow/shrink transition.
     @State private var collapsed = true
     @State private var dragY: CGFloat = 0
-    @State private var expandedArtRect: CGRect = .zero
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
-
-    private let space = "player"
 
     var body: some View {
         GeometryReader { safeGeo in
@@ -31,10 +28,11 @@ struct FullPlayerView: View {
                 let originGlobal = geo.frame(in: .global).origin
                 let artSide = min(geo.size.width - 90, 340)
 
-                // Rest center of the big artwork (measured), plus the live drag.
-                let expCenter = expandedArtRect == .zero
-                    ? CGPoint(x: geo.size.width / 2, y: safeTop + 78 + artSide / 2)
-                    : expandedArtRect.center
+                // Rest center of the big artwork, computed deterministically from
+                // the header layout (grabber height + fixed gap) so the chrome's
+                // slide-offset can never corrupt it. The live drag is added on top.
+                let artTop = safeTop + 39
+                let expCenter = CGPoint(x: geo.size.width / 2, y: artTop + artSide / 2)
 
                 // Mini slot, converted from the accessory's global frame into this
                 // view's local space (fallback to a bottom-left estimate).
@@ -62,7 +60,6 @@ struct FullPlayerView: View {
                         .position(artCenter)
                         .allowsHitTesting(false)
                 }
-                .coordinateSpace(name: space)
                 .frame(width: geo.size.width, height: geo.size.height)
                 .onAppear {
                     DispatchQueue.main.async {
@@ -106,22 +103,18 @@ struct FullPlayerView: View {
         .offset(y: collapsed ? geo.size.height : dragY)
     }
 
-    /// The draggable top region: grabber, an invisible spacer that reserves the
-    /// artwork's rest frame (measured for the transition), and the titles.
+    /// The draggable top region: grabber, a spacer that reserves the artwork's
+    /// rest space, and the titles. The traveling artwork is drawn as a separate
+    /// overlay positioned deterministically at this reserved slot's center — no
+    /// measuring, so the chrome's slide-offset can never corrupt the anchor.
     private func header(geo: GeometryProxy, artSide: CGFloat, safeTop: CGFloat) -> some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 0) {
             Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
                 .padding(.top, safeTop + 8)
-                .padding(.bottom, 14)
 
             Color.clear
                 .frame(width: artSide, height: artSide)
-                .background(
-                    GeometryReader { g in
-                        Color.clear.preference(key: ExpandedArtKey.self,
-                                               value: g.frame(in: .named(space)))
-                    }
-                )
+                .padding(.top, 26)
 
             VStack(spacing: 5) {
                 Text(playback.currentTrack?.title ?? "").font(.title2.bold())
@@ -132,16 +125,12 @@ struct FullPlayerView: View {
                     Text(album).font(.subheadline).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
+            .padding(.top, 26)
             .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .gesture(dragGesture)
-        .onPreferenceChange(ExpandedArtKey.self) { rect in
-            // Only trust the rest frame (offset is 0 then), so drag never
-            // corrupts the measured anchor.
-            if dragY == 0 { expandedArtRect = rect }
-        }
     }
 
     private var dragGesture: some Gesture {
@@ -254,11 +243,6 @@ struct FullPlayerView: View {
         case .one: return "repeat.1"
         }
     }
-}
-
-private struct ExpandedArtKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 /// The single traveling artwork. Its display size (`side`) is animatable, but
