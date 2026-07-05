@@ -14,6 +14,7 @@ enum Schema {
         registerV6(&migrator)
         registerV7(&migrator)
         registerV8(&migrator)
+        registerV9(&migrator)
         return migrator
     }
 
@@ -371,6 +372,38 @@ enum Schema {
             // One pending op per item — a newer intent replaces the older.
             try db.create(index: "idx_favorite_outbox_item", on: "favorite_outbox",
                           columns: ["serverId", "remoteId"], unique: true)
+        }
+    }
+
+    /// v9 — repair Jellyfin track artwork stored by early syncs. A mapper bug
+    /// meant a track with no embedded art still stored a BARE track item id as its
+    /// `artworkKey` (the album-art fallback was dead code), producing an
+    /// `Items/{trackId}/Images/Primary` URL that 404s — so those tracks showed a
+    /// placeholder. Repair them in place from the album's artwork so the catalog
+    /// is correct without forcing a slow full re-sync (the mapper is fixed too, so
+    /// future upserts stay correct). Scoped to the bare-id case
+    /// (`artworkKey == remoteId`); Plex keys are thumb paths and can never equal a
+    /// track remoteId, so Plex rows are untouched.
+    private static func registerV9(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v9.repairJellyfinTrackArtwork") { db in
+            try db.execute(sql: """
+                UPDATE track
+                SET artworkKey = (
+                    SELECT a.artworkKey FROM album a
+                    WHERE a.serverId = track.serverId
+                      AND a.remoteId = track.albumRemoteId
+                      AND a.artworkKey IS NOT NULL AND a.artworkKey <> ''
+                )
+                WHERE artworkKey IS NOT NULL
+                  AND artworkKey = remoteId
+                  AND albumRemoteId IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM album a
+                    WHERE a.serverId = track.serverId
+                      AND a.remoteId = track.albumRemoteId
+                      AND a.artworkKey IS NOT NULL AND a.artworkKey <> ''
+                  )
+                """)
         }
     }
 }

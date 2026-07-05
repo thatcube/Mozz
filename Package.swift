@@ -118,7 +118,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),
         .testTarget(name: "MozzNetworkingTests", dependencies: ["MozzNetworking"]),
-        .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase"]),
+        .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", .product(name: "GRDB", package: "GRDB.swift")]),
         .testTarget(
             name: "MozzPlexTests",
             dependencies: ["MozzPlex", "MozzNetworking"],

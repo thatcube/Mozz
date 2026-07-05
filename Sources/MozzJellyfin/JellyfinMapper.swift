@@ -81,12 +81,15 @@ enum JellyfinMapper {
         )
     }
 
-    /// Encodes an artwork reference as `itemId` or `itemId|tag`. The tag lets
-    /// the CDN/browser cache bust correctly when art changes.
+    /// Encodes an artwork reference as `itemId|tag`. Jellyfin always returns the
+    /// image's `tag` in `ImageTags`/`AlbumPrimaryImageTag` when — and only when —
+    /// the item actually has that image, so a missing tag means "no image": we
+    /// return nil rather than a bare `itemId`, which would build an
+    /// `Items/{id}/Images/Primary` URL that 404s. Returning nil here is also what
+    /// makes the track's album-art fallback (below) actually fire.
     static func artwork(itemID: String?, tag: String?) -> ArtworkRef? {
-        guard let itemID else { return nil }
-        if let tag { return ArtworkRef(key: "\(itemID)|\(tag)") }
-        return ArtworkRef(key: itemID)
+        guard let itemID, let tag else { return nil }
+        return ArtworkRef(key: "\(itemID)|\(tag)")
     }
 
     static func date(_ string: String?) -> Date? {

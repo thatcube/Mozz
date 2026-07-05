@@ -35,7 +35,34 @@
         }
       ],
       "UserData": { "IsFavorite": true }
+    },
+    {
+      "Id": "t2",
+      "Name": "Pulsewidth",
+      "Type": "Audio",
+      "Album": "Selected Ambient Works 85-92",
+      "AlbumId": "al1",
+      "AlbumArtist": "Aphex Twin",
+      "ArtistItems": [{ "Name": "Aphex Twin", "Id": "a1" }],
+      "IndexNumber": 3,
+      "ParentIndexNumber": 1,
+      "RunTimeTicks": 2850000000,
+      "AlbumPrimaryImageTag": "talb1",
+      "MediaSources": [
+        { "Container": "flac", "MediaStreams": [ { "Type": "Audio", "Codec": "flac" } ] }
+      ]
+    },
+    {
+      "Id": "t3",
+      "Name": "Untagged Rarity",
+      "Type": "Audio",
+      "AlbumArtist": "Aphex Twin",
+      "IndexNumber": 4,
+      "RunTimeTicks": 1200000000,
+      "MediaSources": [
+        { "Container": "flac", "MediaStreams": [ { "Type": "Audio", "Codec": "flac" } ] }
+      ]
     }
   ],
-  "TotalRecordCount": 1
+  "TotalRecordCount": 3
 }

@@ -1,5 +1,6 @@
 import XCTest
 import MozzCore
+import GRDB
 @testable import MozzDatabase
 
 private func makeServer(_ id: String = "srv1", kind: BackendKind = .jellyfin) -> ServerConnection {
@@ -697,6 +698,61 @@ final class SyntheticCatalogTests: XCTestCase {
         // FTS index populated for generated content.
         let results = try await repo.search("horizon", limitPerType: 5)
         XCTAssertFalse(results.isEmpty, "expected FTS hits in synthetic catalog")
+    }
+}
+
+// MARK: - v9 Jellyfin artwork repair migration
+
+final class JellyfinArtworkRepairMigrationTests: XCTestCase {
+    /// Stage the schema to v8, insert data as an early (buggy) sync would have —
+    /// including a track whose `artworkKey` is a bare item id that 404s — then run
+    /// the real registered v9 migration and assert only the broken row is repaired
+    /// from album art, while correct/foreign rows are left untouched.
+    func testV9RepairsBareIdTrackArtworkFromAlbum() throws {
+        let queue = try DatabaseQueue()
+        let migrator = Schema.makeMigrator()
+        try migrator.migrate(queue, upTo: "v8.favoriteOutbox")
+
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO server (id, kind, name, baseURL, clientIdentifier)
+                VALUES ('srv1', 'jellyfin', 'Test', 'https://example.local', 'c1')
+                """)
+            try db.execute(sql: """
+                INSERT INTO album (serverId, remoteId, title, artistName, artworkKey)
+                VALUES ('srv1', 'al1', 'Debut', 'Björk', 'al1|talb1')
+                """)
+            // Insert tracks covering every case the repair must handle.
+            let rows = [
+                // broken: bare id (== remoteId), album has art → repair to album key
+                ("t1", "t1", "al1"),
+                // healthy: real embedded track art (id|tag) → untouched
+                ("t2", "t2|realtag", "al1"),
+                // Plex-shaped thumb key (!= remoteId) → untouched
+                ("t3", "/library/metadata/9/thumb/1", "al1"),
+                // bare id but no matching album row → untouched (nothing to copy)
+                ("t4", "t4", "alX"),
+            ]
+            for (remoteId, artworkKey, albumRemoteId) in rows {
+                try db.execute(sql: """
+                    INSERT INTO track (serverId, remoteId, title, artistName, artworkKey, albumRemoteId)
+                    VALUES ('srv1', ?, 'Track', 'Björk', ?, ?)
+                    """, arguments: [remoteId, artworkKey, albumRemoteId])
+            }
+        }
+
+        // Run v9 (and any later migrations).
+        try migrator.migrate(queue)
+
+        let keys = try queue.read { db in
+            try Dictionary(uniqueKeysWithValues: Row.fetchAll(
+                db, sql: "SELECT remoteId, artworkKey FROM track"
+            ).map { ($0["remoteId"] as String, $0["artworkKey"] as String?) })
+        }
+        XCTAssertEqual(keys["t1"], "al1|talb1", "bare-id track should adopt album art")
+        XCTAssertEqual(keys["t2"], "t2|realtag", "real track art must be preserved")
+        XCTAssertEqual(keys["t3"], "/library/metadata/9/thumb/1", "Plex thumb key must be untouched")
+        XCTAssertEqual(keys["t4"], "t4", "no matching album → left as-is")
     }
 }
 
