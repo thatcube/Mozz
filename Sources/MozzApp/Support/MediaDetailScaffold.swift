@@ -37,7 +37,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     @EnvironmentObject private var env: AppEnvironment
-    @State private var bg: Color = .mozzBackground
+    @State private var bg: Color = Color(white: 0.12)
     @State private var resolvedColor = false
 
     private static var fullBleedHeight: CGFloat { 440 }
@@ -49,12 +49,19 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                 header
                 content()
                     .padding(.horizontal, 16)
-                    .padding(.top, 4)
+                    .padding(.top, 12)
                     .padding(.bottom, 40)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.mozzDetailBackground)
             }
         }
         .scrollIndicators(.hidden)
-        .background(Color.mozzBackground.ignoresSafeArea())
+        // The hero color fills the whole backdrop (incl. under the status bar, so
+        // there's no white band); the content section paints its own near-black
+        // over it. Force a dark treatment so the page reads like Apple Music's
+        // always-dark detail pages and white hero text stays legible.
+        .background(bg.ignoresSafeArea())
+        .environment(\.colorScheme, .dark)
         .heroNavigationChrome()
         .task(id: hero.seed) {
             resolvedColor = false

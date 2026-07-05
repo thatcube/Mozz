@@ -16,7 +16,7 @@ struct MozzWeeklyDetailView: View {
 
     var body: some View {
         MediaDetailScaffold(
-            hero: MediaHero(style: .centeredArtwork, artwork: heroArtwork, seed: heroSeed),
+            hero: MediaHero(style: .fullBleed, artwork: heroArtwork, seed: heroSeed),
             title: title,
             subtitle: "Made for You",
             meta: tracks.isEmpty ? nil : (tracks.count == 1 ? "1 song" : "\(tracks.count) songs"),

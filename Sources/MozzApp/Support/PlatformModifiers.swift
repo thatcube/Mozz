@@ -102,4 +102,8 @@ extension Color {
         Color.black
         #endif
     }
+
+    /// The near-black content background for the (always-dark, Apple-Music-style)
+    /// media detail page, below the colored hero.
+    static var mozzDetailBackground: Color { Color(white: 0.07) }
 }
