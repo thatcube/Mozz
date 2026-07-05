@@ -49,12 +49,15 @@ struct FullPlayerView: View {
                     ? miniCenter
                     : CGPoint(x: expCenter.x, y: expCenter.y + dragY)
                 let side = collapsed ? miniSide : artSide
+                // Land at the mini artwork's exact corner radius (8) so the swap
+                // to the real accessory is seamless; grow to 10 when expanded.
+                let artRadius: CGFloat = collapsed ? 8 : 10
 
                 ZStack(alignment: .top) {
                     background
                         .offset(y: collapsed ? geo.size.height : dragY)
                     chrome(geo: geo, artSide: artSide, safeTop: safeTop)
-                    PlayerArtwork(track: playback.currentTrack, side: side)
+                    PlayerArtwork(track: playback.currentTrack, side: side, cornerRadius: artRadius)
                         .shadow(color: .black.opacity(collapsed ? 0 : 0.35),
                                 radius: collapsed ? 0 : 18, y: collapsed ? 0 : 10)
                         .position(artCenter)
@@ -148,7 +151,11 @@ struct FullPlayerView: View {
     }
 
     private func dismiss() {
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) {
+        // `.removed` (not the default `.logicallyComplete`) so `onClose` fires
+        // only once the spring has fully settled to the mini size. Otherwise the
+        // overlay is torn down mid-settle (slightly under 30pt) and the real
+        // 30pt accessory snaps in — a visible "lands too small, then corrects".
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.86), completionCriteria: .removed) {
             collapsed = true
             dragY = 0
         } completion: {
@@ -252,6 +259,7 @@ struct FullPlayerView: View {
 private struct PlayerArtwork: View {
     let track: Track?
     let side: CGFloat
+    var cornerRadius: CGFloat = 10
 
     @EnvironmentObject private var env: AppEnvironment
     private let base: CGFloat = 320
@@ -270,7 +278,7 @@ private struct PlayerArtwork: View {
             }
         }
         .frame(width: side, height: side)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     private var resolvedURL: URL? {
@@ -291,7 +299,7 @@ private struct PlayerArtwork: View {
             Image(systemName: "music.note")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: side * 0.34, height: side * 0.34)
+                .frame(width: side * 0.4, height: side * 0.4)
                 .foregroundStyle(.white.opacity(0.85))
         )
     }

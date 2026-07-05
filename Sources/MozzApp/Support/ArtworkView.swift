@@ -50,7 +50,9 @@ struct ArtworkView: View {
         )
         .overlay(
             Image(systemName: "music.note")
-                .font(.system(size: size * 0.4))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size * 0.4, height: size * 0.4)
                 .foregroundStyle(.white.opacity(0.85))
         )
     }
