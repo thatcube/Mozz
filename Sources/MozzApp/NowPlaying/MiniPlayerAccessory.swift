@@ -16,7 +16,7 @@ struct MiniPlayerAccessory: View {
         if let track = playback.currentTrack {
             HStack(spacing: 10) {
                 ArtworkView(artwork: track.artwork, seed: track.albumTitle ?? track.title,
-                            size: 40, cornerRadius: 8)
+                            size: 30, cornerRadius: 8)
                     .opacity(ui.isFullPresented ? 0 : 1)
                     .background(
                         GeometryReader { geo in
@@ -28,7 +28,7 @@ struct MiniPlayerAccessory: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Text(track.artistName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(track.artistName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -52,7 +52,7 @@ struct MiniPlayerAccessory: View {
                 .disabled(!playback.snapshot.hasNext)
                 .opacity(playback.snapshot.hasNext ? 1 : 0.4)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .onPreferenceChange(MiniArtFrameKey.self) { frame in
                 // The system lays this content out in more than one context: the
                 // real on-screen slot (near the bottom of the window) plus an
