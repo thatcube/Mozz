@@ -334,6 +334,11 @@ private struct IslandContent: View {
     @State private var zoneW: CGFloat = 220      // measured text-zone width
     @State private var commitTick = 0            // bumped to fire a haptic pop
     @State private var armedDir = 0              // side currently past the threshold
+    // A zero-duration long press detects touch-DOWN instantly (a stationary
+    // DragGesture doesn't — it waits to disambiguate, which delayed the scale on
+    // taps). `maximumDistance: .infinity` keeps it held through a swipe; the
+    // @GestureState auto-resets to false on release/cancel.
+    @GestureState private var pressActive = false
 
     private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
 
@@ -367,6 +372,16 @@ private struct IslandContent: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .highPriorityGesture(islandGesture)
+            // Instant press detection via a simultaneous 0-duration long press —
+            // fires on touch-down with no disambiguation delay, and runs alongside
+            // the drag/tap gesture and the sibling buttons without consuming them.
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0, maximumDistance: .infinity)
+                    .updating($pressActive) { _, state, _ in state = true }
+            )
+            .onChange(of: pressActive) { _, active in
+                withAnimation(Self.pressSpring) { pressed = active }
+            }
 
             Button { playback.togglePlayPause() } label: {
                 Image(systemName: playback.snapshot.status == .playing ? "pause.fill" : "play.fill")
