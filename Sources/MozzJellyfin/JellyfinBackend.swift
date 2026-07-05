@@ -204,7 +204,10 @@ public struct JellyfinBackend: MusicBackend {
             URLQueryItem(name: "SortBy", value: "SortName"),
             URLQueryItem(name: "SortOrder", value: "Ascending"),
             URLQueryItem(name: "Recursive", value: "true"),
-            URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
+            // Report the total so the sync engine can tell a complete
+            // enumeration from a truncated one and only prune when complete
+            // (measured to add no meaningful server cost vs. leaving it off).
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true"),
         ]
     }
 

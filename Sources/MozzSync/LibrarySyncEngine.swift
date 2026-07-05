@@ -105,18 +105,32 @@ public struct LibrarySyncEngine: Sendable {
         )
         let playlistIDs = try await syncPlaylists(progress: progress)
 
+        // Prune rows the server no longer has — but ONLY when the enumeration
+        // actually completed. A truncated/flaky sync (fewer items seen than the
+        // server's reported total, or an empty result) must never prune: the
+        // `download` row cascade-deletes from `track`, so a single bad sync
+        // could otherwise wipe the catalog AND the user's offline downloads
+        // (and orphan the files on disk). See canPrune(_:).
         progress?(SyncProgress(phase: .pruning, itemsSynced: 0))
         var deleted = 0
-        deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs)
-        deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs)
-        deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs)
-        deleted += try await writer.prunePlaylists(serverId: serverId, keeping: playlistIDs)
+        if canPrune(trackIDs) {
+            deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs.seen)
+        }
+        if canPrune(albumIDs) {
+            deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs.seen)
+        }
+        if canPrune(artistIDs) {
+            deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen)
+        }
+        if canPrune(playlistIDs) {
+            deleted += try await writer.prunePlaylists(serverId: serverId, keeping: playlistIDs.seen)
+        }
 
         let summary = SyncSummary(
-            artists: artistIDs.count,
-            albums: albumIDs.count,
-            tracks: trackIDs.count,
-            playlists: playlistIDs.count,
+            artists: artistIDs.seen.count,
+            albums: albumIDs.seen.count,
+            tracks: trackIDs.seen.count,
+            playlists: playlistIDs.seen.count,
             deleted: deleted,
             duration: Date().timeIntervalSince(started)
         )
@@ -124,45 +138,70 @@ public struct LibrarySyncEngine: Sendable {
         return summary
     }
 
+    /// A full sync only prunes when the enumeration is known to be complete.
+    /// If the server reported a total record count, we must have seen at least
+    /// that many items; if it reported no total, we at least refuse to delete
+    /// the entire catalog on an empty result. This is the guard that stops a
+    /// flaky/truncated page from wiping the DB (and cascading into downloads).
+    private func canPrune(_ enumeration: PagedEnumeration) -> Bool {
+        if let total = enumeration.reportedTotal {
+            return enumeration.seen.count >= total
+        }
+        return !enumeration.seen.isEmpty
+    }
+
     // MARK: Paging
 
+    /// The outcome of enumerating one entity type: the remote ids seen (for
+    /// pruning) and the server's reported total (the completeness signal).
+    private struct PagedEnumeration {
+        var seen: [String]
+        var reportedTotal: Int?
+    }
+
     /// Page one entity type to exhaustion, writing each batch and collecting the
-    /// remote ids seen (for pruning). Stops on the first short/empty page.
+    /// remote ids seen (for pruning). Terminates ONLY on a genuinely empty page.
+    /// A short page (fewer than `pageSize`) is *not* treated as terminal: some
+    /// servers legitimately return short pages mid-enumeration, and assuming
+    /// "short == done" would truncate the sync and then prune everything the
+    /// truncated run never saw.
     private func syncPages<Item: Sendable>(
         phase: SyncProgress.Phase,
         fetch: @Sendable (Int, Int) async throws -> CatalogPage<Item>,
         write: @Sendable ([Item]) async throws -> Void,
         id: @Sendable (Item) -> String,
         progress: (@Sendable (SyncProgress) -> Void)?
-    ) async throws -> [String] {
+    ) async throws -> PagedEnumeration {
         var offset = 0
         var seen: [String] = []
+        var reportedTotal: Int?
         while true {
             try Task.checkCancellation()
             let page = try await fetch(offset, pageSize)
+            if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
             if page.items.isEmpty { break }
             try await write(page.items)
             seen.append(contentsOf: page.items.map(id))
-            progress?(SyncProgress(phase: phase, itemsSynced: seen.count, totalCount: page.totalCount))
+            progress?(SyncProgress(phase: phase, itemsSynced: seen.count, totalCount: reportedTotal))
             offset += page.items.count
-            if page.items.count < pageSize { break }
         }
-        return seen
+        return PagedEnumeration(seen: seen, reportedTotal: reportedTotal)
     }
 
     /// Playlists need a second pass to sync their ordered items.
-    private func syncPlaylists(progress: (@Sendable (SyncProgress) -> Void)?) async throws -> [String] {
+    private func syncPlaylists(progress: (@Sendable (SyncProgress) -> Void)?) async throws -> PagedEnumeration {
         var offset = 0
         var playlists: [Playlist] = []
+        var reportedTotal: Int?
         while true {
             try Task.checkCancellation()
             let page = try await backend.fetchPlaylists(offset: offset, limit: pageSize)
+            if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
             if page.items.isEmpty { break }
             try await writer.upsertPlaylists(page.items, serverId: serverId)
             playlists.append(contentsOf: page.items)
-            progress?(SyncProgress(phase: .playlists, itemsSynced: playlists.count, totalCount: page.totalCount))
+            progress?(SyncProgress(phase: .playlists, itemsSynced: playlists.count, totalCount: reportedTotal))
             offset += page.items.count
-            if page.items.count < pageSize { break }
         }
 
         for playlist in playlists {
@@ -170,7 +209,7 @@ public struct LibrarySyncEngine: Sendable {
             let itemIDs = try await fetchPlaylistItemIDs(playlistID: playlist.id)
             try await writer.replacePlaylistItems(playlistRemoteId: playlist.id, trackRemoteIds: itemIDs, serverId: serverId)
         }
-        return playlists.map(\.id)
+        return PagedEnumeration(seen: playlists.map(\.id), reportedTotal: reportedTotal)
     }
 
     private func fetchPlaylistItemIDs(playlistID: String) async throws -> [String] {
@@ -184,7 +223,6 @@ public struct LibrarySyncEngine: Sendable {
             try await writer.upsertTracks(page.items, serverId: serverId)
             ids.append(contentsOf: page.items.map(\.id))
             offset += page.items.count
-            if page.items.count < pageSize { break }
         }
         return ids
     }

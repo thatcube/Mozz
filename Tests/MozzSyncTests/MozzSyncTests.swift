@@ -14,6 +14,11 @@ struct MockBackend: MusicBackend {
     var playlists: [Playlist] = []
     var playlistItems: [String: [Track]] = [:]
     var capabilities: ServerCapabilities
+    /// Test hooks: override the reported total (simulate a server that claims
+    /// more than it returns), and force a short-but-non-terminal first track
+    /// page (simulate a server that returns fewer than `limit` mid-enumeration).
+    var trackTotalOverride: Int?
+    var trackShortFirstPage = false
 
     init(serverId: String = "srv") {
         self.connection = ServerConnection(
@@ -32,7 +37,16 @@ struct MockBackend: MusicBackend {
         Self.page(albums, offset: offset, limit: limit)
     }
     func fetchTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track> {
-        Self.page(tracks, offset: offset, limit: limit)
+        // Simulate a short (but non-terminal) first page: return 2 items even
+        // though more remain, so the engine must not treat "short == done".
+        if trackShortFirstPage && offset == 0 && tracks.count > 2 {
+            return CatalogPage(items: Array(tracks.prefix(2)), totalCount: trackTotalOverride ?? tracks.count)
+        }
+        let page = Self.page(tracks, offset: offset, limit: limit)
+        if let total = trackTotalOverride {
+            return CatalogPage(items: page.items, totalCount: total)
+        }
+        return page
     }
     func fetchPlaylists(offset: Int, limit: Int) async throws -> CatalogPage<Playlist> {
         Self.page(playlists, offset: offset, limit: limit)
@@ -135,6 +149,50 @@ final class LibrarySyncEngineTests: XCTestCase {
         let after = try await repository.trackCount(serverId: "srv")
         XCTAssertEqual(after, 3)
         XCTAssertEqual(summary.deleted, 7)
+    }
+
+    func testShortPageMidEnumerationDoesNotStopEarly() async throws {
+        // A server that returns a short (2-item) first page even though 10
+        // tracks exist must NOT be treated as "done" after page 1 — all 10
+        // must be fetched. (Regression guard for the old `count < pageSize`
+        // early-break that could truncate a sync mid-enumeration.)
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.tracks = makeTracks(10)
+        backend.trackShortFirstPage = true
+
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 4)
+        let summary = try await engine.sync()
+
+        XCTAssertEqual(summary.tracks, 10, "short mid-enumeration page must not truncate the sync")
+        let repository = LibraryRepository(database)
+        let count = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(count, 10)
+    }
+
+    func testIncompleteEnumerationDoesNotPruneCatalog() async throws {
+        // The catastrophic B2 case: a healthy catalog exists, then a flaky
+        // re-sync returns far fewer items than the server's reported total.
+        // Pruning must be SKIPPED so the catalog (and its downloads, which
+        // cascade-delete from tracks) is never wiped by a truncated sync.
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.tracks = makeTracks(10)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 4).sync()
+
+        let repository = LibraryRepository(database)
+        let initialCount = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(initialCount, 10)
+
+        // Flaky re-sync: server still reports 10 total, but only returns 4.
+        backend.tracks = Array(makeTracks(10).prefix(4))
+        backend.trackTotalOverride = 10
+        let summary = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 4).sync()
+
+        let afterCount = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(afterCount, 10,
+                       "incomplete enumeration (seen < reported total) must not prune existing rows")
+        XCTAssertEqual(summary.deleted, 0)
     }
 
     func testPlaylistItemsSyncedInOrder() async throws {
