@@ -4,6 +4,7 @@ import MozzDatabase
 import MozzDownloads
 import MozzPlayback
 import MozzNetworking
+import MozzRecommend
 import MozzSync
 import MozzPlex
 import MozzJellyfin
@@ -52,6 +53,9 @@ public final class AppEnvironment: ObservableObject {
     public let downloads: DownloadManager
     public let playback: PlaybackEngine
     public let playEvents: PlayEventStore
+    /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
+    /// off-main so the Home shelf reads instantly and offline.
+    public let recommendations: RecommendationService
     public let credentials: any CredentialStore
     public let clientInfo: ClientInfo
     public let clientIdentifier: String
@@ -72,6 +76,7 @@ public final class AppEnvironment: ObservableObject {
         self.downloads = DownloadManager(database: database, fileStore: fileStore)
         self.playback = PlaybackEngine(resolver: resolver)
         self.playEvents = PlayEventStore(database)
+        self.recommendations = RecommendationService(store: RecommendationStore(database))
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
         self.clientInfo = ClientInfo(
             product: "Mozz", version: "0.1.0",
@@ -300,7 +305,30 @@ public final class AppEnvironment: ObservableObject {
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 200)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
+        // New catalog + listening → refresh "Mozz Weekly" off-main. Non-fatal.
+        await regenerateMozzWeekly()
         return summary
+    }
+
+    // MARK: Recommendations
+
+    /// Force-regenerate the "Mozz Weekly" set for the active server (e.g. after a
+    /// sync). Off-main via the recommendation actor; failures are swallowed so a
+    /// recommendation hiccup never breaks sync/browse.
+    public func regenerateMozzWeekly() async {
+        guard let serverId = active?.connection.id else { return }
+        _ = try? await recommendations.generateMozzWeekly(serverId: serverId)
+    }
+
+    /// Generate "Mozz Weekly" only if it's missing or older than a week — the
+    /// weekly cadence, cheap to call whenever Home appears.
+    public func ensureMozzWeekly() async {
+        guard let serverId = active?.connection.id else { return }
+        let existing = try? await recommendations.mozzWeeklySet()
+        let ageDays = existing.map { (Date().timeIntervalSince1970 - $0.generatedAt) / 86_400 }
+        if existing == nil || (ageDays ?? .greatestFiniteMagnitude) >= 7 {
+            _ = try? await recommendations.generateMozzWeekly(serverId: serverId)
+        }
     }
 
     /// Rebuild the active backend with a bulk-timeout transport for catalog

@@ -2,11 +2,13 @@ import SwiftUI
 import MozzCore
 import MozzDatabase
 
-/// The Home tab: a browse surface built from data we already have — Recently
-/// Played (from the on-device play_event log) and Recently Added — with room to
-/// grow into recommendation shelves once track_features lands.
+/// The Home tab: browse surfaces built from data we already have — the offline
+/// "Mozz Weekly" rediscovery mix (from the recommendation engine), Recently
+/// Played (from the play_event log), and Recently Added.
 struct HomeView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @State private var mozzWeekly: [TrackRecord] = []
+    @State private var mozzWeeklyTitle = "Mozz Weekly"
     @State private var recentlyPlayed: [TrackRecord] = []
     @State private var recentlyAdded: [AlbumRecord] = []
     @State private var loaded = false
@@ -17,13 +19,16 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     TightHeader(title: "Home")
 
+                    if !mozzWeekly.isEmpty {
+                        TrackShelf(title: mozzWeeklyTitle, tracks: mozzWeekly)
+                    }
                     if !recentlyPlayed.isEmpty {
                         TrackShelf(title: "Recently Played", tracks: recentlyPlayed)
                     }
                     if !recentlyAdded.isEmpty {
                         AlbumShelf(title: "Recently Added", albums: recentlyAdded)
                     }
-                    if loaded && recentlyPlayed.isEmpty && recentlyAdded.isEmpty {
+                    if loaded && mozzWeekly.isEmpty && recentlyPlayed.isEmpty && recentlyAdded.isEmpty {
                         ContentUnavailableView("Nothing Here Yet", systemImage: "house",
                             description: Text("Play something or sync your library — it'll show up here."))
                             .padding(.top, 60)
@@ -39,6 +44,11 @@ struct HomeView: View {
 
     private func load() async {
         guard let serverId = env.active?.connection.id else { loaded = true; return }
+        // Refresh the weekly mix if it's missing/stale, then read the persisted
+        // set (instant + offline — no scoring happens on this path).
+        await env.ensureMozzWeekly()
+        mozzWeekly = (try? await env.recommendations.mozzWeeklyTracks()) ?? []
+        if let set = try? await env.recommendations.mozzWeeklySet() { mozzWeeklyTitle = set.title }
         recentlyPlayed = (try? await env.repository.recentlyPlayedTracks(serverId: serverId, limit: 20)) ?? []
         recentlyAdded = (try? await env.repository.recentlyAddedAlbums(serverId: serverId, limit: 20)) ?? []
         loaded = true
