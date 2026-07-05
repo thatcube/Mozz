@@ -11,9 +11,11 @@ final class PerformanceHarnessTests: XCTestCase {
         let db = try MusicDatabase.inMemory()
         let harness = PerformanceHarness(db)
         let serverId = "perf"
+        // ~7% fragmentation so GROUP BY albumGroupKey does real consolidation work
+        // (unique titles would collapse nothing and hide the grouping cost).
         let gen = try await harness.generate(
             serverId: serverId,
-            size: .init(artists: 400, albums: 2_000, tracks: 20_000)
+            size: .init(artists: 400, albums: 2_000, tracks: 20_000, fragmentation: 0.07)
         )
         let metrics = try await harness.measureReads(serverId: serverId, generationSeconds: gen)
 
@@ -23,15 +25,23 @@ final class PerformanceHarnessTests: XCTestCase {
         // A single page must be effectively instant regardless of catalog size.
         XCTAssertLessThan(metrics.pageFetchMs, 50, "page fetch too slow: \(metrics.pageFetchMs)")
 
-        // The album page now GROUPs BY the consolidation key; make sure that
-        // grouping stays fast at scale (the reviewer measured ~5ms).
         let repo = LibraryRepository(db)
+        // Confirm the fragmentation actually consolidated (else the perf below is
+        // meaningless): distinct groups must be fewer than raw album rows.
+        let rawAlbums = try await repo.albumCount(serverId: serverId)
+        let allGroups = try await repo.albumsPage(serverId: serverId, offset: 0, limit: rawAlbums)
+        XCTAssertEqual(rawAlbums, 2_000)
+        XCTAssertLessThan(allGroups.count, rawAlbums, "fragmentation didn't consolidate anything")
+
+        // The album page GROUPs BY + ORDERs BY albumGroupKey (index-driven, early
+        // terminating). A deep page must stay fast — the guard against a
+        // materialize-all-groups-then-sort regression.
         let albumPageStart = Date()
-        _ = try await repo.albumsPage(serverId: serverId, offset: 0, limit: 100)
+        _ = try await repo.albumsPage(serverId: serverId, offset: 1_000, limit: 100)
         let albumPageMs = Date().timeIntervalSince(albumPageStart) * 1000
         XCTAssertLessThan(albumPageMs, 60, "grouped album page too slow: \(albumPageMs)")
 
-        print("[PERF 20k]\n\(metrics.summary)")
+        print("[PERF 20k] albums \(rawAlbums)→\(allGroups.count) groups, page \(String(format: "%.1f", albumPageMs))ms\n\(metrics.summary)")
     }
 
     func testFullScale100kPerf() async throws {

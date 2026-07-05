@@ -102,10 +102,10 @@ public struct LibraryRepository: Sendable {
     public func albumsPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT *, MAX(COALESCE(trackCount, 0)) FROM album
+                SELECT *, \(Self.albumRepresentative) FROM album
                 \(Self.serverClause(serverId))
                 GROUP BY serverId, albumGroupKey
-                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                ORDER BY albumGroupKey
                 LIMIT ? OFFSET ?
                 """, arguments: Self.serverArgs(serverId) + [limit, offset])
         }
@@ -129,10 +129,10 @@ public struct LibraryRepository: Sendable {
     public func albums(forArtistRemoteId artistRemoteId: String, serverId: ServerID) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT *, MAX(COALESCE(trackCount, 0)) FROM album
+                SELECT *, \(Self.albumRepresentative) FROM album
                 WHERE serverId = ? AND artistRemoteId = ?
                 GROUP BY albumGroupKey
-                ORDER BY year DESC, sortTitle COLLATE NOCASE
+                ORDER BY year DESC, albumGroupKey
                 """, arguments: [serverId, artistRemoteId])
         }
     }
@@ -143,14 +143,14 @@ public struct LibraryRepository: Sendable {
             try TrackRecord.fetchAll(db, sql: """
                 SELECT * FROM track
                 WHERE serverId = ? AND albumRemoteId = ?
-                ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
+                \(Self.albumTrackOrder)
                 """, arguments: [serverId, albumRemoteId])
         }
     }
 
     /// Tracks of a consolidated album, spanning every fragment that shares the
-    /// album's group key (so a server-split album shows all its songs). Disc/
-    /// track ordered. This is what the album detail and album download use.
+    /// album's group key (so a server-split album shows all its songs). This is
+    /// what the album detail and album download use.
     public func tracks(forAlbumGroupKey groupKey: String, serverId: ServerID) async throws -> [TrackRecord] {
         try await database.read { db in
             try TrackRecord.fetchAll(db, sql: """
@@ -158,7 +158,7 @@ public struct LibraryRepository: Sendable {
                 WHERE serverId = ? AND albumRemoteId IN (
                     SELECT remoteId FROM album WHERE serverId = ? AND albumGroupKey = ?
                 )
-                ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
+                \(Self.albumTrackOrder)
                 """, arguments: [serverId, serverId, groupKey])
         }
     }
@@ -174,7 +174,7 @@ public struct LibraryRepository: Sendable {
                         SELECT albumGroupKey FROM album WHERE serverId = ? AND remoteId = ?
                     )
                 )
-                ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
+                \(Self.albumTrackOrder)
                 """, arguments: [serverId, serverId, serverId, albumRemoteId])
         }
     }
@@ -227,10 +227,10 @@ public struct LibraryRepository: Sendable {
     public func recentlyAddedAlbums(serverId: ServerID, limit: Int = 20) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT *, MAX(COALESCE(trackCount, 0)) FROM album
+                SELECT *, \(Self.albumRepresentative) FROM album
                 WHERE serverId = ?
                 GROUP BY albumGroupKey
-                ORDER BY addedAt DESC, sortTitle COLLATE NOCASE
+                ORDER BY addedAt DESC, albumGroupKey
                 LIMIT ?
                 """, arguments: [serverId, limit])
         }
@@ -266,10 +266,10 @@ public struct LibraryRepository: Sendable {
     public func albums(forGenre genre: String, serverId: ServerID) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT album.*, MAX(COALESCE(album.trackCount, 0)) FROM album JOIN json_each(album.genres) je
+                SELECT album.*, \(Self.albumRepresentative("album.")) FROM album JOIN json_each(album.genres) je
                 WHERE album.serverId = ? AND je.value = ?
                 GROUP BY album.albumGroupKey
-                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                ORDER BY album.albumGroupKey
                 """, arguments: [serverId, genre])
         }
     }
@@ -381,6 +381,23 @@ public struct LibraryRepository: Sendable {
     }
 
     // MARK: - Helpers
+
+    /// The single-`MAX()` expression whose winning row supplies the consolidated
+    /// album's representative columns (artwork, id, year…). Priority: a fragment
+    /// *with* artwork first, then the one with the most tracks — so the album's
+    /// cover and identity stay stable across syncs. `column` prefixes the two
+    /// referenced columns for queries that join (e.g. `"album."`).
+    private static func albumRepresentative(_ column: String = "") -> String {
+        "MAX((CASE WHEN \(column)artworkKey IS NOT NULL AND \(column)artworkKey <> '' THEN 1 ELSE 0 END) * 1000000 + COALESCE(\(column)trackCount, 0))"
+    }
+    private static let albumRepresentative = albumRepresentative()
+
+    /// Track ordering within a (possibly multi-fragment) album: disc then track,
+    /// tolerating missing numbers (null disc floats to disc 1, null track sorts
+    /// last), then the source fragment id so a fragment's tracks stay together
+    /// when numbering collides, then title. Best-effort for messy metadata.
+    private static let albumTrackOrder =
+        "ORDER BY COALESCE(discNumber, 1), COALESCE(trackNumber, 999999), albumRemoteId, sortTitle COLLATE NOCASE"
 
     private static func serverClause(_ serverId: ServerID?) -> String {
         serverId != nil ? "WHERE serverId = ?" : ""

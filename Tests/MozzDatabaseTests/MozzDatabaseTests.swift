@@ -153,9 +153,10 @@ final class SchemaAndWriteTests: XCTestCase {
 
         // One album ("2001" by Dr. Dre) that the server fragmented into 3 album
         // entities: same album-artist + title, different ids, a subset of tracks
-        // each. Plus a genuine different edition that must NOT merge.
+        // each. alb1 has artwork; alb3 has the most tracks. Plus a genuine
+        // different edition that must NOT merge.
         try await writer.upsertAlbums([
-            Album(id: "alb1", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 1),
+            Album(id: "alb1", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, artwork: ArtworkRef(key: "cover"), trackCount: 1),
             Album(id: "alb2", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 1),
             Album(id: "alb3", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 2),
             Album(id: "dlx", title: "2001 (Deluxe)", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 1),
@@ -172,8 +173,10 @@ final class SchemaAndWriteTests: XCTestCase {
         let page = try await repo.albumsPage(serverId: server.id, offset: 0, limit: 50)
         XCTAssertEqual(page.count, 2)
         let main = try XCTUnwrap(page.first { $0.title == "2001" })
-        // Representative = the fragment with the most tracks (fullest metadata/art).
-        XCTAssertEqual(main.remoteId, "alb3")
+        // Representative prefers the fragment WITH artwork (cover stability) over
+        // the one with more tracks.
+        XCTAssertEqual(main.remoteId, "alb1")
+        XCTAssertEqual(main.artworkKey, "cover")
 
         // Artist detail consolidates too.
         let artistAlbums = try await repo.albums(forArtistRemoteId: "dre", serverId: server.id)
@@ -196,23 +199,23 @@ final class SchemaAndWriteTests: XCTestCase {
     func testAlbumGroupKeyPolicy() {
         // Case/diacritic/whitespace-insensitive; edition markers preserved.
         XCTAssertEqual(
-            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001"),
-            AlbumGrouping.key(artistRemoteId: "dre", artistName: "dr. dre", title: "  2001 "))
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", sortTitle: "2001"),
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "dr. dre", sortTitle: "  2001 "))
         XCTAssertNotEqual(
-            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001"),
-            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001 (Deluxe)"))
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", sortTitle: "2001"),
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", sortTitle: "2001 (Deluxe)"))
         // Album-artist ID wins over display name when present.
         XCTAssertEqual(
-            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001"),
-            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Andre Young", title: "2001"))
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", sortTitle: "2001"),
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Andre Young", sortTitle: "2001"))
         // No id → fall back to name; different names stay separate.
         XCTAssertNotEqual(
-            AlbumGrouping.key(artistRemoteId: nil, artistName: "Dr. Dre", title: "2001"),
-            AlbumGrouping.key(artistRemoteId: nil, artistName: "Snoop Dogg", title: "2001"))
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Dr. Dre", sortTitle: "2001"),
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Snoop Dogg", sortTitle: "2001"))
         // Diacritics folded on the name-fallback path.
         XCTAssertEqual(
-            AlbumGrouping.key(artistRemoteId: nil, artistName: "Bjork", title: "Homogenic"),
-            AlbumGrouping.key(artistRemoteId: nil, artistName: "Björk", title: "Homogenic"))
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Bjork", sortTitle: "Homogenic"),
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Björk", sortTitle: "Homogenic"))
     }
 
     func testPlayEventStoreAppendAndRead() async throws {

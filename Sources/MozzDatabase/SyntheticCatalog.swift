@@ -11,11 +11,17 @@ public struct SyntheticCatalog: Sendable {
         public var artists: Int
         public var albums: Int
         public var tracks: Int
+        /// Fraction of albums that are *fragments* — sharing an earlier album's
+        /// title + album-artist so the read layer must consolidate them (mirrors
+        /// how Jellyfin splits one album into many). 0 = every title unique (the
+        /// old behavior, which hid all grouping cost from the benchmark).
+        public var fragmentation: Double
 
-        public init(artists: Int, albums: Int, tracks: Int) {
+        public init(artists: Int, albums: Int, tracks: Int, fragmentation: Double = 0) {
             self.artists = artists
             self.albums = albums
             self.tracks = tracks
+            self.fragmentation = fragmentation
         }
 
         /// The performance-bar target: ~100k tracks / ~10k albums.
@@ -75,7 +81,8 @@ public struct SyntheticCatalog: Sendable {
         let albumsPerArtist = max(1, size.albums / max(1, size.artists))
         try await inChunks(size.albums, chunkSize) { start, end in
             let batch = (start..<end).map {
-                Self.makeAlbum(index: $0, artistCount: size.artists, albumsPerArtist: albumsPerArtist)
+                Self.makeAlbum(index: $0, artistCount: size.artists,
+                               albumsPerArtist: albumsPerArtist, fragmentation: size.fragmentation)
             }
             try await writer.upsertAlbums(batch, serverId: serverId)
             report(end - start)
@@ -126,9 +133,23 @@ public struct SyntheticCatalog: Sendable {
         )
     }
 
-    private static func makeAlbum(index: Int, artistCount: Int, albumsPerArtist: Int) -> Album {
-        let artistIndex = min(artistCount - 1, index / albumsPerArtist)
-        let title = albumTitle(index)
+    private static func makeAlbum(index: Int, artistCount: Int, albumsPerArtist: Int, fragmentation: Double = 0) -> Album {
+        var artistIndex = min(artistCount - 1, index / albumsPerArtist)
+        var title = albumTitle(index)
+        // Fragmentation: within each run of `clusterSpan` albums, a `fragmentation`
+        // fraction adopt the run's base album's title + artist, so those rows must
+        // be consolidated by GROUP BY albumGroupKey. Because it's per-member, most
+        // groups end up small (2-3) with an occasional tall one (~clusterSpan) — a
+        // realistic long tail, unlike the old all-unique titles that hid the cost.
+        let clusterSpan = 16
+        if fragmentation > 0, index % clusterSpan != 0 {
+            let r = Double((index &* 2_654_435_761) & 0x7fff_ffff) / Double(0x7fff_ffff)
+            if r < fragmentation {
+                let base = (index / clusterSpan) * clusterSpan
+                title = albumTitle(base)
+                artistIndex = min(artistCount - 1, base / albumsPerArtist)
+            }
+        }
         return Album(
             id: "alb-\(index)",
             title: title,

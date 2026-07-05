@@ -53,7 +53,8 @@ public struct CatalogWriter: Sendable {
             let stmt = try db.makeStatement(sql: Self.albumUpsertSQL)
             for album in albums {
                 let groupKey = AlbumGrouping.key(
-                    artistRemoteId: album.artistID, artistName: album.artistName, title: album.title)
+                    artistRemoteId: album.artistID, artistName: album.artistName,
+                    sortTitle: album.sortTitle ?? album.title)
                 try stmt.execute(arguments: [
                     serverId, album.id, album.title, album.sortTitle ?? album.title,
                     album.artistName, album.artistID, album.year,

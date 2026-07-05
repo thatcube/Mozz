@@ -9,6 +9,7 @@ enum Schema {
         registerV1(&migrator)
         registerV2(&migrator)
         registerV3(&migrator)
+        registerV4(&migrator)
         return migrator
     }
 
@@ -221,13 +222,14 @@ enum Schema {
             try db.alter(table: "album") { t in
                 t.add(column: "albumGroupKey", .text).notNull().defaults(to: "")
             }
-            let rows = try Row.fetchAll(db, sql: "SELECT id, artistRemoteId, artistName, title FROM album")
+            let rows = try Row.fetchAll(db, sql: "SELECT id, artistRemoteId, artistName, sortTitle, title FROM album")
             let update = try db.makeStatement(sql: "UPDATE album SET albumGroupKey = ? WHERE id = ?")
             for row in rows {
+                let sortTitle: String = row["sortTitle"] ?? row["title"] ?? ""
                 let key = AlbumGrouping.key(
                     artistRemoteId: row["artistRemoteId"],
                     artistName: row["artistName"] ?? "",
-                    title: row["title"] ?? ""
+                    sortTitle: sortTitle
                 )
                 try update.execute(arguments: [key, row["id"] as Int64])
             }
@@ -235,6 +237,27 @@ enum Schema {
             try db.execute(sql: """
                 CREATE INDEX idx_album_group ON album(serverId, albumGroupKey, sortTitle COLLATE NOCASE, title COLLATE NOCASE)
                 """)
+        }
+    }
+
+    /// v4 — re-backfill `albumGroupKey` after switching to the title-first key
+    /// layout (so `ORDER BY albumGroupKey` is alphabetical and can early-
+    /// terminate). Installs that already ran v3 hold the old artist-first keys;
+    /// this rewrites them. Fresh installs migrate an empty album table, so this
+    /// is a no-op there (rows arrive later via the upsert, already title-first).
+    private static func registerV4(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v4.albumGroupKeyTitleFirst") { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT id, artistRemoteId, artistName, sortTitle, title FROM album")
+            let update = try db.makeStatement(sql: "UPDATE album SET albumGroupKey = ? WHERE id = ?")
+            for row in rows {
+                let sortTitle: String = row["sortTitle"] ?? row["title"] ?? ""
+                let key = AlbumGrouping.key(
+                    artistRemoteId: row["artistRemoteId"],
+                    artistName: row["artistName"] ?? "",
+                    sortTitle: sortTitle
+                )
+                try update.execute(arguments: [key, row["id"] as Int64])
+            }
         }
     }
 }
