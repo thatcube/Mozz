@@ -25,50 +25,53 @@ struct FullPlayerView: View {
     private let space = "player"
 
     var body: some View {
-        GeometryReader { geo in
-            let originGlobal = geo.frame(in: .global).origin
-            let artSide = min(geo.size.width - 90, 340)
+        GeometryReader { safeGeo in
+            let safeTop = safeGeo.safeAreaInsets.top
+            GeometryReader { geo in
+                let originGlobal = geo.frame(in: .global).origin
+                let artSide = min(geo.size.width - 90, 340)
 
-            // Rest center of the big artwork (measured), plus the live drag.
-            let expCenter = expandedArtRect == .zero
-                ? CGPoint(x: geo.size.width / 2, y: geo.safeAreaInsets.top + 52 + artSide / 2)
-                : expandedArtRect.center
+                // Rest center of the big artwork (measured), plus the live drag.
+                let expCenter = expandedArtRect == .zero
+                    ? CGPoint(x: geo.size.width / 2, y: safeTop + 78 + artSide / 2)
+                    : expandedArtRect.center
 
-            // Mini slot, converted from the accessory's global frame into this
-            // view's local space (fallback to a bottom-left estimate).
-            let miniGlobal = ui.miniArtFrame == .zero
-                ? CGRect(x: originGlobal.x + 28,
-                         y: originGlobal.y + geo.size.height - 40,
-                         width: 40, height: 40)
-                : ui.miniArtFrame
-            let miniCenter = CGPoint(x: miniGlobal.midX - originGlobal.x,
-                                     y: miniGlobal.midY - originGlobal.y)
-            let miniSide = miniGlobal.width
+                // Mini slot, converted from the accessory's global frame into this
+                // view's local space (fallback to a bottom-left estimate).
+                let miniGlobal = ui.miniArtFrame == .zero
+                    ? CGRect(x: originGlobal.x + 28,
+                             y: originGlobal.y + geo.size.height - 40,
+                             width: 40, height: 40)
+                    : ui.miniArtFrame
+                let miniCenter = CGPoint(x: miniGlobal.midX - originGlobal.x,
+                                         y: miniGlobal.midY - originGlobal.y)
+                let miniSide = miniGlobal.width
 
-            let artCenter = collapsed
-                ? miniCenter
-                : CGPoint(x: expCenter.x, y: expCenter.y + dragY)
-            let side = collapsed ? miniSide : artSide
+                let artCenter = collapsed
+                    ? miniCenter
+                    : CGPoint(x: expCenter.x, y: expCenter.y + dragY)
+                let side = collapsed ? miniSide : artSide
 
-            ZStack(alignment: .top) {
-                background
-                    .offset(y: collapsed ? geo.size.height : dragY)
-                chrome(geo: geo, artSide: artSide)
-                PlayerArtwork(track: playback.currentTrack, side: side)
-                    .shadow(color: .black.opacity(collapsed ? 0 : 0.35),
-                            radius: collapsed ? 0 : 18, y: collapsed ? 0 : 10)
-                    .position(artCenter)
-                    .allowsHitTesting(false)
-            }
-            .coordinateSpace(name: space)
-            .frame(width: geo.size.width, height: geo.size.height)
-            .onAppear {
-                DispatchQueue.main.async {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { collapsed = false }
+                ZStack(alignment: .top) {
+                    background
+                        .offset(y: collapsed ? geo.size.height : dragY)
+                    chrome(geo: geo, artSide: artSide, safeTop: safeTop)
+                    PlayerArtwork(track: playback.currentTrack, side: side)
+                        .shadow(color: .black.opacity(collapsed ? 0 : 0.35),
+                                radius: collapsed ? 0 : 18, y: collapsed ? 0 : 10)
+                        .position(artCenter)
+                        .allowsHitTesting(false)
+                }
+                .coordinateSpace(name: space)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .onAppear {
+                    DispatchQueue.main.async {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { collapsed = false }
+                    }
                 }
             }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
     }
 
     // MARK: Background (dims + fades)
@@ -83,9 +86,9 @@ struct FullPlayerView: View {
 
     // MARK: Chrome (everything but the traveling artwork)
 
-    private func chrome(geo: GeometryProxy, artSide: CGFloat) -> some View {
+    private func chrome(geo: GeometryProxy, artSide: CGFloat, safeTop: CGFloat) -> some View {
         VStack(spacing: 0) {
-            header(geo: geo, artSide: artSide)
+            header(geo: geo, artSide: artSide, safeTop: safeTop)
 
             scrubber
                 .padding(.horizontal, 32)
@@ -105,10 +108,11 @@ struct FullPlayerView: View {
 
     /// The draggable top region: grabber, an invisible spacer that reserves the
     /// artwork's rest frame (measured for the transition), and the titles.
-    private func header(geo: GeometryProxy, artSide: CGFloat) -> some View {
+    private func header(geo: GeometryProxy, artSide: CGFloat, safeTop: CGFloat) -> some View {
         VStack(spacing: 22) {
             Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
-                .padding(.top, geo.safeAreaInsets.top + 8)
+                .padding(.top, safeTop + 8)
+                .padding(.bottom, 14)
 
             Color.clear
                 .frame(width: artSide, height: artSide)
@@ -299,7 +303,12 @@ private struct PlayerArtwork: View {
                      Color(hue: (hue + 0.1).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.45)],
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
-        .overlay(Image(systemName: "music.note")
-            .font(.system(size: side * 0.32)).foregroundStyle(.white.opacity(0.85)))
+        .overlay(
+            Image(systemName: "music.note")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: side * 0.34, height: side * 0.34)
+                .foregroundStyle(.white.opacity(0.85))
+        )
     }
 }

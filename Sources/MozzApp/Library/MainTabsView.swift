@@ -31,6 +31,13 @@ struct MainTabsView: View {
                 .zIndex(100)
             }
         }
+        .onChange(of: hasTrack) { _, has in
+            // Test hook: auto-open the full player so its layout/transition can be
+            // inspected in the Simulator, where no gesture injection is available.
+            if has, ProcessInfo.processInfo.environment["MOZZ_AUTOEXPAND"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { ui.isFullPresented = true }
+            }
+        }
     }
 
     private var tabs: some View {
