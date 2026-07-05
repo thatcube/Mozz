@@ -39,8 +39,14 @@ struct SearchView: View {
                 HStack(spacing: 12) {
                     searchField
                     if isActive {
-                        Button("Cancel") { cancelSearch() }
-                            .transition(.opacity)
+                        Button { cancelSearch() } label: {
+                            Image(systemName: "xmark")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Cancel search")
+                        }
+                        .glassCircleButtonStyle()
+                        .transition(.opacity)
                     }
                 }
                 .padding(.horizontal, 20)
