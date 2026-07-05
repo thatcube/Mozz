@@ -53,7 +53,13 @@ struct MiniPlayerAccessory: View {
                 .opacity(playback.snapshot.hasNext ? 1 : 0.4)
             }
             .padding(.horizontal, 12)
-            .onPreferenceChange(MiniArtFrameKey.self) { ui.miniArtFrame = $0 }
+            .onPreferenceChange(MiniArtFrameKey.self) { frame in
+                // The system lays this content out in more than one context: the
+                // real on-screen slot (near the bottom of the window) plus an
+                // offscreen measurement pass near the origin. Keep only the
+                // bottom-most frame so the traveling artwork lands on the real slot.
+                if frame.midY >= ui.miniArtFrame.midY { ui.miniArtFrame = frame }
+            }
         }
     }
 }

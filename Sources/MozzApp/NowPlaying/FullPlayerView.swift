@@ -52,6 +52,7 @@ struct FullPlayerView: View {
 
             ZStack(alignment: .top) {
                 background
+                    .offset(y: collapsed ? geo.size.height : dragY)
                 chrome(geo: geo, artSide: artSide)
                 PlayerArtwork(track: playback.currentTrack, side: side)
                     .shadow(color: .black.opacity(collapsed ? 0 : 0.35),
@@ -78,7 +79,6 @@ struct FullPlayerView: View {
             .overlay(LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.28)],
                                     startPoint: .top, endPoint: .bottom))
             .ignoresSafeArea()
-            .opacity(collapsed ? 0 : max(0, 1 - dragY / 700))
     }
 
     // MARK: Chrome (everything but the traveling artwork)
@@ -100,8 +100,7 @@ struct FullPlayerView: View {
             upNext.padding(.top, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .opacity(collapsed ? 0 : 1)
-        .offset(y: dragY)
+        .offset(y: collapsed ? geo.size.height : dragY)
     }
 
     /// The draggable top region: grabber, an invisible spacer that reserves the
