@@ -52,6 +52,7 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
     public var supportsTranscoding: Bool
     public var supportsOriginalFileDownload: Bool
     public var supportsFavorites: Bool
+    public var supportsRatings: Bool
     public var supportsLyrics: Bool
     public var supportsSyncedLyrics: Bool
     public var supportsNormalizationGain: Bool
@@ -66,6 +67,7 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
         self.supportsTranscoding = capabilities.supportsTranscoding
         self.supportsOriginalFileDownload = capabilities.supportsOriginalFileDownload
         self.supportsFavorites = capabilities.supportsFavorites
+        self.supportsRatings = capabilities.supportsRatings
         self.supportsLyrics = capabilities.supportsLyrics
         self.supportsSyncedLyrics = capabilities.supportsSyncedLyrics
         self.supportsNormalizationGain = capabilities.supportsNormalizationGain
@@ -82,6 +84,7 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
             supportsTranscoding: supportsTranscoding,
             supportsOriginalFileDownload: supportsOriginalFileDownload,
             supportsFavorites: supportsFavorites,
+            supportsRatings: supportsRatings,
             supportsLyrics: supportsLyrics,
             supportsSyncedLyrics: supportsSyncedLyrics,
             supportsNormalizationGain: supportsNormalizationGain,
@@ -168,6 +171,8 @@ public struct TrackRecord: Codable, FetchableRecord, MutablePersistableRecord, S
     public var mediaKey: String?
     public var artworkKey: String?
     public var isFavorite: Bool
+    /// User star rating 0–5 (half-steps); `nil` = unrated (Plex only).
+    public var rating: Double?
     public var normalizationGainDB: Double?
     public var addedAt: Double?
     public var genres: [String]

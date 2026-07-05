@@ -170,6 +170,10 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
     public var artwork: ArtworkRef?
     public var genres: [String]
     public var isFavorite: Bool
+    /// User's star rating 0–5 in half-star increments, when the backend exposes
+    /// ratings (Plex). `nil` = unrated. Jellyfin has no per-track ratings — it
+    /// uses `isFavorite` instead — so this stays `nil` there.
+    public var rating: Double?
     /// ReplayGain / normalization gain in dB, when the server exposes it.
     public var normalizationGainDB: Double?
     public var addedAt: Date?
@@ -192,6 +196,7 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
         artwork: ArtworkRef? = nil,
         genres: [String] = [],
         isFavorite: Bool = false,
+        rating: Double? = nil,
         normalizationGainDB: Double? = nil,
         addedAt: Date? = nil
     ) {
@@ -212,6 +217,7 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
         self.artwork = artwork
         self.genres = genres
         self.isFavorite = isFavorite
+        self.rating = rating
         self.normalizationGainDB = normalizationGainDB
         self.addedAt = addedAt
     }

@@ -170,6 +170,12 @@ public struct JellyfinBackend: MusicBackend {
         _ = try await client.send(endpoint)
     }
 
+    public func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws {
+        // Jellyfin music has no per-track star rating — it uses favorites, which
+        // `setFavorite` handles. supportsRatings is false so the UI shows a heart.
+        throw MozzError.unsupported("Jellyfin uses favorites, not star ratings")
+    }
+
     public func reportPlayback(_ report: PlaybackReport) async throws {
         struct Body: Encodable {
             let ItemId: String

@@ -19,6 +19,11 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
     public var supportsOriginalFileDownload: Bool
     /// Server exposes per-user favorites we can read/write.
     public var supportsFavorites: Bool
+    /// Server exposes per-user star ratings (Plex `userRating`). Distinct from
+    /// favorites: Plex has ratings but no boolean favorite; Jellyfin is the
+    /// reverse. The UI shows a heart when `supportsFavorites`, a rating chip when
+    /// `supportsRatings`.
+    public var supportsRatings: Bool
     /// Server exposes plain (unsynced) lyrics.
     public var supportsLyrics: Bool
     /// Server exposes time-synced lyrics.
@@ -41,6 +46,7 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         supportsTranscoding: Bool = true,
         supportsOriginalFileDownload: Bool = true,
         supportsFavorites: Bool = true,
+        supportsRatings: Bool = false,
         supportsLyrics: Bool = false,
         supportsSyncedLyrics: Bool = false,
         supportsNormalizationGain: Bool = false,
@@ -53,6 +59,7 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.supportsTranscoding = supportsTranscoding
         self.supportsOriginalFileDownload = supportsOriginalFileDownload
         self.supportsFavorites = supportsFavorites
+        self.supportsRatings = supportsRatings
         self.supportsLyrics = supportsLyrics
         self.supportsSyncedLyrics = supportsSyncedLyrics
         self.supportsNormalizationGain = supportsNormalizationGain

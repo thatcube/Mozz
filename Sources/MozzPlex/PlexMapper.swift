@@ -36,6 +36,7 @@ enum PlexMapper {
             artwork: artwork(meta.thumb ?? meta.parentThumb ?? meta.grandparentThumb),
             genres: tags(meta.Genre),
             isFavorite: false,
+            rating: meta.userRating.map { $0 / 2 },   // Plex stores 0–10; domain is 0–5
             normalizationGainDB: nil,
             addedAt: date(meta.addedAt)
         )

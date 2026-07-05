@@ -31,6 +31,7 @@ public extension TrackRecord {
             artwork: artworkKey.map(ArtworkRef.init(key:)),
             genres: genres,
             isFavorite: isFavorite,
+            rating: rating,
             normalizationGainDB: normalizationGainDB,
             addedAt: addedAt.map { Date(timeIntervalSince1970: $0) }
         )

@@ -160,15 +160,28 @@ final class PlexURLTests: XCTestCase {
         XCTAssertTrue(string.contains("X-Plex-Token=plex-token"))
     }
 
-    func testSetFavoriteIsUnsupported() async {
-        do {
-            try await makeBackend().setFavorite(true, itemID: "3001", type: .track)
-            XCTFail("Plex should not support favorites")
-        } catch let error as MozzError {
-            guard case .unsupported = error else { return XCTFail("wrong error: \(error)") }
-        } catch {
-            XCTFail("wrong error type")
-        }
+    func testSetRatingIssuesRateRequest() async throws {
+        // Plex has no boolean favorite; a rating is written via `/:/rate` with
+        // the value on Plex's 0–10 scale (4★ → 8). The mock 404s on this path,
+        // but the outgoing request (what we're testing) is still captured.
+        let transport = PlexFixtureTransport([])
+        _ = try? await makeBackend(transport).setRating(4, itemID: "3001", type: .track)
+        let url = try XCTUnwrap(transport.lastRequest?.url?.absoluteString)
+        XCTAssertTrue(url.contains(":/rate"), "expected the rate endpoint, got \(url)")
+        XCTAssertTrue(url.contains("key=3001"))
+        XCTAssertTrue(url.contains("rating=8"), "4★ should map to Plex rating 8, got \(url)")
+        XCTAssertTrue(url.contains("identifier=com.plexapp.plugins.library"))
+    }
+
+    func testSetFavoriteMapsToFiveStarRating() async throws {
+        // On Plex a "like" is expressed as 5★ (rating 10); "unlike" clears it (0).
+        let transport = PlexFixtureTransport([])
+        _ = try? await makeBackend(transport).setFavorite(true, itemID: "3001", type: .track)
+        XCTAssertTrue(try XCTUnwrap(transport.lastRequest?.url?.absoluteString).contains("rating=10"))
+
+        let clearTransport = PlexFixtureTransport([])
+        _ = try? await makeBackend(clearTransport).setFavorite(false, itemID: "3001", type: .track)
+        XCTAssertTrue(try XCTUnwrap(clearTransport.lastRequest?.url?.absoluteString).contains("rating=0"))
     }
 }
 

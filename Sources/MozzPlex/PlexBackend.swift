@@ -73,8 +73,9 @@ public struct PlexBackend: MusicBackend {
             supportsTranscoding: true,
             supportsOriginalFileDownload: true,
             // Plex has 5-star ratings, not a boolean favorite; the UI gates the
-            // heart off this flag rather than pretending ratings are favorites.
+            // heart off supportsFavorites and shows a rating chip off this flag.
             supportsFavorites: false,
+            supportsRatings: true,
             supportsLyrics: false,
             supportsSyncedLyrics: false,
             supportsNormalizationGain: false,
@@ -178,9 +179,23 @@ public struct PlexBackend: MusicBackend {
     // MARK: Writes
 
     public func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {
-        // Plex has no boolean favorite for music; capability detection reports
-        // `supportsFavorites = false`, so a well-behaved UI never calls this.
-        throw MozzError.unsupported("Plex uses star ratings, not favorites")
+        // Plex has no boolean favorite for music. Express a "like" as 5 stars and
+        // an "unlike" as clearing the rating, so any caller works even though the
+        // UI (gated on supportsFavorites=false) shows a rating chip, not a heart.
+        try await setRating(isFavorite ? 5 : nil, itemID: itemID, type: type)
+    }
+
+    public func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws {
+        // Plex `userRating` is 0–10 (10 == 5 stars). Clearing sends 0. Plex's
+        // rate endpoint is a GET with query params, like the timeline scrobble.
+        let plexRating = stars.map { max(0, min(10, Int(($0 * 2).rounded()))) } ?? 0
+        let endpoint = Endpoint(path: ":/rate", query: [
+            URLQueryItem(name: "key", value: itemID),
+            URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
+            URLQueryItem(name: "rating", value: "\(plexRating)"),
+            URLQueryItem(name: "X-Plex-Client-Identifier", value: connection.clientIdentifier),
+        ])
+        _ = try await client.send(endpoint)
     }
 
     public func reportPlayback(_ report: PlaybackReport) async throws {

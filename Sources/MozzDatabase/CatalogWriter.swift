@@ -86,7 +86,7 @@ public struct CatalogWriter: Sendable {
                     track.format.container, track.format.codec, track.format.bitrateKbps,
                     track.format.sampleRateHz, track.format.channels, track.format.bitDepth,
                     track.fileSizeBytes, track.mediaKey, track.artwork?.key,
-                    track.isFavorite, track.normalizationGainDB,
+                    track.isFavorite, track.rating, track.normalizationGainDB,
                     track.addedAt?.timeIntervalSince1970, Self.jsonText(track.genres),
                 ])
             }
@@ -223,7 +223,7 @@ public struct CatalogWriter: Sendable {
         "title", "sortTitle", "albumTitle", "albumRemoteId", "artistName",
         "artistRemoteId", "albumArtistName", "trackNumber", "discNumber", "duration",
         "container", "codec", "bitrateKbps", "sampleRateHz", "channels", "bitDepth",
-        "fileSizeBytes", "mediaKey", "artworkKey", "isFavorite", "normalizationGainDB",
+        "fileSizeBytes", "mediaKey", "artworkKey", "isFavorite", "rating", "normalizationGainDB",
         "addedAt", "genres",
     ])
     private static let playlistUpsertSQL = upsertSQL(table: "playlist", columns: [

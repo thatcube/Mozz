@@ -139,6 +139,11 @@ public protocol MusicBackend: Sendable {
     /// server has no favorites concept.
     func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws
 
+    /// Set or clear a 0–5 star rating (half-steps). `stars == nil` clears it.
+    /// Throws ``MozzError/unsupported(_:)`` if the server has no ratings concept
+    /// (Jellyfin — it uses favorites instead).
+    func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws
+
     /// Report playback progress / scrobble. No-op by default.
     func reportPlayback(_ report: PlaybackReport) async throws
 }

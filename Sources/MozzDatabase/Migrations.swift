@@ -12,6 +12,7 @@ enum Schema {
         registerV4(&migrator)
         registerV5(&migrator)
         registerV6(&migrator)
+        registerV7(&migrator)
         return migrator
     }
 
@@ -329,6 +330,24 @@ enum Schema {
             // Stream a set's items in rank order without a sort step.
             try db.create(index: "idx_rec_item_rank", on: "recommendation_item",
                           columns: ["set_id", "rank"])
+        }
+    }
+
+    /// v7 — "liked songs" across backends. Jellyfin has a boolean favorite
+    /// (`isFavorite`, already synced); Plex has no favorite but a 0–5 star
+    /// rating. Add a per-track `rating` (0–5, half-steps, nil = unrated) so Plex
+    /// ratings have a home, plus a `supportsRatings` capability so the UI knows
+    /// to show a heart (favorites) vs a rating chip (ratings). "Liked" is then a
+    /// union: `isFavorite OR rating >= threshold`. Additive; existing installs
+    /// get `rating = NULL` and `supportsRatings = 0` until the next sync/probe.
+    private static func registerV7(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v7.ratings") { db in
+            try db.alter(table: "track") { t in
+                t.add(column: "rating", .double)
+            }
+            try db.alter(table: "serverCapabilities") { t in
+                t.add(column: "supportsRatings", .boolean).notNull().defaults(to: false)
+            }
         }
     }
 }

@@ -63,6 +63,7 @@ struct MockBackend: MusicBackend {
     }
     func artworkURL(for artwork: ArtworkRef, size: Int) -> URL? { nil }
     func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {}
+    func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws {}
 
     private static func page<T>(_ all: [T], offset: Int, limit: Int) -> CatalogPage<T> {
         guard offset < all.count else { return CatalogPage(items: [], totalCount: all.count) }

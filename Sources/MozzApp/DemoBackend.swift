@@ -58,4 +58,6 @@ public struct DemoBackend: MusicBackend {
     public func artworkURL(for artwork: ArtworkRef, size: Int) -> URL? { nil }
 
     public func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {}
+
+    public func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws {}
 }
