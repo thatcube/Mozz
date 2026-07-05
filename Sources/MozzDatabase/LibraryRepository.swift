@@ -138,6 +138,22 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    public func album(serverId: ServerID, remoteId: String) async throws -> AlbumRecord? {
+        try await database.read { db in
+            try AlbumRecord
+                .filter(Column("serverId") == serverId && Column("remoteId") == remoteId)
+                .fetchOne(db)
+        }
+    }
+
+    public func artist(serverId: ServerID, remoteId: String) async throws -> ArtistRecord? {
+        try await database.read { db in
+            try ArtistRecord
+                .filter(Column("serverId") == serverId && Column("remoteId") == remoteId)
+                .fetchOne(db)
+        }
+    }
+
     /// Ordered tracks of a playlist, resolving membership to local track rows.
     public func tracks(forPlaylistRemoteId playlistRemoteId: String, serverId: ServerID) async throws -> [TrackRecord] {
         try await database.read { db in
