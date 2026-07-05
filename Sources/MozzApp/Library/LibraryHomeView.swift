@@ -6,9 +6,10 @@ import MozzDatabase
 /// Playlists, Artists, Albums, Genres, Downloaded) with a "Recently Added" shelf
 /// at the bottom.
 ///
-/// Uses the same native large title + trailing Settings avatar as Home and
-/// Search (via `musicNavigationBar`) so the title lands in the identical spot on
-/// every tab, over a plain `ScrollView`
+/// Uses the same tight custom header (title + trailing avatar, via `TightHeader`)
+/// as Home and Search so the title sits right under the status bar and in the
+/// identical spot on every tab, over a plain `ScrollView`. The navigation bar is
+/// hidden (`hideNavigationBar`) so only the custom header shows.
 /// (not an inset-grouped `List`) so nothing offsets the content.
 ///
 /// This view owns the tab's single `NavigationStack`; every screen it pushes
@@ -24,6 +25,8 @@ struct LibraryHomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    TightHeader(title: "Library")
+
                     VStack(spacing: 0) {
                         categoryLink("Songs", "music.note") { SongsView() }
                         rowDivider
@@ -42,10 +45,9 @@ struct LibraryHomeView: View {
                         AlbumShelf(title: "Recently Added", albums: recentlyAdded)
                     }
                 }
-                .padding(.top, 8)
                 .padding(.bottom, 24)
             }
-            .musicNavigationBar("Library")
+            .hideNavigationBar()
             .task { await loadRecent() }
         }
     }

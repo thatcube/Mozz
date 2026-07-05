@@ -15,6 +15,8 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    TightHeader(title: "Home")
+
                     if !recentlyPlayed.isEmpty {
                         TrackShelf(title: "Recently Played", tracks: recentlyPlayed)
                     }
@@ -27,10 +29,9 @@ struct HomeView: View {
                             .padding(.top, 60)
                     }
                 }
-                .padding(.top, 8)
                 .padding(.bottom, 24)
             }
-            .musicNavigationBar("Home")
+            .hideNavigationBar()
             .task { await load() }
             .refreshable { await load() }
         }

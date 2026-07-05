@@ -35,58 +35,31 @@ extension View {
         #endif
     }
 
-    /// A large navigation-bar title on iOS (the standard collapsing large title
-    /// every top-level screen shares). On the macOS test host it just sets the
-    /// title (no display-mode API).
-    @ViewBuilder func largeNavigationTitle(_ title: String) -> some View {
-        #if os(iOS) || os(tvOS)
-        self.navigationTitle(title).navigationBarTitleDisplayMode(.large)
+    /// Hides the navigation bar on iOS so a custom scroll-away header (title +
+    /// avatar, tight to the top like Apple Music) can stand in for it — the
+    /// native SwiftUI large title can't be pulled that high (its top inset is
+    /// larger and not reducible). Pass `false` to reveal the bar (e.g. while
+    /// native search is active, which needs the bar to host its field). No-op on
+    /// the macOS test host.
+    @ViewBuilder func hideNavigationBar(_ hidden: Bool = true) -> some View {
+        #if os(iOS)
+        self.toolbar(hidden ? .hidden : .visible, for: .navigationBar)
         #else
-        self.navigationTitle(title)
+        self
         #endif
     }
 
-    /// The Apple Music-style top bar: the large title with the Settings avatar
-    /// aligned to its trailing edge, on the same line. iOS 26's
-    /// `ToolbarItemPlacement.largeTitle` hosts custom content *in* the large-title
-    /// row, so we lay out the title + avatar there ourselves to get exact
-    /// alignment (a lone item would center and drop the text). `.navigationTitle`
-    /// still drives the collapsed/inline title and pushed-view back button.
-    /// On iOS 17–25 we fall back to a standard large title with the avatar in the
-    /// top-trailing slot; on the macOS test host it's just the title.
-    @ViewBuilder func musicNavigationBar(_ title: String) -> some View {
+    /// Real iOS 26 Liquid Glass, clipped to a capsule (for the custom search
+    /// field). Falls back to a material on iOS 17–25 and the macOS test host.
+    @ViewBuilder func glassCapsule() -> some View {
         #if os(iOS)
         if #available(iOS 26.0, *) {
-            self.navigationTitle(title)
-                .toolbar {
-                    ToolbarItem(placement: .largeTitle) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(title).font(.largeTitle.bold())
-                            Spacer(minLength: 12)
-                            SettingsAvatar().alignmentGuide(.firstTextBaseline) { $0[.bottom] }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
+            self.glassEffect(.regular, in: Capsule())
         } else {
-            self.navigationTitle(title)
-                .navigationBarTitleDisplayMode(.large)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsAvatar() } }
+            self.background(.regularMaterial, in: Capsule())
         }
         #else
-        self.navigationTitle(title)
-        #endif
-    }
-
-    /// The system `.searchable` search field, kept always-visible below the
-    /// large title on iOS (the Apple Music look) via the navigation-bar drawer.
-    /// On the macOS test host it falls back to the default placement so the code
-    /// still compiles.
-    @ViewBuilder func librarySearchable(text: Binding<String>, prompt: String) -> some View {
-        #if os(iOS)
-        self.searchable(text: text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
-        #else
-        self.searchable(text: text, prompt: prompt)
+        self.background(.regularMaterial, in: Capsule())
         #endif
     }
 }

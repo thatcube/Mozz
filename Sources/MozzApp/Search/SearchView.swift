@@ -7,11 +7,13 @@ import MozzDatabase
 /// search hits SQLite directly, it stays well under the sub-100ms bar even at
 /// 100k tracks.
 ///
-/// Uses the system `.searchable` field (via `librarySearchable`) so we get the
-/// real iOS search experience for free: the Liquid Glass field, the native
-/// focus animation, and the system Cancel button — the exact Apple Music
-/// behavior. When the query is empty it shows a "Recently Searched" list
-/// resolved live from the catalog.
+/// At rest it shows a tight custom header ("Search" + avatar) matching Apple
+/// Music's top-aligned title, plus a search field. Focusing the field collapses
+/// the header, slides the field up, and reveals a Cancel button. The field uses
+/// real iOS 26 Liquid Glass; we can't use the system `.searchable` here because
+/// it requires a visible navigation bar, which is incompatible with the tight
+/// top-aligned title. When the query is empty it shows a "Recently Searched"
+/// list resolved live from the catalog.
 struct SearchView: View {
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var recents = RecentSearchStore()
@@ -20,40 +22,88 @@ struct SearchView: View {
     @State private var resolvedRecents: [RecentResolved] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var lastLatencyMs: Double?
+    @FocusState private var focused: Bool
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
+    /// Actively searching — the field is focused or a query has been entered.
+    /// Drives the collapse of the title header and the Cancel button.
+    private var isActive: Bool { focused || !trimmedQuery.isEmpty }
 
     var body: some View {
         NavigationStack {
-            List {
-                if trimmedQuery.isEmpty {
-                    if !resolvedRecents.isEmpty {
-                        Section {
-                            ForEach(resolvedRecents) { recentRow($0) }
-                        } header: {
-                            HStack {
-                                Text("Recently Searched").font(.headline).textCase(nil)
-                                Spacer()
-                                Button("Clear") { recents.clear() }.font(.subheadline)
-                            }
-                        }
-                    }
-                } else {
-                    resultSections
+            VStack(spacing: 0) {
+                if !isActive {
+                    TightHeader(title: "Search")
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                HStack(spacing: 12) {
+                    searchField
+                    if isActive {
+                        Button("Cancel") { cancelSearch() }
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, isActive ? 8 : 0)
+                .padding(.bottom, 8)
+
+                resultsList
             }
-            .listStyle(.plain)
-            .musicNavigationBar("Search")
-            .librarySearchable(text: $query, prompt: "Artists, albums, songs")
+            .animation(.snappy(duration: 0.3), value: isActive)
+            .hideNavigationBar()
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
-            .overlay { emptyState }
-            .safeAreaInset(edge: .bottom) {
-                if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
-                    Text(String(format: "found in %.1f ms", ms))
-                        .font(.caption2).foregroundStyle(.tertiary)
-                        .padding(.bottom, 4)
+        }
+    }
+
+    /// A custom search field with real iOS 26 Liquid Glass. We can't use the
+    /// system `.searchable` here because it requires a visible navigation bar,
+    /// which is incompatible with the tight top-aligned title — so we recreate
+    /// the field (glass material + focus animation + Cancel) to keep both.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Artists, albums, songs", text: $query)
+                .focused($focused)
+                .submitLabel(.search)
+                .plainTextFieldStyle()
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .glassCapsule()
+    }
+
+    private var resultsList: some View {
+        List {
+            if trimmedQuery.isEmpty {
+                if !resolvedRecents.isEmpty {
+                    Section {
+                        ForEach(resolvedRecents) { recentRow($0) }
+                    } header: {
+                        HStack {
+                            Text("Recently Searched").font(.headline).textCase(nil)
+                            Spacer()
+                            Button("Clear") { recents.clear() }.font(.subheadline)
+                        }
+                    }
+                }
+            } else {
+                resultSections
+            }
+        }
+        .listStyle(.plain)
+        .overlay { emptyState }
+        .safeAreaInset(edge: .bottom) {
+            if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
+                Text(String(format: "found in %.1f ms", ms))
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .padding(.bottom, 4)
             }
         }
     }
@@ -143,6 +193,13 @@ struct SearchView: View {
     }
 
     // MARK: Actions
+
+    private func cancelSearch() {
+        query = ""
+        focused = false
+        results = SearchResults(artists: [], albums: [], tracks: [])
+        lastLatencyMs = nil
+    }
 
     private func record(_ kind: RecentSearchItem.Kind, serverId: String, remoteId: String) {
         recents.add(RecentSearchItem(kind: kind, serverId: serverId, remoteId: remoteId))
