@@ -30,6 +30,10 @@ struct NowPlayingMorphContainer: View {
     @State private var p: CGFloat = 0
     /// Live drag translation (points) while the open drawer is being pulled down.
     @State private var dragY: CGFloat = 0
+    /// Transient extra height added to the island's BOTTOM edge during the
+    /// receive-bounce (points). Rests at 0. Driven by its own spring so the
+    /// bounce feel is tunable independently of the collapse speed.
+    @State private var bounce: CGFloat = 0
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
 
@@ -44,7 +48,7 @@ struct NowPlayingMorphContainer: View {
             GeometryReader { geo in
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
-                              p: p, dragY: dragY)
+                              pRaw: p, dragY: dragY, bounce: bounce)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     travelingArtwork(m)
@@ -128,7 +132,10 @@ struct NowPlayingMorphContainer: View {
             .disabled(!playback.snapshot.hasNext)
             .opacity(playback.snapshot.hasNext ? 1 : 0.4)
         }
-        .padding(.horizontal, Morph.islandContentPad)
+        // Artwork + titles are shifted right (bigger leading inset); play/next
+        // keep the tighter trailing inset so they don't move.
+        .padding(.leading, Morph.islandArtLeading)
+        .padding(.trailing, Morph.islandContentPad)
         // Tapping the pill (outside the buttons) expands into the drawer.
         .contentShape(Rectangle())
         .onTapGesture { ui.isFullPresented = true }
@@ -208,16 +215,36 @@ struct NowPlayingMorphContainer: View {
             }
     }
 
-    /// The single animator. `open` grows the drawer; `!open` collapses it into
-    /// the island with a gentle receive-bounce (low damping = small overshoot).
+    /// The single animator.
+    /// - `open`  grows the drawer with a smooth spring.
+    /// - `!open` collapses it into the island. The *shape* (top edge, width,
+    ///   radius, artwork, opacities) settles on a clean, near-critically-damped
+    ///   spring so nothing overshoots below island size (no artwork clip). The
+    ///   *receive-bounce* is a separate, decoupled pulse on `bounce`: the moment
+    ///   of collapse loads the island's bottom edge, which then springs back —
+    ///   the island stretches taller from the bottom, then settles.
     private func animate(to open: Bool) {
         if open {
+            bounce = 0
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) {
                 p = 1; dragY = 0
             }
         } else {
-            withAnimation(.spring(response: 0.44, dampingFraction: 0.72)) {
+            let wasExpanded = p > 0.5
+            // Slower + smoother than before (was 0.44 / 0.72) so the collapse
+            // no longer feels fast or over-springy.
+            withAnimation(.spring(response: 0.58, dampingFraction: 0.9)) {
                 p = 0; dragY = 0
+            }
+            // Only bounce when actually collapsing from the open drawer (not on
+            // the initial appear, where we're already docked).
+            guard wasExpanded else { return }
+            // Load the bottom-edge stretch, then spring it back to rest. It's
+            // masked while the surface is still large and only reads once the
+            // surface reaches island size — a downward stretch that retracts.
+            bounce = Morph.receiveStretch
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
+                bounce = 0
             }
         }
     }
@@ -320,15 +347,24 @@ private struct Morph {
     let height: CGFloat
     let safeTop: CGFloat
     let safeBottom: CGFloat
-    let p: CGFloat
+    /// Raw progress from the spring. May momentarily leave [0,1]; clamped via `p`.
+    let pRaw: CGFloat
     let dragY: CGFloat
+    /// Extra height on the island's bottom edge for the receive-bounce (points).
+    let bounce: CGFloat
+
+    /// Clamped progress — everything below is a function of this, so the shape,
+    /// artwork and top edge can never overshoot past their island rest values
+    /// (that overshoot is what used to shrink the surface and clip the artwork).
+    var p: CGFloat { min(max(pRaw, 0), 1) }
 
     // MARK: tunables
     static let islandHeight: CGFloat = 56
     static let islandHMargin: CGFloat = 14      // pill inset from the screen edges
-    static let islandContentPad: CGFloat = 12   // inset inside the pill
-    static let islandArtSide: CGFloat = 42
-    static let islandArtRadius: CGFloat = 9
+    static let islandContentPad: CGFloat = 12   // trailing inset (play/next side)
+    static let islandArtLeading: CGFloat = 20   // leading inset — shifts art+titles right
+    static let islandArtSide: CGFloat = 34      // was 42 (−8, smaller island artwork)
+    static let islandArtRadius: CGFloat = 8
     static let islandBottomGap: CGFloat = 8     // gap between island and tab bar
     static let tabBarHeight: CGFloat = 50       // floating tab-bar estimate
     static let expandedRadius: CGFloat = 24
@@ -336,6 +372,7 @@ private struct Morph {
     static let bottomOverhang: CGFloat = 120    // surface runs off-screen at p=1
     static let expArtTopGap: CGFloat = 39       // grabber + gap above big artwork
     static let expArtMaxSide: CGFloat = 340
+    static let receiveStretch: CGFloat = 26     // bottom-edge stretch loaded on collapse
 
     // Island (collapsed) frame -----------------------------------------------
     var islandW: CGFloat { width - 2 * Self.islandHMargin }
@@ -343,7 +380,7 @@ private struct Morph {
     var islandTop: CGFloat { islandBottom - Self.islandHeight }
     var islandCenterY: CGFloat { islandBottom - Self.islandHeight / 2 }
     var islandLeft: CGFloat { (width - islandW) / 2 }
-    var islandArtCenterX: CGFloat { islandLeft + Self.islandContentPad + Self.islandArtSide / 2 }
+    var islandArtCenterX: CGFloat { islandLeft + Self.islandArtLeading + Self.islandArtSide / 2 }
     var islandRadius: CGFloat { Self.islandHeight / 2 }
 
     // Expanded artwork --------------------------------------------------------
@@ -353,7 +390,11 @@ private struct Morph {
     // Morphing surface --------------------------------------------------------
     var surfaceW: CGFloat { lerp(islandW, width, p) }
     var surfaceHExpanded: CGFloat { height + Self.bottomOverhang }
-    var surfaceH: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) }
+    /// Base height from the morph, plus the transient receive-bounce added to the
+    /// BOTTOM edge only (the top edge stays put, so the island stretches taller
+    /// from the bottom then settles). Clamped so an up-overshoot can't eat the
+    /// mini row / artwork.
+    var surfaceH: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) + max(bounce, -6) }
     /// Top edge follows the finger 1:1 at p=1, and lands on the island's top on
     /// collapse. `dragY` is folded back to 0 by the collapse spring alongside p.
     var topEdge: CGFloat { lerp(islandTop, 0, p) + dragY }
