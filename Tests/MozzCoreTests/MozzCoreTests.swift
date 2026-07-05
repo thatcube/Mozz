@@ -140,6 +140,19 @@ final class MozzErrorTests: XCTestCase {
         XCTAssertFalse(MozzError.unauthorized.isReachabilityFailure)
         XCTAssertFalse(MozzError.badStatus(500).isReachabilityFailure)
     }
+
+    func testLocalizedDescriptionSurfacesDetail() {
+        // `unsupported`/`transport`/`decodingFailed` carry a human message that
+        // must reach `localizedDescription` (used in the sync-failed banner) —
+        // otherwise it falls back to the opaque "error N" NSError text.
+        XCTAssertEqual(
+            MozzError.unsupported("No music library on ‘X’").errorDescription,
+            "No music library on ‘X’")
+        XCTAssertEqual(MozzError.transport("timed out").errorDescription, "timed out")
+        let localized = (MozzError.unsupported("why") as Error).localizedDescription
+        XCTAssertEqual(localized, "why")
+        XCTAssertFalse(localized.contains("error 2"))
+    }
 }
 
 final class CredentialStoreTests: XCTestCase {

@@ -486,10 +486,15 @@ public final class AppEnvironment: ObservableObject {
               let plex = current.backend as? PlexBackend else { return }
 
         guard let section = try await plex.musicSections().first else {
-            let all = (try? await plex.allLibrarySections()) ?? []
-            let summary = all.isEmpty
-                ? "the server returned no library sections"
-                : "found only " + all.map { "\($0.title ?? "?") (\($0.type ?? "?"))" }.joined(separator: ", ")
+            let summary: String
+            do {
+                let all = try await plex.allLibrarySections()
+                summary = all.isEmpty
+                    ? "the server returned no library sections"
+                    : "found only " + all.map { "\($0.title ?? "?") (\($0.type ?? "?"))" }.joined(separator: ", ")
+            } catch {
+                summary = "couldn't list sections: \(error.localizedDescription)"
+            }
             throw MozzError.unsupported("No music library on ‘\(current.connection.name)’ — \(summary)")
         }
 
