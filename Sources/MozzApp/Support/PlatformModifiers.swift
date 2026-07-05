@@ -14,16 +14,6 @@ extension View {
         #endif
     }
 
-    /// Inset-grouped list style (the rounded "card" look) on iOS/tvOS; falls
-    /// back to the default style on macOS, where `.insetGrouped` is unavailable.
-    @ViewBuilder func insetGroupedListStyle() -> some View {
-        #if os(iOS) || os(tvOS)
-        self.listStyle(.insetGrouped)
-        #else
-        self
-        #endif
-    }
-
     /// URL-entry configuration (no autocaps/autocorrect, URL keyboard) on iOS.
     @ViewBuilder func urlFieldStyle() -> some View {
         #if os(iOS)
@@ -51,16 +41,6 @@ extension View {
     @ViewBuilder func hideNavigationBar() -> some View {
         #if os(iOS)
         self.toolbar(.hidden, for: .navigationBar)
-        #else
-        self
-        #endif
-    }
-
-    /// Pins the Settings avatar in the top-trailing nav-bar slot on iOS (used on
-    /// Search, whose `.searchable` field requires the nav bar). No-op on macOS.
-    @ViewBuilder func trailingSettingsAvatar() -> some View {
-        #if os(iOS)
-        self.toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsAvatar() } }
         #else
         self
         #endif

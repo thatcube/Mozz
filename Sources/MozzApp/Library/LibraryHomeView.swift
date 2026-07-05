@@ -3,79 +3,65 @@ import MozzCore
 import MozzDatabase
 
 /// The Library tab root — an Apple Music-style menu of category rows (Songs,
-/// Playlists, Artists, Albums, Genres) with a "Recently Added" shelf at the
-/// bottom.
+/// Playlists, Artists, Albums, Genres, Downloaded) with a "Recently Added" shelf
+/// at the bottom.
 ///
-/// This view owns the tab's single `NavigationStack`; every category screen it
-/// pushes (SongsView, AlbumsView, ArtistsView, …) must NOT declare its own
-/// stack. Nesting `NavigationStack`s builds a pathologically deep
-/// hosting/hit-test hierarchy that turns routine layout passes into multi-second
-/// hangs, so the one-stack-per-tab rule is load-bearing, not stylistic.
+/// Uses the same scroll-away `ScreenHeader` as Home and Search so the title
+/// lands in the identical spot on every tab, and a plain `ScrollView` (not an
+/// inset-grouped `List`) so nothing offsets the title downward.
+///
+/// This view owns the tab's single `NavigationStack`; every screen it pushes
+/// (SongsView, AlbumsView, DownloadsView, …) must NOT declare its own stack.
+/// Nesting `NavigationStack`s builds a pathologically deep hosting/hit-test
+/// hierarchy that turns routine layout passes into multi-second hangs, so the
+/// one-stack-per-tab rule is load-bearing, not stylistic.
 struct LibraryHomeView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var recentlyAdded: [AlbumRecord] = []
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
                     ScreenHeader(title: "Library")
-                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                }
 
-                Section {
-                    NavigationLink { SongsView() } label: {
-                        LibraryCategoryRow(title: "Songs", systemImage: "music.note")
+                    VStack(spacing: 0) {
+                        categoryLink("Songs", "music.note") { SongsView() }
+                        rowDivider
+                        categoryLink("Playlists", "music.note.list") { PlaylistsView() }
+                        rowDivider
+                        categoryLink("Artists", "music.mic") { ArtistsView() }
+                        rowDivider
+                        categoryLink("Albums", "square.stack") { AlbumsView() }
+                        rowDivider
+                        categoryLink("Genres", "guitars") { GenresView() }
+                        rowDivider
+                        categoryLink("Downloaded", "arrow.down.circle") { DownloadsView() }
                     }
-                    NavigationLink { PlaylistsView() } label: {
-                        LibraryCategoryRow(title: "Playlists", systemImage: "music.note.list")
-                    }
-                    NavigationLink { ArtistsView() } label: {
-                        LibraryCategoryRow(title: "Artists", systemImage: "music.mic")
-                    }
-                    NavigationLink { AlbumsView() } label: {
-                        LibraryCategoryRow(title: "Albums", systemImage: "square.stack")
-                    }
-                    NavigationLink { GenresView() } label: {
-                        LibraryCategoryRow(title: "Genres", systemImage: "guitars")
-                    }
-                    NavigationLink { DownloadsView() } label: {
-                        LibraryCategoryRow(title: "Downloaded", systemImage: "arrow.down.circle")
-                    }
-                }
 
-                if !recentlyAdded.isEmpty {
-                    Section("Recently Added") {
-                        recentlyAddedShelf
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
+                    if !recentlyAdded.isEmpty {
+                        AlbumShelf(title: "Recently Added", albums: recentlyAdded)
                     }
                 }
+                .padding(.bottom, 24)
             }
-            .insetGroupedListStyle()
             .hideNavigationBar()
             .task { await loadRecent() }
         }
     }
 
-    private var recentlyAddedShelf: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 16) {
-                ForEach(recentlyAdded) { album in
-                    NavigationLink {
-                        AlbumDetailView(album: album)
-                    } label: {
-                        AlbumCell(album: album)
-                            .frame(width: 150)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+    private var rowDivider: some View {
+        Divider().padding(.leading, 64)
+    }
+
+    private func categoryLink<Destination: View>(
+        _ title: String, _ systemImage: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink { destination() } label: {
+            LibraryCategoryRow(title: title, systemImage: systemImage)
         }
+        .buttonStyle(.plain)
     }
 
     private func loadRecent() async {
@@ -84,20 +70,26 @@ struct LibraryHomeView: View {
     }
 }
 
-/// A single category row: tinted SF Symbol + title, matching the Apple Music
-/// library menu. The chevron is supplied by the enclosing `NavigationLink`.
+/// A single category row: tinted SF Symbol + title + trailing chevron, matching
+/// the Apple Music library menu.
 struct LibraryCategoryRow: View {
     let title: String
     let systemImage: String
 
     var body: some View {
-        Label {
-            Text(title)
-        } icon: {
+        HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .foregroundStyle(Color.accentColor)
                 .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 32)
+            Text(title).font(.title3)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
     }
 }

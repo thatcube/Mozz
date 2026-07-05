@@ -3,20 +3,21 @@ import MozzCore
 import MozzDatabase
 
 /// A scroll-away screen header: a large title with the Settings avatar at the
-/// trailing edge. Placed as the first item in a screen's scrolling content (not
-/// the nav bar), so it scrolls off as the user scrolls down — and the avatar
-/// isn't pinned over the content.
+/// trailing edge, on the same line. Placed as the first item in a screen's
+/// scrolling content so the title lands in the same spot on every tab and the
+/// avatar is always aligned with it.
 struct ScreenHeader: View {
     let title: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center) {
             Text(title).font(.largeTitle.bold())
             Spacer()
-            SettingsAvatar().alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+            SettingsAvatar()
         }
         .padding(.horizontal, 20)
-        .padding(.top, 4)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 }
 
