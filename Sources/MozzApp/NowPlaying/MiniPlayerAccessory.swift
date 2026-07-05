@@ -15,22 +15,27 @@ struct MiniPlayerAccessory: View {
     var body: some View {
         if let track = playback.currentTrack {
             HStack(spacing: 10) {
-                ArtworkView(artwork: track.artwork, seed: track.albumTitle ?? track.title,
-                            size: 30, cornerRadius: 8)
-                    .opacity(ui.isFullPresented ? 0 : 1)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(key: MiniArtFrameKey.self,
-                                                   value: geo.frame(in: .global))
-                        }
-                    )
-                    .onTapGesture(perform: onTap)
+                // Artwork + titles are one tap target that fills the pill's full
+                // height and width, so a tap anywhere on the bar (not just the
+                // 30pt artwork or the text baseline) reliably opens the player.
+                HStack(spacing: 10) {
+                    ArtworkView(artwork: track.artwork, seed: track.albumTitle ?? track.title,
+                                size: 30, cornerRadius: 8)
+                        .opacity(ui.isFullPresented ? 0 : 1)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: MiniArtFrameKey.self,
+                                                       value: geo.frame(in: .global))
+                            }
+                        )
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Text(track.artistName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(track.artistName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onTap)
 
@@ -52,6 +57,7 @@ struct MiniPlayerAccessory: View {
                 .disabled(!playback.snapshot.hasNext)
                 .opacity(playback.snapshot.hasNext ? 1 : 0.4)
             }
+            .frame(maxHeight: .infinity)
             .padding(.horizontal, 10)
             .onPreferenceChange(MiniArtFrameKey.self) { frame in
                 // The system lays this content out in more than one context: the

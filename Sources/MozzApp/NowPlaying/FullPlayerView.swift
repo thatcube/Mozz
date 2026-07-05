@@ -267,12 +267,7 @@ private struct PlayerArtwork: View {
     var body: some View {
         Group {
             if let url = resolvedURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-                    default: placeholder
-                    }
-                }
+                CachedArtworkImage(url: url) { placeholder }
             } else {
                 placeholder
             }
