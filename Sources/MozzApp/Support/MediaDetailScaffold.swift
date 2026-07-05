@@ -41,39 +41,41 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     @State private var bg: Color = Color(white: 0.12)
     @State private var resolvedColor = false
 
-    private static var fullBleedHeight: CGFloat { 440 }
+    private static var fullBleedHeight: CGFloat { 500 }
     private static var centeredArtworkSize: CGFloat { 240 }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                header
-                content()
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 40)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.mozzDetailBackground)
+        ZStack(alignment: .topLeading) {
+            // Base color fills the entire screen (incl. under the status bar), so
+            // there's never a white band.
+            bg.ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    header
+                    content()
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 40)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.mozzDetailBackground)
+                }
             }
-        }
-        .scrollIndicators(.hidden)
-        // The hero color fills the whole backdrop (incl. under the status bar, so
-        // there's no white band); the content section paints its own near-black
-        // over it. Force a dark treatment so the page reads like Apple Music's
-        // always-dark detail pages and white hero text stays legible.
-        .background(bg.ignoresSafeArea())
-        .environment(\.colorScheme, .dark)
-        // Fully custom chrome: the system nav bar (translucent background +
-        // duplicate title) fights the hero, so hide it and float our own back
-        // button — matching the app's custom tab bar / TightHeader. Keep the
-        // swipe-back gesture (hiding the bar would otherwise disable it).
-        .hideNavigationBar()
-        .enableInteractivePop()
-        .overlay(alignment: .topLeading) {
+            .scrollIndicators(.hidden)
+            // Full-bleed hero must extend under the status bar (image behind the
+            // clock), so the ScrollView ignores the top safe area; the centered
+            // style keeps its box below the status bar.
+            .ignoresSafeArea(edges: hero.style == .fullBleed ? .top : [])
+
+            // Back button stays BELOW the status bar (the ZStack respects the
+            // safe area even though the scroll content ignores it).
             DetailBackButton { dismiss() }
                 .padding(.leading, 12)
                 .padding(.top, 4)
         }
+        .environment(\.colorScheme, .dark)
+        .hideNavigationBar()
+        .enableInteractivePop()
         .task(id: hero.seed) {
             resolvedColor = false
             let color = await DominantColor.background(
@@ -100,7 +102,6 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                         colors: [.clear, .clear, bg.opacity(0.55), bg],
                         startPoint: .top, endPoint: .bottom)
                 }
-                .ignoresSafeArea(edges: .top)
             VStack(spacing: 14) {
                 titleBlock(onDark: true)
                 actions()
