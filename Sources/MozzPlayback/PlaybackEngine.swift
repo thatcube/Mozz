@@ -24,6 +24,14 @@ public final class PlaybackEngine: ObservableObject {
     @Published public private(set) var currentTrack: Track?
     @Published public private(set) var upNext: [Track] = []
 
+    /// The track a user "next" / "previous" would land on, without mutating —
+    /// used by the island's swipe to decide whether a title/artist line will
+    /// actually change (and therefore whether it should move). Respect repeat
+    /// mode. `previous()` additionally restarts the current track when >3s in;
+    /// that policy is applied by the caller, not reflected here.
+    public var peekNextTrack: Track? { queue.peekNext }
+    public var peekPreviousTrack: Track? { queue.peekPrevious }
+
     /// Optional scrobble / progress hook. The app wires this to
     /// `MusicBackend.reportPlayback`. Never blocks playback.
     public var onReport: (@Sendable (PlaybackReport) -> Void)?

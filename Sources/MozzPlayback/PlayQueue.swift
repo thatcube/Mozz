@@ -98,6 +98,26 @@ public struct PlayQueue: Sendable, Equatable {
         }
     }
 
+    /// The track a user "previous" would land on, without mutating. Mirrors
+    /// ``peekNext`` and respects `repeatMode` (wraps to the last track under
+    /// repeat-all). Note the engine additionally *restarts* the current track on
+    /// `previous()` when more than 3s in — that policy lives in the engine, not
+    /// here, so this always reports the true prior track.
+    public var peekPrevious: Track? {
+        guard !isEmpty else { return nil }
+        switch repeatMode {
+        case .one:
+            return current
+        case .off:
+            let p = position - 1
+            return order.indices.contains(p) ? tracks[order[p]] : nil
+        case .all:
+            let p = position - 1
+            let idx = p >= 0 ? p : order.count - 1
+            return order.indices.contains(idx) ? tracks[order[idx]] : nil
+        }
+    }
+
     // MARK: Loading
 
     /// Replace the queue with `newTracks` and begin at `startIndex` (a base

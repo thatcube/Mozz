@@ -363,6 +363,19 @@ struct NowPlayingMorphContainer: View {
 
 /// Shared spring for the island text slide.
 private let islandTextSpring = Animation.spring(response: 0.34, dampingFraction: 1.0)
+/// The outgoing (leaving) title/artist clears out faster than the incoming
+/// settles, so the old text doesn't linger under the new one.
+private let islandExitAnimation = Animation.easeOut(duration: 0.20)
+/// The outgoing text aims WELL past the zone edge (this × zoneW), so it becomes
+/// fully hidden early in the ease (during its fast part) rather than only at the
+/// decelerating tail — otherwise a long title's tail lingers as the new one
+/// settles. It's off-screen for the slow remainder, so the overshoot is unseen.
+private let islandExitOvershoot: CGFloat = 1.9
+/// The incoming text STARTS this far past the edge (× zoneW), beyond the fade, so
+/// the spring's fast initial burst happens off-screen and the visible motion is
+/// the slower settle — it reads as sliding in from the edge, not appearing
+/// mid-zone. Symmetric with the exit overshoot.
+private let islandEnterOvershoot: CGFloat = 1.9
 
 /// Live press state for the docked island. `@Observable` so SwiftUI's
 /// per-property observation re-renders only the views that read a given field:
@@ -445,6 +458,12 @@ private struct IslandContent: View {
     @State private var zoneW: CGFloat = 220      // measured text-zone width
     @State private var commitTick = 0            // bumped to fire a haptic pop
     @State private var armedDir = 0              // side currently past the threshold
+    // A text line locks (stays put, ignores the thumb) when the track it'd change
+    // to shares that line's text — so the artist never "scrolls" when swiping
+    // between same-artist tracks. Set at drag time so they stay correct through
+    // the commit settle (when currentTrack has already advanced).
+    @State private var lockTitle = false
+    @State private var lockArtist = false
 
     /// Scales with Dynamic Type (10 at default) so we can subtract its growth from
     /// the title/artist line spacing — the two lines pull together at large sizes,
@@ -456,6 +475,36 @@ private struct IslandContent: View {
     /// top more than the bottom). Scales with type: ~0.5pt at default, ~0.7pt at
     /// xxxLarge — where the ~4px imbalance is actually visible.
     @ScaledMetric(relativeTo: .subheadline) private var textVerticalNudge: CGFloat = 0.5
+
+    /// Width of the soft fade at each edge of the text zone — the outgoing/incoming
+    /// (and live-drag) title/artist dissolve through it instead of hard-clipping.
+    /// Matches the artwork↔text gap (the inner HStack spacing) so the fade sits in
+    /// that gap: the resting text is fully opaque, and text only dissolves as it
+    /// slides into the gap.
+    private static let textEdgeFade: CGFloat = 10
+    /// The left fade ends this far short of the artwork (1pt), so it clears just to
+    /// the RIGHT of the artwork rather than exactly at its edge.
+    private static let textLeftFadeInset: CGFloat = 1
+    private static var textLeftFade: CGFloat { textEdgeFade - textLeftFadeInset }
+
+    /// Horizontal fade mask applied over the text zone AFTER it's been expanded by
+    /// the fade widths on each side (see body). The clear→opaque ramps therefore
+    /// fall in those expansion strips — the gaps to the artwork (left) and the play
+    /// button (right) — leaving the whole measured text area opaque. The left strip
+    /// is 1pt narrower so it clears just right of the artwork.
+    private var edgeFadeMask: some View {
+        let padded = zoneW + Self.textLeftFade + Self.textEdgeFade
+        let leftFrac = min(Self.textLeftFade / max(padded, 1), 0.5)
+        let rightFrac = min(Self.textEdgeFade / max(padded, 1), 0.5)
+        return LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: leftFrac),
+                .init(color: .black, location: 1 - rightFrac),
+                .init(color: .clear, location: 1),
+            ],
+            startPoint: .leading, endPoint: .trailing)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -470,18 +519,29 @@ private struct IslandContent: View {
                 VStack(alignment: .leading, spacing: titleArtistSpacing) {
                     IslandSlideText(text: playback.currentTrack?.title ?? "",
                                     dir: navDir, zoneW: zoneW, animate: animateSwipe,
-                                    liveDrag: dragX, commitStart: commitStart,
+                                    liveDrag: lockTitle ? 0 : dragX, commitStart: commitStart,
                                     font: .subheadline.weight(.semibold), secondary: false)
                     IslandSlideText(text: playback.currentTrack?.artistName ?? "",
                                     dir: navDir, zoneW: zoneW, animate: animateSwipe,
-                                    liveDrag: dragX, commitStart: commitStart,
+                                    liveDrag: lockArtist ? 0 : dragX, commitStart: commitStart,
                                     font: .caption2, secondary: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(GeometryReader { g in
                     Color.clear.preference(key: IslandTitleWidthKey.self, value: g.size.width)
                 })
-                .clipped()
+                // Soft fade at the zone edges (replaces a hard clip): the sliding
+                // text dissolves as it enters/leaves. Expand the maskable region by
+                // the fade width on each side, apply the fade there, then restore
+                // the layout with negative padding — so the ramps live in the gaps
+                // (to the artwork on the left, the play button on the right) and the
+                // resting text stays fully opaque. The left strip is 1pt narrower so
+                // the fade clears just to the right of the artwork, not on its edge.
+                .padding(.leading, Self.textLeftFade)
+                .padding(.trailing, Self.textEdgeFade)
+                .mask(edgeFadeMask)
+                .padding(.leading, -Self.textLeftFade)
+                .padding(.trailing, -Self.textEdgeFade)
                 // Nudge the text block up to correct font line-box asymmetry (the
                 // glyphs sit slightly low inside their line boxes, so the visual
                 // top gap is larger than the bottom). Scales with Dynamic Type, so
@@ -521,6 +581,22 @@ private struct IslandContent: View {
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
+    /// Lock a title/artist line (stops it following the thumb) when the track the
+    /// current drag direction would land on shares that line's text — so the line
+    /// never "scrolls" only to spring back. `previous()` restarts the current
+    /// track when >3s in, so in that case the target IS the current track (both
+    /// lines unchanged). No target (nothing to skip to) ⇒ no lock, so the
+    /// rubber-band feedback is preserved.
+    private func updateLineLocks(goNext: Bool) {
+        let target: Track? = goNext
+            ? playback.peekNextTrack
+            : (playback.snapshot.elapsed > 3 ? playback.currentTrack : playback.peekPreviousTrack)
+        guard let target else { lockTitle = false; lockArtist = false; return }
+        let cur = playback.currentTrack
+        lockTitle = (target.title) == (cur?.title ?? "")
+        lockArtist = (target.artistName) == (cur?.artistName ?? "")
+    }
+
     /// Shared slide-commit used by both the swipe and the skip button. `startX`
     /// is where the outgoing line begins its exit (the finger's release position
     /// for a swipe, or 0 for a button press from rest).
@@ -547,12 +623,14 @@ private struct IslandContent: View {
                 guard abs(w) > abs(h), abs(w) > Self.tapSlop else {
                     if dragX != 0 { dragX = 0 }    // vertical / tap: don't follow
                     armedDir = 0
+                    lockTitle = false; lockArtist = false
                     return
                 }
                 let canGo = w < 0
                     ? playback.snapshot.hasNext
                     : (playback.snapshot.hasPrevious || playback.snapshot.elapsed > 3)
                 dragX = canGo ? w : w * 0.3
+                updateLineLocks(goNext: w < 0)
                 var qual = 0
                 if w <= -Self.commitDist, playback.snapshot.hasNext { qual = 1 }
                 else if w >= Self.commitDist,
@@ -637,8 +715,11 @@ private struct IslandSlideText: View {
                 current = new
                 return
             }
-            let enter = dir > 0 ? zoneW : -zoneW  // incoming always from the correct side
-            let exit  = dir > 0 ? -zoneW : zoneW  // outgoing leaves the opposite side
+            let enter = dir > 0 ? zoneW * islandEnterOvershoot : -zoneW * islandEnterOvershoot  // incoming from the correct side, beyond the fade
+            // Outgoing aims well past the edge so it's hidden early (fast part of
+            // the ease), not only at the decelerating tail — no lingering tail on
+            // long titles.
+            let exit  = dir > 0 ? -zoneW * islandExitOvershoot : zoneW * islandExitOvershoot
             outgoing = current
             outgoingX = commitStart               // continue from the finger
             current = new
@@ -647,10 +728,15 @@ private struct IslandSlideText: View {
             gen += 1
             let token = gen
             // Defer one tick so the start offsets render, then slide to rest.
+            // The incoming settles on `islandTextSpring`; the outgoing clears out
+            // on the snappier `islandExitAnimation` so it leaves faster. State
+            // cleanup rides the (slower) incoming so it fires after both settle.
             DispatchQueue.main.async {
+                withAnimation(islandExitAnimation) {
+                    outgoingX = exit
+                }
                 withAnimation(islandTextSpring) {
                     currentX = 0
-                    outgoingX = exit
                 } completion: {
                     if gen == token { outgoing = nil; transitioning = false }
                 }
