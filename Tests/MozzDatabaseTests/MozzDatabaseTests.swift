@@ -363,6 +363,94 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertTrue(afterSetDelete.isEmpty, "items cascade-delete with their set")
     }
 
+    func testLikedTracksUnifiesFavoritesAndRatings() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([
+            Track(id: "fav", title: "Fav", artistName: "A", isFavorite: true),
+            Track(id: "r5", title: "Rated5", artistName: "B", rating: 5),
+            Track(id: "r4", title: "Rated4", artistName: "C", rating: 4),
+            Track(id: "r3", title: "Rated3", artistName: "D", rating: 3),   // below threshold
+            Track(id: "none", title: "Plain", artistName: "E"),
+        ], serverId: server.id)
+
+        let liked = try await repo.likedTracks(serverId: server.id)
+        let ids = liked.map(\.remoteId)
+        XCTAssertEqual(Set(ids), ["fav", "r5", "r4"], "favorites + rating>=4 only")
+        XCTAssertFalse(ids.contains("r3"), "3★ is below the like threshold")
+        XCTAssertFalse(ids.contains("none"))
+        // Highest-rated first (favorite has no rating so sorts after rated ones).
+        XCTAssertEqual(ids.first, "r5")
+    }
+
+    func testFavoritesStoreAppliesLocallyAndQueuesOutbox() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let store = FavoritesStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([Track(id: "t1", title: "One", artistName: "A")], serverId: server.id)
+
+        // Jellyfin-style favorite.
+        let likedNow = try await store.applyLocally(
+            FavoriteChange(serverId: server.id, remoteId: "t1", value: .favorite(true)))
+        XCTAssertTrue(likedNow)
+        let isLikedAfter = try await store.isLiked(serverId: server.id, remoteId: "t1")
+        XCTAssertTrue(isLikedAfter)
+        let likedIds = try await repo.likedTracks(serverId: server.id).map(\.remoteId)
+        XCTAssertEqual(likedIds, ["t1"])
+        // A pending server write was queued.
+        var pending = try await store.pending(serverId: server.id)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.kind, "favorite")
+        XCTAssertEqual(pending.first?.isLiked, true)
+
+        // Toggling again REPLACES the pending op (newest intent wins), not adds.
+        _ = try await store.applyLocally(
+            FavoriteChange(serverId: server.id, remoteId: "t1", value: .favorite(false)))
+        pending = try await store.pending(serverId: server.id)
+        XCTAssertEqual(pending.count, 1, "outbox keeps only the latest intent per track")
+        XCTAssertEqual(pending.first?.isLiked, false)
+        let isUnliked = try await store.isLiked(serverId: server.id, remoteId: "t1")
+        XCTAssertFalse(isUnliked)
+
+        // Flushing removes the pending op.
+        let id = try XCTUnwrap(pending.first?.id)
+        try await store.removePending(id: id)
+        let remaining = try await store.pending(serverId: server.id)
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testFavoritesStoreRatingCrossesLikeThreshold() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = FavoritesStore(db)
+        let server = makeServer(kind: .plex)
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([Track(id: "t1", title: "One", artistName: "A")], serverId: server.id)
+
+        // 3★ is not a like; 5★ is; clearing removes it.
+        let liked3 = try await store.applyLocally(
+            FavoriteChange(serverId: server.id, remoteId: "t1", value: .rating(3)))
+        XCTAssertFalse(liked3)
+        let liked5 = try await store.applyLocally(
+            FavoriteChange(serverId: server.id, remoteId: "t1", value: .rating(5)))
+        XCTAssertTrue(liked5)
+        let isLikedAt5 = try await store.isLiked(serverId: server.id, remoteId: "t1")
+        XCTAssertTrue(isLikedAt5)
+        let likedCleared = try await store.applyLocally(
+            FavoriteChange(serverId: server.id, remoteId: "t1", value: .rating(nil)))
+        XCTAssertFalse(likedCleared)
+        let isLikedCleared = try await store.isLiked(serverId: server.id, remoteId: "t1")
+        XCTAssertFalse(isLikedCleared)
+        let pending = try await store.pending(serverId: server.id)
+        XCTAssertEqual(pending.first?.kind, "rating")
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)

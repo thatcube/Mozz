@@ -13,6 +13,7 @@ enum Schema {
         registerV5(&migrator)
         registerV6(&migrator)
         registerV7(&migrator)
+        registerV8(&migrator)
         return migrator
     }
 
@@ -348,6 +349,28 @@ enum Schema {
             try db.alter(table: "serverCapabilities") { t in
                 t.add(column: "supportsRatings", .boolean).notNull().defaults(to: false)
             }
+        }
+    }
+
+    /// v8 — offline write-back queue for likes/ratings. A like made offline must
+    /// not be lost: the local track row is updated immediately (source of truth),
+    /// and the intended server write is recorded here to be flushed on the next
+    /// sync/connectivity. Keyed so only the LATEST intent per track survives
+    /// (tapping like→unlike→like offline collapses to one pending "like").
+    private static func registerV8(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v8.favoriteOutbox") { db in
+            try db.create(table: "favorite_outbox") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("serverId", .text).notNull()
+                t.column("remoteId", .text).notNull()
+                t.column("itemType", .text).notNull()      // artist|album|track
+                t.column("kind", .text).notNull()          // favorite|rating
+                t.column("value", .double)                 // favorite: 1/0; rating: stars (NULL = clear)
+                t.column("createdAt", .double).notNull()
+            }
+            // One pending op per item — a newer intent replaces the older.
+            try db.create(index: "idx_favorite_outbox_item", on: "favorite_outbox",
+                          columns: ["serverId", "remoteId"], unique: true)
         }
     }
 }

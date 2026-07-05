@@ -56,6 +56,8 @@ public final class AppEnvironment: ObservableObject {
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
     public let recommendations: RecommendationService
+    /// Offline-first like/rating writes (local DB + queued server write-back).
+    public let favorites: FavoritesStore
     public let credentials: any CredentialStore
     public let clientInfo: ClientInfo
     public let clientIdentifier: String
@@ -77,6 +79,7 @@ public final class AppEnvironment: ObservableObject {
         self.playback = PlaybackEngine(resolver: resolver)
         self.playEvents = PlayEventStore(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
+        self.favorites = FavoritesStore(database)
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
         self.clientInfo = ClientInfo(
             product: "Mozz", version: "0.1.0",
@@ -307,6 +310,8 @@ public final class AppEnvironment: ObservableObject {
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         // New catalog + listening → refresh "Mozz Weekly" off-main. Non-fatal.
         await regenerateMozzWeekly()
+        // Flush any likes/ratings that were made offline.
+        await flushFavoriteOutbox()
         return summary
     }
 
@@ -328,6 +333,68 @@ public final class AppEnvironment: ObservableObject {
         let ageDays = existing.map { (Date().timeIntervalSince1970 - $0.generatedAt) / 86_400 }
         if existing == nil || (ageDays ?? .greatestFiniteMagnitude) >= 7 {
             _ = try? await recommendations.generateMozzWeekly(serverId: serverId)
+        }
+    }
+
+    // MARK: Likes & ratings
+
+    /// Whether the active server models likes as a boolean favorite (Jellyfin);
+    /// the UI shows a heart. Otherwise it uses ratings (Plex) → a rating chip.
+    public var usesFavorites: Bool { active?.capabilities.supportsFavorites ?? false }
+    public var usesRatings: Bool { active?.capabilities.supportsRatings ?? false }
+
+    /// Like or unlike a track. On a favorites backend this toggles the boolean
+    /// favorite; on a ratings backend it sets 5★ (like) or clears the rating
+    /// (unlike). Offline-first: the local DB updates immediately and the server
+    /// write is queued + flushed later.
+    public func setLiked(_ liked: Bool, track: TrackRecord) async {
+        guard let active else { return }
+        let value: FavoriteChange.Value = active.capabilities.supportsFavorites
+            ? .favorite(liked)
+            : .rating(liked ? LikePolicy.likeStars : nil)
+        await applyFavorite(FavoriteChange(serverId: active.connection.id, remoteId: track.remoteId, value: value),
+                            wasLiked: LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating))
+    }
+
+    /// Set (or clear, with `nil`) a track's granular star rating — ratings
+    /// backends only (Plex). No-op on a favorites backend.
+    public func setRating(_ stars: Double?, track: TrackRecord) async {
+        guard let active, active.capabilities.supportsRatings else { return }
+        await applyFavorite(FavoriteChange(serverId: active.connection.id, remoteId: track.remoteId, value: .rating(stars)),
+                            wasLiked: LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating))
+    }
+
+    /// Apply a like/rating change: local DB write (instant, offline) + a
+    /// liked/unliked play-event on transition (recommender signal) + a queued
+    /// server write-back that flushes now if online.
+    private func applyFavorite(_ change: FavoriteChange, wasLiked: Bool) async {
+        let nowLiked = (try? await favorites.applyLocally(change)) ?? change.isLiked
+        if nowLiked != wasLiked {
+            try? await playEvents.append(
+                PlayEvent(trackID: change.remoteId, kind: nowLiked ? .liked : .unliked),
+                serverId: change.serverId)
+        }
+        await flushFavoriteOutbox()
+    }
+
+    /// Replay queued like/rating writes to the server, removing each on success.
+    /// Stops at the first failure (offline/transient) so order is preserved and
+    /// the rest stay queued for the next attempt.
+    public func flushFavoriteOutbox() async {
+        guard let active else { return }
+        let pending = (try? await favorites.pending(serverId: active.connection.id)) ?? []
+        for op in pending {
+            let type = CatalogItemType(rawValue: op.itemType) ?? .track
+            do {
+                if op.kind == "favorite" {
+                    try await active.backend.setFavorite((op.value ?? 0) >= 0.5, itemID: op.remoteId, type: type)
+                } else {
+                    try await active.backend.setRating(op.value, itemID: op.remoteId, type: type)
+                }
+                if let id = op.id { try await favorites.removePending(id: id) }
+            } catch {
+                break
+            }
         }
     }
 

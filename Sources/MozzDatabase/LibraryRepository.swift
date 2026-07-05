@@ -297,6 +297,31 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// The "Liked Songs" list: Jellyfin favorites plus Plex tracks rated at or
+    /// above ``LikePolicy/ratingThreshold`` — unified so one query serves both
+    /// backends (a track carries only one of the two signals). Highest-rated
+    /// first, then favorites, then a stable alphabetical tiebreak.
+    public func likedTracks(serverId: ServerID? = nil, limit: Int = 1000) async throws -> [TrackRecord] {
+        try await database.read { db in
+            var sql = """
+                SELECT * FROM track
+                WHERE (isFavorite = 1 OR COALESCE(rating, 0) >= \(LikePolicy.ratingThreshold))
+                """
+            var args: [DatabaseValueConvertible?] = []
+            if let serverId {
+                sql += " AND serverId = ?"
+                args.append(serverId)
+            }
+            sql += """
+                 ORDER BY COALESCE(rating, 0) DESC, isFavorite DESC,
+                          artistName COLLATE NOCASE, sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                 LIMIT ?
+                """
+            args.append(limit)
+            return try TrackRecord.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+        }
+    }
+
     // MARK: Full-text search
 
     /// Search all three entity types. Returns quickly (each MATCH is bounded by
