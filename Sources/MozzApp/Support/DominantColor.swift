@@ -57,7 +57,7 @@ enum DominantColor {
     static func seedPalette(_ seed: String) -> Palette {
         let hue = Double(abs(seed.hashValue) % 360) / 360.0
         return Palette(hero: Color(hue: hue, saturation: 0.5, brightness: 0.42),
-                       deep: Color(hue: hue, saturation: 0.45, brightness: 0.08))
+                       deep: Color(hue: hue, saturation: 0.45, brightness: 0.18))
     }
 
     #if canImport(UIKit)
@@ -95,13 +95,14 @@ extension UIColor {
         return UIColor(hue: h, saturation: min(1, s * 1.15), brightness: min(b, 0.46), alpha: 1)
     }
 
-    /// Adjust an extracted color into the page's deep base tone: the same hue,
-    /// pushed to a near-black brightness so the song list is high-contrast while
-    /// staying tinted by — and seamless with — the hero color above it.
+    /// Adjust an extracted color into the page's deep base tone: the SAME hue as
+    /// the hero, kept clearly tinted (not black) but dark enough that white song
+    /// text stays high-contrast. This is the color the WHOLE page settles onto,
+    /// so the artwork fades into a colored page rather than a black one.
     func mozzDeepAdjusted() -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
-        return UIColor(hue: h, saturation: min(s, 0.5), brightness: 0.08, alpha: 1)
+        return UIColor(hue: h, saturation: min(s, 0.6), brightness: 0.18, alpha: 1)
     }
 }
 #endif

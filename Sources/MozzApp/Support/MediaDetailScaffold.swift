@@ -210,13 +210,21 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         }
     }
 
-    /// The seamless page background behind the scrolling content: the hero's
-    /// extracted color at the very top (so the artwork blends straight into the
-    /// list with no seam) darkening into `deepBg` within ~260pt, which keeps the
-    /// white song text high-contrast a few rows down.
+    /// The seamless page background behind the scrolling content. The hero's
+    /// extracted color holds through the first row (so the artwork continues
+    /// straight into the list with no seam) then eases into `deepBg` — the SAME
+    /// hue, kept tinted rather than black — over ~420pt. `deepBg` also fills the
+    /// whole page base, so the entire page carries the artwork's color while the
+    /// white song text stays high-contrast on the settled tone.
     private var contentBackground: some View {
-        LinearGradient(colors: [bg, deepBg], startPoint: .top, endPoint: .bottom)
-            .frame(height: 260)
+        LinearGradient(
+            stops: [
+                .init(color: bg, location: 0.0),
+                .init(color: bg, location: 0.08),
+                .init(color: deepBg, location: 1.0),
+            ],
+            startPoint: .top, endPoint: .bottom)
+            .frame(height: 420)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
