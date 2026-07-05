@@ -61,3 +61,56 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.detectedAt = detectedAt
     }
 }
+
+/// Where the capabilities used for a session came from — which also dictates
+/// whether they should be written back to the store.
+public enum CapabilitySource: Sendable, Equatable {
+    /// Freshly probed from the live server — authoritative, persist it.
+    case detected
+    /// Server unreachable (offline); reusing the last-known stored record.
+    /// Must NOT be re-persisted (it already is the stored row, and re-saving
+    /// risks clobbering it with a partial value).
+    case cached
+    /// Nothing known yet (first activation, offline): conservative defaults,
+    /// persisted so a row exists; corrected on the next successful detection.
+    case fallback
+}
+
+public struct ResolvedCapabilities: Sendable {
+    public var capabilities: ServerCapabilities
+    public var source: CapabilitySource
+
+    public init(capabilities: ServerCapabilities, source: CapabilitySource) {
+        self.capabilities = capabilities
+        self.source = source
+    }
+
+    /// Whether these capabilities should be written to the store.
+    public var shouldPersist: Bool { source != .cached }
+}
+
+/// Decides which capabilities a (re)activation should use, and whether to
+/// persist them.
+///
+/// The rule exists to fix a real bug: when a server is unreachable at launch,
+/// `detectCapabilities()` fails, and naively falling back to
+/// `ServerCapabilities(backend:)` **overwrites the last-known detected
+/// capabilities with generic defaults** — silently changing gated features
+/// (e.g. a server's detected synced-lyrics support) until the next online sync.
+/// Live detection wins; otherwise keep the cached record untouched; only fall
+/// back to defaults when nothing is stored yet.
+public enum CapabilityResolver {
+    public static func resolve(
+        detected: ServerCapabilities?,
+        cached: ServerCapabilities?,
+        backend: BackendKind
+    ) -> ResolvedCapabilities {
+        if let detected {
+            return ResolvedCapabilities(capabilities: detected, source: .detected)
+        }
+        if let cached {
+            return ResolvedCapabilities(capabilities: cached, source: .cached)
+        }
+        return ResolvedCapabilities(capabilities: ServerCapabilities(backend: backend), source: .fallback)
+    }
+}

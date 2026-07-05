@@ -65,6 +65,35 @@ final class PlaybackModeTests: XCTestCase {
     }
 }
 
+final class CapabilityResolverTests: XCTestCase {
+    func testDetectedWinsAndPersists() {
+        let detected = ServerCapabilities(backend: .jellyfin, supportsSyncedLyrics: true)
+        let cached = ServerCapabilities(backend: .jellyfin, supportsSyncedLyrics: false)
+        let r = CapabilityResolver.resolve(detected: detected, cached: cached, backend: .jellyfin)
+        XCTAssertEqual(r.source, .detected)
+        XCTAssertTrue(r.capabilities.supportsSyncedLyrics)
+        XCTAssertTrue(r.shouldPersist)
+    }
+
+    func testCachedKeptWhenOfflineAndNotPersisted() {
+        // The bug this guards: an offline launch must NOT overwrite the
+        // last-known detected capabilities with generic defaults.
+        let cached = ServerCapabilities(backend: .jellyfin, supportsSyncedLyrics: true, supportsNormalizationGain: true)
+        let r = CapabilityResolver.resolve(detected: nil, cached: cached, backend: .jellyfin)
+        XCTAssertEqual(r.source, .cached)
+        XCTAssertTrue(r.capabilities.supportsSyncedLyrics)
+        XCTAssertTrue(r.capabilities.supportsNormalizationGain)
+        XCTAssertFalse(r.shouldPersist, "cached capabilities must not be re-persisted")
+    }
+
+    func testFallbackWhenNothingKnown() {
+        let r = CapabilityResolver.resolve(detected: nil, cached: nil, backend: .plex)
+        XCTAssertEqual(r.source, .fallback)
+        XCTAssertEqual(r.capabilities.backend, .plex)
+        XCTAssertTrue(r.shouldPersist)
+    }
+}
+
 final class MozzErrorTests: XCTestCase {
     func testRetryability() {
         XCTAssertTrue(MozzError.serverUnreachable.isRetryable)

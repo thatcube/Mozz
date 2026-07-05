@@ -157,11 +157,19 @@ public final class AppEnvironment: ObservableObject {
             return
         }
         let (connection, backend) = try await buildBackend(from: stored)
-        let capabilities = (try? await backend.detectCapabilities())
-            ?? ServerCapabilities(backend: stored.kind)
         try await CatalogWriter(database).saveServer(connection)
-        try await CatalogWriter(database).saveCapabilities(capabilities, serverId: connection.id)
-        finishActivation(connection: connection, backend: backend, capabilities: capabilities)
+
+        // Prefer live detection; if the server is unreachable (offline launch),
+        // keep the last-known capabilities rather than clobbering them with
+        // generic defaults. Only persist detected/fallback values (never re-save
+        // the cached row). See CapabilityResolver.
+        let detected = try? await backend.detectCapabilities()
+        let cached = try? await repository.capabilities(serverId: connection.id)
+        let resolved = CapabilityResolver.resolve(detected: detected, cached: cached, backend: stored.kind)
+        if resolved.shouldPersist {
+            try await CatalogWriter(database).saveCapabilities(resolved.capabilities, serverId: connection.id)
+        }
+        finishActivation(connection: connection, backend: backend, capabilities: resolved.capabilities)
     }
 
     private func finishActivation(connection: ServerConnection, backend: any MusicBackend, capabilities: ServerCapabilities) {
