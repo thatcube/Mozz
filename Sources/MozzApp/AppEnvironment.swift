@@ -328,9 +328,9 @@ public final class AppEnvironment: ObservableObject {
         try? await downloads.download(track, serverId: active.connection.id, using: active.backend)
     }
 
-    public func downloadAlbum(remoteId: String) async {
+    public func downloadAlbum(groupKey: String) async {
         guard let active else { return }
-        try? await downloads.downloadAlbum(remoteId: remoteId, serverId: active.connection.id, using: active.backend)
+        try? await downloads.downloadAlbum(albumGroupKey: groupKey, serverId: active.connection.id, using: active.backend)
     }
 
     // MARK: Backend construction

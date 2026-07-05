@@ -52,11 +52,13 @@ public struct CatalogWriter: Sendable {
         try await database.write { db in
             let stmt = try db.makeStatement(sql: Self.albumUpsertSQL)
             for album in albums {
+                let groupKey = AlbumGrouping.key(
+                    artistRemoteId: album.artistID, artistName: album.artistName, title: album.title)
                 try stmt.execute(arguments: [
                     serverId, album.id, album.title, album.sortTitle ?? album.title,
                     album.artistName, album.artistID, album.year,
                     album.artwork?.key, album.trackCount, album.isFavorite,
-                    album.addedAt?.timeIntervalSince1970, Self.jsonText(album.genres),
+                    album.addedAt?.timeIntervalSince1970, Self.jsonText(album.genres), groupKey,
                 ])
             }
         }
@@ -174,7 +176,7 @@ public struct CatalogWriter: Sendable {
     ])
     private static let albumUpsertSQL = upsertSQL(table: "album", columns: [
         "title", "sortTitle", "artistName", "artistRemoteId", "year",
-        "artworkKey", "trackCount", "isFavorite", "addedAt", "genres",
+        "artworkKey", "trackCount", "isFavorite", "addedAt", "genres", "albumGroupKey",
     ])
     private static let trackUpsertSQL = upsertSQL(table: "track", columns: [
         "title", "sortTitle", "albumTitle", "albumRemoteId", "artistName",

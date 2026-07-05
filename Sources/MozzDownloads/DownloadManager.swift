@@ -93,8 +93,8 @@ public final class DownloadManager: NSObject, ObservableObject {
     }
 
     /// Queue every track of an album for offline download.
-    public func downloadAlbum(remoteId albumRemoteId: String, serverId: ServerID, using backend: any MusicBackend) async throws {
-        let records = try await repository.tracks(forAlbumRemoteId: albumRemoteId, serverId: serverId)
+    public func downloadAlbum(albumGroupKey: String, serverId: ServerID, using backend: any MusicBackend) async throws {
+        let records = try await repository.tracks(forAlbumGroupKey: albumGroupKey, serverId: serverId)
         for record in records {
             try await download(record.toDomain(), serverId: serverId, using: backend)
         }

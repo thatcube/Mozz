@@ -66,7 +66,7 @@ struct AlbumDetailView: View {
             }
             Button {
                 Task {
-                    await env.downloadAlbum(remoteId: album.remoteId)
+                    await env.downloadAlbum(groupKey: album.albumGroupKey)
                     await refreshDownloadStates()
                 }
             } label: {
@@ -91,7 +91,7 @@ struct AlbumDetailView: View {
 
     private func load() async {
         guard let serverId = env.active?.connection.id else { return }
-        tracks = (try? await env.repository.tracks(forAlbumRemoteId: album.remoteId, serverId: serverId)) ?? []
+        tracks = (try? await env.repository.tracks(forAlbumGroupKey: album.albumGroupKey, serverId: serverId)) ?? []
         loaded = true
         await refreshDownloadStates()
     }

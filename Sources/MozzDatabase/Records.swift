@@ -131,6 +131,10 @@ public struct AlbumRecord: Codable, FetchableRecord, MutablePersistableRecord, S
     public var isFavorite: Bool
     public var addedAt: Double?
     public var genres: [String]
+    /// Consolidation key (see `AlbumGrouping`) — the read layer groups album
+    /// fragments by this so a split album shows as one. Defaulted so any
+    /// memberwise construction (tests) stays source-compatible.
+    public var albumGroupKey: String = ""
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID

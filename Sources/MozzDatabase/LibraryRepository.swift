@@ -17,6 +17,25 @@ public struct SearchResults: Sendable {
     }
 }
 
+extension Array where Element == AlbumRecord {
+    /// Collapse album fragments (same `albumGroupKey`) to one representative,
+    /// keeping the first occurrence — which, for a ranked FTS result, is the
+    /// best-scored fragment — then cap at `limit`. Used to dedupe search results
+    /// without limiting *before* grouping (which would let fragments of one album
+    /// crowd out distinct albums).
+    func dedupedByAlbumGroup(limit: Int) -> [AlbumRecord] {
+        var seen = Set<String>()
+        var out: [AlbumRecord] = []
+        out.reserveCapacity(Swift.min(limit, count))
+        for album in self {
+            guard seen.insert(album.albumGroupKey).inserted else { continue }
+            out.append(album)
+            if out.count == limit { break }
+        }
+        return out
+    }
+}
+
 /// The read side of the source-of-truth database — the *only* thing the UI
 /// reads from. Every method is paginated or bounded so no query ever loads the
 /// whole library, which is what keeps memory flat and scrolling smooth at
@@ -83,8 +102,9 @@ public struct LibraryRepository: Sendable {
     public func albumsPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT * FROM album
+                SELECT *, MAX(COALESCE(trackCount, 0)) FROM album
                 \(Self.serverClause(serverId))
+                GROUP BY serverId, albumGroupKey
                 ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
                 LIMIT ? OFFSET ?
                 """, arguments: Self.serverArgs(serverId) + [limit, offset])
@@ -104,12 +124,14 @@ public struct LibraryRepository: Sendable {
 
     // MARK: Detail
 
-    /// Albums by an artist, newest first (then alphabetical).
+    /// Albums by an artist, newest first (then alphabetical). Fragments of the
+    /// same album (same album-artist + title) are consolidated to one row.
     public func albums(forArtistRemoteId artistRemoteId: String, serverId: ServerID) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT * FROM album
+                SELECT *, MAX(COALESCE(trackCount, 0)) FROM album
                 WHERE serverId = ? AND artistRemoteId = ?
+                GROUP BY albumGroupKey
                 ORDER BY year DESC, sortTitle COLLATE NOCASE
                 """, arguments: [serverId, artistRemoteId])
         }
@@ -123,6 +145,37 @@ public struct LibraryRepository: Sendable {
                 WHERE serverId = ? AND albumRemoteId = ?
                 ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
                 """, arguments: [serverId, albumRemoteId])
+        }
+    }
+
+    /// Tracks of a consolidated album, spanning every fragment that shares the
+    /// album's group key (so a server-split album shows all its songs). Disc/
+    /// track ordered. This is what the album detail and album download use.
+    public func tracks(forAlbumGroupKey groupKey: String, serverId: ServerID) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                WHERE serverId = ? AND albumRemoteId IN (
+                    SELECT remoteId FROM album WHERE serverId = ? AND albumGroupKey = ?
+                )
+                ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
+                """, arguments: [serverId, serverId, groupKey])
+        }
+    }
+
+    /// Tracks of the consolidated album *containing* a given album remoteId —
+    /// resolves the group key first. Used where only a remoteId is known.
+    public func tracks(forAlbumGroupContaining albumRemoteId: String, serverId: ServerID) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                WHERE serverId = ? AND albumRemoteId IN (
+                    SELECT remoteId FROM album WHERE serverId = ? AND albumGroupKey = (
+                        SELECT albumGroupKey FROM album WHERE serverId = ? AND remoteId = ?
+                    )
+                )
+                ORDER BY discNumber, trackNumber, sortTitle COLLATE NOCASE
+                """, arguments: [serverId, serverId, serverId, albumRemoteId])
         }
     }
 
@@ -174,8 +227,9 @@ public struct LibraryRepository: Sendable {
     public func recentlyAddedAlbums(serverId: ServerID, limit: Int = 20) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT * FROM album
+                SELECT *, MAX(COALESCE(trackCount, 0)) FROM album
                 WHERE serverId = ?
+                GROUP BY albumGroupKey
                 ORDER BY addedAt DESC, sortTitle COLLATE NOCASE
                 LIMIT ?
                 """, arguments: [serverId, limit])
@@ -208,12 +262,13 @@ public struct LibraryRepository: Sendable {
         }
     }
 
-    /// Albums tagged with a genre, alphabetical.
+    /// Albums tagged with a genre, alphabetical. Album fragments consolidated.
     public func albums(forGenre genre: String, serverId: ServerID) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
-                SELECT album.* FROM album JOIN json_each(album.genres) je
+                SELECT album.*, MAX(COALESCE(album.trackCount, 0)) FROM album JOIN json_each(album.genres) je
                 WHERE album.serverId = ? AND je.value = ?
+                GROUP BY album.albumGroupKey
                 ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
                 """, arguments: [serverId, genre])
         }
@@ -271,7 +326,8 @@ public struct LibraryRepository: Sendable {
                 JOIN album_fts ON album_fts.rowid = album.id
                 WHERE album_fts MATCH ?\(serverFilter ? " AND album.serverId = ?" : "")
                 \(order("album_fts")) LIMIT ?
-                """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
+                """, arguments: Self.matchArgs(pattern, serverId, limitPerType * 5))
+                .dedupedByAlbumGroup(limit: limitPerType)
             let tracks = try TrackRecord.fetchAll(db, sql: """
                 SELECT track.* FROM track
                 JOIN track_fts ON track_fts.rowid = track.id

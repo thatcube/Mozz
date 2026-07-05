@@ -22,6 +22,15 @@ final class PerformanceHarnessTests: XCTestCase {
         XCTAssertLessThan(metrics.searchP95Ms, 100, "search p95 exceeded 100ms bar: \(metrics.searchP95Ms)")
         // A single page must be effectively instant regardless of catalog size.
         XCTAssertLessThan(metrics.pageFetchMs, 50, "page fetch too slow: \(metrics.pageFetchMs)")
+
+        // The album page now GROUPs BY the consolidation key; make sure that
+        // grouping stays fast at scale (the reviewer measured ~5ms).
+        let repo = LibraryRepository(db)
+        let albumPageStart = Date()
+        _ = try await repo.albumsPage(serverId: serverId, offset: 0, limit: 100)
+        let albumPageMs = Date().timeIntervalSince(albumPageStart) * 1000
+        XCTAssertLessThan(albumPageMs, 60, "grouped album page too slow: \(albumPageMs)")
+
         print("[PERF 20k]\n\(metrics.summary)")
     }
 

@@ -8,6 +8,7 @@ enum Schema {
         var migrator = DatabaseMigrator()
         registerV1(&migrator)
         registerV2(&migrator)
+        registerV3(&migrator)
         return migrator
     }
 
@@ -204,6 +205,36 @@ enum Schema {
             }
             try db.create(index: "idx_play_event_track", on: "play_event", columns: ["track_ref"])
             try db.create(index: "idx_play_event_time", on: "play_event", columns: ["created_at"])
+        }
+    }
+
+    /// v3 — album consolidation key (`albumGroupKey`).
+    ///
+    /// Servers (notably Jellyfin) fragment one album into many album entities
+    /// that share an album-artist + title but each hold a subset of tracks. We
+    /// never mutate/delete those mirrored rows (that would risk the download
+    /// cascade / prune path); instead each album carries a derived group key the
+    /// read layer groups by. Backfilled in Swift so existing rows use the exact
+    /// same derivation as the upsert path.
+    private static func registerV3(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v3.albumGroupKey") { db in
+            try db.alter(table: "album") { t in
+                t.add(column: "albumGroupKey", .text).notNull().defaults(to: "")
+            }
+            let rows = try Row.fetchAll(db, sql: "SELECT id, artistRemoteId, artistName, title FROM album")
+            let update = try db.makeStatement(sql: "UPDATE album SET albumGroupKey = ? WHERE id = ?")
+            for row in rows {
+                let key = AlbumGrouping.key(
+                    artistRemoteId: row["artistRemoteId"],
+                    artistName: row["artistName"] ?? "",
+                    title: row["title"] ?? ""
+                )
+                try update.execute(arguments: [key, row["id"] as Int64])
+            }
+            // Album list/detail group + order by this key, scoped per server.
+            try db.execute(sql: """
+                CREATE INDEX idx_album_group ON album(serverId, albumGroupKey, sortTitle COLLATE NOCASE, title COLLATE NOCASE)
+                """)
         }
     }
 }

@@ -144,6 +144,77 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertEqual(recent.map(\.remoteId), ["t2", "t1"])
     }
 
+    func testAlbumFragmentsConsolidate() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+
+        // One album ("2001" by Dr. Dre) that the server fragmented into 3 album
+        // entities: same album-artist + title, different ids, a subset of tracks
+        // each. Plus a genuine different edition that must NOT merge.
+        try await writer.upsertAlbums([
+            Album(id: "alb1", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 1),
+            Album(id: "alb2", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 1),
+            Album(id: "alb3", title: "2001", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 2),
+            Album(id: "dlx", title: "2001 (Deluxe)", artistName: "Dr. Dre", artistID: "dre", year: 1999, trackCount: 1),
+        ], serverId: server.id)
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "Still D.R.E.", albumID: "alb1", artistName: "Dr. Dre", trackNumber: 4, discNumber: 1),
+            Track(id: "t2", title: "Forgot About Dre", albumID: "alb2", artistName: "Dr. Dre", trackNumber: 10, discNumber: 1),
+            Track(id: "t3", title: "The Next Episode", albumID: "alb3", artistName: "Dr. Dre", trackNumber: 11, discNumber: 1),
+            Track(id: "t4", title: "The Watcher", albumID: "alb3", artistName: "Dr. Dre", trackNumber: 2, discNumber: 1),
+            Track(id: "t5", title: "Xxplosive", albumID: "dlx", artistName: "Dr. Dre", trackNumber: 6, discNumber: 1),
+        ], serverId: server.id)
+
+        // Album list collapses the 3 fragments into one; deluxe stays separate.
+        let page = try await repo.albumsPage(serverId: server.id, offset: 0, limit: 50)
+        XCTAssertEqual(page.count, 2)
+        let main = try XCTUnwrap(page.first { $0.title == "2001" })
+        // Representative = the fragment with the most tracks (fullest metadata/art).
+        XCTAssertEqual(main.remoteId, "alb3")
+
+        // Artist detail consolidates too.
+        let artistAlbums = try await repo.albums(forArtistRemoteId: "dre", serverId: server.id)
+        XCTAssertEqual(Set(artistAlbums.map(\.title)), ["2001", "2001 (Deluxe)"])
+
+        // Album detail returns ALL tracks across the fragments, disc/track ordered.
+        let tracks = try await repo.tracks(forAlbumGroupKey: main.albumGroupKey, serverId: server.id)
+        XCTAssertEqual(tracks.map(\.title), ["The Watcher", "Still D.R.E.", "Forgot About Dre", "The Next Episode"])
+
+        // The download path resolves the same set from any fragment's remoteId.
+        let viaFragment = try await repo.tracks(forAlbumGroupContaining: "alb1", serverId: server.id)
+        XCTAssertEqual(viaFragment.count, 4)
+
+        // The deluxe edition keeps its own single track.
+        let deluxe = try XCTUnwrap(page.first { $0.title == "2001 (Deluxe)" })
+        let deluxeTracks = try await repo.tracks(forAlbumGroupKey: deluxe.albumGroupKey, serverId: server.id)
+        XCTAssertEqual(deluxeTracks.map(\.title), ["Xxplosive"])
+    }
+
+    func testAlbumGroupKeyPolicy() {
+        // Case/diacritic/whitespace-insensitive; edition markers preserved.
+        XCTAssertEqual(
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001"),
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "dr. dre", title: "  2001 "))
+        XCTAssertNotEqual(
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001"),
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001 (Deluxe)"))
+        // Album-artist ID wins over display name when present.
+        XCTAssertEqual(
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Dr. Dre", title: "2001"),
+            AlbumGrouping.key(artistRemoteId: "dre", artistName: "Andre Young", title: "2001"))
+        // No id → fall back to name; different names stay separate.
+        XCTAssertNotEqual(
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Dr. Dre", title: "2001"),
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Snoop Dogg", title: "2001"))
+        // Diacritics folded on the name-fallback path.
+        XCTAssertEqual(
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Bjork", title: "Homogenic"),
+            AlbumGrouping.key(artistRemoteId: nil, artistName: "Björk", title: "Homogenic"))
+    }
+
     func testPlayEventStoreAppendAndRead() async throws {
         let db = try MusicDatabase.inMemory()
         let store = PlayEventStore(db)
