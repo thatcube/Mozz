@@ -155,27 +155,37 @@ public struct LibraryRepository: Sendable {
 
     /// Search all three entity types. Returns quickly (each MATCH is bounded by
     /// `limitPerType`) — the basis for the sub-100ms search target.
+    ///
+    /// **As-you-type cost control.** A short prefix (1–2 chars) matches a huge
+    /// fraction of a large FTS index, and `ORDER BY bm25(...)` must score the
+    /// *entire* match set before `LIMIT` — measured ~40× slower at 100k tracks.
+    /// So we only rank once the query is ≥3 chars (by which point the match set
+    /// is small and bm25 is cheap); shorter queries use FTS's natural order and
+    /// early-terminate at `LIMIT`, which stays a couple of milliseconds even on
+    /// a huge library. Ranking is meaningless for 1–2 char queries anyway.
     public func search(_ query: String, serverId: ServerID? = nil, limitPerType: Int = 20) async throws -> SearchResults {
         guard let pattern = FTSQuery.pattern(for: query) else { return SearchResults() }
+        let ranked = query.trimmingCharacters(in: .whitespaces).count >= 3
         return try await database.read { db in
             let serverFilter = serverId != nil
+            func order(_ table: String) -> String { ranked ? "ORDER BY bm25(\(table))" : "" }
             let artists = try ArtistRecord.fetchAll(db, sql: """
                 SELECT artist.* FROM artist
                 JOIN artist_fts ON artist_fts.rowid = artist.id
                 WHERE artist_fts MATCH ?\(serverFilter ? " AND artist.serverId = ?" : "")
-                ORDER BY bm25(artist_fts) LIMIT ?
+                \(order("artist_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             let albums = try AlbumRecord.fetchAll(db, sql: """
                 SELECT album.* FROM album
                 JOIN album_fts ON album_fts.rowid = album.id
                 WHERE album_fts MATCH ?\(serverFilter ? " AND album.serverId = ?" : "")
-                ORDER BY bm25(album_fts) LIMIT ?
+                \(order("album_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             let tracks = try TrackRecord.fetchAll(db, sql: """
                 SELECT track.* FROM track
                 JOIN track_fts ON track_fts.rowid = track.id
                 WHERE track_fts MATCH ?\(serverFilter ? " AND track.serverId = ?" : "")
-                ORDER BY bm25(track_fts) LIMIT ?
+                \(order("track_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             return SearchResults(artists: artists, albums: albums, tracks: tracks)
         }

@@ -60,5 +60,18 @@ final class PerformanceHarnessTests: XCTestCase {
         XCTAssertEqual(metrics.trackCount, 100_000)
         XCTAssertLessThan(metrics.searchP95Ms, 100, "search p95 exceeded 100ms bar at 100k: \(metrics.searchP95Ms)")
         print("[PERF 100k]\n\(metrics.summary)")
+
+        // Regression guard for the as-you-type hang: every synthetic track title
+        // contains "the", so a short prefix matches almost the entire FTS index.
+        // Ranking that with bm25 forces scoring the whole match set (~60ms at
+        // 100k, and far worse on-device / concurrently with a sync). Short
+        // queries must early-terminate at LIMIT instead and stay ~single-digit ms.
+        let repo = LibraryRepository(reopened)
+        for term in ["t", "th", "a", "s"] {
+            let start = Date()
+            _ = try await repo.search(term, serverId: serverId)
+            let ms = Date().timeIntervalSince(start) * 1000
+            XCTAssertLessThan(ms, 30, "broad prefix '\(term)' too slow (\(ms) ms) — bm25 full-scan regression?")
+        }
     }
 }

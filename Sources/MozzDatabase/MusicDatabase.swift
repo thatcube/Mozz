@@ -25,6 +25,11 @@ public final class MusicDatabase: Sendable {
         var config = Configuration()
         // Busy timeout so brief writer contention doesn't surface as errors.
         config.busyMode = .timeout(5)
+        // WAL allows concurrent reads during a write, but the reader pool is
+        // finite (GRDB default 5). During a sync write the UI issues many
+        // concurrent reads (browse pages, artwork, search); a bigger pool keeps
+        // an as-you-type search from starving the browse/artwork reads.
+        config.maximumReaderCount = 10
         let pool = try DatabasePool(path: url.path, configuration: config)
         return try MusicDatabase(dbWriter: pool)
     }

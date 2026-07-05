@@ -8,19 +8,52 @@ import AppKit
 typealias PlatformImage = NSImage
 #endif
 
-/// A tiny process-wide image cache keyed by resolved URL. Backends produce
+/// A thread-safe in-memory image cache keyed by resolved URL. Backends produce
 /// deterministic artwork URLs (stable token, no nonce), so the URL string is a
-/// safe cache key across token rotation within a session.
-final class ArtworkImageCache: @unchecked Sendable {
-    static let shared = ArtworkImageCache()
+/// safe cache key across token rotation within a session. `NSCache` is itself
+/// thread-safe, so this is safe to read from any isolation context.
+final class ArtworkMemoryCache: @unchecked Sendable {
     private let cache = NSCache<NSURL, PlatformImage>()
-
-    private init() {
-        cache.countLimit = 512
-    }
-
+    init() { cache.countLimit = 512 }
     func image(for url: URL) -> PlatformImage? { cache.object(forKey: url as NSURL) }
     func insert(_ image: PlatformImage, for url: URL) { cache.setObject(image, forKey: url as NSURL) }
+}
+
+/// Process-wide cache instance, reachable from both isolated and nonisolated
+/// contexts (a plain `Sendable` value, not actor state).
+private let artworkMemoryCache = ArtworkMemoryCache()
+
+/// Loads artwork off the main thread and coalesces concurrent requests for the
+/// same URL, so many cells asking for the same art trigger a single fetch +
+/// decode. Decoding a JPEG on the main thread (as a naive `AsyncImage`
+/// replacement would) causes scroll hitching with real server artwork.
+actor ArtworkImageLoader {
+    static let shared = ArtworkImageLoader()
+
+    private var inFlight: [URL: Task<PlatformImage?, Never>] = [:]
+
+    /// Synchronous cache peek — safe from any thread.
+    nonisolated func cached(_ url: URL) -> PlatformImage? {
+        artworkMemoryCache.image(for: url)
+    }
+
+    /// Fetch + decode off the main thread, coalescing concurrent requests for
+    /// the same URL. Returns the decoded image (or nil on failure).
+    func image(for url: URL) async -> PlatformImage? {
+        if let hit = artworkMemoryCache.image(for: url) { return hit }
+        if let existing = inFlight[url] { return await existing.value }
+
+        let task = Task<PlatformImage?, Never>.detached(priority: .utility) {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let decoded = PlatformImage(data: data) else { return nil }
+            return decoded
+        }
+        inFlight[url] = task
+        let result = await task.value
+        inFlight[url] = nil
+        if let result { artworkMemoryCache.insert(result, for: url) }
+        return result
+    }
 }
 
 private extension Image {
@@ -55,7 +88,7 @@ struct CachedArtworkImage<Placeholder: View>: View {
     init(url: URL, @ViewBuilder placeholder: () -> Placeholder) {
         self.url = url
         self.placeholder = placeholder()
-        _image = State(initialValue: ArtworkImageCache.shared.image(for: url))
+        _image = State(initialValue: ArtworkImageLoader.shared.cached(url))
     }
 
     var body: some View {
@@ -72,17 +105,17 @@ struct CachedArtworkImage<Placeholder: View>: View {
     }
 
     private func load() async {
-        if let cached = ArtworkImageCache.shared.image(for: url) {
+        if let cached = ArtworkImageLoader.shared.cached(url) {
             image = cached
             return
         }
         // Clear any stale image from a previous URL so we never show the wrong
         // artwork while the new one loads.
         image = nil
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
-              !Task.isCancelled,
-              let decoded = PlatformImage(data: data) else { return }
-        ArtworkImageCache.shared.insert(decoded, for: url)
-        image = decoded
+        // Fetch + decode happen off the main thread inside the loader actor;
+        // duplicate requests for the same URL are coalesced.
+        let loaded = await ArtworkImageLoader.shared.image(for: url)
+        guard !Task.isCancelled else { return }
+        image = loaded
     }
 }
