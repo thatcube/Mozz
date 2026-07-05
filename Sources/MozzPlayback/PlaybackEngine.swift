@@ -35,6 +35,13 @@ public final class PlaybackEngine: ObservableObject {
     /// Called when artwork should be fetched for the lock screen.
     public var onNeedsArtwork: ((Track) -> Void)?
 
+    /// Whether per-track loudness normalization (ReplayGain / Sound Check) is
+    /// applied. When on, a track's `normalizationGainDB` is turned into an audio
+    /// mix so tracks play at a consistent level. Default on.
+    public var normalizationEnabled: Bool = true
+    /// Global preamp (dB) added on top of each track's gain.
+    public var normalizationPreampDB: Double = 0
+
     private let player = AVQueuePlayer()
     private let resolver: TrackURLResolver
     private let session = AudioSessionController()
@@ -210,6 +217,7 @@ public final class PlaybackEngine: ObservableObject {
                 let resolved = try await resolver.resolve(track)
                 guard generation == self.loadGeneration else { return }
                 let item = AVPlayerItem(url: resolved.url)
+                self.applyNormalization(to: item, gainDB: track.normalizationGainDB)
                 self.player.insert(item, after: nil)
                 self.loaded = [(item, track, resolved.sessionID)]
                 if autoplay {
@@ -241,12 +249,35 @@ public final class PlaybackEngine: ObservableObject {
             let resolved = try await resolver.resolve(nextTrack)
             guard generation == loadGeneration, loaded.count == 1 else { return }
             let item = AVPlayerItem(url: resolved.url)
+            applyNormalization(to: item, gainDB: nextTrack.normalizationGainDB)
             if player.canInsert(item, after: loaded.last?.item) {
                 player.insert(item, after: loaded.last?.item)
                 loaded.append((item, nextTrack, resolved.sessionID))
             }
         } catch {
             // Leave the lookahead empty; we'll rebuild on the boundary instead.
+        }
+    }
+
+    /// Attach an audio mix that applies the track's loudness-normalization gain
+    /// (ReplayGain / Sound Check), so tracks play at a consistent level.
+    ///
+    /// Works for assets that expose an audio track — local downloads and
+    /// direct-play originals, which is exactly where the server reports a gain.
+    /// For transcoded HLS streams (no accessible audio track) it silently
+    /// no-ops. Applied off the load path so it never delays time-to-first-audio;
+    /// the mix takes effect as soon as the (fast, for local files) track load
+    /// resolves.
+    private func applyNormalization(to item: AVPlayerItem, gainDB: Double?) {
+        guard normalizationEnabled, let gainDB else { return }
+        let preamp = normalizationPreampDB
+        Task { @MainActor in
+            guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first else { return }
+            let params = AVMutableAudioMixInputParameters(track: track)
+            params.setVolume(NormalizationGain.linearScalar(gainDB: gainDB, preampDB: preamp), at: .zero)
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            item.audioMix = mix
         }
     }
 

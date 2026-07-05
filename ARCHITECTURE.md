@@ -229,10 +229,18 @@ in the DB, offline browse + play works with the server completely unreachable.
 
 ## 6. Playback
 
-`PlaybackEngine` (`@MainActor`) wraps a single **`AVQueuePlayer`** for **true gapless**
+`PlaybackEngine` (`@MainActor`) wraps a single **`AVQueuePlayer`** for **near-gapless**
 playback: it keeps a small window of pre-created `AVPlayerItem`s and `insert(item, after:)`s the
 next track ahead of time, so AVFoundation crosses item boundaries with no teardown/setup gap.
-`AVPlayerItem.didPlayToEndTime` advances the queue and refills the window.
+(This is queue-preloading, not sample-accurate concatenation — it removes the load/teardown gap
+between tracks but does not strip encoder padding on lossy formats.) `AVPlayerItem.didPlayToEndTime`
+advances the queue and refills the window.
+
+- **Loudness normalization (ReplayGain / Sound Check)**: when enabled (Settings toggle, on by
+  default), each track's `normalizationGainDB` is converted to a linear scalar (`NormalizationGain`)
+  and applied via a per-item `AVAudioMix`, so tracks play at a consistent level. Applies to assets
+  with an accessible audio track (local downloads + direct-play originals — where the gain is
+  reported); transcoded HLS silently no-ops.
 
 - **`PlayQueue`** owns order, `RepeatMode` (off/one/all) and shuffle (`isShuffled`, with a
   stable original order preserved so un-shuffle restores it), plus `hasNext`/`hasPrevious`/
@@ -409,15 +417,21 @@ quality · Plozz-shareability.
 
 ### Known gaps / trade-offs (honest)
 
-- **Favorites, lyrics and ReplayGain** are first-class in the schema, backend protocol and
-  capabilities, and favorites has a backend write — but the **UI toggle/display for
-  favorites/lyrics and the ReplayGain gain-application in the engine are not yet wired.** The
-  data and seams exist; the last-mile UI/DSP is follow-up.
+- **Favorites and lyrics** are first-class in the schema, backend protocol and capabilities,
+  and favorites has a backend write — but the **UI toggle/display for favorites/lyrics is not
+  yet wired.** The data and seams exist; the last-mile UI is follow-up.
+- **Loudness normalization (ReplayGain)** is now applied in the engine via a per-item
+  `AVAudioMix` (Settings toggle, on by default) for assets with an accessible audio track;
+  transcoded HLS streams are not normalized (no accessible track).
+- **Gapless** is near-gapless via `AVQueuePlayer` preloading (no load/teardown gap between
+  preloaded items), not sample-accurate concatenation; adequate for streaming, and the honest
+  claim.
 - **Scrobbling** is wired to `backend.reportPlayback`; direct Last.fm/ListenBrainz submission
-  (the brief's clean-win idea) is future work on top of that hook.
-- **Artwork disk cache** relies on `URLCache`/`AsyncImage` today; a bounded downsampled disk
-  cache is the documented next step (does not affect the measured numbers — synthetic art is a
-  gradient placeholder).
+  (the brief's clean-win idea) is future work on top of that hook. Listening history
+  (`play_event`) is captured on-device (completed vs skipped) as the fuel for it.
+- **Artwork cache**: `CachedArtworkImage` keeps an in-memory `NSCache` of decoded images and
+  decodes off the main thread; a bounded downsampled **disk** cache is the documented next step
+  (does not affect the measured numbers — synthetic art is a gradient placeholder).
 - **FPS capture and on-real-hardware numbers** are missing because the beta toolchain's
   simulator UI-automation bridge (`SimulatorKit.framework`) is unavailable; headless benchmarks
   are driven by `MOZZ_BENCH`/`MOZZ_AUTOPLAY` env hooks instead.

@@ -94,6 +94,34 @@ final class CapabilityResolverTests: XCTestCase {
     }
 }
 
+final class NormalizationGainTests: XCTestCase {
+    func testZeroGainIsUnity() {
+        XCTAssertEqual(NormalizationGain.linearScalar(gainDB: 0), 1.0, accuracy: 0.0001)
+    }
+
+    func testNegativeGainAttenuates() {
+        // -6 dB ≈ 0.501, -20 dB = 0.1.
+        XCTAssertEqual(NormalizationGain.linearScalar(gainDB: -6), 0.501, accuracy: 0.005)
+        XCTAssertEqual(NormalizationGain.linearScalar(gainDB: -20), 0.1, accuracy: 0.0005)
+    }
+
+    func testPositiveGainBoosts() {
+        // +6 dB ≈ 1.995.
+        XCTAssertEqual(NormalizationGain.linearScalar(gainDB: 6), 1.995, accuracy: 0.005)
+    }
+
+    func testPreampShiftsGain() {
+        // gain 0 + preamp -6 == gain -6.
+        XCTAssertEqual(NormalizationGain.linearScalar(gainDB: 0, preampDB: -6),
+                       NormalizationGain.linearScalar(gainDB: -6), accuracy: 0.0001)
+    }
+
+    func testExtremeGainIsClampedToCeiling() {
+        // A bogus +100 dB tag must not blow out the output.
+        XCTAssertEqual(NormalizationGain.linearScalar(gainDB: 100), 4.0, accuracy: 0.0001)
+    }
+}
+
 final class MozzErrorTests: XCTestCase {
     func testRetryability() {
         XCTAssertTrue(MozzError.serverUnreachable.isRetryable)

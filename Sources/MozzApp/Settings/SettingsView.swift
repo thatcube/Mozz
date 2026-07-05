@@ -7,6 +7,8 @@ struct SettingsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var isSyncing = false
     @State private var syncProgressText: String?
+    /// Persisted across launches; mirrors `PlaybackEngine.normalizationEnabled`.
+    @AppStorage("mozz.normalizationEnabled") private var normalizationEnabled = true
 
     var body: some View {
         NavigationStack {
@@ -49,6 +51,14 @@ struct SettingsView: View {
                         }
                     }
 
+                    Section("Playback") {
+                        Toggle(isOn: $normalizationEnabled) {
+                            Label("Volume Normalization", systemImage: "waveform")
+                        }
+                        Text("Plays tracks at a consistent loudness using each track's normalization gain, when available.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
                     Section {
                         NavigationLink {
                             BenchmarksView()
@@ -70,6 +80,10 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear { env.playback.normalizationEnabled = normalizationEnabled }
+            .onChange(of: normalizationEnabled) { _, enabled in
+                env.playback.normalizationEnabled = enabled
+            }
         }
     }
 
