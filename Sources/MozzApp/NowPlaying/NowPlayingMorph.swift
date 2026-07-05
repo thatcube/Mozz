@@ -1,6 +1,9 @@
 import SwiftUI
 import MozzCore
 import MozzPlayback
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Morph container (Candidate B: pure custom Liquid Glass)
 //
@@ -40,6 +43,7 @@ struct NowPlayingMorphContainer: View {
 
     /// How much the docked island grows while touched.
     private static let pressScale: CGFloat = 1.04
+    private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
 
     var body: some View {
         // Outer reader supplies the real safe-area insets; the inner reader,
@@ -63,12 +67,28 @@ struct NowPlayingMorphContainer: View {
                     // surface's top edge DOWN into the island on collapse
                     // (miniCenterY), is hidden while expanding (miniOpacity), and
                     // rides the base top so the receive-grow can rise past it.
-                    IslandContent(playback: playback, pressed: $islandPressed) { ui.isFullPresented = true }
+                    IslandContent(playback: playback) { ui.isFullPresented = true }
                         .frame(width: m.islandW, height: Morph.islandHeight)
                         .position(x: m.surfaceCenterX, y: m.miniCenterY)
                         .opacity(m.miniOpacity)
                         .allowsHitTesting(m.p < 0.5)
                     travelingArtwork(m)
+                    // Instant, whole-island press detection. A UIKit 0-duration
+                    // long-press recognizer (installed on the window, so it sits
+                    // above the real touch target that SwiftUI draws into a shared
+                    // host view) reports touch-DOWN with zero delay — the SwiftUI
+                    // drag/long-press gestures wait to disambiguate a stationary
+                    // finger, which lagged the scale. It observes without stealing
+                    // the touch, and this transparent layer spans the ENTIRE pill,
+                    // so a press anywhere — artwork, titles OR the buttons — scales
+                    // the whole island as one unit. Gated to the docked state.
+                    Color.clear
+                        .frame(width: m.islandW, height: Morph.islandHeight)
+                        .onTouchDownChanged { active in
+                            guard m.p < 0.5 else { return }
+                            withAnimation(Self.pressSpring) { islandPressed = active }
+                        }
+                        .position(x: m.surfaceCenterX, y: m.miniCenterY)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 // Press-scale the WHOLE island as one unit: scale the entire
@@ -324,7 +344,6 @@ private let islandTextSpring = Animation.spring(response: 0.34, dampingFraction:
 /// the parent, so this only reserves its slot.
 private struct IslandContent: View {
     @ObservedObject var playback: PlaybackEngine
-    @Binding var pressed: Bool
     var onExpand: () -> Void
 
     @State private var dragX: CGFloat = 0        // live thumb-follow (0 at rest)
@@ -334,13 +353,6 @@ private struct IslandContent: View {
     @State private var zoneW: CGFloat = 220      // measured text-zone width
     @State private var commitTick = 0            // bumped to fire a haptic pop
     @State private var armedDir = 0              // side currently past the threshold
-    // A zero-duration long press detects touch-DOWN instantly (a stationary
-    // DragGesture doesn't — it waits to disambiguate, which delayed the scale on
-    // taps). `maximumDistance: .infinity` keeps it held through a swipe; the
-    // @GestureState auto-resets to false on release/cancel.
-    @GestureState private var pressActive = false
-
-    private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
 
     var body: some View {
         HStack(spacing: 10) {
@@ -372,16 +384,6 @@ private struct IslandContent: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .highPriorityGesture(islandGesture)
-            // Instant press detection via a simultaneous 0-duration long press —
-            // fires on touch-down with no disambiguation delay, and runs alongside
-            // the drag/tap gesture and the sibling buttons without consuming them.
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0, maximumDistance: .infinity)
-                    .updating($pressActive) { _, state, _ in state = true }
-            )
-            .onChange(of: pressActive) { _, active in
-                withAnimation(Self.pressSpring) { pressed = active }
-            }
 
             Button { playback.togglePlayPause() } label: {
                 Image(systemName: playback.snapshot.status == .playing ? "pause.fill" : "play.fill")
@@ -423,12 +425,12 @@ private struct IslandContent: View {
     private static let tapSlop: CGFloat = 8         // movement under this = a tap
     private static let openDist: CGFloat = 40       // upward drag that opens the player
 
-    /// One high-priority gesture for the artwork+titles zone: instant press-scale
-    /// on touch, tap or swipe-up to open, horizontal swipe to change track.
+    /// One high-priority gesture for the artwork+titles zone: tap or swipe-up to
+    /// open, horizontal swipe to change track. (Press-scale is handled separately
+    /// by the parent's whole-pill touch-down reader.)
     private var islandGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                if !pressed { withAnimation(Self.pressSpring) { pressed = true } }
                 let w = value.translation.width, h = value.translation.height
                 guard abs(w) > abs(h), abs(w) > Self.tapSlop else {
                     if dragX != 0 { dragX = 0 }    // vertical / tap: don't follow
@@ -447,7 +449,6 @@ private struct IslandContent: View {
                 armedDir = qual
             }
             .onEnded { value in
-                withAnimation(Self.pressSpring) { pressed = false }
                 let w = value.translation.width, h = value.translation.height
                 let pw = value.predictedEndTranslation.width
                 let ph = value.predictedEndTranslation.height
@@ -695,6 +696,111 @@ private extension View {
         }
     }
 }
+
+// MARK: - Instant touch-down reporting (UIKit)
+
+private extension View {
+    /// Reports touch-DOWN / up on this view **instantly**. SwiftUI's own
+    /// DragGesture / LongPressGesture wait to disambiguate a stationary finger
+    /// (they only fire on movement), which lagged the island press-scale. This
+    /// bridges a UIKit 0-duration long-press recognizer that fires on
+    /// `touchesBegan` and, being non-cancelling + simultaneous, observes without
+    /// stealing the touch from SwiftUI gestures/buttons underneath. No-op off iOS.
+    @ViewBuilder
+    func onTouchDownChanged(_ action: @escaping (Bool) -> Void) -> some View {
+        #if canImport(UIKit)
+        self.background(TouchDownReader(onChange: action))
+        #else
+        self
+        #endif
+    }
+}
+
+#if canImport(UIKit)
+/// Installs a 0-duration `UILongPressGestureRecognizer` on the **window** so
+/// touch-down is reported with zero delay, scoped to this view's bounds, without
+/// consuming the touch (so the SwiftUI swipe/tap gestures and buttons still work).
+///
+/// It must attach to the window — not the representable's immediate `superview` —
+/// because SwiftUI draws `Text`/`Image`/shapes into a shared backing view rather
+/// than a `UIView` per element, so the immediate superview is usually NOT an
+/// ancestor of the real touch target and the recognizer never fires. The window
+/// is always an ancestor, and `shouldReceive` re-scopes delivery to this view's
+/// bounds. `allowableMovement` is unbounded so the press survives a swipe.
+private struct TouchDownReader: UIViewRepresentable {
+    var onChange: (Bool) -> Void
+
+    func makeUIView(context: Context) -> PassthroughView {
+        let view = PassthroughView()
+        context.coordinator.onChange = onChange
+        context.coordinator.view = view
+        view.onEnterHierarchy = { [weak view] in
+            guard let view, let window = view.window,
+                  context.coordinator.recognizer == nil else { return }
+            let press = UILongPressGestureRecognizer(
+                target: context.coordinator, action: #selector(Coordinator.handle(_:)))
+            press.minimumPressDuration = 0
+            press.allowableMovement = .greatestFiniteMagnitude
+            press.cancelsTouchesInView = false
+            press.delaysTouchesBegan = false
+            press.delaysTouchesEnded = false
+            press.delegate = context.coordinator
+            window.addGestureRecognizer(press)
+            context.coordinator.recognizer = press
+            context.coordinator.host = window
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: PassthroughView, context: Context) {
+        context.coordinator.onChange = onChange
+    }
+
+    static func dismantleUIView(_ uiView: PassthroughView, coordinator: Coordinator) {
+        if let r = coordinator.recognizer { coordinator.host?.removeGestureRecognizer(r) }
+        coordinator.recognizer = nil
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onChange: ((Bool) -> Void)?
+        weak var view: PassthroughView?
+        weak var recognizer: UIGestureRecognizer?
+        weak var host: UIView?
+
+        @objc func handle(_ g: UILongPressGestureRecognizer) {
+            switch g.state {
+            case .began: onChange?(true)
+            case .ended, .cancelled, .failed: onChange?(false)
+            default: break
+            }
+        }
+
+        // Run alongside SwiftUI's gestures rather than fighting them.
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        // Only react to touches inside this view's own bounds (the island pill),
+        // so touches elsewhere on the window are ignored.
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let view, view.window != nil else { return false }
+            return view.bounds.contains(touch.location(in: view))
+        }
+    }
+
+    /// Transparent, never the hit-test target — it exists only as a bounds anchor
+    /// for the window recognizer's `shouldReceive` scoping.
+    final class PassthroughView: UIView {
+        var onEnterHierarchy: (() -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { onEnterHierarchy?() }
+        }
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+    }
+}
+#endif
 
 // MARK: - Artwork
 
