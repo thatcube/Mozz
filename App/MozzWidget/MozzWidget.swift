@@ -29,9 +29,19 @@ extension Color {
 
 // MARK: - Now Playing widget
 
+/// How long a "playing" snapshot is trusted without a fresh app heartbeat. The
+/// app reloads the widget periodically while playing (see AppEnvironment); if it
+/// is force-quit, no reload arrives, so after this grace the widget stops showing
+/// a (now wrong) Pause button and renders a neutral state instead.
+private let nowPlayingLiveGrace: TimeInterval = 100
+
 struct NowPlayingEntry: TimelineEntry {
     let date: Date
     let snapshot: NowPlayingWidgetSnapshot?
+    /// Whether the app is believed to be running (so a "playing" state — and its
+    /// Pause button — is trustworthy). `false` renders a neutral, control-free
+    /// state used when the app looks terminated.
+    var live: Bool = true
 }
 
 struct NowPlayingProvider: TimelineProvider {
@@ -46,16 +56,35 @@ struct NowPlayingProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NowPlayingEntry>) -> Void) {
-        // The app pushes reloads on every playback change, so a single entry that
-        // never expires on its own is correct.
-        let entry = NowPlayingEntry(date: .now, snapshot: WidgetSnapshotStore.readNowPlaying())
-        completion(Timeline(entries: [entry], policy: .never))
+        let snapshot = WidgetSnapshotStore.readNowPlaying()
+        let now = Date()
+        var entries = [NowPlayingEntry(date: now, snapshot: snapshot, live: true)]
+        // If it claims to be playing, schedule a fallback that flips to a neutral
+        // state after the grace period. The app pushes a reload roughly every
+        // minute while it's actually playing, which rebuilds this timeline and
+        // supersedes the fallback — so it only ever fires once the app has been
+        // terminated (no more reloads). `.never` so the widget doesn't self-refresh
+        // back into the stale "playing" snapshot.
+        if snapshot?.isPlaying == true {
+            entries.append(NowPlayingEntry(date: now.addingTimeInterval(nowPlayingLiveGrace),
+                                           snapshot: snapshot, live: false))
+        }
+        completion(Timeline(entries: entries, policy: .never))
     }
 }
+
+/// The effective control state the widget should render.
+private enum NowPlayingMode { case playing, paused, neutral }
 
 struct NowPlayingWidgetView: View {
     @Environment(\.widgetFamily) private var family
     var entry: NowPlayingEntry
+
+    private func mode(_ s: NowPlayingWidgetSnapshot) -> NowPlayingMode {
+        // A stale "playing" entry (app looks terminated) → neutral, no controls.
+        if s.isPlaying && !entry.live { return .neutral }
+        return s.isPlaying ? .playing : .paused
+    }
 
     var body: some View {
         Group {
@@ -82,7 +111,9 @@ struct NowPlayingWidgetView: View {
             HStack(alignment: .top) {
                 crispArtwork(s).frame(width: 64, height: 64)
                 Spacer(minLength: 0)
-                playPauseButton(s, compact: true)
+                if mode(s) != .neutral {
+                    playPauseButton(s, compact: true)
+                }
             }
             Spacer(minLength: 8)
             Text(s.title).font(.subheadline).fontWeight(.semibold)
@@ -101,15 +132,17 @@ struct NowPlayingWidgetView: View {
                 .aspectRatio(1, contentMode: .fit)
                 .frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 4) {
-                Text(s.isPlaying ? "NOW PLAYING" : "PAUSED")
+                Text(stateLabel(s))
                     .font(.caption2).fontWeight(.semibold)
                     .foregroundStyle(.white.opacity(0.7))
                     .tracking(0.5)
                 Text(s.title).font(.headline).fontWeight(.semibold)
                     .lineLimit(2).minimumScaleFactor(0.8)
                 Text(s.artist).font(.subheadline).lineLimit(1).opacity(0.85)
-                Spacer(minLength: 6)
-                playPauseButton(s, compact: false)
+                if mode(s) != .neutral {
+                    Spacer(minLength: 6)
+                    playPauseButton(s, compact: false)
+                }
             }
             .frame(maxHeight: .infinity, alignment: .top)
             Spacer(minLength: 0)
@@ -117,6 +150,14 @@ struct NowPlayingWidgetView: View {
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(for: .widget) { background(s) }
+    }
+
+    private func stateLabel(_ s: NowPlayingWidgetSnapshot) -> String {
+        switch mode(s) {
+        case .playing: return "NOW PLAYING"
+        case .paused:  return "PAUSED"
+        case .neutral: return "MOZZ"
+        }
     }
 
     // MARK: Pieces
