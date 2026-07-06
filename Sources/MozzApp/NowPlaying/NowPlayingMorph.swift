@@ -350,10 +350,16 @@ struct NowPlayingMorphContainer: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(playback.upNext.prefix(100).enumerated()), id: \.offset) { _, track in
-                            HStack {
-                                Text(track.title).lineLimit(1)
-                                Spacer()
-                                Text(track.artistName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            HStack(spacing: 10) {
+                                ArtworkView(artwork: track.artwork,
+                                            seed: track.albumTitle ?? track.title,
+                                            size: 40, cornerRadius: 6)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(track.title).lineLimit(1)
+                                    Text(track.artistName).font(.caption)
+                                        .foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
                             }
                             .font(.subheadline)
                         }
