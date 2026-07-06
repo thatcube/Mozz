@@ -812,12 +812,14 @@ public final class AppEnvironment: ObservableObject {
         guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
         playback.provideArtwork(data, for: track.id)
         // Also stash it for the widgets and refresh their snapshots with the art.
-        if track.id == playback.currentTrack?.id {
-            WidgetSnapshotStore.writeArtwork(data, name: Self.widgetArtworkName(track.id))
-            if let hex = WidgetTint.mutedHex(from: data) { widgetTintByTrack[track.id] = hex }
-            updateNowPlayingWidget()
-            patchRecentArtwork(trackID: track.id)
-        }
+        guard track.id == playback.currentTrack?.id else { return }
+        WidgetSnapshotStore.writeArtwork(data, name: Self.widgetArtworkName(track.id))
+        // Derive the muted tint off the main thread (CoreImage decode + render).
+        let hex = await Task.detached(priority: .utility) { WidgetTint.mutedHex(from: data) }.value
+        guard track.id == playback.currentTrack?.id else { return }
+        if let hex { widgetTintByTrack[track.id] = hex }
+        updateNowPlayingWidget()
+        patchRecentArtwork(trackID: track.id)
     }
 
     // MARK: Widgets (Home / Lock Screen snapshots)

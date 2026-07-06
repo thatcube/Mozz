@@ -8,6 +8,11 @@ import CoreImage
 /// the Apple-Music look where the tile takes on a desaturated shade of the cover.
 /// Runs in the app process (the widget extension just applies the resulting hex).
 enum WidgetTint {
+    #if canImport(UIKit)
+    /// Shared context — allocating a `CIContext` per call is comparatively costly.
+    private static let context = CIContext(options: [.workingColorSpace: NSNull()])
+    #endif
+
     /// Returns "#RRGGBB" of a darkened, slightly-desaturated average of the image,
     /// suitable as a background behind white text. `nil` if it can't be computed.
     static func mutedHex(from data: Data) -> String? {
@@ -23,7 +28,6 @@ enum WidgetTint {
               let output = filter.outputImage else { return nil }
 
         var pixel = [UInt8](repeating: 0, count: 4)
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
         context.render(output, toBitmap: &pixel, rowBytes: 4,
                        bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
                        format: .RGBA8, colorSpace: nil)

@@ -79,6 +79,8 @@ PY
 regen_signed() {
   echo "▸ Generating signed Xcode project (team $TEAM, $VARIANT: $BUNDLE)..."
   cp project.yml .project.yml.bak
+  # Always restore the committed project.yml, even if generation fails partway.
+  trap 'mv -f .project.yml.bak project.yml 2>/dev/null || true' EXIT
   sed -i '' 's/CODE_SIGNING_REQUIRED: "NO"/CODE_SIGNING_REQUIRED: "YES"/' project.yml
   sed -i '' 's/CODE_SIGNING_ALLOWED: "NO"/CODE_SIGNING_ALLOWED: "YES"/' project.yml
   sed -i '' "s/    CODE_SIGN_STYLE: Automatic/    CODE_SIGN_STYLE: Automatic\n    DEVELOPMENT_TEAM: \"$TEAM\"/" project.yml
@@ -90,6 +92,7 @@ regen_signed() {
   rm -rf Mozz.xcodeproj
   tools/generate-project.sh >/dev/null
   mv .project.yml.bak project.yml
+  trap - EXIT
 }
 
 # Regenerate if asked, if the project is missing/unsigned, or if the cached
