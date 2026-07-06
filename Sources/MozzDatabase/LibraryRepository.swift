@@ -297,6 +297,31 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// An artist's tracks ranked by local play count (most-played first), then a
+    /// stable disc/track/title order. Membership is via the artist's albums, so
+    /// it also works for album-artists that no track directly references. Used
+    /// for the "Top Songs" section (limit 5) and its "See All" list (large limit).
+    public func topTracks(forArtistRemoteId artistRemoteId: String, serverId: ServerID, limit: Int) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM track
+                LEFT JOIN (
+                    SELECT track_ref, COUNT(*) AS plays
+                    FROM play_event
+                    WHERE kind IN ('started', 'completed')
+                    GROUP BY track_ref
+                ) pe ON (track.serverId || ':' || track.remoteId) = pe.track_ref
+                WHERE track.serverId = ? AND track.albumRemoteId IN (
+                    SELECT remoteId FROM album WHERE serverId = ? AND artistRemoteId = ?
+                )
+                ORDER BY COALESCE(pe.plays, 0) DESC,
+                         track.discNumber, track.trackNumber,
+                         track.sortTitle COLLATE NOCASE, track.title COLLATE NOCASE
+                LIMIT ?
+                """, arguments: [serverId, serverId, artistRemoteId, limit])
+        }
+    }
+
     /// The "Liked Songs" list: Jellyfin favorites plus Plex tracks rated at or
     /// above ``LikePolicy/ratingThreshold`` — unified so one query serves both
     /// backends (a track carries only one of the two signals). Highest-rated

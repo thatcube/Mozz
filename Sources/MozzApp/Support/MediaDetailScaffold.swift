@@ -36,6 +36,10 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     let title: String
     var subtitle: String?
     var meta: String?
+    /// Horizontal inset applied to `content`. Defaults to 16 (song lists); the
+    /// artist page passes 0 so its horizontal shelves can bleed to the edge and
+    /// pad each section itself.
+    var contentHorizontalPadding: CGFloat = 16
     @ViewBuilder var actions: () -> Actions
     @ViewBuilder var content: () -> Content
 
@@ -73,7 +77,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                 VStack(spacing: 0) {
                     header
                     content()
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, contentHorizontalPadding)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
                         .frame(maxWidth: .infinity)
