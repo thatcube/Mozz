@@ -39,8 +39,6 @@ struct NowPlayingMorphContainer: View {
     /// True only during the collapse, so the downward receive-bounce fires on the
     /// way into the island and never while opening or dragging.
     @State private var receiving = false
-    @State private var scrubbing = false
-    @State private var scrubValue = 0.0
     /// Live island-press state: `pressed` drives the whole-island scale, `location`
     /// (pill-local) drives the finger-following glow. Kept in an `@Observable` so
     /// the high-frequency `location` updates re-render ONLY the lightweight glow
@@ -284,22 +282,8 @@ struct NowPlayingMorphContainer: View {
 
     private var scrubber: some View {
         let snapshot = playback.snapshot
-        return VStack(spacing: 4) {
-            Slider(
-                value: Binding(get: { scrubbing ? scrubValue : snapshot.elapsed },
-                               set: { scrubValue = $0 }),
-                in: 0...max(snapshot.duration, 1),
-                onEditingChanged: { editing in
-                    scrubbing = editing
-                    if !editing { playback.seek(to: scrubValue) }
-                }
-            )
-            HStack {
-                Text(Format.duration(scrubbing ? scrubValue : snapshot.elapsed))
-                Spacer()
-                Text(Format.duration(snapshot.duration))
-            }
-            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        return SeekBar(elapsed: snapshot.elapsed, duration: snapshot.duration) { target in
+            playback.seek(to: target)
         }
     }
 
