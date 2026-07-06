@@ -900,7 +900,7 @@ private extension View {
 
 // MARK: - Instant touch-down reporting (UIKit)
 
-private extension View {
+extension View {
     /// Reports touch-DOWN / move / up on this view **instantly**, with the touch
     /// point in this view's local coordinates. SwiftUI's own DragGesture /
     /// LongPressGesture wait to disambiguate a stationary finger (they only fire on
@@ -929,7 +929,7 @@ private extension View {
 /// ancestor of the real touch target and the recognizer never fires. The window
 /// is always an ancestor, and `shouldReceive` re-scopes delivery to this view's
 /// bounds. `allowableMovement` is unbounded so the press survives a swipe.
-private struct TouchDownReader: UIViewRepresentable {
+struct TouchDownReader: UIViewRepresentable {
     var onChange: (Bool, CGPoint) -> Void
 
     func makeUIView(context: Context) -> PassthroughView {
