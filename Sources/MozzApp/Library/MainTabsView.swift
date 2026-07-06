@@ -140,6 +140,29 @@ struct MainTabsView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { ui.isFullPresented = true }
             }
         }
+        .task { consumePendingDeepLinkIfNeeded() }
+        .onChange(of: env.pendingDeepLink) { _, _ in consumePendingDeepLinkIfNeeded() }
+    }
+
+    /// Apply any queued deep-link / Handoff destination now that the tab UI is on
+    /// screen: switch to its tab and set that tab's navigation path (resolving the
+    /// record payload from the local catalog). Clears the queue when handled.
+    private func consumePendingDeepLinkIfNeeded() {
+        guard let target = env.pendingDeepLink else { return }
+        Task {
+            guard let (tab, routes) = await env.resolveDeepLink(target) else {
+                env.pendingDeepLink = nil
+                return
+            }
+            loadedTabs.insert(tab)
+            expandLockUntil = Date.now + Self.expandCooldown
+            withAnimation(Self.expandSpring) {
+                selectedTab = tab
+                paths[tab] = routes
+                minimize = 0
+            }
+            env.pendingDeepLink = nil
+        }
     }
 
     /// All visited pages stay mounted (state preserved); only the selected one is

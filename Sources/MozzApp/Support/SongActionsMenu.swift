@@ -14,8 +14,18 @@ struct SongActionsMenu: View {
     let track: TrackRecord
     var downloadState: DownloadState?
 
+    @State private var isFavorite: Bool
+    @State private var rating: Double?
+
+    init(track: TrackRecord, downloadState: DownloadState? = nil) {
+        self.track = track
+        self.downloadState = downloadState
+        _isFavorite = State(initialValue: track.isFavorite)
+        _rating = State(initialValue: track.rating)
+    }
+
     private var liked: Bool {
-        LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating)
+        LikePolicy.isLiked(isFavorite: isFavorite, rating: rating)
     }
 
     var body: some View {
@@ -50,6 +60,8 @@ struct SongActionsMenu: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("More actions")
+        .onChange(of: track.isFavorite) { _, new in isFavorite = new }
+        .onChange(of: track.rating) { _, new in rating = new }
     }
 
     @ViewBuilder private var likeOrRate: some View {
@@ -58,14 +70,16 @@ struct SongActionsMenu: View {
                 ForEach((1...5).reversed(), id: \.self) { stars in
                     Button {
                         let snapshot = track
+                        rating = Double(stars)
                         Task { await env.setRating(Double(stars), track: snapshot) }
                     } label: {
                         Label("\(stars) Star\(stars == 1 ? "" : "s")", systemImage: "star.fill")
                     }
                 }
-                if (track.rating ?? 0) > 0 {
+                if (rating ?? 0) > 0 {
                     Button(role: .destructive) {
                         let snapshot = track
+                        rating = nil
                         Task { await env.setRating(nil, track: snapshot) }
                     } label: {
                         Label("Clear Rating", systemImage: "star.slash")
@@ -77,7 +91,9 @@ struct SongActionsMenu: View {
         } else {
             Button {
                 let snapshot = track
-                Task { await env.setLiked(!liked, track: snapshot) }
+                let next = !liked
+                isFavorite = next
+                Task { await env.setLiked(next, track: snapshot) }
             } label: {
                 Label(liked ? "Unlike" : "Like", systemImage: liked ? "heart.fill" : "heart")
             }

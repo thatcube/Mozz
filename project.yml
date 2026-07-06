@@ -68,3 +68,17 @@ targets:
         NSLocalNetworkUsageDescription: "Mozz connects to Plex and Jellyfin media servers on your local network."
         NSBonjourServices:
           - _jellyfin._tcp
+        # Custom URL scheme for deep links (mozz://album/<id>, mozz://tab/library,
+        # …). Widget tiles and shared links open the app straight to a screen.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.thatcube.Mozz
+            CFBundleURLSchemes:
+              - mozz
+        # Handoff: activity types this app advertises/continues across devices.
+        # Must be pre-declared or the OS won't route onContinueUserActivity.
+        NSUserActivityTypes:
+          - com.thatcube.mozz.album
+          - com.thatcube.mozz.artist
+          - com.thatcube.mozz.playlist
+          - com.thatcube.mozz.genre
+          - com.thatcube.mozz.library

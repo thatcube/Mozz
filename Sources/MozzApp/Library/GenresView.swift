@@ -65,6 +65,7 @@ struct GenreDetailView: View {
             }
         }
         .task { await load() }
+        .handoff(DeepLinkTarget.genreActivity, id: genre, title: genre)
     }
 
     private func load() async {

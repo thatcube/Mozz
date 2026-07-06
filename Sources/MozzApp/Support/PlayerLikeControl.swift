@@ -30,11 +30,14 @@ struct PlayerLikeControl: View {
             }
         }
         // The view is reused across track changes (same position in the drawer),
-        // so seed from the new track when the current song changes.
+        // so reseed when the current song changes; also reconcile if the record's
+        // like/rating value changes in place.
         .onChange(of: track.id) { _, _ in
             isFavorite = track.isFavorite
             rating = track.rating
         }
+        .onChange(of: track.isFavorite) { _, new in isFavorite = new }
+        .onChange(of: track.rating) { _, new in rating = new }
     }
 
     private var heart: some View {

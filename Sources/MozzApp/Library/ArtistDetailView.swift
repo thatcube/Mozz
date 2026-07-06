@@ -52,6 +52,7 @@ struct ArtistDetailView: View {
             }
         )
         .task { await load() }
+        .handoff(DeepLinkTarget.artistActivity, id: artist.remoteId, title: artist.name)
     }
 
     private var topSongsSection: some View {

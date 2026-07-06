@@ -84,6 +84,12 @@ public final class AppEnvironment: ObservableObject {
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
 
+    /// A deep-link / Handoff destination waiting to be navigated to. Set by
+    /// `onOpenURL` / `onContinueUserActivity`; consumed by `MainTabsView` once it
+    /// is on screen (a link may arrive during launch/onboarding, before the tab
+    /// UI exists, so it must be queued rather than applied immediately).
+    @Published var pendingDeepLink: DeepLinkTarget?
+
     /// Whether a catalog sync is currently running, and its latest progress.
     /// Owned by the environment (not a view) so a sync survives navigating away
     /// from Settings / refreshing Home, and every view reflects the true state.
@@ -533,6 +539,48 @@ public final class AppEnvironment: ObservableObject {
             } catch {
                 break
             }
+        }
+    }
+
+    // MARK: Deep links / Handoff routing
+
+    /// Handle an incoming `mozz://` URL (deep link, widget tap). Parses it and
+    /// queues the destination; `MainTabsView` applies it when it's on screen.
+    func handle(url: URL) {
+        guard let target = DeepLinkTarget.parse(url) else { return }
+        pendingDeepLink = target
+    }
+
+    /// Handle a continued Handoff activity, routing through the same queue.
+    func handleHandoff(activityType: String, userInfo: [AnyHashable: Any]?) {
+        guard let target = DeepLinkTarget.from(activityType: activityType, userInfo: userInfo) else { return }
+        pendingDeepLink = target
+    }
+
+    /// Resolve a queued target into a concrete tab + navigation path, looking up
+    /// record payloads from the local database. Returns `nil` if the record isn't
+    /// in the catalog (e.g. a stale link, or not yet synced).
+    func resolveDeepLink(_ target: DeepLinkTarget) async -> (AppTab, [AppRoute])? {
+        switch target {
+        case .tab(let tab):
+            return (tab, [])
+        case .category(let route):
+            return (.library, [route])
+        case .genre(let name):
+            return (.library, [.genre(name)])
+        case .album(let id):
+            guard let serverId = active?.connection.id,
+                  let album = try? await repository.album(serverId: serverId, remoteId: id) else { return nil }
+            return (.library, [.album(album)])
+        case .artist(let id):
+            guard let serverId = active?.connection.id,
+                  let artist = try? await repository.artist(serverId: serverId, remoteId: id) else { return nil }
+            return (.library, [.artist(artist)])
+        case .playlist(let id):
+            guard let serverId = active?.connection.id,
+                  let playlist = (try? await repository.allPlaylists(serverId: serverId))?.first(where: { $0.remoteId == id })
+            else { return nil }
+            return (.library, [.playlist(playlist)])
         }
     }
 
