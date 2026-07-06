@@ -66,7 +66,7 @@ struct DiagnosticsView: View {
             }
         }
         .navigationTitle("Diagnostics")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationTitle()
     }
 
     /// A capability row that scales with Dynamic Type (LabeledContent reflows the

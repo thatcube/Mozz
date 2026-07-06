@@ -99,6 +99,9 @@ public final class AppEnvironment: ObservableObject {
     /// A human-readable setup failure, shown on the setup screen with a retry.
     @Published public var setupError: String?
     private var activationTask: Task<Void, Never>?
+    /// Bumped each `activate(session:)` so a superseded activation's async cleanup
+    /// can't clobber a newer one's session/state.
+    private var activationGeneration = 0
 
     /// A deep-link / Handoff destination waiting to be navigated to. Set by
     /// `onOpenURL` / `onContinueUserActivity`; consumed by `MainTabsView` once it
@@ -208,13 +211,15 @@ public final class AppEnvironment: ObservableObject {
         isSettingUp = true
         setupError = nil
         activationTask?.cancel()
-        activationTask = Task { await self.performActivation(session) }
+        activationGeneration &+= 1
+        let generation = activationGeneration
+        activationTask = Task { await self.performActivation(session, generation: generation) }
     }
 
     /// Retry the last failed setup, or a fresh one.
     public func retryActivation(session: AuthenticatedSession) { activate(session: session) }
 
-    private func performActivation(_ session: AuthenticatedSession) async {
+    private func performActivation(_ session: AuthenticatedSession, generation: Int) async {
         canEnterEarly = false
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
@@ -232,11 +237,16 @@ public final class AppEnvironment: ObservableObject {
             // screen until there's enough to browse (or the user taps "Browse
             // now"), so we don't drop them onto an empty Home.
             await gateInitialSync()
+            guard generation == activationGeneration else { return }  // superseded
+            setupError = nil
             isSettingUp = false                 // success → enter the app
         } catch is CancellationError {
+            // Don't clobber a newer activation's freshly-saved session/state.
+            guard generation == activationGeneration else { return }
             SessionPersistence.clear(credentials)
-            isSettingUp = false                 // superseded/cancelled → leave setup
+            isSettingUp = false                 // cancelled → leave setup
         } catch {
+            guard generation == activationGeneration else { return }
             SessionPersistence.clear(credentials)
             setupError = "Couldn't finish setting up: \(error.localizedDescription)"
             // Keep `isSettingUp` true so the setup screen shows the error + retry.
@@ -250,6 +260,13 @@ public final class AppEnvironment: ObservableObject {
         guard let serverId = active?.connection.id else { return }
         let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
         if existing > 0 { return }   // re-login with a catalog already present
+        // A sync left running from a previous server/sign-out would make the
+        // single-flight `startSync()` a no-op; cancel and wait for it to clear
+        // so this server actually gets its own fresh sync.
+        if isSyncing {
+            cancelSync()
+            while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
         startSync()
         let enoughToBrowse = 20
         while isSettingUp {
@@ -320,6 +337,7 @@ public final class AppEnvironment: ObservableObject {
 
     public func signOut() {
         activationTask?.cancel()
+        cancelSync()                 // stop any in-flight catalog sync for the old account
         isSettingUp = false
         setupError = nil
         canEnterEarly = false
@@ -772,6 +790,12 @@ public final class AppEnvironment: ObservableObject {
         SessionPersistence.save(stored, to: credentials)
         do {
             try await activate(stored)
+            // Cancel any sync still running for the previous server so the
+            // single-flight startSync() actually starts one for the new server.
+            if isSyncing {
+                cancelSync()
+                while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+            }
             startSync()
         } catch {
             // Restore the previously-working session so a failed switch doesn't
