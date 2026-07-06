@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var mozzWeeklyTitle = "Mozz Weekly"
     @State private var recentlyPlayed: [TrackRecord] = []
     @State private var recentlyAdded: [AlbumRecord] = []
+    @State private var likedCount = 0
     @State private var loaded = false
 
     private var mozzWeeklyRep: TrackRecord? {
@@ -28,6 +29,19 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     TightHeader(title: "Home")
+
+                    if env.active != nil {
+                        HStack(spacing: 16) {
+                            NavigationLink {
+                                LikedSongsView()
+                            } label: {
+                                LikedSongsHomeCard(count: likedCount)
+                            }
+                            .buttonStyle(.plain)
+                            Color.clear   // keeps the tile to a half-width column
+                        }
+                        .padding(.horizontal, 20)
+                    }
 
                     if !mozzWeekly.isEmpty {
                         NavigationLink {
@@ -71,6 +85,7 @@ struct HomeView: View {
         prefetchMozzWeeklyHero()
         recentlyPlayed = (try? await env.repository.recentlyPlayedTracks(serverId: serverId, limit: 20)) ?? []
         recentlyAdded = (try? await env.repository.recentlyAddedAlbums(serverId: serverId, limit: 20)) ?? []
+        likedCount = (try? await env.repository.likedTracksCount(serverId: serverId)) ?? 0
         loaded = true
     }
 
@@ -107,6 +122,37 @@ struct AlbumShelf: View {
                 .padding(.horizontal, 20)
             }
         }
+    }
+}
+
+/// A tappable half-width tile on Home that opens Liked Songs. A subtle red
+/// gradient with a white heart, matching the collection's identity.
+struct LikedSongsHomeCard: View {
+    let count: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 12)
+            Text("Liked Songs")
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text(count > 0 ? (count == 1 ? "1 song" : "\(count) songs") : "Tap ♥ to add")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(16)
+        .frame(height: 116, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.84, green: 0.27, blue: 0.35),
+                         Color(red: 0.50, green: 0.09, blue: 0.16)],
+                startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
     }
 }
 
