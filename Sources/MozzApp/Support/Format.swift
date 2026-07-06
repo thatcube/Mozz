@@ -22,4 +22,15 @@ enum Format {
         guard let n else { return "" }
         return n == 1 ? "1 track" : "\(n) tracks"
     }
+
+    /// A coarse, human total duration for a footer line: "48 min", "1 hr 12 min".
+    static func longDuration(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "" }
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        if h > 0 { return m > 0 ? "\(h) hr \(m) min" : "\(h) hr" }
+        if m > 0 { return "\(m) min" }
+        return "\(total) sec"
+    }
 }
