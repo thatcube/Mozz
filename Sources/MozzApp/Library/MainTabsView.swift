@@ -134,6 +134,16 @@ struct MainTabsView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { ui.isFullPresented = true }
             }
         }
+        .task {
+            // TEMP debug hook: auto-navigate into Liked Songs so the full-bleed
+            // layout can be inspected in the Simulator (no tap injection). Set
+            // MOZZ_DEBUG_SHORTLIKED to also shrink it to a few rows. REMOVE.
+            let e = ProcessInfo.processInfo.environment
+            if e["MOZZ_DEBUG_LIKED"] == "1" || e["MOZZ_DEBUG_SHORTLIKED"] == "1" {
+                selectedTab = .home
+                paths[.home] = [.likedSongs]
+            }
+        }
     }
 
     /// All visited pages stay mounted (state preserved); only the selected one is

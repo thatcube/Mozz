@@ -5,15 +5,6 @@ import MozzDatabase
 import UIKit
 #endif
 
-/// Publishes the scroll viewport height so the scaffold can keep its content at
-/// least that tall (short pages then lay out like full ones — see `body`).
-private struct ViewportHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 /// Describes the top-of-page hero for a media detail. The *style* is independent
 /// of the content type, so a caller chooses how the artwork is presented while
 /// the rest of the page stays identical:
@@ -56,9 +47,6 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     @State private var bg: Color = Color(white: 0.12)
     @State private var deepBg: Color = .mozzDetailBackground
-    /// Measured height of the scroll viewport, used to keep the content at least
-    /// viewport-tall (see the `minHeight` in `body`). 0 until first layout.
-    @State private var viewportHeight: CGFloat = 0
 
     private static var fullBleedHeight: CGFloat { 500 }
     private static var centeredArtworkSize: CGFloat { 240 }
@@ -104,34 +92,20 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                         .padding(.bottom, 40)
                         .frame(maxWidth: .infinity)
                         // Seamless bleed: the hero's color continues at the very
-                        // top of the list, then darkens into `deepBg` a few rows
-                        // down (closure form, so it's a decorative layer that
-                        // never affects layout width — see the horizontal-overflow
-                        // history above).
-                        .background { contentBackground }
+                        // top of the list, then eases into `deepBg` a few hundred
+                        // points down. Pinned to the TOP of the content and given a
+                        // FIXED height (never `maxHeight: .infinity`): a flexible
+                        // decoration inside the ScrollView poisons the sibling
+                        // header's height proposal when the page is short — see the
+                        // note on `contentBackground`. `deepBg` already fills the
+                        // whole page base, so there's nothing to fill below the
+                        // gradient anyway.
+                        .background(alignment: .top) { contentBackground }
                 }
-                // Keep the scroll content at least as tall as the viewport, so a
-                // page with only a few rows lays out EXACTLY like a full one. The
-                // stretchy full-bleed header is a greedy GeometryReader; when the
-                // content is shorter than the viewport that leaves ambiguous slack
-                // which SwiftUI can resolve into a bad header frame — the Play/
-                // Shuffle actions get clipped to a sliver and the hero color never
-                // settles (the "few liked songs looked broken" bug). Filling to the
-                // viewport removes the slack; `deepBg` covers any extra space
-                // seamlessly. `alignment: .top` so short content stays pinned up.
-                .frame(minHeight: viewportHeight, alignment: .top)
             }
             .scrollIndicators(.hidden)
             .coordinateSpace(name: Self.scrollSpace)
             .minimizesBottomBarOnScroll()
-            // Measure the scroll viewport height (the ScrollView's own bounds, not
-            // its content) to feed the minHeight above.
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: ViewportHeightKey.self, value: proxy.size.height)
-                }
-            }
-            .onPreferenceChange(ViewportHeightKey.self) { viewportHeight = $0 }
 
             // Back button stays BELOW the status bar (the ZStack respects the
             // safe area even though the full-bleed image bleeds under it).
@@ -283,8 +257,18 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// extracted color holds through the first row (so the artwork continues
     /// straight into the list with no seam) then eases into `deepBg` — the SAME
     /// hue, kept tinted rather than black — over ~420pt. `deepBg` also fills the
-    /// whole page base, so the entire page carries the artwork's color while the
-    /// white song text stays high-contrast on the settled tone.
+    /// whole page base (see `body`), so below this gradient the page keeps the
+    /// settled tone with no seam.
+    ///
+    /// IMPORTANT: this is a FIXED-height gradient (420pt), NOT `maxHeight:
+    /// .infinity`. A flexible/greedy decoration inside the ScrollView makes the
+    /// content's height proposal ambiguous; when the page is shorter than the
+    /// viewport SwiftUI resolves that slack by squashing the *sibling* full-bleed
+    /// header's height proposal to near-zero, which collapsed the title's meta
+    /// line and the Play/Shuffle row (the "few liked songs looked broken" bug).
+    /// A fixed height keeps the proposal unambiguous, so short and tall pages lay
+    /// out identically. Applied with `.background(alignment: .top)` so it always
+    /// pins to the first row.
     private var contentBackground: some View {
         LinearGradient(
             stops: [
@@ -293,8 +277,8 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                 .init(color: deepBg, location: 1.0),
             ],
             startPoint: .top, endPoint: .bottom)
+            .frame(maxWidth: .infinity)
             .frame(height: 420)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var heroFallback: some View {
