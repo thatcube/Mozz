@@ -27,10 +27,11 @@ private enum RatingTuning {
     /// The downward tail on the reveal bubble that points at the star. It flows
     /// smoothly out of the bottom edge (a morphed teardrop) rather than a bolted-
     /// on triangle: `revealTailBase` is its width where it meets the body,
-    /// `revealTailHeight` how far it drops, `revealTailTip` the rounding of its tip.
-    static let revealTailBase: CGFloat = 44
-    static let revealTailHeight: CGFloat = 14
-    static let revealTailTip: CGFloat = 7
+    /// `revealTailHeight` how far it drops, `revealTailTip` the rounding of its tip
+    /// (small = a sharper, more native-looking beak).
+    static let revealTailBase: CGFloat = 38
+    static let revealTailHeight: CGFloat = 16
+    static let revealTailTip: CGFloat = 3
     static let tint: Color = .primary
     static let inactiveTint: Color = .secondary
 }
@@ -359,7 +360,7 @@ struct FluidRatingControl: View {
     // MARK: Hold-drag reveal
 
     private var revealStrip: some View {
-        VStack(spacing: 11) {
+        VStack(spacing: 18) {
             RatingStripView(value: preview)
                 .background {
                     GeometryReader { geo in
@@ -377,11 +378,7 @@ struct FluidRatingControl: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
         .padding(.bottom, RatingTuning.revealTailHeight)
-        .background {
-            TailedBubble()
-                .fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
-        }
+        .glassBackground(TailedBubble())
         .transition(.scale(scale: 0.9).combined(with: .opacity))
         .allowsHitTesting(false)
     }

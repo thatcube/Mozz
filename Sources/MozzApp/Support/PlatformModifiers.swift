@@ -91,6 +91,22 @@ extension View {
         self.background(.regularMaterial, in: Circle())
         #endif
     }
+
+    /// Real iOS 26 Liquid Glass clipped to an arbitrary shape (e.g. the rating
+    /// reveal's tailed bubble, so it matches the system popover's glass). Falls
+    /// back to a material fill + soft shadow on iOS 17–25 and the macOS test host.
+    @ViewBuilder func glassBackground<S: Shape>(_ shape: S) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(shape.fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 3))
+        }
+        #else
+        self.background(shape.fill(.regularMaterial))
+        #endif
+    }
 }
 
 extension Color {
