@@ -70,27 +70,31 @@ public struct PlexPinSession: Sendable, Hashable {
 
     /// The hosted OAuth page the user can be sent to instead of typing the PIN.
     public func authAppURL(clientInfo: ClientInfo, forwardURL: String? = nil) -> URL? {
-        var components = URLComponents(string: "https://app.plex.tv/auth")
-        var items: [URLQueryItem] = [
-            .init(name: "clientID", value: clientIdentifier),
-            .init(name: "code", value: code),
-            .init(name: "context[device][product]", value: clientInfo.product),
-            .init(name: "context[device][version]", value: clientInfo.version),
-            .init(name: "context[device][platform]", value: clientInfo.platform),
-            .init(name: "context[device][platformVersion]", value: clientInfo.platformVersion),
-            .init(name: "context[device][device]", value: clientInfo.deviceName),
+        var items: [(name: String, value: String)] = [
+            ("clientID", clientIdentifier),
+            ("code", code),
+            ("context[device][product]", clientInfo.product),
+            ("context[device][version]", clientInfo.version),
+            ("context[device][platform]", clientInfo.platform),
+            ("context[device][platformVersion]", clientInfo.platformVersion),
+            ("context[device][device]", clientInfo.deviceName),
         ]
         if let forwardURL {
-            items.append(.init(name: "forwardUrl", value: forwardURL))
+            items.append(("forwardUrl", forwardURL))
         }
-        components?.fragment = "?" + (items.compactMap { item -> String? in
-            guard let value = item.value,
-                  let name = item.name.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed),
-                  let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed)
+        // Encode each name/value EXACTLY once, then place the query in the
+        // fragment ourselves. Assigning to `URLComponents.fragment` would
+        // percent-encode a SECOND time (turning "%5B" into "%255B"), mangling the
+        // `context[device][...]` param names so Plex rejects the link with
+        // "We were unable to complete this request." `clientID`/`code` are clean
+        // and survived that, but the malformed context still broke the handshake.
+        let query = items.compactMap { item -> String? in
+            guard let name = item.name.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed),
+                  let value = item.value.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed)
             else { return nil }
-            return "\(name)=\(encoded)"
-        }.joined(separator: "&"))
-        return components?.url
+            return "\(name)=\(value)"
+        }.joined(separator: "&")
+        return URL(string: "https://app.plex.tv/auth#?\(query)")
     }
 }
 
