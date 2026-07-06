@@ -10,6 +10,10 @@ import MozzRecommend
 /// offline); generation happens off-main on a schedule.
 struct HomeView: View {
     @EnvironmentObject private var env: AppEnvironment
+    /// Bumped by the tab bar to pop this tab to root (see MainTabsView). Applied as
+    /// the NavigationStack's `.id`, so a change rebuilds the stack at root while this
+    /// view's data `@State` (below) is preserved.
+    var popToken: Int = 0
     @State private var mixes: [RecommendationService.HomeMix] = []
     @State private var recentlyPlayed: [TrackRecord] = []
     @State private var recentlyAdded: [AlbumRecord] = []
@@ -51,6 +55,7 @@ struct HomeView: View {
             .task { await load() }
             .refreshable { await load() }
         }
+        .id(popToken)
     }
 
     /// The quick-access grid: Liked Songs plus every precomputed mix, as compact

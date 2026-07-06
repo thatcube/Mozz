@@ -19,6 +19,9 @@ import MozzDatabase
 /// one-stack-per-tab rule is load-bearing, not stylistic.
 struct LibraryHomeView: View {
     @EnvironmentObject private var env: AppEnvironment
+    /// Bumped by the tab bar to pop this tab to root (see MainTabsView). Applied as
+    /// the NavigationStack's `.id`, preserving this view's data `@State`.
+    var popToken: Int = 0
     @State private var recentlyAdded: [AlbumRecord] = []
 
     var body: some View {
@@ -53,6 +56,7 @@ struct LibraryHomeView: View {
             .minimizesBottomBarOnScroll()
             .task { await loadRecent() }
         }
+        .id(popToken)
     }
 
     private var rowDivider: some View {

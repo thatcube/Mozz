@@ -16,6 +16,9 @@ import MozzDatabase
 /// list resolved live from the catalog.
 struct SearchView: View {
     @EnvironmentObject private var env: AppEnvironment
+    /// Bumped by the tab bar to pop this tab to root (see MainTabsView). Applied as
+    /// the NavigationStack's `.id`, preserving the query/results `@State` below.
+    var popToken: Int = 0
     @StateObject private var recents = RecentSearchStore()
     @State private var query = ""
     @State private var results = SearchResults(artists: [], albums: [], tracks: [])
@@ -66,6 +69,7 @@ struct SearchView: View {
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
         }
+        .id(popToken)
     }
 
     /// A custom search field with real iOS 26 Liquid Glass. We can't use the

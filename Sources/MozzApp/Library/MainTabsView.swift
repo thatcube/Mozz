@@ -31,6 +31,24 @@ struct MainTabsView: View {
     /// 0 = expanded tab bar, 1 = minimized (blob split). TEMP: toggled by a
     /// long-press on the bar for visual iteration; wired to scroll next.
     @State private var minimize: CGFloat = 0
+    /// Per-tab "pop to root" tokens. Pressing a tab bumps its token; each tab's
+    /// `NavigationStack` is `.id()`-ed on the token, so the bump rebuilds the stack
+    /// at root (the view's data `@State` lives outside the stack, so it's preserved —
+    /// no reload flash). This gives the standard "tap a tab → root of that tab".
+    @State private var navResetTokens: [AppTab: Int] = [:]
+
+    private func token(_ tab: AppTab) -> Int { navResetTokens[tab, default: 0] }
+
+    /// Handle a tab-bar press. Switching tabs preserves each tab's navigation depth;
+    /// re-tapping the tab you're already on pops it to root (standard iOS behavior).
+    private func pressTab(_ tab: AppTab) {
+        if tab == selectedTab {
+            navResetTokens[tab, default: 0] += 1   // re-tap → pop to root
+        }
+        selectedTab = tab
+        minimize = 0
+        loadedTabs.insert(tab)
+    }
 
     private var hasTrack: Bool { playback.currentTrack != nil }
 
@@ -45,7 +63,8 @@ struct MainTabsView: View {
             // edge (not pinned to the safe area), so it ignores the bottom safe
             // area and pads up by `edgeMargin`.
             MainTabBar(selected: $selectedTab, leftTab: leftTab,
-                       hasIsland: hasTrack, minimize: $minimize)
+                       hasIsland: hasTrack, minimize: $minimize,
+                       onPressTab: pressTab)
                 .padding(.horizontal, BottomBar.hMargin)
                 .padding(.bottom, BottomBar.edgeMargin)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -101,9 +120,9 @@ struct MainTabsView: View {
     @ViewBuilder
     private func page(for tab: AppTab) -> some View {
         switch tab {
-        case .home:    HomeView()
-        case .library: LibraryHomeView()
-        case .search:  SearchView()
+        case .home:    HomeView(popToken: token(.home))
+        case .library: LibraryHomeView(popToken: token(.library))
+        case .search:  SearchView(popToken: token(.search))
         }
     }
 }
@@ -204,6 +223,10 @@ struct MainTabBar: View {
     var hasIsland: Bool
     /// 0 = expanded (full bar), 1 = minimized (two blobs). Interpolated.
     @Binding var minimize: CGFloat
+    /// Called when a tab is pressed (tapped, or committed via the blob drag). The
+    /// parent switches to it AND pops it to root — so it fires even on a re-tap of
+    /// the already-selected tab (which wouldn't change `selected`).
+    var onPressTab: (AppTab) -> Void
 
     @Namespace private var glassNS
 
@@ -340,8 +363,7 @@ struct MainTabBar: View {
         // icon+label group is centred), and recentres as the label fades — via
         // offsets, so nothing is clipped (the earlier frame-clamp cut descenders).
         return Button {
-            self.selected = tab
-            minimize = 0            // any tap on a blob expands the bar back to full
+            onPressTab(tab)         // switch + pop to root (also expands the bar)
         } label: {
             ZStack {
                 Image(systemName: tab.icon)
@@ -382,6 +404,10 @@ struct MainTabBar: View {
 
     private func onBlobTouchChanged(x rawX: CGFloat, W: CGFloat, expanded: Bool) {
         let x = min(max(rawX, 0), W)
+        // When minimized the now-playing island sits in the centre gap and owns
+        // those touches — ignore them here, or an island swipe/tap reads as a tab
+        // hit and undocks the bar. Only the two side circles react.
+        if barTouchIgnored(x: x, W: W, expanded: expanded) { return }
         hoverTab = tab(at: x, W: W, expanded: expanded)
         guard expanded else { return }
         // Clamp the follow point to between the outer tab centres so the blob
@@ -405,6 +431,9 @@ struct MainTabBar: View {
 
     private func onBlobTouchEnded(x rawX: CGFloat, W: CGFloat, expanded: Bool) {
         let x = min(max(rawX, 0), W)
+        // Centre-gap touches belong to the island (see onBlobTouchChanged) — never
+        // let a release there undock/navigate.
+        if barTouchIgnored(x: x, W: W, expanded: expanded) { draggingBlob = false; return }
         let target = tab(at: x, W: W, expanded: expanded)
         let wasDragging = draggingBlob
         draggingBlob = false
@@ -412,9 +441,24 @@ struct MainTabBar: View {
         // Only commit if we actually engaged (grabbed). A stray end without a begin
         // shouldn't navigate.
         guard wasDragging || !expanded else { return }
-        selected = target
-        minimize = 0
+        onPressTab(target)          // switch + pop to root + expand the bar
         moveBlob(to: expandedCenterX(target, W: W))
+    }
+
+    /// True when a touch at `x` should be IGNORED by the bar because it falls in the
+    /// centre gap that the now-playing island occupies once minimized. With a full
+    /// bar (`expanded`) the whole width is the bar, so nothing is ignored. Minimized,
+    /// only the two side circles (and their outer margins) react; the gap between
+    /// them is the island's — otherwise an island swipe/tap would undock the bar and
+    /// switch tabs. Uses the settled circle centres (`circleCenterInset`), which is
+    /// accurate whenever the bar is minimized enough for `expanded` to be false.
+    private func barTouchIgnored(x: CGFloat, W: CGFloat, expanded: Bool) -> Bool {
+        guard !expanded else { return false }
+        let r = BottomBar.minCircleD / 2
+        let leftCX = BottomBar.circleCenterInset
+        let rightCX = W - BottomBar.circleCenterInset
+        let onSideCircle = x <= leftCX + r || x >= rightCX - r
+        return !onSideCircle
     }
 
     // MARK: Glass shapes

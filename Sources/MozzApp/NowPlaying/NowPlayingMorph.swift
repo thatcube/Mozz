@@ -400,8 +400,11 @@ private let marqueeStartDwell: Duration = .milliseconds(2600)
 private let marqueeEndDwell: Duration = .milliseconds(1100)
 /// A tiny settle pause between the return finishing and the next cycle starting.
 private let marqueeLoopGap: Duration = .milliseconds(250)
-/// TEMP debug: overlay live marquee measurements onto the title line. REMOVE.
-private let marqueeDebug = false
+/// Spring used to ease the title back to home (offset 0) when a glide is
+/// interrupted — by a collapse/expand morph or a swipe. Roughly matches the
+/// scroll-minimize morph spring so the text returns in lockstep with the pill
+/// instead of teleporting.
+private let marqueeReturn = Animation.spring(response: 0.45, dampingFraction: 0.9)
 
 /// Publishes a measured intrinsic (untruncated) text width up the view tree.
 private struct MarqueeWidthKey: PreferenceKey {
@@ -778,15 +781,10 @@ private struct IslandSlideText: View {
     /// whether the line needs to scroll and how far.
     @State private var naturalW: CGFloat = 0
     /// Live marquee scroll offset (0 = start, negative = scrolled left to reveal
-    /// the tail). Only ever non-zero while `scrolling`.
+    /// the tail). Driven entirely by the marquee task, which eases it back to 0
+    /// (never snaps) whenever a glide is interrupted, so the offset can be read
+    /// directly with no gating flag.
     @State private var marqueeX: CGFloat = 0
-    /// True ONLY while an actual marquee cycle is animating (post-settle). The
-    /// offset reads `marqueeX` only when this is set; the instant a morph begins we
-    /// flip it false so the offset falls back to a plain 0 and the text rides the
-    /// morph layout — regardless of any lingering `marqueeX` animation. This is what
-    /// makes "snap to start, then morph normally" reliable: we don't fight the
-    /// in-flight linear animation, we just stop reading it.
-    @State private var scrolling = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -810,56 +808,40 @@ private struct IslandSlideText: View {
             // that swap is what made the title "race" upward on collapse. `fixedSize`
             // means it never truncates, so there's a real tail for the marquee to
             // reveal and no re-truncation snapshot to animate.
+            //
+            // Offset priority: a swipe commit (currentX) wins; then a live finger
+            // drag (liveDrag) so track-swipe follows the thumb; otherwise the marquee
+            // (marqueeX, which the task holds at 0 whenever it isn't actively
+            // gliding). No gating flag — marqueeX is authoritative at rest.
             label(current)
-                .offset(x: transitioning ? currentX : (scrolling ? marqueeX : liveDrag))
-        }
-        // TEMP debug: show live measurements on the title line. REMOVE.
-        .overlay(alignment: .leading) {
-            if marqueeDebug && marquees {
-                Text("n\(Int(naturalW)) z\(Int(zoneW)) o\(Int(overflow)) A\(marqueeActive ? 1 : 0) S\(scrolling ? 1 : 0) rm\(reduceMotion ? 1 : 0)")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.yellow)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(1)
-                    .background(.black)
-                    .allowsHitTesting(false)
-            }
+                .offset(x: transitioning ? currentX : (liveDrag != 0 ? liveDrag : marqueeX))
         }
         // Measure the intrinsic width off-screen so we know when (and how far) to
         // scroll. A background never affects the ZStack's own size.
         .background(alignment: .leading) { measuringLabel }
         .onPreferenceChange(MarqueeWidthKey.self) { naturalW = $0 }
-        // The instant the island starts morphing up/down, its width (zoneW) begins
-        // to change. Stop the marquee IMMEDIATELY: dropping `scrolling` makes the
-        // offset fall back to a plain 0 (no animation), so the text rides the morph
-        // exactly like the non-marquee case — no horizontal glide compositing with
-        // the vertical morph, and no lingering linear animation to fight. The driver
-        // below (keyed on zoneW) then holds it reset and only starts a fresh cycle
-        // once the width settles at either end.
-        //
-        // Compare BUCKETED widths, not the raw CGFloat: zoneW is derived from the
-        // MEASURED native-accessory frame, which micro-jitters sub-pixel on every
-        // playback re-render. Reacting to that jitter reset `scrolling` continuously
-        // and killed the marquee. A real morph moves zoneW by tens of points, so it
-        // still crosses buckets and resets.
-        .onChange(of: zoneW) { old, new in
-            guard Self.widthBucket(old) != Self.widthBucket(new) else { return }
-            guard scrolling || marqueeX != 0 else { return }
-            scrolling = false
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) { marqueeX = 0 }
-        }
-        // One driver: restarts whenever the text, its width, the available width,
-        // or the active state changes; auto-cancels when the view goes away or
-        // marquee turns off (drag/swipe/collapse).
+        // One driver, keyed on marqueeKey (text, bucketed width, measured width,
+        // active). It restarts on a real width change (a collapse/expand morph
+        // crosses width buckets) or a track/state change, and auto-cancels when the
+        // view goes away. Every marqueeX transition here is ANIMATED (linear glide,
+        // or `marqueeReturn` easing back to home) — the task never snaps the offset,
+        // so an interrupted glide eases back in lockstep with the morph instead of
+        // teleporting. During a morph the task keeps restarting: each run eases to
+        // home and re-enters the dwell (the next restart cancels it before it can
+        // glide), so the text rides the morph parked at home, then resumes once the
+        // width settles.
         .task(id: marqueeKey) {
-            scrolling = false
-            marqueeX = 0
-            guard marqueeActive, overflow > marqueeMinOverflow else { return }
+            // Not scrollable in this state (short title, mid-swipe, reduce motion):
+            // ease home (never snap) and bail.
+            guard marqueeActive, overflow > marqueeMinOverflow else {
+                if marqueeX != 0 { withAnimation(marqueeReturn) { marqueeX = 0 } }
+                return
+            }
             let dist = overflow
             let dur = Double(dist / marqueeSpeed)
-            scrolling = true
+            // Coordinated return: if a previous glide (or a mid-scroll morph) left the
+            // text off-home, ease it back to 0 before the fresh cycle.
+            if marqueeX != 0 { withAnimation(marqueeReturn) { marqueeX = 0 } }
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: marqueeStartDwell)
@@ -870,8 +852,8 @@ private struct IslandSlideText: View {
                     try await Task.sleep(for: .seconds(dur))
                     try await Task.sleep(for: marqueeLoopGap)
                 } catch {
-                    scrolling = false      // cancelled mid-cycle — reset clean
-                    marqueeX = 0
+                    // Cancelled (view gone or restarting): a fresh run owns marqueeX
+                    // now and will ease it home, so don't write shared state here.
                     return
                 }
             }
