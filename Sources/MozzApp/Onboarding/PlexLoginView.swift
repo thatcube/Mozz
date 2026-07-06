@@ -61,11 +61,7 @@ struct PlexLoginView: View {
         task = Task {
             do {
                 let pin = try await auth.requestPin()
-                // Ask Plex to deep-link back into Mozz after authorization so the
-                // user is returned to the app automatically (the app then finishes
-                // via the PIN poll). forwardUrl only affects the post-auth redirect
-                // — the PIN claim happens regardless — so this can't break sign-in.
-                let url = pin.authAppURL(clientInfo: env.clientInfo, forwardURL: "mozz://plex-auth")
+                let url = pin.authAppURL(clientInfo: env.clientInfo)
                 linkURL = url
                 // Send the user straight to Plex; the button remains as a fallback
                 // if the system declined to open it automatically.
