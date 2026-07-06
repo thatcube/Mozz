@@ -60,7 +60,10 @@ public struct PlexAuthenticator: Sendable {
     }
 
     /// Poll until the PIN is claimed (or the deadline passes), returning the
-    /// account token.
+    /// account token. Transient `checkPin` failures are swallowed and retried —
+    /// polling is inherently best-effort, and the app is often suspended mid-poll
+    /// while the user authorizes in Safari (which can kill an in-flight request);
+    /// aborting on the first blip would drop a sign-in that's about to succeed.
     public func awaitPin(
         _ session: PlexPinSession,
         pollInterval: TimeInterval = 2,
@@ -69,7 +72,7 @@ public struct PlexAuthenticator: Sendable {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             try Task.checkCancellation()
-            if let token = try await checkPin(id: session.id) { return token }
+            if let token = try? await checkPin(id: session.id), !token.isEmpty { return token }
             try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
         }
         throw MozzError.cancelled

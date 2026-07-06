@@ -61,13 +61,17 @@ struct PlexLoginView: View {
         task = Task {
             do {
                 let pin = try await auth.requestPin()
-                let url = pin.authAppURL(clientInfo: env.clientInfo)
+                // Ask Plex to deep-link back into Mozz after authorization so the
+                // user is returned to the app automatically (the app then finishes
+                // via the PIN poll). forwardUrl only affects the post-auth redirect
+                // — the PIN claim happens regardless — so this can't break sign-in.
+                let url = pin.authAppURL(clientInfo: env.clientInfo, forwardURL: "mozz://plex-auth")
                 linkURL = url
                 // Send the user straight to Plex; the button remains as a fallback
                 // if the system declined to open it automatically.
                 if let url { openURL(url) }
                 status = "Waiting for you to authorize in Plex…"
-                let token = try await auth.awaitPin(pin, timeout: 300)
+                let token = try await auth.awaitPin(pin, pollInterval: 1, timeout: 300)
                 // Authorized — show a success cue while we finish setup (server
                 // discovery probes each server for music, so this can take a few
                 // seconds on multi-server accounts).
