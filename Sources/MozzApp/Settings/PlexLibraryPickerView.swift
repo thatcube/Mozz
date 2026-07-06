@@ -28,39 +28,46 @@ struct PlexLibraryPickerView: View {
             } else {
                 if servers.count > 1 {
                     Section {
-                        // Inline Picker = accessible single-select: VoiceOver
-                        // announces the chosen server as "selected", and the
-                        // checkmark is drawn for us. Choosing one switches servers.
+                        // Menu Picker = one clean "Server ▸ <current>" row (no
+                        // duplicate label, no non-selectable header row) that opens
+                        // an accessible single-select menu. Choosing switches server.
                         Picker("Server", selection: serverSelection) {
                             ForEach(servers) { server in
                                 Text(server.name).tag(server.id)
                             }
                         }
-                        .pickerStyle(.inline)
+                        .pickerStyle(.menu)
                         .disabled(isSwitching)
                         if isSwitching {
                             HStack(spacing: 10) { ProgressView(); Text("Switching server…") }
                         }
-                    } header: {
-                        Text("Server")
                     }
                 }
 
                 Section {
-                    // Toggles = accessible multi-select: VoiceOver announces each
-                    // as a switch with its on/off state.
-                    ForEach(libraries) { library in
-                        Toggle(library.title, isOn: librarySelection(library.id))
+                    if libraries.count <= 1 {
+                        // Nothing to choose with a single library — show it as
+                        // informational (a lone toggle you could turn off but never
+                        // turn back on would be a trap).
+                        ForEach(libraries) { library in
+                            LabeledContent(library.title) {
+                                Text("Syncing").foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        // Toggles = accessible multi-select: VoiceOver announces
+                        // each as a switch with its on/off state.
+                        ForEach(libraries) { library in
+                            Toggle(library.title, isOn: librarySelection(library.id))
+                        }
                     }
                 } header: {
                     Text("Music Libraries")
                 } footer: {
-                    Text(libraries.isEmpty
-                         ? "This server has no music libraries."
-                         : "All libraries sync by default. Deselected libraries won't sync and their tracks are removed on the next sync.")
+                    Text(libraryFooter)
                 }
 
-                if !libraries.isEmpty {
+                if libraries.count > 1 {
                     Section {
                         Button("Sync Selected Libraries") { apply() }
                             .disabled(selected.isEmpty || selected == savedSelection || isSwitching)
@@ -71,6 +78,14 @@ struct PlexLibraryPickerView: View {
         .navigationTitle("Plex Libraries")
         .inlineNavigationTitle()
         .task { await load() }
+    }
+
+    private var libraryFooter: String {
+        if libraries.isEmpty { return "This server has no music libraries." }
+        if libraries.count == 1 {
+            return "Mozz syncs this library. When a server has more than one music library, you can choose which to sync here."
+        }
+        return "All libraries sync by default. Deselected libraries won't sync and their tracks are removed on the next sync."
     }
 
     /// Single-select binding for the server Picker: reads the current server,
