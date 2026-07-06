@@ -189,7 +189,7 @@ final class PlexAuthURLTests: XCTestCase {
         let info = ClientInfo(product: "Mozz", version: "1.0", deviceName: "iPhone", platform: "iOS", platformVersion: "17.0")
         let url = try XCTUnwrap(session.authAppURL(clientInfo: info))
         let string = url.absoluteString
-        XCTAssertTrue(string.hasPrefix("https://app.plex.tv/auth#?"))
+        XCTAssertTrue(string.hasPrefix("https://app.plex.tv/auth#!?"))
         XCTAssertTrue(string.contains("code=WXYZ"))
         XCTAssertTrue(string.contains("clientID=client-uuid-123"))
         XCTAssertTrue(string.contains("Mozz"))

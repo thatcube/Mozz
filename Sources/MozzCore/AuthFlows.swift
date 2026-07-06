@@ -94,7 +94,12 @@ public struct PlexPinSession: Sendable, Hashable {
             else { return nil }
             return "\(name)=\(value)"
         }.joined(separator: "&")
-        return URL(string: "https://app.plex.tv/auth#?\(query)")
+        // NOTE: app.plex.tv is a hashbang-routed SPA — the auth route lives at
+        // `#!?` (bang), NOT `#?`. With a plain `#?` the router doesn't match the
+        // auth handler, so after the user signs in there's no PIN context and
+        // Plex shows "We were unable to complete this request." (Matches the
+        // battle-tested Seerr/Overseerr flow.)
+        return URL(string: "https://app.plex.tv/auth#!?\(query)")
     }
 }
 
