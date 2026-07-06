@@ -400,6 +400,8 @@ private let marqueeStartDwell: Duration = .milliseconds(2600)
 private let marqueeEndDwell: Duration = .milliseconds(1100)
 /// A tiny settle pause between the return finishing and the next cycle starting.
 private let marqueeLoopGap: Duration = .milliseconds(250)
+/// TEMP debug: overlay live marquee measurements onto the title line. REMOVE.
+private let marqueeDebug = false
 
 /// Publishes a measured intrinsic (untruncated) text width up the view tree.
 private struct MarqueeWidthKey: PreferenceKey {
@@ -811,6 +813,19 @@ private struct IslandSlideText: View {
             label(current)
                 .offset(x: transitioning ? currentX : (scrolling ? marqueeX : liveDrag))
         }
+        // TEMP debug: show live measurements on the title line. REMOVE.
+        .overlay(alignment: .leading) {
+            if marqueeDebug && marquees {
+                Text("n\(Int(naturalW)) z\(Int(zoneW)) o\(Int(overflow)) A\(marqueeActive ? 1 : 0) S\(scrolling ? 1 : 0) rm\(reduceMotion ? 1 : 0)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.yellow)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(1)
+                    .background(.black)
+                    .allowsHitTesting(false)
+            }
+        }
         // Measure the intrinsic width off-screen so we know when (and how far) to
         // scroll. A background never affects the ZStack's own size.
         .background(alignment: .leading) { measuringLabel }
@@ -822,7 +837,14 @@ private struct IslandSlideText: View {
         // the vertical morph, and no lingering linear animation to fight. The driver
         // below (keyed on zoneW) then holds it reset and only starts a fresh cycle
         // once the width settles at either end.
-        .onChange(of: zoneW) { _, _ in
+        //
+        // Compare BUCKETED widths, not the raw CGFloat: zoneW is derived from the
+        // MEASURED native-accessory frame, which micro-jitters sub-pixel on every
+        // playback re-render. Reacting to that jitter reset `scrolling` continuously
+        // and killed the marquee. A real morph moves zoneW by tens of points, so it
+        // still crosses buckets and resets.
+        .onChange(of: zoneW) { old, new in
+            guard Self.widthBucket(old) != Self.widthBucket(new) else { return }
             guard scrolling || marqueeX != 0 else { return }
             scrolling = false
             var t = Transaction(); t.disablesAnimations = true
@@ -932,12 +954,18 @@ private struct IslandSlideText: View {
             && overflow > marqueeMinOverflow && !current.isEmpty
     }
     /// Identity for the marquee driver: any change restarts it from the beginning.
-    /// Includes `zoneW` so that WHILE the pill collapses/expands (zoneW animating) the
-    /// driver keeps restarting and holds the text still; once zoneW settles at either
-    /// end (full island OR centre pill) it runs, scrolled to that width's overflow.
+    /// Uses a BUCKETED zoneW (see `widthBucket`) so sub-pixel jitter of the measured
+    /// island frame doesn't churn the task; a real morph crosses buckets and restarts
+    /// it (holding the text still), and once the width settles it runs, scrolled to
+    /// that width's overflow.
     private var marqueeKey: String {
-        "\(current)|\(Int(zoneW.rounded()))|\(Int(naturalW.rounded()))|\(marqueeActive ? 1 : 0)"
+        "\(current)|\(Self.widthBucket(zoneW))|\(Int(naturalW.rounded()))|\(marqueeActive ? 1 : 0)"
     }
+
+    /// Quantise a width to ~3pt buckets, so the imperceptible sub-pixel jitter of the
+    /// measured native-accessory frame is ignored while genuine morph transitions
+    /// (tens of points) still register.
+    private static func widthBucket(_ w: CGFloat) -> Int { Int((w / 3).rounded()) }
 }
 
 // MARK: - Geometry
