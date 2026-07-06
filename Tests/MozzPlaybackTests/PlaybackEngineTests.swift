@@ -50,6 +50,23 @@ final class PlaybackEngineTests: XCTestCase {
         XCTAssertNil(engine.currentTrack)
         XCTAssertEqual(engine.snapshot.status, .idle)
     }
+
+    /// Regression: a mutation that changes the upcoming track without a full
+    /// reload (here, switching to repeat-one) must evict the already pre-rolled
+    /// lookahead, or AVQueuePlayer would gaplessly play the stale track at the
+    /// boundary while the queue reports a different one.
+    func testStaleLookaheadEvictedWhenNextTrackChanges() async {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        await engine.awaitPendingLoadsForTesting()
+        // Repeat off, on t0 → the pre-rolled next is t1.
+        XCTAssertEqual(engine.lookaheadTrackIDsForTesting, ["t0", "t1"])
+
+        engine.setRepeatMode(.one)   // peekNext now == current (t0)
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(engine.lookaheadTrackIDsForTesting, ["t0", "t0"],
+                       "stale t1 pre-roll must be replaced with the repeat-one track")
+    }
 }
 
 /// Verifies the listening-history emission (B1): every track start is paired

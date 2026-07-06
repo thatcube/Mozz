@@ -132,6 +132,10 @@ public final class PlaybackEngine: ObservableObject {
     public func restore(_ state: PlaybackPersistentState) {
         guard !state.queue.isEmpty, currentTrack == nil, queue.isEmpty else { return }
         queue = state.queue
+        // The decoded queue has no transient reshuffle-on-wrap cache (it's
+        // excluded from Codable); rebuild it so the first post-restore wrap still
+        // reshuffles when parked on the last slot with shuffle + repeat-all.
+        queue.rebuildTransientState()
         pendingSeek = state.elapsed > 1 ? state.elapsed : nil
         reload(autoplay: false)
     }
@@ -224,6 +228,20 @@ public final class PlaybackEngine: ObservableObject {
 
     public func toggleShuffle() { setShuffle(!queue.isShuffled) }
 
+    #if DEBUG
+    /// Test-only: the track ids currently pre-rolled into the player, aligned
+    /// with `player.items()`. Lets tests assert the gapless lookahead matches the
+    /// queue after mutations.
+    var lookaheadTrackIDsForTesting: [String] { loaded.map(\.track.id) }
+
+    /// Test-only: drain the fire-and-forget reload/refill Tasks so `loaded`
+    /// reflects the current queue. The stub resolver resolves without real I/O,
+    /// so yielding a handful of times is sufficient.
+    func awaitPendingLoadsForTesting() async {
+        for _ in 0..<50 { await Task.yield() }
+    }
+    #endif
+
     public func stop() {
         // A user-initiated stop mid-track is a skip. (When called at the natural
         // end of the queue, `handleNaturalFinish` has already logged `.completed`
@@ -300,6 +318,12 @@ public final class PlaybackEngine: ObservableObject {
 
     private func refillLookaheadAsync(generation: Int) async {
         guard generation == loadGeneration else { return }
+        // If a next item was already pre-rolled but the queue's next track has
+        // since changed (shuffle/repeat toggled, or a queue edit, while parked on
+        // the last track), evict the now-stale item. AVQueuePlayer auto-advances
+        // to the pre-rolled item at the boundary, so without this it would
+        // gaplessly play the wrong track while the queue reports a different one.
+        evictStaleLookahead()
         guard loaded.count == 1, let nextTrack = queue.peekNext else { return }
         // Don't double-load the same track object unless repeat-one intends it.
         do {
@@ -314,6 +338,20 @@ public final class PlaybackEngine: ObservableObject {
         } catch {
             // Leave the lookahead empty; we'll rebuild on the boundary instead.
         }
+    }
+
+    /// Remove an already pre-rolled next item when it no longer matches the
+    /// queue's current `peekNext` (returns whether it evicted). Keeps the gapless
+    /// pre-roll honest after mutations that change the upcoming track without a
+    /// full `reload` — `setShuffle`/`setRepeatMode`/`append`/`insertNext`/
+    /// `playNext`. The normal advance path (where the pre-roll matches) is a
+    /// no-op, so gapless playback is preserved.
+    @discardableResult
+    private func evictStaleLookahead() -> Bool {
+        guard loaded.count == 2, loaded[1].track.id != queue.peekNext?.id else { return false }
+        player.remove(loaded[1].item)
+        loaded.removeLast()
+        return true
     }
 
     /// Attach an audio mix that applies the track's loudness-normalization gain

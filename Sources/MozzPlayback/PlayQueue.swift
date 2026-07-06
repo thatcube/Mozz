@@ -289,6 +289,14 @@ public struct PlayQueue: Sendable, Equatable, Codable {
 
     public mutating func toggleShuffle() { setShuffle(!isShuffled) }
 
+    /// Rebuild transient, non-persisted bookkeeping after a queue is assigned
+    /// wholesale (e.g. decoded from a saved session). `nextLoopOrder` is excluded
+    /// from `Codable`, so this re-primes the reshuffle-on-wrap cache for the
+    /// current position; call it after restoring a persisted queue.
+    public mutating func rebuildTransientState() {
+        refreshWrapCache()
+    }
+
     /// A balanced (artist-spread) permutation of all base indices. When `pinned`
     /// is non-nil that track is forced to the front so it keeps playing when
     /// shuffle turns on mid-track; the remainder stays spread.

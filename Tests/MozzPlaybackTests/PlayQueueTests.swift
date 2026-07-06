@@ -1,9 +1,17 @@
 import XCTest
+import Foundation
 import MozzCore
 @testable import MozzPlayback
 
 private func tracks(_ n: Int) -> [Track] {
     (0..<n).map { Track(id: "t\($0)", title: "Track \($0)", artistName: "A") }
+}
+
+/// 12 tracks across 3 equal-sized artists (A/B/C), so the balanced-shuffle
+/// grouping path is actually exercised through `PlayQueue` (not just the
+/// single-group fallback the `tracks(_:)` helper hits).
+private func multiArtistTracks() -> [Track] {
+    (0..<12).map { Track(id: "t\($0)", title: "T\($0)", artistName: ["A", "B", "C"][$0 % 3]) }
 }
 
 final class PlayQueueTests: XCTestCase {
@@ -186,5 +194,52 @@ final class PlayQueueTests: XCTestCase {
         for _ in 0..<q.count { q.advance() }
         XCTAssertEqual(q.order, order, "repeat-all without shuffle replays the same order")
         XCTAssertEqual(q.current?.id, "t0")
+    }
+
+    // MARK: Balanced spreading through PlayQueue (multi-artist)
+
+    func testShufflePinsCurrentWithMultipleArtists() {
+        var q = PlayQueue()
+        q.setItems(multiArtistTracks(), startingAt: 5)   // t5 == artist "C"
+        q.setShuffle(true)
+        XCTAssertEqual(q.current?.id, "t5", "current track stays pinned to the front")
+        XCTAssertEqual(q.position, 0)
+        let ids = Set(([q.current!] + q.upNext).map(\.id))
+        XCTAssertEqual(ids.count, 12, "every track present exactly once")
+    }
+
+    func testSetItemsShuffledSpreadsArtistsThroughQueue() {
+        var q = PlayQueue()
+        q.setItemsShuffled(multiArtistTracks())
+        let ordered = [q.current!] + q.upNext
+        XCTAssertEqual(Set(ordered.map(\.id)).count, 12)
+        // 3 equal-sized groups on evenly-spaced combs → guaranteed round-robin,
+        // so no two adjacent tracks share an artist (RNG-independent).
+        let artists = ordered.map(\.artistName)
+        let collisions = zip(artists, artists.dropFirst()).filter { $0 == $1 }.count
+        XCTAssertEqual(collisions, 0, "balanced shuffle must spread artists end-to-end")
+    }
+
+    // MARK: Restore rebuilds the reshuffle-on-wrap cache
+
+    func testRestoreRebuildsWrapCacheSoFirstWrapReshuffles() throws {
+        var q = PlayQueue()
+        q.setItemsShuffled(tracks(20))
+        q.setRepeatMode(.all)
+        while q.position < q.order.count - 1 { q.advance() }   // park on the last slot
+
+        // Persistence round-trip: nextLoopOrder is excluded from Codable, so the
+        // decoded queue starts with an empty wrap cache.
+        let data = try JSONEncoder().encode(q)
+        var restored = try JSONDecoder().decode(PlayQueue.self, from: data)
+        restored.rebuildTransientState()
+
+        let orderBeforeWrap = restored.order
+        let predicted = restored.peekNext?.id
+        let played = restored.trackDidFinish()?.id
+        XCTAssertEqual(played, predicted, "gapless wrap invariant holds after restore")
+        XCTAssertEqual(restored.position, 0)
+        XCTAssertNotEqual(restored.order, orderBeforeWrap,
+                          "first wrap after restore reshuffles (rebuildTransientState primed the cache)")
     }
 }
