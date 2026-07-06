@@ -272,7 +272,7 @@ struct RatingPopoverContent: View {
                 .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.2), value: showClear)
+        .animation(.snappy(duration: 0.4), value: showClear)
         .padding(.horizontal, 28)
         .padding(.top, 24)
         .padding(.bottom, showClear ? 14 : 24)
