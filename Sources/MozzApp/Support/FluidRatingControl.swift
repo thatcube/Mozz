@@ -23,37 +23,69 @@ private enum RatingTuning {
     static let revealYOffset: CGFloat = -74
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
-    static let revealCornerRadius: CGFloat = 22
-    /// Size of the little downward tail on the reveal bubble that points at the
-    /// star, mirroring the tap popover's arrow.
-    static let revealTailWidth: CGFloat = 26
-    static let revealTailHeight: CGFloat = 11
+    static let revealCornerRadius: CGFloat = 24
+    /// The downward tail on the reveal bubble that points at the star. It flows
+    /// smoothly out of the bottom edge (a morphed teardrop) rather than a bolted-
+    /// on triangle: `revealTailBase` is its width where it meets the body,
+    /// `revealTailHeight` how far it drops, `revealTailTip` the rounding of its tip.
+    static let revealTailBase: CGFloat = 44
+    static let revealTailHeight: CGFloat = 14
+    static let revealTailTip: CGFloat = 7
     static let tint: Color = .primary
     static let inactiveTint: Color = .secondary
 }
 
-/// A rounded-rectangle "speech bubble" with a small rounded tail centered on the
-/// bottom edge, pointing down — used by the hold-drag reveal so it visually
-/// matches the native tap popover (rounded corners + a downward arrow).
+/// A rounded-rectangle "speech bubble" whose bottom edge flows into a small,
+/// centered, downward tail — drawn as ONE continuous path so the tail morphs out
+/// of the container (smooth necks in, rounded tip) instead of reading as a
+/// detached triangle. Points down at the star, mirroring the tap popover.
 private struct TailedBubble: Shape {
     var cornerRadius: CGFloat = RatingTuning.revealCornerRadius
-    var tailWidth: CGFloat = RatingTuning.revealTailWidth
+    var tailBase: CGFloat = RatingTuning.revealTailBase
     var tailHeight: CGFloat = RatingTuning.revealTailHeight
+    var tailTip: CGFloat = RatingTuning.revealTailTip
 
     func path(in rect: CGRect) -> Path {
-        let body = CGRect(x: rect.minX, y: rect.minY,
-                          width: rect.width, height: rect.height - tailHeight)
-        var path = Path(roundedRect: body, cornerRadius: cornerRadius)
+        let r = min(cornerRadius, min(rect.width, rect.height - tailHeight) / 2)
+        let w = rect.width
+        let bottom = rect.maxY - tailHeight        // body's bottom edge (tail base)
         let cx = rect.midX
-        var tail = Path()
-        tail.move(to: CGPoint(x: cx - tailWidth / 2, y: body.maxY - 1))
-        tail.addQuadCurve(to: CGPoint(x: cx, y: body.maxY + tailHeight),
-                          control: CGPoint(x: cx - tailWidth / 6, y: body.maxY + tailHeight * 0.7))
-        tail.addQuadCurve(to: CGPoint(x: cx + tailWidth / 2, y: body.maxY - 1),
-                          control: CGPoint(x: cx + tailWidth / 6, y: body.maxY + tailHeight * 0.7))
-        tail.closeSubpath()
-        path.addPath(tail)
-        return path
+        let baseHalf = tailBase / 2
+        let tipHalf = tailTip / 2
+        let tipY = rect.maxY
+
+        var p = Path()
+        // Top edge + corners, right edge (clockwise from top-left).
+        p.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
+        p.addLine(to: CGPoint(x: w - r, y: rect.minY))
+        p.addArc(center: CGPoint(x: w - r, y: rect.minY + r), radius: r,
+                 startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+        p.addLine(to: CGPoint(x: w, y: bottom - r))
+        p.addArc(center: CGPoint(x: w - r, y: bottom - r), radius: r,
+                 startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+        // Bottom edge toward the tail (right side).
+        p.addLine(to: CGPoint(x: cx + baseHalf, y: bottom))
+        // Neck smoothly down into the tail, round across the tip, and back up —
+        // all with quad curves so the tip is an unambiguous rounded point.
+        p.addCurve(to: CGPoint(x: cx + tipHalf, y: tipY - tipHalf),
+                   control1: CGPoint(x: cx + baseHalf * 0.5, y: bottom),
+                   control2: CGPoint(x: cx + tipHalf, y: tipY - tailHeight * 0.5))
+        p.addQuadCurve(to: CGPoint(x: cx, y: tipY),
+                       control: CGPoint(x: cx + tipHalf, y: tipY))
+        p.addQuadCurve(to: CGPoint(x: cx - tipHalf, y: tipY - tipHalf),
+                       control: CGPoint(x: cx - tipHalf, y: tipY))
+        p.addCurve(to: CGPoint(x: cx - baseHalf, y: bottom),
+                   control1: CGPoint(x: cx - tipHalf, y: tipY - tailHeight * 0.5),
+                   control2: CGPoint(x: cx - baseHalf * 0.5, y: bottom))
+        // Bottom edge (left side) + bottom-left corner, left edge, top-left corner.
+        p.addLine(to: CGPoint(x: rect.minX + r, y: bottom))
+        p.addArc(center: CGPoint(x: rect.minX + r, y: bottom - r), radius: r,
+                 startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
+        p.addArc(center: CGPoint(x: rect.minX + r, y: rect.minY + r), radius: r,
+                 startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -327,7 +359,7 @@ struct FluidRatingControl: View {
     // MARK: Hold-drag reveal
 
     private var revealStrip: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 11) {
             RatingStripView(value: preview)
                 .background {
                     GeometryReader { geo in
@@ -343,7 +375,7 @@ struct FluidRatingControl: View {
         }
         .padding(.top, 26)
         .padding(.horizontal, 24)
-        .padding(.bottom, 14)
+        .padding(.bottom, 20)
         .padding(.bottom, RatingTuning.revealTailHeight)
         .background {
             TailedBubble()
