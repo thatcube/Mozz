@@ -359,4 +359,31 @@ final class PlexAuthTests: XCTestCase {
         let chosen = await auth.firstMusicConnection([movies, unreachable])
         XCTAssertEqual(chosen?.serverName, "The Movies")
     }
+
+    func testPrefersServerWithNonEmptyMusicLibrary() async throws {
+        // Two servers that BOTH report a music (artist) section, but one library
+        // is empty (0 artists) and the other has content. Selection must skip the
+        // empty one — mirrors a placeholder music library added to a movies box.
+        let transport = PlexFixtureTransport([
+            // Section item-count probes (…/sections/{key}/all) — host-specific,
+            // listed first so they win over the generic sections-list route.
+            .init(contains: "empty-box.plex.direct:32400/library/sections/", fixture: "plex_artist_count_empty"),
+            .init(contains: "full-box.plex.direct:32400/library/sections/", fixture: "plex_artist_count_full"),
+            // Sections list for both boxes (has an artist section, key "3").
+            .init(contains: "library/sections", fixture: "plex_sections"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport)
+        let empty = PlexResourceConnection(
+            serverName: "Empty Music", clientIdentifier: "e1",
+            uri: URL(string: "https://empty-box.plex.direct:32400")!,
+            isLocal: true, isRelay: false, accessToken: "t-empty")
+        let full = PlexResourceConnection(
+            serverName: "Real Music", clientIdentifier: "f1",
+            uri: URL(string: "https://full-box.plex.direct:32400")!,
+            isLocal: true, isRelay: false, accessToken: "t-full")
+
+        let chosen = await auth.firstMusicConnection([empty, full])
+        XCTAssertEqual(chosen?.serverName, "Real Music")
+        XCTAssertEqual(chosen?.accessToken, "t-full")
+    }
 }

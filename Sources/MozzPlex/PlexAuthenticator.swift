@@ -132,20 +132,20 @@ public struct PlexAuthenticator: Sendable {
         return connections.first
     }
 
-    /// Probe candidates in preference order and return the first whose SERVER
-    /// actually has a music (`artist`) library. The account may own several
-    /// servers (e.g. a movies-only box and a separate music box); picking purely
-    /// by reachability lands the user on whichever server answers first, which
-    /// may have no music at all. We fetch `library/sections` (which also proves
-    /// reachability) and prefer a server that reports an artist section. Falls
-    /// back to the first reachable connection, then the first candidate, so login
-    /// still succeeds even if none report music — the sync then surfaces a clear
-    /// "no music library" message.
+    /// Probe candidates in preference order and return the first whose SERVER has
+    /// a music (`artist`) library WITH CONTENT. The account may own several
+    /// servers (a movies-only box, a music box, a placeholder library with no
+    /// tracks…); picking by reachability alone — or by the mere presence of an
+    /// artist section — can strand the user on an EMPTY music library while their
+    /// real music lives on another server. So we prefer a server whose artist
+    /// section reports a non-zero item count, then fall back to any server with a
+    /// music section, then the first reachable one, then the first candidate.
     public func firstMusicConnection(
         _ connections: [PlexResourceConnection],
         perProbeTimeout: TimeInterval = 4
     ) async -> PlexResourceConnection? {
         var firstReachable: PlexResourceConnection?
+        var firstWithAnyMusic: PlexResourceConnection?
         for connection in connections {
             let probe = HTTPClient(
                 baseURL: connection.uri,
@@ -157,11 +157,23 @@ public struct PlexAuthenticator: Sendable {
                 Endpoint(path: "library/sections"), as: PlexContainerResponse.self
             ) else { continue }
             if firstReachable == nil { firstReachable = connection }
-            if (response.MediaContainer.Directory ?? []).contains(where: { $0.type == "artist" }) {
-                return connection
+            let musicKeys = (response.MediaContainer.Directory ?? [])
+                .filter { $0.type == "artist" }
+                .compactMap(\.key)
+            guard !musicKeys.isEmpty else { continue }
+            if firstWithAnyMusic == nil { firstWithAnyMusic = connection }
+            // Prefer a music library that actually has artists in it.
+            for key in musicKeys {
+                let counted = try? await probe.send(
+                    Endpoint(path: "library/sections/\(key)/all", query: [
+                        URLQueryItem(name: "type", value: "8"),
+                        URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+                        URLQueryItem(name: "X-Plex-Container-Size", value: "0"),
+                    ]), as: PlexContainerResponse.self)
+                if (counted?.MediaContainer.totalSize ?? 0) > 0 { return connection }
             }
         }
-        return firstReachable ?? connections.first
+        return firstWithAnyMusic ?? firstReachable ?? connections.first
     }
 
     /// One-call convenience: discover connections, pick one, and produce the
