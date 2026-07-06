@@ -330,7 +330,7 @@ struct DetailSongRows: View {
                 .onTapGesture { onPlay(index) }
                 .padding(.vertical, 5)
                 if index < tracks.count - 1 {
-                    Divider().padding(.leading, showArtist ? 0 : 36)
+                    Divider().padding(.leading, showArtist ? 56 : 36)
                 }
             }
         }

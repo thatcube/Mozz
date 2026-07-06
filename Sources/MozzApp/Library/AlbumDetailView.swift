@@ -106,7 +106,14 @@ struct TrackRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let n = track.trackNumber, !showArtist {
+            if showArtist {
+                // Multi-album context (Liked Songs, full song list, mixes,
+                // playlists): show the track's album cover. Inside an album every
+                // row shares one cover, so `showArtist` is off and we show the
+                // track number instead.
+                ArtworkView(artwork: track.artworkKey.map(ArtworkRef.init(key:)),
+                            seed: track.albumTitle ?? track.title, size: 44, cornerRadius: 6)
+            } else if let n = track.trackNumber {
                 Text("\(n)").font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
                     .frame(width: 24, alignment: .trailing)
             }
