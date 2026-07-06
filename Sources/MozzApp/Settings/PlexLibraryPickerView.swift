@@ -27,36 +27,30 @@ struct PlexLibraryPickerView: View {
                 Section { HStack(spacing: 10) { ProgressView(); Text("Loading your Plex servers…") } }
             } else {
                 if servers.count > 1 {
-                    Section("Server") {
-                        ForEach(servers) { server in
-                            Button { switchTo(server) } label: {
-                                HStack {
-                                    Text(server.name).foregroundStyle(.primary)
-                                    Spacer()
-                                    if server.isCurrent {
-                                        Image(systemName: "checkmark").foregroundStyle(.tint)
-                                    }
-                                }
+                    Section {
+                        // Inline Picker = accessible single-select: VoiceOver
+                        // announces the chosen server as "selected", and the
+                        // checkmark is drawn for us. Choosing one switches servers.
+                        Picker("Server", selection: serverSelection) {
+                            ForEach(servers) { server in
+                                Text(server.name).tag(server.id)
                             }
-                            .disabled(isSwitching || server.isCurrent)
                         }
+                        .pickerStyle(.inline)
+                        .disabled(isSwitching)
                         if isSwitching {
                             HStack(spacing: 10) { ProgressView(); Text("Switching server…") }
                         }
+                    } header: {
+                        Text("Server")
                     }
                 }
 
                 Section {
+                    // Toggles = accessible multi-select: VoiceOver announces each
+                    // as a switch with its on/off state.
                     ForEach(libraries) { library in
-                        Button { toggle(library.id) } label: {
-                            HStack {
-                                Text(library.title).foregroundStyle(.primary)
-                                Spacer()
-                                if selected.contains(library.id) {
-                                    Image(systemName: "checkmark").foregroundStyle(.tint)
-                                }
-                            }
-                        }
+                        Toggle(library.title, isOn: librarySelection(library.id))
                     }
                 } header: {
                     Text("Music Libraries")
@@ -79,6 +73,25 @@ struct PlexLibraryPickerView: View {
         .task { await load() }
     }
 
+    /// Single-select binding for the server Picker: reads the current server,
+    /// and switches when a different one is chosen.
+    private var serverSelection: Binding<String> {
+        Binding(
+            get: { servers.first(where: \.isCurrent)?.id ?? "" },
+            set: { newID in switchTo(id: newID) }
+        )
+    }
+
+    /// Per-library on/off binding for the Toggles.
+    private func librarySelection(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { selected.contains(id) },
+            set: { isOn in
+                if isOn { selected.insert(id) } else { selected.remove(id) }
+            }
+        )
+    }
+
     private func load() async {
         servers = await env.plexServers()
         libraries = await env.plexMusicLibraries()
@@ -86,15 +99,13 @@ struct PlexLibraryPickerView: View {
         loaded = true
     }
 
-    private func toggle(_ id: String) {
-        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
-    }
-
-    private func switchTo(_ server: PlexServerOption) {
+    private func switchTo(id newID: String) {
+        guard !newID.isEmpty, !isSwitching,
+              newID != servers.first(where: \.isCurrent)?.id else { return }
         isSwitching = true
         loaded = false
         Task {
-            await env.selectPlexServer(id: server.id)
+            await env.selectPlexServer(id: newID)
             await load()
             isSwitching = false
         }
