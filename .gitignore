@@ -31,3 +31,4 @@ CLAUDE.local.md
 .ai/
 .agents/
 *.agent.md
+.project.yml.verbak
