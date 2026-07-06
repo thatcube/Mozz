@@ -24,14 +24,17 @@ private enum RatingTuning {
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
     static let revealCornerRadius: CGFloat = 24
-    /// The downward tail on the reveal bubble that points at the star. Modeled on
-    /// the system popover beak: it flares wide where it meets the body (a smooth
-    /// concave fillet at `revealTailBase`), necks to `revealTailNeck`, then runs
-    /// in near-straight sides down to a softly rounded point (`revealTailTip`).
+    /// The downward tail on the reveal bubble that points at the star. Each side
+    /// is a single cubic that leaves the body edge horizontally (a seamless
+    /// fillet — no corner) and meets at the bottom with a horizontal tangent (a
+    /// smooth rounded tip), so the whole outline is tangent-continuous and the
+    /// glass rim flows without kinks. `revealTailBase` = width where it meets the
+    /// body, `revealTailHeight` = drop, `revealTailShoulder` = fillet softness
+    /// (fraction of the half-base), `revealTailTip` = bottom roundness.
     static let revealTailBase: CGFloat = 52
-    static let revealTailNeck: CGFloat = 26
     static let revealTailHeight: CGFloat = 17
-    static let revealTailTip: CGFloat = 7
+    static let revealTailShoulder: CGFloat = 0.5
+    static let revealTailTip: CGFloat = 6
     static let tint: Color = .primary
     static let inactiveTint: Color = .secondary
 }
@@ -43,8 +46,8 @@ private enum RatingTuning {
 private struct TailedBubble: Shape {
     var cornerRadius: CGFloat = RatingTuning.revealCornerRadius
     var tailBase: CGFloat = RatingTuning.revealTailBase
-    var tailNeck: CGFloat = RatingTuning.revealTailNeck
     var tailHeight: CGFloat = RatingTuning.revealTailHeight
+    var tailShoulder: CGFloat = RatingTuning.revealTailShoulder
     var tailTip: CGFloat = RatingTuning.revealTailTip
 
     func path(in rect: CGRect) -> Path {
@@ -53,10 +56,7 @@ private struct TailedBubble: Shape {
         let bottom = rect.maxY - tailHeight        // body's bottom edge (tail base)
         let cx = rect.midX
         let baseHalf = tailBase / 2
-        let neckHalf = tailNeck / 2
-        let tipHalf = tailTip / 2
         let tipY = rect.maxY
-        let fillet = min(tailHeight * 0.35, 4)
 
         var p = Path()
         // Top edge + corners, right edge (clockwise from top-left).
@@ -67,20 +67,17 @@ private struct TailedBubble: Shape {
         p.addLine(to: CGPoint(x: w, y: bottom - r))
         p.addArc(center: CGPoint(x: w - r, y: bottom - r), radius: r,
                  startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
-        // Bottom edge toward the tail (right side).
+        // Bottom edge to the tail's right base.
         p.addLine(to: CGPoint(x: cx + baseHalf, y: bottom))
-        // Beak: concave fillet out of the body, near-straight side down, rounded
-        // tip, and mirror back up into the body.
-        p.addQuadCurve(to: CGPoint(x: cx + neckHalf, y: bottom + fillet),
-                       control: CGPoint(x: cx + neckHalf, y: bottom))
-        p.addLine(to: CGPoint(x: cx + tipHalf, y: tipY - tipHalf))
-        p.addQuadCurve(to: CGPoint(x: cx, y: tipY),
-                       control: CGPoint(x: cx + tipHalf, y: tipY))
-        p.addQuadCurve(to: CGPoint(x: cx - tipHalf, y: tipY - tipHalf),
-                       control: CGPoint(x: cx - tipHalf, y: tipY))
-        p.addLine(to: CGPoint(x: cx - neckHalf, y: bottom + fillet))
-        p.addQuadCurve(to: CGPoint(x: cx - baseHalf, y: bottom),
-                       control: CGPoint(x: cx - neckHalf, y: bottom))
+        // Right side: one cubic leaving the body horizontally (seamless fillet)
+        // and arriving at the tip horizontally (rounded bottom).
+        p.addCurve(to: CGPoint(x: cx, y: tipY),
+                   control1: CGPoint(x: cx + baseHalf * tailShoulder, y: bottom),
+                   control2: CGPoint(x: cx + tailTip, y: tipY))
+        // Left side: mirror image, back up into the body.
+        p.addCurve(to: CGPoint(x: cx - baseHalf, y: bottom),
+                   control1: CGPoint(x: cx - tailTip, y: tipY),
+                   control2: CGPoint(x: cx - baseHalf * tailShoulder, y: bottom))
         // Bottom edge (left side) + bottom-left corner, left edge, top-left corner.
         p.addLine(to: CGPoint(x: rect.minX + r, y: bottom))
         p.addArc(center: CGPoint(x: rect.minX + r, y: bottom - r), radius: r,
