@@ -462,6 +462,28 @@ public final class AppEnvironment: ObservableObject {
                             wasLiked: LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating))
     }
 
+    /// Like/rate overloads for the domain ``Track`` (e.g. the now-playing engine
+    /// exposes `Track`, not `TrackRecord`). `Track.id` is the backend remote id.
+    public func setLiked(_ liked: Bool, track: Track) async {
+        guard let active else { return }
+        let value: FavoriteChange.Value = active.capabilities.supportsFavorites
+            ? .favorite(liked)
+            : .rating(liked ? LikePolicy.likeStars : nil)
+        await applyFavorite(FavoriteChange(serverId: active.connection.id, remoteId: track.id, value: value),
+                            wasLiked: LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating))
+    }
+
+    public func setRating(_ stars: Double?, track: Track) async {
+        guard let active, active.capabilities.supportsRatings else { return }
+        await applyFavorite(FavoriteChange(serverId: active.connection.id, remoteId: track.id, value: .rating(stars)),
+                            wasLiked: LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating))
+    }
+
+    /// Whether a track is currently liked, per the active backend's policy.
+    public func isLiked(_ track: Track) -> Bool {
+        LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating)
+    }
+
     /// Apply a like/rating change: local DB write (instant, offline) + a
     /// liked/unliked play-event on transition (recommender signal) + a queued
     /// server write-back that flushes now if online.

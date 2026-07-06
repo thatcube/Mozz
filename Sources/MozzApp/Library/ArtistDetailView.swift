@@ -112,9 +112,9 @@ struct ArtistTopSongRow: View {
                 }
             }
             Spacer()
-            LikeControl(track: track)
             Text(Format.duration(track.duration))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            SongActionsMenu(track: track)
         }
         .padding(.vertical, 6)
     }
