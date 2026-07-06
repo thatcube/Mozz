@@ -20,9 +20,41 @@ private enum RatingTuning {
     static let longPressDuration: Double = 0.18
     /// Vertical offset of the revealed strip above the player star so the finger
     /// doesn't cover it.
-    static let revealYOffset: CGFloat = -68
+    static let revealYOffset: CGFloat = -74
+    /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
+    /// rounded-rect look rather than a full capsule).
+    static let revealCornerRadius: CGFloat = 22
+    /// Size of the little downward tail on the reveal bubble that points at the
+    /// star, mirroring the tap popover's arrow.
+    static let revealTailWidth: CGFloat = 26
+    static let revealTailHeight: CGFloat = 11
     static let tint: Color = .primary
     static let inactiveTint: Color = .secondary
+}
+
+/// A rounded-rectangle "speech bubble" with a small rounded tail centered on the
+/// bottom edge, pointing down — used by the hold-drag reveal so it visually
+/// matches the native tap popover (rounded corners + a downward arrow).
+private struct TailedBubble: Shape {
+    var cornerRadius: CGFloat = RatingTuning.revealCornerRadius
+    var tailWidth: CGFloat = RatingTuning.revealTailWidth
+    var tailHeight: CGFloat = RatingTuning.revealTailHeight
+
+    func path(in rect: CGRect) -> Path {
+        let body = CGRect(x: rect.minX, y: rect.minY,
+                          width: rect.width, height: rect.height - tailHeight)
+        var path = Path(roundedRect: body, cornerRadius: cornerRadius)
+        let cx = rect.midX
+        var tail = Path()
+        tail.move(to: CGPoint(x: cx - tailWidth / 2, y: body.maxY - 1))
+        tail.addQuadCurve(to: CGPoint(x: cx, y: body.maxY + tailHeight),
+                          control: CGPoint(x: cx - tailWidth / 6, y: body.maxY + tailHeight * 0.7))
+        tail.addQuadCurve(to: CGPoint(x: cx + tailWidth / 2, y: body.maxY - 1),
+                          control: CGPoint(x: cx + tailWidth / 6, y: body.maxY + tailHeight * 0.7))
+        tail.closeSubpath()
+        path.addPath(tail)
+        return path
+    }
 }
 
 // MARK: - Rating math
@@ -309,11 +341,15 @@ struct FluidRatingControl: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
-        .padding(.top, 16)
+        .padding(.top, 26)
         .padding(.horizontal, 24)
-        .padding(.bottom, 12)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(radius: 8, y: 2)
+        .padding(.bottom, 14)
+        .padding(.bottom, RatingTuning.revealTailHeight)
+        .background {
+            TailedBubble()
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+        }
         .transition(.scale(scale: 0.9).combined(with: .opacity))
         .allowsHitTesting(false)
     }
