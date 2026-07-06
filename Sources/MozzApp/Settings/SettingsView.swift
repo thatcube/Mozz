@@ -81,6 +81,15 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Link(destination: Self.repoURL) {
+                        Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    Link(destination: Self.sponsorURL) {
+                        Label("Support Development", systemImage: "heart")
+                    }
+                }
+
+                Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Mozz \(Self.appVersion)")
                             .font(.caption).foregroundStyle(.secondary)
@@ -110,6 +119,9 @@ struct SettingsView: View {
                 .foregroundStyle(enabled ? .green : .secondary)
         }
     }
+
+    private static let repoURL = URL(string: "https://github.com/thatcube/mozz")!
+    private static let sponsorURL = URL(string: "https://github.com/sponsors/thatcube")!
 
     /// Marketing version + build from the bundle, e.g. "0.1.0 (1)".
     private static var appVersion: String {
