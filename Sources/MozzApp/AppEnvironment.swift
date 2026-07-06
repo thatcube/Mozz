@@ -41,6 +41,20 @@ public struct ActiveServer: Sendable {
     public var capabilities: ServerCapabilities
 }
 
+/// A Plex server the account can reach, for the server picker.
+public struct PlexServerOption: Identifiable, Sendable, Hashable {
+    public let id: String   // Plex machine identifier
+    public let name: String
+    public let isCurrent: Bool
+}
+
+/// A music library on the active Plex server, for the library picker.
+public struct PlexMusicLibraryOption: Identifiable, Sendable, Hashable {
+    public let id: String   // section key
+    public let title: String
+    public let isSelected: Bool
+}
+
 /// The composition root. Owns the long-lived services (database, repository,
 /// download manager, playback engine, credential store) and knows how to build
 /// a backend from a stored or freshly-authenticated session. Created once and
@@ -150,7 +164,8 @@ public final class AppEnvironment: ObservableObject {
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
-            clientIdentifier: session.clientIdentifier, musicSectionID: nil
+            clientIdentifier: session.clientIdentifier, musicSectionID: nil,
+            accountToken: session.accountToken, selectedMusicSectionIDs: nil
         )
         // Persist BEFORE activation so buildBackend's Plex section resolution can
         // load this session, add the resolved section id and save it back (it
@@ -498,10 +513,20 @@ public final class AppEnvironment: ObservableObject {
             throw MozzError.unsupported("No music library on ‘\(current.connection.name)’ — \(summary)")
         }
 
-        let ids = sections.map(\.id)
+        let allIDs = sections.map(\.id)
+        // Honor the user's library selection (nil = all); ignore stale ids the
+        // server no longer has, and fall back to all if the selection resolves to
+        // nothing (e.g. every chosen library was removed).
+        let stored = SessionPersistence.load(credentials)
+        let selected = stored?.selectedMusicSectionIDs
+        var ids = allIDs
+        if let selected {
+            let filtered = allIDs.filter { selected.contains($0) }
+            if !filtered.isEmpty { ids = filtered }
+        }
         // Already spanning exactly this set — nothing to rebuild.
         if Set(ids) == Set(plex.musicSectionIDs), current.connection.musicSectionID != nil { return }
-        guard let token = SessionPersistence.load(credentials)?.token else { return }
+        guard let token = stored?.token else { return }
 
         var connection = current.connection
         connection.musicSectionID = ids.first
@@ -512,6 +537,73 @@ public final class AppEnvironment: ObservableObject {
             SessionPersistence.save(stored, to: credentials)
         }
         finishActivation(connection: connection, backend: backend, capabilities: current.capabilities)
+    }
+
+    // MARK: Plex server & library picker
+
+    /// Discover the account's Plex servers for the picker (grouped by server, one
+    /// entry each). Empty for non-Plex or when the account token isn't stored.
+    public func plexServers() async -> [PlexServerOption] {
+        guard active?.connection.kind == .plex,
+              let accountToken = SessionPersistence.load(credentials)?.accountToken else { return [] }
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: clientIdentifier)
+        guard let connections = try? await auth.discoverConnections(accountToken: accountToken) else { return [] }
+        let currentName = active?.connection.name
+        var seen = Set<String>()
+        var options: [PlexServerOption] = []
+        for connection in connections where !connection.clientIdentifier.isEmpty {
+            if seen.insert(connection.clientIdentifier).inserted {
+                options.append(PlexServerOption(id: connection.clientIdentifier,
+                                                name: connection.serverName,
+                                                isCurrent: connection.serverName == currentName))
+            }
+        }
+        return options
+    }
+
+    /// The active Plex server's music libraries, with the user's current
+    /// selection (nil selection = all selected).
+    public func plexMusicLibraries() async -> [PlexMusicLibraryOption] {
+        guard let plex = active?.backend as? PlexBackend,
+              let sections = try? await plex.musicSections() else { return [] }
+        let selected = SessionPersistence.load(credentials)?.selectedMusicSectionIDs
+        return sections.map { section in
+            PlexMusicLibraryOption(id: section.id, title: section.title,
+                                   isSelected: selected?.contains(section.id) ?? true)
+        }
+    }
+
+    /// Switch to a different Plex server (by machine identifier): pick its best
+    /// music connection, reset the library selection to "all", persist, activate
+    /// and re-sync.
+    public func selectPlexServer(id serverMachineID: String) async {
+        guard let existing = SessionPersistence.load(credentials),
+              let accountToken = existing.accountToken else { return }
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: clientIdentifier)
+        guard let connections = try? await auth.discoverConnections(accountToken: accountToken) else { return }
+        let serverConnections = connections.filter { $0.clientIdentifier == serverMachineID }
+        guard let chosen = await auth.firstMusicConnection(serverConnections) else { return }
+        let stored = StoredSession(
+            kind: .plex, baseURL: chosen.uri, token: chosen.accessToken,
+            userID: nil, serverName: chosen.serverName, clientIdentifier: clientIdentifier,
+            musicSectionID: nil, accountToken: accountToken, selectedMusicSectionIDs: nil)
+        SessionPersistence.save(stored, to: credentials)
+        do {
+            try await activate(stored)
+            startSync()
+        } catch {
+            lastSyncSummary = "Couldn't switch server: \(error.localizedDescription)"
+        }
+    }
+
+    /// Persist which music libraries to sync (empty = all) and re-sync. The next
+    /// sync's `ensurePlexMusicSection` applies the selection, and its prune drops
+    /// tracks from deselected libraries.
+    public func setSelectedMusicLibraries(_ ids: [String]) {
+        guard var stored = SessionPersistence.load(credentials) else { return }
+        stored.selectedMusicSectionIDs = ids.isEmpty ? nil : ids
+        SessionPersistence.save(stored, to: credentials)
+        startSync()
     }
 
     /// Rebuild the active backend with a bulk-timeout transport for catalog

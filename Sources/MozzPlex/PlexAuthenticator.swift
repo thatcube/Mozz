@@ -190,7 +190,8 @@ public struct PlexAuthenticator: Sendable {
             token: chosen.accessToken,
             userID: nil,
             serverName: chosen.serverName,
-            clientIdentifier: clientIdentifier
+            clientIdentifier: clientIdentifier,
+            accountToken: accountToken
         )
     }
 

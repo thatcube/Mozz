@@ -34,6 +34,10 @@ public struct AuthenticatedSession: Sendable, Hashable {
     public var userID: String?
     public var serverName: String
     public var clientIdentifier: String
+    /// The Plex *account* token (distinct from the per-server access `token`),
+    /// retained so the app can re-discover the account's servers later for the
+    /// server picker. Nil for Jellyfin.
+    public var accountToken: String?
 
     public init(
         kind: BackendKind,
@@ -41,7 +45,8 @@ public struct AuthenticatedSession: Sendable, Hashable {
         token: String,
         userID: String? = nil,
         serverName: String,
-        clientIdentifier: String
+        clientIdentifier: String,
+        accountToken: String? = nil
     ) {
         self.kind = kind
         self.baseURL = baseURL
@@ -49,6 +54,7 @@ public struct AuthenticatedSession: Sendable, Hashable {
         self.userID = userID
         self.serverName = serverName
         self.clientIdentifier = clientIdentifier
+        self.accountToken = accountToken
     }
 }
 
