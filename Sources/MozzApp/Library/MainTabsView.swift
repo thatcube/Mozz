@@ -59,10 +59,13 @@ struct MainTabsView: View {
         // Tapping a tab ALWAYS expands the bar — and must always finish expanding.
         // Start a cooldown so scroll-driven minimize (from momentum, or the content
         // inset shifting as the bar grows / the page transitions) can't re-collapse
-        // it mid-animation. See `scrollMinimizeBinding`. (The expand itself animates
-        // via MainTabBar's `.animation(barSpring, value: minimize)`.)
+        // it mid-animation. See `scrollMinimizeBinding`. Wrap the change in the shared
+        // bar spring so the ISLAND animates its un-drop too: the tab bar has its own
+        // `.animation(_, value: minimize)`, but the now-playing island container reads
+        // `minimize` directly, so without this transaction it would snap to full size
+        // while the bar springs. (The scroll path already animates via `setMinimize`.)
         expandLockUntil = Date.now + Self.expandCooldown
-        minimize = 0
+        withAnimation(Self.expandSpring) { minimize = 0 }
         loadedTabs.insert(tab)
     }
 
@@ -70,6 +73,9 @@ struct MainTabsView: View {
     /// animation always plays out. Covers the spring settle + any page-transition
     /// layout that shifts the scroll geometry.
     private static let expandCooldown: TimeInterval = 0.7
+    /// Matches `MainTabBar.barSpring` and the scroll-minimize spring so the bar,
+    /// the island drop, and a tap-driven expand all move on the same curve.
+    private static let expandSpring = Animation.spring(response: 0.5, dampingFraction: 0.8)
 
     /// The binding handed to page scroll views to drive the bar's minimize. Unlike a
     /// plain `$minimize`, its setter DROPS writes while the expand cooldown is active,
