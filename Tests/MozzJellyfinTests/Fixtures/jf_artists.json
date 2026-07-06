@@ -1,0 +1,23 @@
+{
+  "Items": [
+    {
+      "Id": "a1",
+      "Name": "Aphex Twin",
+      "SortName": "Aphex Twin",
+      "Type": "MusicArtist",
+      "Genres": ["Electronic", "IDM"],
+      "ImageTags": { "Primary": "tagA" },
+      "UserData": { "IsFavorite": true },
+      "ChildCount": 5
+    },
+    {
+      "Id": "a2",
+      "Name": "Björk",
+      "SortName": "Bjork",
+      "Type": "MusicArtist",
+      "Genres": ["Art Pop"],
+      "ImageTags": { "Primary": "tagB" }
+    }
+  ],
+  "TotalRecordCount": 2
+}

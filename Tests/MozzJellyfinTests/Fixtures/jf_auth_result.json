@@ -1,0 +1,5 @@
+{
+  "AccessToken": "jf-token-xyz",
+  "ServerId": "srv123",
+  "User": { "Id": "user1", "Name": "brandon" }
+}

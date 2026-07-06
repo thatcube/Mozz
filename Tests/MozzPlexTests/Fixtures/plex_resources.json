@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Home Plex",
+    "clientIdentifier": "machine-1",
+    "provides": "server",
+    "accessToken": "server-token-1",
+    "connections": [
+      {
+        "uri": "https://192-168-1-10.abcdef.plex.direct:32400",
+        "address": "192.168.1.10",
+        "port": 32400,
+        "protocol": "https",
+        "local": true,
+        "relay": false
+      },
+      {
+        "uri": "https://relay-01.plex.direct:443",
+        "address": "10.0.0.1",
+        "port": 443,
+        "protocol": "https",
+        "local": false,
+        "relay": true
+      }
+    ]
+  },
+  {
+    "name": "Player Only",
+    "clientIdentifier": "machine-2",
+    "provides": "player",
+    "connections": []
+  }
+]

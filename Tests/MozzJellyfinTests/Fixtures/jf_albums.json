@@ -1,0 +1,19 @@
+{
+  "Items": [
+    {
+      "Id": "al1",
+      "Name": "Selected Ambient Works 85-92",
+      "SortName": "Selected Ambient Works 85-92",
+      "Type": "MusicAlbum",
+      "AlbumArtist": "Aphex Twin",
+      "AlbumArtists": [{ "Name": "Aphex Twin", "Id": "a1" }],
+      "ProductionYear": 1992,
+      "ImageTags": { "Primary": "talb1" },
+      "ChildCount": 13,
+      "Genres": ["Ambient", "IDM"],
+      "DateCreated": "2021-05-01T12:00:00.0000000Z",
+      "UserData": { "IsFavorite": false }
+    }
+  ],
+  "TotalRecordCount": 1
+}
