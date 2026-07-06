@@ -189,7 +189,9 @@ struct RatingPopoverContent: View {
             .allowsHitTesting((current ?? 0) > 0)
             .animation(.easeInOut(duration: 0.15), value: (current ?? 0) > 0)
         }
-        .padding(16)
+        .padding(.horizontal, 28)
+        .padding(.top, 24)
+        .padding(.bottom, 14)
         .presentationCompactAdaptation(.popover)
     }
 
@@ -301,8 +303,9 @@ struct FluidRatingControl: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
+        .padding(.top, 16)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 12)
         .background(.regularMaterial, in: Capsule())
         .shadow(radius: 8, y: 2)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
