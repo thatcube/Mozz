@@ -13,30 +13,12 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 if let active = env.active {
-                    Section("Server") {
-                        LabeledContent("Name", value: active.connection.name)
-                        LabeledContent("Type", value: active.connection.kind.displayName)
-                        LabeledContent("Address", value: active.connection.baseURL.absoluteString)
-                    }
-
-                    Section("Capabilities") {
-                        capabilityRow("Offline download", active.capabilities.supportsOriginalFileDownload)
-                        capabilityRow("Transcoding", active.capabilities.supportsTranscoding)
-                        capabilityRow("Favorites", active.capabilities.supportsFavorites)
-                        capabilityRow("Lyrics", active.capabilities.supportsLyrics)
-                        capabilityRow("Normalization gain", active.capabilities.supportsNormalizationGain)
-                        capabilityRow("Scrobble / progress", active.capabilities.supportsProgressReporting)
-                        if let plexPass = active.capabilities.hasPlexPass {
-                            capabilityRow("Plex Pass", plexPass)
-                        }
-                    }
-
                     Section("Library") {
                         Button {
                             env.startSync()
                         } label: {
                             HStack {
-                                Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                                Label(env.isSyncing ? "Syncing…" : "Sync Now", systemImage: "arrow.triangle.2.circlepath")
                                 Spacer()
                                 if env.isSyncing { ProgressView() }
                             }
@@ -67,26 +49,44 @@ struct SettingsView: View {
 
                     Section {
                         NavigationLink {
-                            BenchmarksView()
+                            DiagnosticsView()
                         } label: {
-                            Label("Performance Benchmarks", systemImage: "speedometer")
+                            Label("Diagnostics", systemImage: "stethoscope")
                         }
                     }
 
                     Section {
                         Button(role: .destructive) { env.signOut() } label: {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            Text("Sign Out")
+                                .frame(maxWidth: .infinity)
                         }
                     }
                 }
 
                 Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Mozz \(Self.appVersion)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("GPL-3.0 · offline-first music for Plex & Jellyfin")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                    Link(destination: Self.repoURL) {
+                        Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
+                    .accessibilityHint("Opens in Safari")
+                    Link(destination: Self.sponsorURL) {
+                        Label("Support Development", systemImage: "heart")
+                    }
+                    .accessibilityHint("Opens in Safari")
+                    if let reviewURL = Self.appStoreReviewURL {
+                        Link(destination: reviewURL) {
+                            Label("Rate on the App Store", systemImage: "star")
+                        }
+                        .accessibilityHint("Opens the App Store")
+                    }
+                    LabeledContent {
+                        Text(Self.appVersion)
+                    } label: {
+                        Label("Version", systemImage: "info.circle")
+                    }
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("A free, open-source app under GPL-3.0. If you enjoy Mozz, a GitHub star, a review, or a small tip means a lot — thank you!")
                 }
             }
             .navigationTitle("Settings")
@@ -102,13 +102,19 @@ struct SettingsView: View {
         }
     }
 
-    private func capabilityRow(_ title: String, _ enabled: Bool) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
-                .foregroundStyle(enabled ? .green : .secondary)
-        }
+    private static let repoURL = URL(string: "https://github.com/thatcube/mozz")!
+    private static let sponsorURL = URL(string: "https://github.com/sponsors/thatcube")!
+
+    /// App Store numeric ID, assigned once Mozz is published (e.g. "1234567890").
+    /// While empty, the "Rate on the App Store" row stays hidden so it never
+    /// points at a broken link.
+    private static let appStoreID = ""
+
+    /// Deep link straight to the App Store review composer, or `nil` until the
+    /// app has an App Store ID.
+    private static var appStoreReviewURL: URL? {
+        guard !appStoreID.isEmpty else { return nil }
+        return URL(string: "https://apps.apple.com/app/id\(appStoreID)?action=write-review")
     }
 
     /// Marketing version + build from the bundle, e.g. "0.1.0 (1)".
