@@ -31,19 +31,25 @@ struct MainTabsView: View {
     /// 0 = expanded tab bar, 1 = minimized (blob split). TEMP: toggled by a
     /// long-press on the bar for visual iteration; wired to scroll next.
     @State private var minimize: CGFloat = 0
-    /// Per-tab "pop to root" tokens. Pressing a tab bumps its token; each tab's
-    /// `NavigationStack` is `.id()`-ed on the token, so the bump rebuilds the stack
-    /// at root (the view's data `@State` lives outside the stack, so it's preserved —
-    /// no reload flash). This gives the standard "tap a tab → root of that tab".
-    @State private var navResetTokens: [AppTab: Int] = [:]
+    /// Per-tab navigation paths (value-based routing). Each tab's `NavigationStack`
+    /// binds to its path, so pop-to-root is an animated `path.removeAll()` and the
+    /// path is programmatic (future deep links / state restoration). Switching tabs
+    /// preserves each tab's depth because its path persists here.
+    @State private var paths: [AppTab: [AppRoute]] = [:]
 
-    private func token(_ tab: AppTab) -> Int { navResetTokens[tab, default: 0] }
+    /// A binding to one tab's path (dictionary subscript with an empty default).
+    private func pathBinding(_ tab: AppTab) -> Binding<[AppRoute]> {
+        Binding(get: { paths[tab] ?? [] }, set: { paths[tab] = $0 })
+    }
 
     /// Handle a tab-bar press. Switching tabs preserves each tab's navigation depth;
     /// re-tapping the tab you're already on pops it to root (standard iOS behavior).
     private func pressTab(_ tab: AppTab) {
         if tab == selectedTab {
-            navResetTokens[tab, default: 0] += 1   // re-tap → pop to root
+            // Re-tap → animated pop to root (no-op if already at root).
+            if !(paths[tab] ?? []).isEmpty {
+                withAnimation { paths[tab] = [] }
+            }
         }
         selectedTab = tab
         minimize = 0
@@ -120,9 +126,9 @@ struct MainTabsView: View {
     @ViewBuilder
     private func page(for tab: AppTab) -> some View {
         switch tab {
-        case .home:    HomeView(popToken: token(.home))
-        case .library: LibraryHomeView(popToken: token(.library))
-        case .search:  SearchView(popToken: token(.search))
+        case .home:    HomeView(path: pathBinding(.home))
+        case .library: LibraryHomeView(path: pathBinding(.library))
+        case .search:  SearchView(path: pathBinding(.search))
         }
     }
 }

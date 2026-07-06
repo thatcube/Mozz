@@ -10,10 +10,9 @@ import MozzRecommend
 /// offline); generation happens off-main on a schedule.
 struct HomeView: View {
     @EnvironmentObject private var env: AppEnvironment
-    /// Bumped by the tab bar to pop this tab to root (see MainTabsView). Applied as
-    /// the NavigationStack's `.id`, so a change rebuilds the stack at root while this
-    /// view's data `@State` (below) is preserved.
-    var popToken: Int = 0
+    /// This tab's navigation path (value-based routing), owned by MainTabsView so
+    /// pop-to-root and depth-preservation-on-switch work across tab changes.
+    @Binding var path: [AppRoute]
     @State private var mixes: [RecommendationService.HomeMix] = []
     @State private var recentlyPlayed: [TrackRecord] = []
     @State private var recentlyAdded: [AlbumRecord] = []
@@ -22,7 +21,7 @@ struct HomeView: View {
     @State private var loaded = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     TightHeader(title: "Home")
@@ -50,10 +49,10 @@ struct HomeView: View {
             }
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()
+            .appRouteDestinations()
             .task { await load() }
             .refreshable { await load() }
         }
-        .id(popToken)
     }
 
     /// The quick-access grid: Liked Songs plus every precomputed mix, as compact
@@ -84,9 +83,7 @@ struct HomeView: View {
     @ViewBuilder private func cell(_ cell: HomeCell) -> some View {
         switch cell {
         case .liked:
-            NavigationLink {
-                LikedSongsView()
-            } label: {
+            NavigationLink(value: AppRoute.likedSongs) {
                 HomeShortcutTile(title: "Liked Songs",
                                  subtitle: likedCount > 0 ? (likedCount == 1 ? "1 song" : "\(likedCount) songs") : "Tap ♥ to add") {
                     LikedSongsSquare()
@@ -94,10 +91,8 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
         case .mix(let mix):
-            NavigationLink {
-                MixDetailView(setId: mix.id, fallbackTitle: mix.title,
-                              subtitle: mix.subtitle ?? "Made for You")
-            } label: {
+            NavigationLink(value: AppRoute.mix(setId: mix.id, title: mix.title,
+                                               subtitle: mix.subtitle ?? "Made for You")) {
                 HomeShortcutTile(title: mix.title, subtitle: mix.subtitle) {
                     ArtworkView(artwork: mix.artworkKey.map(ArtworkRef.init(key:)),
                                 seed: mix.id, size: 56, cornerRadius: 0)
@@ -201,9 +196,7 @@ struct AlbumShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
-                        NavigationLink {
-                            AlbumDetailView(album: album)
-                        } label: {
+                        NavigationLink(value: AppRoute.album(album)) {
                             AlbumCell(album: album).frame(width: 150)
                         }
                         .buttonStyle(.plain)
@@ -258,9 +251,7 @@ struct PlaylistShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(playlists) { playlist in
-                        NavigationLink {
-                            PlaylistDetailView(playlist: playlist)
-                        } label: {
+                        NavigationLink(value: AppRoute.playlist(playlist)) {
                             VStack(alignment: .leading, spacing: 6) {
                                 ArtworkView(artwork: playlist.artworkKey.map(ArtworkRef.init(key:)),
                                             seed: playlist.title, size: 150, cornerRadius: 8)

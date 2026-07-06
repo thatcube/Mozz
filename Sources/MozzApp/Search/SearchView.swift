@@ -16,9 +16,8 @@ import MozzDatabase
 /// list resolved live from the catalog.
 struct SearchView: View {
     @EnvironmentObject private var env: AppEnvironment
-    /// Bumped by the tab bar to pop this tab to root (see MainTabsView). Applied as
-    /// the NavigationStack's `.id`, preserving the query/results `@State` below.
-    var popToken: Int = 0
+    /// This tab's navigation path (value-based routing), owned by MainTabsView.
+    @Binding var path: [AppRoute]
     @StateObject private var recents = RecentSearchStore()
     @State private var query = ""
     @State private var results = SearchResults(artists: [], albums: [], tracks: [])
@@ -36,7 +35,7 @@ struct SearchView: View {
     private var isActive: Bool { focused || !trimmedQuery.isEmpty }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 if !isActive {
                     TightHeader(title: "Search")
@@ -66,10 +65,10 @@ struct SearchView: View {
             }
             .animation(.snappy(duration: 0.3), value: isActive)
             .hideNavigationBar()
+            .appRouteDestinations()
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
         }
-        .id(popToken)
     }
 
     /// A custom search field with real iOS 26 Liquid Glass. We can't use the
@@ -140,7 +139,7 @@ struct SearchView: View {
         if !results.artists.isEmpty {
             Section("Artists") {
                 ForEach(results.artists) { artist in
-                    NavigationLink { ArtistDetailView(artist: artist) } label: {
+                    NavigationLink(value: AppRoute.artist(artist)) {
                         Label(artist.name, systemImage: "music.mic")
                     }
                     .simultaneousGesture(TapGesture().onEnded {
@@ -152,7 +151,7 @@ struct SearchView: View {
         if !results.albums.isEmpty {
             Section("Albums") {
                 ForEach(results.albums) { album in
-                    NavigationLink { AlbumDetailView(album: album) } label: {
+                    NavigationLink(value: AppRoute.album(album)) {
                         VStack(alignment: .leading) {
                             Text(album.title)
                             Text(album.artistName).font(.caption).foregroundStyle(.secondary)
@@ -181,7 +180,7 @@ struct SearchView: View {
     @ViewBuilder private func recentRow(_ resolved: RecentResolved) -> some View {
         switch resolved {
         case .artist(let a):
-            NavigationLink { ArtistDetailView(artist: a) } label: {
+            NavigationLink(value: AppRoute.artist(a)) {
                 RecentRowLabel(artworkKey: a.artworkKey, seed: a.name,
                                title: a.name, subtitle: "Artist", circular: true)
             }
@@ -189,7 +188,7 @@ struct SearchView: View {
                 record(.artist, serverId: a.serverId, remoteId: a.remoteId)
             })
         case .album(let a):
-            NavigationLink { AlbumDetailView(album: a) } label: {
+            NavigationLink(value: AppRoute.album(a)) {
                 RecentRowLabel(artworkKey: a.artworkKey, seed: a.title,
                                title: a.title, subtitle: "Album · \(a.artistName)")
             }

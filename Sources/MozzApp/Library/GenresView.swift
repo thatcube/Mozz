@@ -11,9 +11,7 @@ struct GenresView: View {
     var body: some View {
         List {
             ForEach(genres, id: \.self) { genre in
-                NavigationLink {
-                    GenreDetailView(genre: genre)
-                } label: {
+                NavigationLink(value: AppRoute.genre(genre)) {
                     Text(genre)
                 }
             }
@@ -50,9 +48,7 @@ struct GenreDetailView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(albums) { album in
-                    NavigationLink {
-                        AlbumDetailView(album: album)
-                    } label: {
+                    NavigationLink(value: AppRoute.album(album)) {
                         AlbumCell(album: album)
                     }
                     .buttonStyle(.plain)

@@ -12,9 +12,7 @@ struct PlaylistsView: View {
     var body: some View {
         List {
             ForEach(playlists) { playlist in
-                NavigationLink {
-                    PlaylistDetailView(playlist: playlist)
-                } label: {
+                NavigationLink(value: AppRoute.playlist(playlist)) {
                     HStack(spacing: 12) {
                         ArtworkView(artwork: playlist.artworkKey.map(ArtworkRef.init(key:)),
                                     seed: playlist.title, size: 44, cornerRadius: 6)

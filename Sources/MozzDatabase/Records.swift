@@ -99,7 +99,7 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
 
 /// An artist row. `id` is the internal integer key (also the FTS rowid);
 /// (`serverId`, `remoteId`) is the stable identity used for upserts.
-public struct ArtistRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable {
+public struct ArtistRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable, Hashable {
     public static let databaseTableName = "artist"
 
     public var id: Int64?
@@ -118,7 +118,7 @@ public struct ArtistRecord: Codable, FetchableRecord, MutablePersistableRecord, 
 }
 
 /// An album row.
-public struct AlbumRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable {
+public struct AlbumRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable, Hashable {
     public static let databaseTableName = "album"
 
     public var id: Int64?
@@ -183,7 +183,7 @@ public struct TrackRecord: Codable, FetchableRecord, MutablePersistableRecord, S
 }
 
 /// A playlist header row.
-public struct PlaylistRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable {
+public struct PlaylistRecord: Codable, FetchableRecord, MutablePersistableRecord, Sendable, Identifiable, Hashable {
     public static let databaseTableName = "playlist"
 
     public var id: Int64?

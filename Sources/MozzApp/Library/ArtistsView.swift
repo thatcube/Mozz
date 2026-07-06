@@ -18,9 +18,7 @@ struct ArtistsView: View {
     var body: some View {
         List {
             ForEach(Array(list.items.enumerated()), id: \.element.id) { index, artist in
-                NavigationLink {
-                    ArtistDetailView(artist: artist)
-                } label: {
+                NavigationLink(value: AppRoute.artist(artist)) {
                     ArtistRow(artist: artist)
                 }
                 .onAppear { list.loadMoreIfNeeded(currentIndex: index) }

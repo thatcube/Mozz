@@ -60,7 +60,7 @@ struct ArtistDetailView: View {
                 Text("Top Songs").font(.title3.bold())
                 Spacer()
                 if songs.count > topSongs.count {
-                    NavigationLink { ArtistAllSongsView(artist: artist, songs: songs) } label: {
+                    NavigationLink(value: AppRoute.artistAllSongs(artist)) {
                         Text("See All").font(.subheadline)
                     }
                 }
@@ -130,9 +130,7 @@ struct ArtistAlbumShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
-                        NavigationLink {
-                            AlbumDetailView(album: album)
-                        } label: {
+                        NavigationLink(value: AppRoute.album(album)) {
                             AlbumCell(album: album).frame(width: 150)
                         }
                         .buttonStyle(.plain)
@@ -144,11 +142,13 @@ struct ArtistAlbumShelf: View {
     }
 }
 
-/// The full ranked song list behind an artist's "See All".
+/// The full ranked song list behind an artist's "See All". Loads its own songs
+/// (same `topTracks` query the artist page uses) so the route carries only the
+/// artist — no heavy `[TrackRecord]` payload in the navigation path.
 struct ArtistAllSongsView: View {
     @EnvironmentObject private var env: AppEnvironment
     let artist: ArtistRecord
-    let songs: [TrackRecord]
+    @State private var songs: [TrackRecord] = []
 
     var body: some View {
         List {
@@ -163,6 +163,11 @@ struct ArtistAllSongsView: View {
         .listStyle(.plain)
         .navigationTitle("\(artist.name) · Songs")
         .inlineNavigationTitle()
+        .task {
+            guard let serverId = env.active?.connection.id else { return }
+            songs = (try? await env.repository.topTracks(
+                forArtistRemoteId: artist.remoteId, serverId: serverId, limit: 500)) ?? []
+        }
     }
 }
 

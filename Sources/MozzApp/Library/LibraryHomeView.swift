@@ -19,31 +19,30 @@ import MozzDatabase
 /// one-stack-per-tab rule is load-bearing, not stylistic.
 struct LibraryHomeView: View {
     @EnvironmentObject private var env: AppEnvironment
-    /// Bumped by the tab bar to pop this tab to root (see MainTabsView). Applied as
-    /// the NavigationStack's `.id`, preserving this view's data `@State`.
-    var popToken: Int = 0
+    /// This tab's navigation path (value-based routing), owned by MainTabsView.
+    @Binding var path: [AppRoute]
     @State private var recentlyAdded: [AlbumRecord] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     TightHeader(title: "Library")
 
                     VStack(spacing: 0) {
-                        categoryLink("Songs", "music.note") { SongsView() }
+                        categoryLink("Songs", "music.note", route: .songs)
                         rowDivider
-                        categoryLink("Liked Songs", "heart") { LikedSongsView() }
+                        categoryLink("Liked Songs", "heart", route: .likedSongs)
                         rowDivider
-                        categoryLink("Playlists", "music.note.list") { PlaylistsView() }
+                        categoryLink("Playlists", "music.note.list", route: .playlists)
                         rowDivider
-                        categoryLink("Artists", "music.mic") { ArtistsView() }
+                        categoryLink("Artists", "music.mic", route: .artists)
                         rowDivider
-                        categoryLink("Albums", "square.stack") { AlbumsView() }
+                        categoryLink("Albums", "square.stack", route: .albums)
                         rowDivider
-                        categoryLink("Genres", "guitars") { GenresView() }
+                        categoryLink("Genres", "guitars", route: .genres)
                         rowDivider
-                        categoryLink("Downloaded", "arrow.down.circle") { DownloadsView() }
+                        categoryLink("Downloaded", "arrow.down.circle", route: .downloads)
                     }
 
                     if !recentlyAdded.isEmpty {
@@ -54,20 +53,17 @@ struct LibraryHomeView: View {
             }
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()
+            .appRouteDestinations()
             .task { await loadRecent() }
         }
-        .id(popToken)
     }
 
     private var rowDivider: some View {
         Divider().padding(.leading, 64)
     }
 
-    private func categoryLink<Destination: View>(
-        _ title: String, _ systemImage: String,
-        @ViewBuilder destination: @escaping () -> Destination
-    ) -> some View {
-        NavigationLink { destination() } label: {
+    private func categoryLink(_ title: String, _ systemImage: String, route: AppRoute) -> some View {
+        NavigationLink(value: route) {
             LibraryCategoryRow(title: title, systemImage: systemImage)
         }
         .buttonStyle(.plain)

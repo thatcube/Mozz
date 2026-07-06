@@ -24,9 +24,7 @@ struct AlbumsView: View {
             }
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(Array(list.items.enumerated()), id: \.element.id) { index, album in
-                    NavigationLink {
-                        AlbumDetailView(album: album)
-                    } label: {
+                    NavigationLink(value: AppRoute.album(album)) {
                         AlbumCell(album: album)
                     }
                     .buttonStyle(.plain)
