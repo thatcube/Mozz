@@ -871,8 +871,21 @@ public final class AppEnvironment: ObservableObject {
         items.insert(RecentlyPlayedItem(
             id: track.id, title: track.title, subtitle: track.artistName,
             artworkFile: artworkFile, deepLink: "mozz://tab/library"), at: 0)
-        WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: Array(items.prefix(12))))
+        let capped = Array(items.prefix(12))
+        WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: capped))
+        pruneWidgetArtwork(referencedBy: capped)
         reloadWidget(MozzWidget.recentlyPlayedKind)
+    }
+
+    /// Delete artwork files no longer referenced by Now Playing or the (capped)
+    /// recently-played list, so the App Group container doesn't accumulate one
+    /// JPEG per unique track ever played.
+    private func pruneWidgetArtwork(referencedBy recents: [RecentlyPlayedItem]) {
+        var keep = Set(recents.compactMap(\.artworkFile))
+        if let track = playback.currentTrack {
+            keep.insert(Self.widgetArtworkName(track.id))
+        }
+        WidgetSnapshotStore.pruneArtwork(keeping: keep)
     }
 
     /// Once artwork lands, fill it into the most-recent entry that referenced this

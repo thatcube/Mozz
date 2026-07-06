@@ -121,4 +121,16 @@ public enum WidgetSnapshotStore {
         let url = dir.appendingPathComponent(name)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
+
+    /// Delete any artwork files not in `keep` (the filenames still referenced by
+    /// the current snapshots), so the directory doesn't grow one JPEG per unique
+    /// track ever played.
+    public static func pruneArtwork(keeping keep: Set<String>) {
+        guard let dir = artworkDir,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in files where !keep.contains(url.lastPathComponent) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
 }
