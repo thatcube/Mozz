@@ -90,4 +90,178 @@ public actor RecommendationService {
     public func mozzWeeklyItems() async throws -> [RecommendationItemRecord] {
         try await store.items(forSet: Self.mozzWeeklyId)
     }
+
+    // MARK: - Home mixes (multiple precomputed sets)
+
+    public static let kindSupermix = "supermix"
+    public static let kindDaily = "daily_mix"
+    public static let kindArtist = "artist_mix"
+    public static let kindReplay = "replay"
+    /// Weekly rediscovery ("Mozz Weekly") uses this existing kind.
+    public static let kindForgotten = "forgotten"
+
+    /// The daily-cadence batch cleared and rebuilt by ``generateHomeMixes``.
+    /// (Mozz Weekly is generated separately on its weekly cadence.)
+    static let homeBatchKinds = [kindSupermix, kindDaily, kindArtist, kindReplay]
+    /// Don't persist a mix with fewer than this many tracks — avoids junk tiles.
+    static let minTracks = 8
+
+    /// A Home mix tile summary: the set plus a representative cover and subtitle.
+    public struct HomeMix: Sendable, Identifiable {
+        public let id: String
+        public let title: String
+        public let subtitle: String?
+        public let kind: String
+        public let artworkKey: String?
+        public let generatedAt: Double
+    }
+
+    /// (Re)generate the daily-cadence Home mixes for a server: Supermix, up to
+    /// three Daily Mixes (one per top genre), up to two Artist Mixes (a top
+    /// artist + same-genre neighbours), and a Replay mix (most-played). The prior
+    /// batch is cleared first so removed slots don't linger. Cold-start (thin
+    /// history) generates none — "Mozz Weekly" already covers day one.
+    public func generateHomeMixes(serverId: ServerID, seed: UInt64? = nil) async throws {
+        let nowDate = now()
+        let nowSec = nowDate.timeIntervalSince1970
+        let lookback = nowSec - 90 * 24 * 3600
+        // notPlayedSince in the future ⇒ exclude nothing ⇒ include familiar
+        // (recently-played) tracks, which is what a Daily Mix / Supermix wants.
+        let includeFamiliar = nowSec + 24 * 3600
+
+        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback)
+        let taste = TasteProfile.build(from: signals, now: nowDate)
+        var rng = SeededGenerator(seed: seed ?? UInt64(bitPattern: Int64(nowSec)))
+
+        try await store.deleteSets(kinds: Self.homeBatchKinds)
+        guard !taste.isThin else { return }
+
+        // Supermix — broad, familiar-leaning blend across all of the listener's taste.
+        let superPool = try await store.candidateTracks(
+            serverId: serverId, genres: taste.topGenres(20), artistIds: taste.topArtists(30),
+            notPlayedSince: includeFamiliar, limit: 3000)
+        if let ranked = ranked(superPool, taste: taste,
+                               config: .init(limit: 60, explorationJitter: 0.12, maxPerArtist: 5, maxPerAlbum: 3),
+                               rng: &rng) {
+            try await save(id: "supermix", title: "Supermix", kind: Self.kindSupermix, items: ranked)
+        }
+
+        // Daily Mixes — one coherent mix per top genre.
+        for (i, genre) in taste.topGenres(3).enumerated() {
+            let pool = try await store.candidateTracks(
+                serverId: serverId, genres: [genre], artistIds: [],
+                notPlayedSince: includeFamiliar, limit: 1000)
+            if let ranked = ranked(pool, taste: taste,
+                                   config: .init(limit: 40, explorationJitter: 0.12, maxPerArtist: 4, maxPerAlbum: 2),
+                                   rng: &rng) {
+                try await save(id: "daily-mix-\(i + 1)", title: "Daily Mix \(i + 1)", kind: Self.kindDaily, items: ranked)
+            }
+        }
+
+        // Artist Mixes — a top artist plus same-genre neighbours.
+        for (i, artistId) in taste.topArtists(2).enumerated() {
+            guard let seedArtist = try await store.seedArtist(remoteId: artistId, serverId: serverId) else { continue }
+            let pool = try await store.candidateTracks(
+                serverId: serverId, genres: Array(seedArtist.genres.prefix(4)), artistIds: [artistId],
+                notPlayedSince: includeFamiliar, limit: 1000)
+            if let ranked = ranked(pool, taste: taste,
+                                   config: .init(limit: 40, explorationJitter: 0.1, maxPerArtist: 6, maxPerAlbum: 3),
+                                   rng: &rng) {
+                let title = seedArtist.name.isEmpty ? "Artist Mix" : "\(seedArtist.name) Mix"
+                try await save(id: "artist-mix-\(i + 1)", title: title, kind: Self.kindArtist, items: ranked)
+            }
+        }
+
+        // Replay — most-played recently, in play-count order (no re-ranking).
+        let replayPool = try await store.mostPlayedCandidates(serverId: serverId, since: nowSec - 60 * 24 * 3600, limit: 50)
+        if replayPool.count >= Self.minTracks {
+            let items = replayPool.enumerated().map { idx, c in
+                ScoredCandidate(candidate: c, score: Double(replayPool.count - idx), source: "content", reason: "On repeat")
+            }
+            try await save(id: "replay-mix", title: "Replay", kind: Self.kindReplay, items: items)
+        }
+    }
+
+    /// Every Home mix (the daily batch + Mozz Weekly), each with a representative
+    /// cover and subtitle, ordered for display. Instant + offline (reads only).
+    public func homeMixes() async throws -> [HomeMix] {
+        let sets = try await store.allSets()
+        let art = try await store.representativeArtworkKeys()
+        return sets.map { s in
+            HomeMix(id: s.id, title: s.title, subtitle: Self.decodeMeta(s.params)?.subtitle,
+                    kind: s.kind, artworkKey: art[s.id], generatedAt: s.generatedAt)
+        }
+        .sorted { a, b in
+            let pa = Self.order(a.kind), pb = Self.order(b.kind)
+            return pa != pb ? pa < pb : a.id < b.id
+        }
+    }
+
+    /// Tracks of any set (for the generic mix detail page), in rank order.
+    public func tracks(forSetId id: String) async throws -> [TrackRecord] {
+        try await store.tracks(forSet: id)
+    }
+
+    public func set(id: String) async throws -> RecommendationSetRecord? {
+        try await store.set(id: id)
+    }
+
+    // MARK: - Home mix helpers
+
+    /// Content-score a pool and blend it; nil if the result is too thin to ship.
+    private func ranked(_ pool: [TrackCandidate], taste: TasteProfile,
+                        config: Blender.Config, rng: inout SeededGenerator) -> [ScoredCandidate]? {
+        guard pool.count >= Self.minTracks else { return nil }
+        let scored = content.score(candidates: pool, taste: taste)
+        let blended = blender.blend(sources: [scored], config: config, using: &rng)
+        return blended.count >= Self.minTracks ? blended : nil
+    }
+
+    /// Persist a mix set + its ranked items, stashing a subtitle (top artists) in
+    /// `params` for the tile.
+    private func save(id: String, title: String, kind: String, items: [ScoredCandidate]) async throws {
+        let set = RecommendationSetRecord(id: id, title: title, kind: kind,
+                                          generatedAt: now().timeIntervalSince1970,
+                                          params: Self.encodeMeta(subtitle: Self.subtitle(from: items.map(\.candidate))))
+        let records = items.enumerated().map { idx, sc in
+            RecommendationItemRecord(setId: id, trackRef: sc.trackRef, rank: idx + 1,
+                                     score: sc.score, inLibrary: true, reason: sc.reason)
+        }
+        try await store.saveRecommendationSet(set, items: records)
+    }
+
+    private static func order(_ kind: String) -> Int {
+        switch kind {
+        case kindSupermix: return 0
+        case kindDaily: return 1
+        case kindArtist: return 2
+        case kindReplay: return 3
+        case kindForgotten: return 4
+        default: return 9
+        }
+    }
+
+    /// "AURORA, ODESZA and more" from a set's tracks (distinct artists, in order).
+    private static func subtitle(from candidates: [TrackCandidate]) -> String? {
+        var seen = Set<String>()
+        var names: [String] = []
+        for c in candidates where !c.artistName.isEmpty {
+            if seen.insert(c.artistName).inserted { names.append(c.artistName) }
+            if names.count == 3 { break }
+        }
+        guard !names.isEmpty else { return nil }
+        return names.count >= 3 ? "\(names[0]), \(names[1]) and more" : names.joined(separator: ", ")
+    }
+
+    private struct MixMeta: Codable { var subtitle: String? }
+
+    private static func encodeMeta(subtitle: String?) -> String? {
+        guard subtitle != nil, let data = try? JSONEncoder().encode(MixMeta(subtitle: subtitle)) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func decodeMeta(_ params: String?) -> MixMeta? {
+        guard let params, let data = params.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(MixMeta.self, from: data)
+    }
 }
