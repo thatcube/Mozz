@@ -51,11 +51,7 @@ struct LikedSongsView: View {
 
     private func load() async {
         let result = (try? await env.repository.likedTracks(serverId: env.active?.connection.id)) ?? []
-        // TEMP debug: shrink to a few rows so the short-content layout can be
-        // inspected in the Simulator. REMOVE.
-        let limited = ProcessInfo.processInfo.environment["MOZZ_DEBUG_SHORTLIKED"] == "1"
-            ? Array(result.prefix(3)) : result
-        tracks = limited
+        tracks = result
         // Stable hero backdrop: the first liked track that has artwork.
         if let pick = result.first(where: { $0.artworkKey != nil }), let key = pick.artworkKey {
             heroArtwork = ArtworkRef(key: key)
