@@ -360,7 +360,7 @@ struct FluidRatingControl: View {
     // MARK: Hold-drag reveal
 
     private var revealStrip: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             RatingStripView(value: preview)
                 .background {
                     GeometryReader { geo in
@@ -376,7 +376,7 @@ struct FluidRatingControl: View {
         }
         .padding(.top, 26)
         .padding(.horizontal, 24)
-        .padding(.bottom, 18)
+        .padding(.bottom, 16)
         .padding(.bottom, RatingTuning.revealTailHeight)
         .glassBackground(TailedBubble())
         .transition(.scale(scale: 0.9).combined(with: .opacity))
