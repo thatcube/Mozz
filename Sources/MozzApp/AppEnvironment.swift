@@ -121,6 +121,7 @@ public final class AppEnvironment: ObservableObject {
         wirePlaybackReporting()
         wirePlayEventLogging()
         wireBackgroundDownloads()
+        wireNowPlayingArtwork()
     }
 
     /// The default on-disk environment (App Support DB + downloads dir + Keychain).
@@ -707,6 +708,26 @@ public final class AppEnvironment: ObservableObject {
                 try? await backend.reportPlayback(report)
             }
         }
+    }
+
+    /// Feed the lock screen / Control Center album art. The engine fires
+    /// `onNeedsArtwork` whenever the current track changes; we resolve the active
+    /// backend's artwork URL, fetch the bytes, and hand them back via
+    /// `provideArtwork`. The engine drops stale results (it checks the track id),
+    /// so a rapid skip can never leave the previous track's art on screen.
+    private func wireNowPlayingArtwork() {
+        playback.onNeedsArtwork = { [weak self] track in
+            guard let self else { return }
+            Task { @MainActor in await self.provideNowPlayingArtwork(for: track) }
+        }
+    }
+
+    private func provideNowPlayingArtwork(for track: Track) async {
+        guard let artwork = track.artwork,
+              let backend = active?.backend,
+              let url = backend.artworkURL(for: artwork, size: 600) else { return }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+        playback.provideArtwork(data, for: track.id)
     }
 
     /// Persist the engine's listening-history events into the on-device
