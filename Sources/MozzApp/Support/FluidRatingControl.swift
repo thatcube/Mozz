@@ -11,10 +11,6 @@ private enum RatingTuning {
     static let stripStarSize: CGFloat = 30
     /// Gap between stars in the expanded strip.
     static let stripStarSpacing: CGFloat = 10
-    /// Dead-zone at the strip's leading edge that maps to "no rating" (nil) during
-    /// the hold-drag reveal. Dragging left into it clears — no 6th icon needed.
-    /// (The tap popover uses zero here and clears via a subtle "Clear" link.)
-    static let zeroZoneWidth: CGFloat = 24
     /// Movement (points) past which a press is treated as a drag-to-rate instead
     /// of a tap.
     static let moveSlop: CGFloat = 10
@@ -33,28 +29,26 @@ private enum RatingTuning {
 //
 // Pure geometry → rating mapping shared by tap and drag so both feel identical.
 enum RatingMath {
-    /// Total width the expanded strip occupies for the given layout.
+    /// Total width the star strip occupies (stars are laid out in fixed-width
+    /// cells so the visual layout exactly matches the hit math below).
     static func stripWidth(starSize: CGFloat = RatingTuning.stripStarSize,
-                           spacing: CGFloat = RatingTuning.stripStarSpacing,
-                           zeroZone: CGFloat = RatingTuning.zeroZoneWidth) -> CGFloat {
-        zeroZone + CGFloat(RatingTuning.starCount) * starSize
+                           spacing: CGFloat = RatingTuning.stripStarSpacing) -> CGFloat {
+        CGFloat(RatingTuning.starCount) * starSize
             + CGFloat(RatingTuning.starCount - 1) * spacing
     }
 
-    /// Map a horizontal position (measured from the strip's leading edge, i.e.
-    /// the start of the zero-zone) to a snapped rating. The left half of star `i`
-    /// yields `i - 0.5`, the right half `i`; anything in the leading zero-zone
-    /// (or before it) yields `nil` (clear). Result is clamped to `0.5...5.0`.
+    /// Map a horizontal position measured from the FIRST star's leading edge to a
+    /// snapped rating. The left half of star `i` yields `i - 0.5`, the right half
+    /// `i`; a position left of the first star (x < 0, e.g. dragging past the strip)
+    /// yields `nil` (clear). Result is clamped to `0.5...5.0`.
     static func rating(atX x: CGFloat,
                        starSize: CGFloat = RatingTuning.stripStarSize,
-                       spacing: CGFloat = RatingTuning.stripStarSpacing,
-                       zeroZone: CGFloat = RatingTuning.zeroZoneWidth) -> Double? {
-        if x < zeroZone { return nil }
-        let localX = x - zeroZone
+                       spacing: CGFloat = RatingTuning.stripStarSpacing) -> Double? {
+        if x < 0 { return nil }
         let pitch = starSize + spacing
-        let index = Int(localX / pitch)
+        let index = Int(x / pitch)
         if index >= RatingTuning.starCount { return 5.0 }
-        let within = localX - CGFloat(index) * pitch
+        let within = x - CGFloat(index) * pitch
         let value = within < starSize / 2 ? Double(index) + 0.5 : Double(index) + 1.0
         return min(value, 5.0)
     }
@@ -80,30 +74,61 @@ final class RatingHaptic {
 
 // MARK: - Star strip
 //
-// Renders the 5-star strip (with a leading zero-zone) from a preview value, and,
-// when `onTapValue` is supplied, hosts a spatial tap that maps x → rating using
-// the same math as the drag. Used by both the popover (tap) and the hold-drag
-// reveal (display only).
+// Renders the 5-star strip from a preview value in fixed-width cells (so the
+// visual centres line up exactly with the drag/tap math). When interactive
+// (`onCommit` supplied) a single drag gesture handles BOTH a tap and a slide:
+// `onPreview` fires live as the finger tracks across (half-star snapping +
+// selection haptics), and `onCommit` fires the final value on release. Dragging
+// left off the first star yields nil (clear). Used by the popover (interactive)
+// and the player's hold-drag reveal (display only).
 struct RatingStripView: View {
     let value: Double?
     var starSize: CGFloat = RatingTuning.stripStarSize
     var spacing: CGFloat = RatingTuning.stripStarSpacing
-    var zeroZone: CGFloat = RatingTuning.zeroZoneWidth
-    var onTapValue: ((Double?) -> Void)? = nil
+    var onPreview: ((Double?) -> Void)? = nil
+    var onCommit: ((Double?) -> Void)? = nil
+
+    @State private var tracking = false
+    @State private var lastReported: Double?
+    private let haptic = RatingHaptic()
+
+    private var isInteractive: Bool { onCommit != nil }
 
     var body: some View {
-        HStack(spacing: spacing) {
+        let strip = HStack(spacing: spacing) {
             ForEach(0..<RatingTuning.starCount, id: \.self) { i in
                 Image(systemName: symbol(for: i))
-                    .font(.system(size: starSize))
+                    .font(.system(size: starSize * 0.9))
                     .foregroundStyle(RatingTuning.tint)
                     .symbolRenderingMode(.hierarchical)
+                    .frame(width: starSize, height: starSize)
             }
         }
-        .padding(.leading, zeroZone)
         .contentShape(Rectangle())
-        .modifier(TapMapper(zeroZone: zeroZone, starSize: starSize, spacing: spacing, onTapValue: onTapValue))
-        .animation(.snappy(duration: 0.12), value: value)
+
+        if isInteractive {
+            strip.gesture(dragGesture).animation(.snappy(duration: 0.12), value: value)
+        } else {
+            strip.animation(.snappy(duration: 0.12), value: value)
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { event in
+                if !tracking { haptic.prepare(); tracking = true; lastReported = value }
+                let v = RatingMath.rating(atX: event.location.x, starSize: starSize, spacing: spacing)
+                if v != lastReported {
+                    haptic.tick()
+                    lastReported = v
+                }
+                onPreview?(v)
+            }
+            .onEnded { event in
+                let v = RatingMath.rating(atX: event.location.x, starSize: starSize, spacing: spacing)
+                onCommit?(v)
+                tracking = false
+            }
     }
 
     private func symbol(for index: Int) -> String {
@@ -115,35 +140,13 @@ struct RatingStripView: View {
     }
 }
 
-/// Adds a location-aware tap to the strip only when a handler is provided.
-private struct TapMapper: ViewModifier {
-    let zeroZone: CGFloat
-    let starSize: CGFloat
-    let spacing: CGFloat
-    let onTapValue: ((Double?) -> Void)?
-
-    func body(content: Content) -> some View {
-        if let onTapValue {
-            content.gesture(
-                SpatialTapGesture(coordinateSpace: .local).onEnded { event in
-                    onTapValue(RatingMath.rating(atX: event.location.x,
-                                                 starSize: starSize,
-                                                 spacing: spacing,
-                                                 zeroZone: zeroZone))
-                }
-            )
-        } else {
-            content
-        }
-    }
-}
-
 // MARK: - Sticky popover content
 //
-// The tap variant used by the player's quick-tap and the row "…" menu's "Rate…".
-// Tapping a star sets the rating immediately (written through the supplied
-// closure) but does NOT dismiss — the user confirms by tapping outside. A subtle
-// "Clear" text link appears only when a rating exists.
+// The tap/slide variant used by the player's quick-tap and the row "…" menu's
+// "Rate…". Tap a star OR slide across to set the rating (live), written through
+// the supplied closure — but it does NOT dismiss; the user confirms by tapping
+// outside. Sliding left off the first star clears; a "Clear" link is also shown
+// when a rating exists.
 struct RatingPopoverContent: View {
     let initialRating: Double?
     let onSet: (Double?) -> Void
@@ -157,14 +160,12 @@ struct RatingPopoverContent: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            // No leading zero-zone here (symmetric padding); clearing is via the
-            // "Clear" link below rather than a tap-left dead-zone.
-            RatingStripView(value: current, zeroZone: 0) { newValue in
-                let picked = newValue ?? 0.5
-                current = picked
-                onSet(picked)
-            }
+        VStack(spacing: 12) {
+            RatingStripView(
+                value: current,
+                onPreview: { current = $0 },
+                onCommit: { current = $0; onSet($0) }
+            )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
             .accessibilityValue(current.map { "\(LikeControl.format($0)) stars" } ?? "No rating")
@@ -177,8 +178,11 @@ struct RatingPopoverContent: View {
                 onSet(nil)
             } label: {
                 Text("Clear")
-                    .font(.footnote)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .opacity((current ?? 0) > 0 ? 1 : 0)
