@@ -279,30 +279,31 @@ struct RatingPopoverContent: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    // Live drag: update the stars immediately. Never collapse an already-shown
-    // Clear while a rating remains — only collapse if the drag reaches no-rating.
+    // Live drag: update the stars only. Never change the popover height while the
+    // finger is down — both growing and shrinking wait for release (below).
     private func previewing(_ value: Double?) {
         current = value
-        if (value ?? 0) <= 0 { setClear(false) }
     }
 
-    // Release: commit the rating. If it's the FIRST time a rating appears, reveal
-    // Clear after a short delay; if Clear is already shown, leave the height
-    // untouched. Clearing to no-rating collapses immediately.
+    // Release: commit the rating, then grow/shrink to match after a short delay,
+    // so the height change always trails your finger lifting (in both directions).
     private func committed(_ value: Double?) {
         current = value
         onSet(value)
-        if (value ?? 0) > 0 {
-            guard !showClear else { return }
-            let work = DispatchWorkItem { withAnimation(.snappy(duration: 0.2)) { showClear = true } }
-            clearWork?.cancel()
-            clearWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + RatingTuning.clearRevealDelay, execute: work)
-        } else {
-            setClear(false)
-        }
+        scheduleClear(to: (value ?? 0) > 0)
     }
 
+    /// Animate the Clear link / height to `target` after `clearRevealDelay`.
+    private func scheduleClear(to target: Bool) {
+        clearWork?.cancel()
+        guard target != showClear else { return }
+        let work = DispatchWorkItem { showClear = target }
+        clearWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + RatingTuning.clearRevealDelay, execute: work)
+    }
+
+    /// Immediate (no delay) height change — for the explicit Clear button and the
+    /// VoiceOver adjust action.
     private func setClear(_ on: Bool) {
         clearWork?.cancel()
         showClear = on
