@@ -13,36 +13,6 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 if let active = env.active {
-                    Section("Server") {
-                        LabeledContent {
-                            Text(active.connection.name)
-                        } label: {
-                            Label("Name", systemImage: "tag")
-                        }
-                        LabeledContent {
-                            Text(active.connection.kind.displayName)
-                        } label: {
-                            Label("Type", systemImage: "server.rack")
-                        }
-                        LabeledContent {
-                            Text(active.connection.baseURL.absoluteString)
-                        } label: {
-                            Label("Address", systemImage: "network")
-                        }
-                    }
-
-                    Section("Capabilities") {
-                        capabilityRow("Offline download", "arrow.down.circle", active.capabilities.supportsOriginalFileDownload)
-                        capabilityRow("Transcoding", "waveform.path", active.capabilities.supportsTranscoding)
-                        capabilityRow("Favorites", "heart", active.capabilities.supportsFavorites)
-                        capabilityRow("Lyrics", "quote.bubble", active.capabilities.supportsLyrics)
-                        capabilityRow("Normalization gain", "waveform", active.capabilities.supportsNormalizationGain)
-                        capabilityRow("Scrobble / progress", "dot.radiowaves.left.and.right", active.capabilities.supportsProgressReporting)
-                        if let plexPass = active.capabilities.hasPlexPass {
-                            capabilityRow("Plex Pass", "star", plexPass)
-                        }
-                    }
-
                     Section("Library") {
                         Button {
                             env.startSync()
@@ -79,9 +49,9 @@ struct SettingsView: View {
 
                     Section {
                         NavigationLink {
-                            BenchmarksView()
+                            DiagnosticsView()
                         } label: {
-                            Label("Performance Benchmarks", systemImage: "speedometer")
+                            Label("Diagnostics", systemImage: "stethoscope")
                         }
                     }
 
@@ -124,21 +94,6 @@ struct SettingsView: View {
                 env.playback.normalizationEnabled = enabled
             }
         }
-    }
-
-    /// A capability row that scales with Dynamic Type (LabeledContent reflows the
-    /// value beneath the label at large text sizes) and announces its state to
-    /// VoiceOver as a value rather than relying on icon color alone.
-    private func capabilityRow(_ title: String, _ systemImage: String, _ enabled: Bool) -> some View {
-        LabeledContent {
-            Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
-                .foregroundStyle(enabled ? Color.green : Color.secondary)
-        } label: {
-            Label(title, systemImage: systemImage)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(enabled ? "Supported" : "Not supported")
     }
 
     private static let repoURL = URL(string: "https://github.com/thatcube/mozz")!
