@@ -24,6 +24,9 @@ private enum RatingTuning {
     /// How long after releasing on a rating the tap popover waits before it grows
     /// to reveal the "Clear" link.
     static let clearRevealDelay: Double = 0.5
+    /// Row height the "Clear" link animates between (0 ↔ this), which drives the
+    /// popover's height change. Includes visual gap above/below the text.
+    static let clearRowHeight: CGFloat = 44
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
     static let revealCornerRadius: CGFloat = 24
@@ -240,7 +243,7 @@ struct RatingPopoverContent: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             RatingStripView(
                 value: current,
                 onPreview: { previewing($0) },
@@ -253,24 +256,27 @@ struct RatingPopoverContent: View {
                 adjust(direction)
             }
 
-            // Present the Clear link only once `showClear` is set, so the popover's
-            // height is dynamic — and it grows a beat AFTER you lift your finger.
-            if showClear {
-                Button {
-                    setClear(false)
-                    current = nil
-                    onSet(nil)
-                } label: {
-                    Text("Clear")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .transition(.opacity)
+            // The Clear link's ROW HEIGHT animates from 0, so the popover grows/
+            // shrinks continuously (the container tracks the changing ideal size)
+            // instead of the button just popping in behind a fading opacity.
+            Button {
+                setClear(false)
+                current = nil
+                onSet(nil)
+            } label: {
+                Text("Clear")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 24)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: RatingTuning.clearRowHeight)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .frame(height: showClear ? RatingTuning.clearRowHeight : 0)
+            .opacity(showClear ? 1 : 0)
+            .clipped()
+            .allowsHitTesting(showClear)
         }
         .animation(.snappy(duration: 0.4), value: showClear)
         .padding(.horizontal, 28)
