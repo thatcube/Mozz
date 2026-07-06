@@ -98,6 +98,48 @@ public struct RecommendationStore: Sendable {
         try await database.read { db in try RecommendationSetRecord.fetchOne(db, key: id) }
     }
 
+    /// Every persisted recommendation set (Home lists and orders these).
+    public func allSets() async throws -> [RecommendationSetRecord] {
+        try await database.read { db in
+            try RecommendationSetRecord.fetchAll(db, sql: "SELECT * FROM recommendation_set")
+        }
+    }
+
+    /// Delete every set (and its items) of the given kinds. Used to clear a stale
+    /// batch of mixes before regenerating, so removed slots don't linger.
+    public func deleteSets(kinds: [String]) async throws {
+        guard !kinds.isEmpty else { return }
+        try await database.write { db in
+            let ph = databasePlaceholders(kinds.count)
+            let args = StatementArguments(kinds)
+            try db.execute(sql: """
+                DELETE FROM recommendation_item WHERE set_id IN
+                    (SELECT id FROM recommendation_set WHERE kind IN (\(ph)))
+                """, arguments: args)
+            try db.execute(sql: "DELETE FROM recommendation_set WHERE kind IN (\(ph))", arguments: args)
+        }
+    }
+
+    /// The artwork key of the highest-ranked in-library track (that has artwork)
+    /// in each set — the representative cover for a mix tile, resolved in one
+    /// query for every set at once.
+    public func representativeArtworkKeys() async throws -> [String: String] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT set_id, artworkKey FROM (
+                    SELECT ri.set_id AS set_id, track.artworkKey AS artworkKey,
+                           ROW_NUMBER() OVER (PARTITION BY ri.set_id ORDER BY ri.rank) AS rn
+                    FROM recommendation_item ri
+                    JOIN track ON \(Self.refExpr) = ri.track_ref
+                    WHERE track.artworkKey IS NOT NULL AND track.artworkKey <> ''
+                ) WHERE rn = 1
+                """)
+            var out: [String: String] = [:]
+            for row in rows { out[row["set_id"]] = row["artworkKey"] }
+            return out
+        }
+    }
+
     /// The most recently generated set of a given kind, if any.
     public func latestSet(kind: String) async throws -> RecommendationSetRecord? {
         try await database.read { db in
@@ -216,6 +258,48 @@ public struct RecommendationStore: Sendable {
                 ORDER BY track.addedAt DESC NULLS LAST, track.remoteId
                 LIMIT ?
                 """, arguments: [serverId, notPlayedSince, limit]).map(Self.candidate)
+        }
+    }
+
+    /// The listener's most-played tracks since `since`, ordered by play count then
+    /// recency — the pool for a "Replay" mix. Play count = started/completed
+    /// events (skips/seeks don't count as replays).
+    public func mostPlayedCandidates(serverId: ServerID, since: Double,
+                                     limit: Int = 100) async throws -> [TrackCandidate] {
+        try await database.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
+                       track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
+                       track.albumRemoteId AS albumRemoteId, track.genres AS genres, track.addedAt AS addedAt,
+                       COUNT(*) AS play_count, MAX(pe.created_at) AS last_played
+                FROM play_event pe
+                JOIN track ON \(Self.refExpr) = pe.track_ref
+                WHERE track.serverId = ? AND pe.kind IN ('started','completed') AND pe.created_at >= ?
+                GROUP BY track_ref
+                ORDER BY play_count DESC, last_played DESC
+                LIMIT ?
+                """, arguments: [serverId, since, limit]).map(Self.candidate)
+        }
+    }
+
+    /// A seed artist's display name and its genres (unioned across the artist's
+    /// tracks, most common first) — used to build an "{Artist} Mix" pool of that
+    /// artist plus same-genre neighbours.
+    public func seedArtist(remoteId: String, serverId: ServerID) async throws -> (name: String, genres: [String])? {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT artistName, genres FROM track
+                WHERE serverId = ? AND artistRemoteId = ?
+                LIMIT 100
+                """, arguments: [serverId, remoteId])
+            guard !rows.isEmpty else { return nil }
+            let name = rows.compactMap { ($0["artistName"] as String?).flatMap { $0.isEmpty ? nil : $0 } }.first ?? ""
+            var counts: [String: Int] = [:]
+            for row in rows {
+                for g in Self.decodeGenres(row["genres"]) { counts[g, default: 0] += 1 }
+            }
+            let genres = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map(\.key)
+            return (name, genres)
         }
     }
 

@@ -240,4 +240,104 @@ final class RecommendationServiceTests: XCTestCase {
         let second = try await service.mozzWeeklyItems().count
         XCTAssertEqual(second, first)
     }
+
+    // MARK: Home mixes
+
+    func testGenerateHomeMixesLineup() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let plays = PlayEventStore(db)
+        let store = RecommendationStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+
+        var tracks: [Track] = []
+        let artists = [("ar1", "Nirvana"), ("ar2", "Pixies"), ("ar3", "Hole")]
+        for (ai, (aid, aname)) in artists.enumerated() {
+            for t in 0..<4 {
+                tracks.append(Track(id: "\(aid)-\(t)", title: "T\(ai)\(t)",
+                                    artistName: aname, artistID: aid, genres: ["Rock"]))
+            }
+        }
+        tracks.append(Track(id: "jazz1", title: "J", artistName: "Davis", artistID: "ar9", genres: ["Jazz"]))
+        try await writer.upsertTracks(tracks, serverId: server.id)
+
+        // Complete 8 distinct Rock tracks → strong Rock/artist affinity + a Replay pool.
+        for i in 0..<8 {
+            let aid = artists[i % 3].0
+            try await plays.append(
+                PlayEvent(trackID: "\(aid)-\(i / 3)", kind: .completed,
+                          createdAt: Date(timeIntervalSince1970: daysAgo(1))),
+                serverId: server.id)
+        }
+
+        let service = RecommendationService(store: store, now: { now })
+        try await service.generateHomeMixes(serverId: server.id, seed: 7)
+
+        let mixes = try await service.homeMixes()
+        let ids = mixes.map(\.id)
+        XCTAssertTrue(ids.contains("supermix"))
+        XCTAssertTrue(ids.contains("daily-mix-1"))
+        XCTAssertTrue(ids.contains("artist-mix-1"))
+        XCTAssertTrue(ids.contains("replay-mix"))
+        XCTAssertEqual(mixes.first?.id, "supermix", "supermix sorts to the front")
+
+        let superTracks = try await service.tracks(forSetId: "supermix")
+        XCTAssertGreaterThanOrEqual(superTracks.count, 8)
+        XCTAssertFalse(superTracks.contains { $0.remoteId == "jazz1" }, "no Jazz affinity → excluded")
+
+        let artistMix = mixes.first { $0.id == "artist-mix-1" }
+        XCTAssertTrue(artistMix?.title.hasSuffix("Mix") ?? false, "artist mix titled '<name> Mix'")
+    }
+
+    func testReplayMixOrdersByPlayCount() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let plays = PlayEventStore(db)
+        let store = RecommendationStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+
+        var tracks: [Track] = []
+        for i in 0..<8 {
+            tracks.append(Track(id: "t\(i)", title: "T\(i)", artistName: "A\(i)",
+                                artistID: "ar\(i)", genres: ["Rock"]))
+        }
+        try await writer.upsertTracks(tracks, serverId: server.id)
+        for i in 0..<8 {
+            try await plays.append(
+                PlayEvent(trackID: "t\(i)", kind: .completed,
+                          createdAt: Date(timeIntervalSince1970: daysAgo(2))), serverId: server.id)
+        }
+        // t0 played four more times → clearly the most-played.
+        for _ in 0..<4 {
+            try await plays.append(
+                PlayEvent(trackID: "t0", kind: .completed,
+                          createdAt: Date(timeIntervalSince1970: daysAgo(1))), serverId: server.id)
+        }
+
+        let service = RecommendationService(store: store, now: { now })
+        try await service.generateHomeMixes(serverId: server.id, seed: 3)
+
+        let replay = try await service.tracks(forSetId: "replay-mix")
+        XCTAssertGreaterThanOrEqual(replay.count, 8)
+        XCTAssertEqual(replay.first?.remoteId, "t0", "most-played track leads the Replay mix")
+    }
+
+    func testGenerateHomeMixesColdStartProducesNoBatch() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = RecommendationStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([
+            Track(id: "a", title: "A", artistName: "X", genres: ["Rock"]),
+            Track(id: "b", title: "B", artistName: "Y", genres: ["Jazz"]),
+        ], serverId: server.id)
+
+        let service = RecommendationService(store: store, now: { now })
+        try await service.generateHomeMixes(serverId: server.id, seed: 1)
+        let mixes = try await service.homeMixes()
+        XCTAssertTrue(mixes.isEmpty, "thin history → no personalized batch mixes")
+    }
 }

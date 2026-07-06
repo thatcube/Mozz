@@ -379,8 +379,9 @@ public final class AppEnvironment: ObservableObject {
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 200)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
-        // New catalog + listening → refresh "Mozz Weekly" off-main. Non-fatal.
+        // New catalog + listening → refresh the mixes off-main. Non-fatal.
         await regenerateMozzWeekly()
+        await regenerateHomeMixes()
         // Flush any likes/ratings that were made offline.
         await flushFavoriteOutbox()
         return summary
@@ -405,6 +406,31 @@ public final class AppEnvironment: ObservableObject {
         if existing == nil || (ageDays ?? .greatestFiniteMagnitude) >= 7 {
             _ = try? await recommendations.generateMozzWeekly(serverId: serverId)
         }
+    }
+
+    private static let homeMixesGeneratedAtKey = "mozz.homeMixesGeneratedAt"
+
+    /// Force-regenerate the daily Home mixes (Supermix, Daily/Artist/Replay).
+    public func regenerateHomeMixes() async {
+        guard let serverId = active?.connection.id else { return }
+        try? await recommendations.generateHomeMixes(serverId: serverId)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.homeMixesGeneratedAtKey)
+    }
+
+    /// Regenerate the daily Home mixes at most once a day. Gated by a persisted
+    /// timestamp (not a set's age) so cold-start users — who produce no mix sets
+    /// yet — don't re-run the generator on every Home appearance.
+    public func ensureHomeMixes() async {
+        guard active?.connection.id != nil else { return }
+        let last = UserDefaults.standard.double(forKey: Self.homeMixesGeneratedAtKey)
+        if (Date().timeIntervalSince1970 - last) >= 24 * 3600 {
+            await regenerateHomeMixes()
+        }
+    }
+
+    /// The Home mix tiles (daily batch + Mozz Weekly), ordered for display.
+    public func homeMixes() async -> [RecommendationService.HomeMix] {
+        (try? await recommendations.homeMixes()) ?? []
     }
 
     // MARK: Likes & ratings
