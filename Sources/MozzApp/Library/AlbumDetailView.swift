@@ -56,6 +56,7 @@ struct AlbumDetailView: View {
             }
         )
         .task { await load() }
+        .handoff(DeepLinkTarget.albumActivity, id: album.remoteId, title: album.title)
         .onChange(of: downloads.progress.count) { _, _ in
             Task { await refreshDownloadStates() }
         }

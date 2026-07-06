@@ -73,6 +73,7 @@ struct PlaylistDetailView: View {
             }
         )
         .task { await load() }
+        .handoff(DeepLinkTarget.playlistActivity, id: playlist.remoteId, title: playlist.title)
     }
 
     private var metaText: String? {

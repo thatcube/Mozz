@@ -42,6 +42,14 @@ struct RootView: View {
         }
         .animation(.default, value: env.active == nil)
         .animation(.default, value: env.isRestoring)
+        .onOpenURL { url in
+            env.handle(url: url)
+        }
+        .onContinueUserActivity(DeepLinkTarget.albumActivity) { env.handleHandoff(activityType: $0.activityType, userInfo: $0.userInfo) }
+        .onContinueUserActivity(DeepLinkTarget.artistActivity) { env.handleHandoff(activityType: $0.activityType, userInfo: $0.userInfo) }
+        .onContinueUserActivity(DeepLinkTarget.playlistActivity) { env.handleHandoff(activityType: $0.activityType, userInfo: $0.userInfo) }
+        .onContinueUserActivity(DeepLinkTarget.genreActivity) { env.handleHandoff(activityType: $0.activityType, userInfo: $0.userInfo) }
+        .onContinueUserActivity(DeepLinkTarget.libraryActivity) { env.handleHandoff(activityType: $0.activityType, userInfo: $0.userInfo) }
     }
 }
 
