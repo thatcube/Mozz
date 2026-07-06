@@ -279,22 +279,23 @@ struct RatingPopoverContent: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    // Live drag: update the stars immediately and keep the popover collapsed
-    // (cancel any pending reveal) while the finger is down.
+    // Live drag: update the stars immediately. Never collapse an already-shown
+    // Clear while a rating remains — only collapse if the drag reaches no-rating.
     private func previewing(_ value: Double?) {
         current = value
-        clearWork?.cancel()
-        if showClear { showClear = false }
+        if (value ?? 0) <= 0 { setClear(false) }
     }
 
-    // Release: commit the rating, then reveal Clear after a short delay (only if
-    // a rating remains); collapse immediately if it was cleared.
+    // Release: commit the rating. If it's the FIRST time a rating appears, reveal
+    // Clear after a short delay; if Clear is already shown, leave the height
+    // untouched. Clearing to no-rating collapses immediately.
     private func committed(_ value: Double?) {
         current = value
         onSet(value)
-        clearWork?.cancel()
         if (value ?? 0) > 0 {
+            guard !showClear else { return }
             let work = DispatchWorkItem { withAnimation(.snappy(duration: 0.2)) { showClear = true } }
+            clearWork?.cancel()
             clearWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + RatingTuning.clearRevealDelay, execute: work)
         } else {
