@@ -86,7 +86,7 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Mozz is a free, open-source, offline-first player for your own Plex & Jellyfin music. If you enjoy it, a GitHub star, an App Store review, or a small tip goes a long way — thank you! · GPL-3.0")
+                    Text("A free, open-source app under GPL-3.0. If you enjoy Mozz, a GitHub star, a review, or a small tip means a lot — thank you!")
                 }
             }
             .navigationTitle("Settings")
