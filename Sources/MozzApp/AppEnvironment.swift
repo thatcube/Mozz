@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import MozzCore
 import MozzDatabase
 import MozzDownloads
@@ -8,6 +9,9 @@ import MozzRecommend
 import MozzSync
 import MozzPlex
 import MozzJellyfin
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 /// A resolver whose delegate can be swapped at runtime. The ``PlaybackEngine``
 /// is created once at launch, but the active server (and therefore the offline/
@@ -109,6 +113,10 @@ public final class AppEnvironment: ObservableObject {
     private var isFlushingOutbox = false
     private var flushRequestedAgain = false
 
+    /// Combine subscriptions that keep the Home/Lock Screen widget snapshots in
+    /// sync with playback.
+    private var widgetCancellables = Set<AnyCancellable>()
+
     public init(database: MusicDatabase, credentials: any CredentialStore, fileStore: DownloadFileStore) {
         self.database = database
         self.credentials = credentials
@@ -128,6 +136,7 @@ public final class AppEnvironment: ObservableObject {
         wirePlayEventLogging()
         wireBackgroundDownloads()
         wireNowPlayingArtwork()
+        wireNowPlayingWidget()
     }
 
     /// The default on-disk environment (App Support DB + downloads dir + Keychain).
@@ -798,6 +807,88 @@ public final class AppEnvironment: ObservableObject {
               let url = backend.artworkURL(for: artwork, size: 600) else { return }
         guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
         playback.provideArtwork(data, for: track.id)
+        // Also stash it for the widgets and refresh their snapshots with the art.
+        if track.id == playback.currentTrack?.id {
+            WidgetSnapshotStore.writeArtwork(data, name: Self.widgetArtworkName(track.id))
+            updateNowPlayingWidget()
+            patchRecentArtwork(trackID: track.id)
+        }
+    }
+
+    // MARK: Widgets (Home / Lock Screen snapshots)
+
+    private static func widgetArtworkName(_ trackID: String) -> String {
+        // Keep it filesystem-safe regardless of the backend's id format.
+        let safe = trackID.replacingOccurrences(of: "/", with: "_")
+        return "np-\(safe).jpg"
+    }
+
+    /// Keep the now-playing snapshot fresh on track change and play/pause. The
+    /// snapshot publisher ticks every 0.5s during playback, so we collapse it to
+    /// just the status to avoid rewriting the file (and reloading the widget) on
+    /// every progress tick.
+    private func wireNowPlayingWidget() {
+        playback.$currentTrack
+            .removeDuplicates { $0?.id == $1?.id }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] track in
+                self?.updateNowPlayingWidget()
+                if let track { self?.recordRecentlyPlayed(track) }
+            }
+            .store(in: &widgetCancellables)
+
+        playback.$snapshot
+            .map(\.status)
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateNowPlayingWidget() }
+            .store(in: &widgetCancellables)
+    }
+
+    private func updateNowPlayingWidget() {
+        guard let track = playback.currentTrack else {
+            WidgetSnapshotStore.writeNowPlaying(nil)
+            reloadWidget(MozzWidget.nowPlayingKind)
+            return
+        }
+        let name = Self.widgetArtworkName(track.id)
+        let artworkFile = WidgetSnapshotStore.artworkURL(name) != nil ? name : nil
+        let snapshot = NowPlayingWidgetSnapshot(
+            title: track.title,
+            artist: track.artistName,
+            isPlaying: playback.snapshot.status == .playing,
+            artworkFile: artworkFile,
+            deepLink: "mozz://tab/library")
+        WidgetSnapshotStore.writeNowPlaying(snapshot)
+        reloadWidget(MozzWidget.nowPlayingKind)
+    }
+
+    private func recordRecentlyPlayed(_ track: Track) {
+        var items = WidgetSnapshotStore.readRecentlyPlayed()?.items ?? []
+        items.removeAll { $0.id == track.id }
+        let name = Self.widgetArtworkName(track.id)
+        let artworkFile = WidgetSnapshotStore.artworkURL(name) != nil ? name : nil
+        items.insert(RecentlyPlayedItem(
+            id: track.id, title: track.title, subtitle: track.artistName,
+            artworkFile: artworkFile, deepLink: "mozz://tab/library"), at: 0)
+        WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: Array(items.prefix(12))))
+        reloadWidget(MozzWidget.recentlyPlayedKind)
+    }
+
+    /// Once artwork lands, fill it into the most-recent entry that referenced this
+    /// track without art yet.
+    private func patchRecentArtwork(trackID: String) {
+        guard var items = WidgetSnapshotStore.readRecentlyPlayed()?.items,
+              let idx = items.firstIndex(where: { $0.id == trackID && $0.artworkFile == nil }) else { return }
+        items[idx].artworkFile = Self.widgetArtworkName(trackID)
+        WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: items))
+        reloadWidget(MozzWidget.recentlyPlayedKind)
+    }
+
+    private func reloadWidget(_ kind: String) {
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        #endif
     }
 
     /// Persist the engine's listening-history events into the on-device
