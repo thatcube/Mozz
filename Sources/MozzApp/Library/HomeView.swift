@@ -56,6 +56,7 @@ struct HomeView: View {
                 .padding(.bottom, 24)
             }
             .hideNavigationBar()
+            .minimizesBottomBarOnScroll()
             .task { await load() }
             .refreshable { await load() }
         }

@@ -50,6 +50,7 @@ struct LibraryHomeView: View {
                 .padding(.bottom, 24)
             }
             .hideNavigationBar()
+            .minimizesBottomBarOnScroll()
             .task { await loadRecent() }
         }
     }

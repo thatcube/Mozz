@@ -44,7 +44,8 @@ struct MainTabsView: View {
             // The floating tab bar sits a fixed distance from the true bottom
             // edge (not pinned to the safe area), so it ignores the bottom safe
             // area and pads up by `edgeMargin`.
-            MainTabBar(selected: $selectedTab, leftTab: leftTab, minimize: $minimize)
+            MainTabBar(selected: $selectedTab, leftTab: leftTab,
+                       hasIsland: hasTrack, minimize: $minimize)
                 .padding(.horizontal, BottomBar.hMargin)
                 .padding(.bottom, BottomBar.edgeMargin)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -54,23 +55,9 @@ struct MainTabsView: View {
                 .ignoresSafeArea(.container, edges: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
             if hasTrack {
-                NowPlayingMorphContainer(playback: playback, ui: ui)
+                NowPlayingMorphContainer(playback: playback, ui: ui, minimize: minimize)
                     .zIndex(100)
             }
-            // TEMP debug: toggle the minimize morph so the blob split can be tuned
-            // before it's wired to scroll. Removed once scroll drives it.
-            Button {
-                minimize = minimize < 0.5 ? 1 : 0
-            } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.headline)
-                    .padding(10)
-                    .background(.thinMaterial, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .padding(.trailing, 16)
-            .zIndex(200)
         }
         .onChange(of: selectedTab) { _, tab in
             loadedTabs.insert(tab)
@@ -98,6 +85,11 @@ struct MainTabsView: View {
                 if loadedTabs.contains(tab) {
                     page(for: tab)
                         .reserveBottomBar(hasTrack: hasTrack)
+                        // Inject the minimize binding ONLY into the selected tab's
+                        // subtree (incl. its pushed subpages), so only the visible
+                        // tab's scroll views drive the bar — background tabs get a
+                        // nil binding and stay inert.
+                        .environment(\.bottomBarMinimize, tab == selectedTab ? $minimize : nil)
                         .opacity(tab == selectedTab ? 1 : 0)
                         .allowsHitTesting(tab == selectedTab)
                         .zIndex(tab == selectedTab ? 1 : 0)
@@ -149,6 +141,26 @@ enum BottomBar {
     static let tabHeight: CGFloat = 63       // 188px @3x — tab bar height
     static let islandHeight: CGFloat = 56
     static let islandGap: CGFloat = 8        // gap between island and tab bar
+    // Minimized "blob split" state, matching Apple Music (Figma @3x ÷3 of the
+    // measured 144 / 84 / 40 px values): the side tabs become 48pt CIRCLES sitting
+    // 28pt from the screen edges, with a 13pt gap to the centre now-playing island
+    // (all three elements 48pt tall).
+    static let minCircleD: CGFloat = 48      // side-circle diameter (Library / Search)
+    static let minInset: CGFloat = 28        // circle from the screen's L/R edge
+    static let minGap: CGFloat = 13          // gap between a side circle and the island
+    static let minElementH: CGFloat = 48     // height of all three minimized elements
+    /// Distance from a side circle's CENTRE to the tab bar's own left/right edge
+    /// (the bar is already inset by `hMargin`), so the circle lands `minInset` from
+    /// the screen edge.
+    static var circleCenterInset: CGFloat { minInset - hMargin + minCircleD / 2 }
+    /// Vertical centre (from the top) of the bar row, given the screen height.
+    static func barCenterY(inHeight h: CGFloat) -> CGFloat { h - edgeMargin - tabHeight / 2 }
+    /// The centre island's frame (screen-space centre X + width) in the minimized
+    /// state — it sits between the two side circles.
+    static func centerGap(inWidth w: CGFloat) -> (centerX: CGFloat, width: CGFloat) {
+        let islandW = w - 2 * (minInset + minCircleD + minGap)
+        return (w / 2, max(islandW, 90))
+    }
     /// Distance from the screen's bottom edge up to the island's top edge.
     static let islandTopFromEdge: CGFloat = edgeMargin + tabHeight + islandGap + islandHeight
     /// Height reserved above the safe-area bottom so scrolled content clears the
@@ -187,6 +199,9 @@ struct MainTabBar: View {
     /// Search is selected) the last active non-Search tab. Search always owns the
     /// right blob.
     var leftTab: AppTab
+    /// Whether the now-playing island is present. Without it the bar never splits
+    /// (there's no centre pill to make room for).
+    var hasIsland: Bool
     /// 0 = expanded (full bar), 1 = minimized (two blobs). Interpolated.
     @Binding var minimize: CGFloat
 
@@ -207,22 +222,28 @@ struct MainTabBar: View {
     private static let leadSpring = Animation.spring(response: 0.24, dampingFraction: 0.72)
     private static let trailSpring = Animation.spring(response: 0.46, dampingFraction: 0.70)
 
-    // Minimized resting blob widths (points). In the EXPANDED state both shapes
-    // span the full width and overlap exactly, so their union renders as one
-    // clean capsule (no middle "waist"); as `minimize`→1 the left shape shrinks
-    // toward the left and the search shape toward the right, and they pull apart
-    // with the container's gooey split.
-    private static let searchMinW: CGFloat = 74
-    private static let leftMinW: CGFloat = 92
+    // Minimized: both side tabs become `minCircleD`-wide CIRCLES (width == the
+    // minimized height, so a Capsule renders as a circle). Shared with `Morph`
+    // (the island fills the centre gap between them) via `BottomBar`.
+    private static let searchMinW: CGFloat = BottomBar.minCircleD
+    private static let leftMinW: CGFloat = BottomBar.minCircleD
 
     var body: some View {
         GeometryReader { geo in
             let W = geo.size.width
             let h = BottomBar.tabHeight
-            let m = min(max(minimize, 0), 1)
-            let leftW = lerpBar(W, Self.leftMinW, m)
-            let searchW = lerpBar(W, Self.searchMinW, m)
-            let searchX = W - searchW
+            // Without a now-playing island there's nothing to sit in the centre, so
+            // the split makes no sense — keep the bar as one full pill (m = 0).
+            let m = hasIsland ? min(max(minimize, 0), 1) : 0
+            // Minimized side-circle geometry (screen-consistent via BottomBar): the
+            // two glass shapes morph from one full-width bar (m=0) into 48pt circles
+            // sitting `circleCenterInset` from the bar's edges (m=1); their height
+            // shrinks 63→48 too, so a Capsule renders as a circle.
+            let ci = BottomBar.circleCenterInset
+            let blobSideW = lerpBar(W, Self.leftMinW, m)          // W → 48
+            let blobSideH = lerpBar(h, BottomBar.minElementH, m)  // 63 → 48
+            let leftCX = lerpBar(W / 2, ci, m)
+            let rightCX = lerpBar(W / 2, W - ci, m)
             // Fixed per-tab width so the selection lozenge is the SAME size at
             // every tab (consistent as it slides between them).
             let itemW = max((W - 2 * Self.pad) / CGFloat(AppTab.allCases.count) - 8, 56)
@@ -230,7 +251,7 @@ struct MainTabBar: View {
             // it fades out over the first third of the minimize, before the split.
             let selShown = m < 0.35
             let selFade = Double(max(0, 1 - m / 0.35))
-            let selX = iconCenterX(selected, W: W, leftW: leftW, searchW: searchW, m: m)
+            let selX = iconCenterX(selected, W: W, m: m)
             let pillW = itemW
             let pillH = h - 10
             // The tab shown as "active" (accent) — the finger's hovered tab while
@@ -248,8 +269,10 @@ struct MainTabBar: View {
             let blobH = pillH - min(stretch * 0.12, 7)
 
             ZStack(alignment: .topLeading) {
-                // The bar's Liquid Glass split blob shapes.
-                glassLayer(leftW: leftW, searchW: searchW, searchX: searchX, h: h)
+                // The bar's Liquid Glass shapes: one full pill (m=0) that splits
+                // into two 48pt side circles (m=1).
+                glassLayer(leftCX: leftCX, rightCX: rightCX,
+                           blobW: blobSideW, blobH: blobSideH, h: h)
 
                 // A tasteful selection lozenge: a flat solid capsule that slides to
                 // the active tab with a LIQUID stretch (dual-spring endpoints) and
@@ -272,9 +295,7 @@ struct MainTabBar: View {
                 // blob (barely moving), and the other tabs fade out in place.
                 ForEach(AppTab.allCases, id: \.self) { tab in
                     tabItem(tab, m: m, itemW: itemW, accent: tab == activeTab)
-                        .position(x: iconCenterX(tab, W: W, leftW: leftW,
-                                                 searchW: searchW, m: m),
-                                  y: h / 2)
+                        .position(x: iconCenterX(tab, W: W, m: m), y: h / 2)
                         .opacity(Double(iconOpacity(tab, m: m)))
                         .allowsHitTesting(iconOpacity(tab, m: m) > 0.5)
                 }
@@ -396,25 +417,28 @@ struct MainTabBar: View {
         moveBlob(to: expandedCenterX(target, W: W))
     }
 
-    // MARK: Icon geometry
+    // MARK: Glass shapes
 
     private static let pad: CGFloat = 6
 
-    /// The bar's Liquid Glass split blob shapes (left + Search), in one container
-    /// so the blob split renders the native gooey surface-tension bridge when the
-    /// bar minimizes.
+    /// The bar's Liquid Glass: two shapes in one `GlassEffectContainer` so the
+    /// split renders the native gooey surface-tension bridge. Expanded (m=0) both
+    /// are full-width and overlap into one clean bar; minimized (m=1) they're two
+    /// 48pt circles at the edges with the now-playing island dropped between them.
     @ViewBuilder
-    private func glassLayer(leftW: CGFloat, searchW: CGFloat, searchX: CGFloat, h: CGFloat) -> some View {
+    private func glassLayer(leftCX: CGFloat, rightCX: CGFloat,
+                            blobW: CGFloat, blobH: CGFloat, h: CGFloat) -> some View {
         if #available(iOS 26.0, macOS 26.0, *) {
             GlassEffectContainer(spacing: 22) {
                 ZStack(alignment: .topLeading) {
-                    Color.clear.frame(width: max(leftW, 1), height: h)
+                    Color.clear.frame(width: max(blobW, 1), height: blobH)
                         .glassEffect(.regular, in: Capsule())
                         .glassEffectID("bar.left", in: glassNS)
-                    Color.clear.frame(width: max(searchW, 1), height: h)
+                        .position(x: leftCX, y: h / 2)
+                    Color.clear.frame(width: max(blobW, 1), height: blobH)
                         .glassEffect(.regular, in: Capsule())
                         .glassEffectID("bar.search", in: glassNS)
-                        .offset(x: searchX)
+                        .position(x: rightCX, y: h / 2)
                 }
             }
         } else {
@@ -432,14 +456,15 @@ struct MainTabBar: View {
         return Self.pad + usable / CGFloat(AppTab.allCases.count) * (i + 0.5)
     }
 
-    /// Animated centre X: the left-blob tab → left blob centre, Search → right
-    /// blob centre, others stay put (and fade).
-    private func iconCenterX(_ tab: AppTab, W: CGFloat, leftW: CGFloat, searchW: CGFloat, m: CGFloat) -> CGFloat {
+    /// Animated centre X: the left-blob tab → left circle centre, Search → right
+    /// circle centre, others stay put (and fade).
+    private func iconCenterX(_ tab: AppTab, W: CGFloat, m: CGFloat) -> CGFloat {
         let start = expandedCenterX(tab, W: W)
+        let ci = BottomBar.circleCenterInset
         if tab == .search {
-            return lerpBar(start, W - Self.searchMinW / 2, m)
+            return lerpBar(start, W - ci, m)
         } else if tab == leftTab {
-            return lerpBar(start, Self.leftMinW / 2, m)
+            return lerpBar(start, ci, m)
         }
         return start
     }
@@ -461,5 +486,74 @@ private struct TabPressStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.9 : 1)
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Scroll-driven bottom-bar minimize
+
+private struct BottomBarMinimizeKey: EnvironmentKey {
+    static let defaultValue: Binding<CGFloat>? = nil
+}
+
+extension EnvironmentValues {
+    /// The floating tab bar's minimize progress (0 = full bar, 1 = blob split),
+    /// injected by `MainTabsView` so a page's scroll view can drive it.
+    var bottomBarMinimize: Binding<CGFloat>? {
+        get { self[BottomBarMinimizeKey.self] }
+        set { self[BottomBarMinimizeKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Drives the floating tab bar's minimize (blob split) from THIS scroll view:
+    /// scrolling down past a threshold splits the bar into two glass blobs; coming
+    /// back near the top re-docks it. Apply directly to a `ScrollView`/`List`
+    /// (`onScrollGeometryChange` only observes the scroll view it's attached to).
+    /// It's a no-op unless the `bottomBarMinimize` binding is in the environment —
+    /// which `MainTabsView` injects ONLY into the selected tab, so background tabs
+    /// can't drive it. No-op before iOS 18.
+    func minimizesBottomBarOnScroll() -> some View {
+        modifier(BottomBarScrollMinimize())
+    }
+}
+
+private struct BottomBarScrollMinimize: ViewModifier {
+    @Environment(\.bottomBarMinimize) private var minimize
+
+    // `y` (contentOffset + top inset) is ~0 at rest and grows as you scroll DOWN,
+    // so it IS the distance from the top. Scroll down past `enterZone` to minimize;
+    // it re-docks only within `topZone` of the top (Apple doesn't re-dock on a
+    // mid-list up-flick).
+    private static let enterZone: CGFloat = 90
+    private static let topZone: CGFloat = 44
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.y + geo.contentInsets.top
+                } action: { _, y in
+                    handle(y)
+                }
+        } else {
+            content
+        }
+    }
+
+    private func handle(_ y: CGFloat) {
+        guard let minimize else { return }
+        if y <= Self.topZone {
+            setMinimize(0)                          // near the top → docked
+        } else if y >= Self.enterZone {
+            setMinimize(1)                          // scrolled well down → minimized
+        }
+        // Between the zones: hold the current state (hysteresis).
+    }
+
+    private func setMinimize(_ v: CGFloat) {
+        guard minimize?.wrappedValue != v else { return }
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            minimize?.wrappedValue = v
+        }
     }
 }

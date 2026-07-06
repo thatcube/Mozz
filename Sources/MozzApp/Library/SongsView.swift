@@ -26,6 +26,7 @@ struct SongsView: View {
             }
         }
         .listStyle(.plain)
+        .minimizesBottomBarOnScroll()
         .navigationTitle("Songs")
         .overlay {
             if list.items.isEmpty && !list.isLoading {

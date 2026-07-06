@@ -34,6 +34,7 @@ struct LikedSongsView: View {
             }
         }
         .listStyle(.plain)
+        .minimizesBottomBarOnScroll()
         .navigationTitle("Liked Songs")
         .overlay {
             if tracks.isEmpty && loaded {

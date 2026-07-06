@@ -33,6 +33,7 @@ struct AlbumsView: View {
                 ProgressView().padding()
             }
         }
+        .minimizesBottomBarOnScroll()
         .navigationTitle("Albums")
         .overlay {
             if list.items.isEmpty && !list.isLoading {

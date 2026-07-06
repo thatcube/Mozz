@@ -30,6 +30,7 @@ struct PlaylistsView: View {
             }
         }
         .listStyle(.plain)
+        .minimizesBottomBarOnScroll()
         .navigationTitle("Playlists")
         .overlay {
             if playlists.isEmpty && loaded {

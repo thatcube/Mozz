@@ -30,6 +30,7 @@ struct ArtistsView: View {
             }
         }
         .listStyle(.plain)
+        .minimizesBottomBarOnScroll()
         .navigationTitle(navTitle)
         .overlay {
             if list.items.isEmpty && !list.isLoading {

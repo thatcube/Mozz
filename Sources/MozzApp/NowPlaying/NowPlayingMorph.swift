@@ -28,6 +28,9 @@ import UIKit
 struct NowPlayingMorphContainer: View {
     @ObservedObject var playback: PlaybackEngine
     @ObservedObject var ui: PlayerUIModel
+    /// Tab-bar minimize progress (0 = docked island above the bar, 1 = island
+    /// dropped into the bar's centre pill between the split blobs). Scroll-driven.
+    var minimize: CGFloat = 0
 
     /// 0 = docked island, 1 = full drawer. Animated by the open/collapse springs.
     @State private var p: CGFloat = 0
@@ -63,7 +66,7 @@ struct NowPlayingMorphContainer: View {
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
                               pRaw: p, dragY: dragY, receiving: receiving,
-                              isExpanded: ui.isFullPresented)
+                              isExpanded: ui.isFullPresented, minimize: minimize)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     // Finger-following specular glow: a soft highlight on the glass
@@ -73,9 +76,9 @@ struct NowPlayingMorphContainer: View {
                     // our own instead of `.glassEffect(.interactive())` because that
                     // API adds its own press-scale that fought our unified scale.)
                     if m.p < 0.5 {
-                        IslandGlow(press: press, width: m.islandW,
-                                   height: Morph.islandHeight, radius: m.radius)
-                            .frame(width: m.islandW, height: Morph.islandHeight)
+                        IslandGlow(press: press, width: m.islandDropW,
+                                   height: m.islandDropH, radius: m.radius)
+                            .frame(width: m.islandDropW, height: m.islandDropH)
                             .position(x: m.surfaceCenterX, y: m.miniCenterY)
                             .allowsHitTesting(false)
                     }
@@ -85,9 +88,16 @@ struct NowPlayingMorphContainer: View {
                     // source of jank). The parent just places it: it rides the
                     // surface's top edge DOWN into the island on collapse
                     // (miniCenterY), is hidden while expanding (miniOpacity), and
-                    // rides the base top so the receive-grow can rise past it.
-                    IslandContent(playback: playback) { ui.isFullPresented = true }
-                        .frame(width: m.islandW, height: Morph.islandHeight)
+                    // shrinks into the centre pill (islandDropW) when minimized.
+                    IslandContent(playback: playback, onExpand: { ui.isFullPresented = true },
+                                  collapse: m.dropT, pillWidth: m.islandDropW,
+                                  maxPillWidth: m.islandW)
+                        .frame(width: m.islandDropW, height: m.islandDropH)
+                        // Clip the mini controls to the pill shape so nothing
+                        // renders past its edges (top included) during the collapse
+                        // morph — the text/buttons dissolve at the pill boundary
+                        // instead of poking out above it.
+                        .clipShape(Capsule())
                         .position(x: m.surfaceCenterX, y: m.miniCenterY)
                         .opacity(m.miniOpacity)
                         .allowsHitTesting(m.p < 0.5)
@@ -103,7 +113,7 @@ struct NowPlayingMorphContainer: View {
                     // the whole island as one unit and lights the glow. Gated to the
                     // docked state.
                     Color.clear
-                        .frame(width: m.islandW, height: Morph.islandHeight)
+                        .frame(width: m.islandDropW, height: m.islandDropH)
                         .onTouchChanged { active, loc in
                             guard m.p < 0.5 else { return }
                             press.location = loc      // instant, tracks the finger
@@ -377,6 +387,28 @@ private let islandExitOvershoot: CGFloat = 1.9
 /// mid-zone. Symmetric with the exit overshoot.
 private let islandEnterOvershoot: CGFloat = 1.9
 
+// MARK: - Marquee (classic music-player horizontal scroll for overflowing text)
+
+/// How fast the marquee glides (points per second). Slow enough to read.
+private let marqueeSpeed: CGFloat = 26
+/// Overflow smaller than this doesn't bother scrolling (a couple clipped pixels
+/// aren't worth the motion).
+private let marqueeMinOverflow: CGFloat = 8
+/// Dwell at the start before scrolling out, and at the end before returning, so
+/// the reader can catch the beginning/end of the line.
+private let marqueeStartDwell: Duration = .milliseconds(2600)
+private let marqueeEndDwell: Duration = .milliseconds(1100)
+/// A tiny settle pause between the return finishing and the next cycle starting.
+private let marqueeLoopGap: Duration = .milliseconds(250)
+
+/// Publishes a measured intrinsic (untruncated) text width up the view tree.
+private struct MarqueeWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Live press state for the docked island. `@Observable` so SwiftUI's
 /// per-property observation re-renders only the views that read a given field:
 /// the whole-island scale reads `pressed` (toggles ~twice per touch), while the
@@ -450,14 +482,47 @@ private struct IslandGlow: View {
 private struct IslandContent: View {
     @ObservedObject var playback: PlaybackEngine
     var onExpand: () -> Void
+    /// How far the island has dropped into the tab bar's centre pill (0…1). At 1
+    /// the skip/next button is gone (Apple's minimized island keeps only
+    /// play/pause), giving the narrower pill more room for the title/artist.
+    var collapse: CGFloat = 0
+    /// The pill's current content width (from the parent's morph). Drives the text
+    /// zone width DETERMINISTICALLY — the old measure→pin→remeasure loop kept the
+    /// labels full-island-wide when the pill collapsed, so text spilled left and
+    /// the buttons overflowed onto the Search circle.
+    var pillWidth: CGFloat = 0
+    /// The DOCKED (largest) pill width. The text truncates once at this width so it
+    /// doesn't re-truncate (which "races" the ellipsis) as the pill narrows during
+    /// the collapse — the narrowing pill just clips the tail instead.
+    var maxPillWidth: CGFloat = 0
 
     @State private var dragX: CGFloat = 0        // live thumb-follow (0 at rest)
     @State private var navDir = 1                // +1 next, -1 previous
     @State private var animateSwipe = false      // true only for a swipe commit
     @State private var commitStart: CGFloat = 0  // finger offset at commit
-    @State private var zoneW: CGFloat = 220      // measured text-zone width
     @State private var commitTick = 0            // bumped to fire a haptic pop
     @State private var armedDir = 0              // side currently past the threshold
+
+    /// Text-zone width for a given pill width + collapse: the pill minus the fixed
+    /// row parts (leading inset, artwork, gaps, play button, collapsing skip,
+    /// trailing inset). Deterministic — no measurement, no feedback loop.
+    private func zoneWidth(pill: CGFloat, collapse: CGFloat) -> CGFloat {
+        let skip = (30 + 10) * (1 - collapse)     // skip button + its HStack gap
+        let fixed = Morph.islandArtLeading        // 20 leading inset
+                  + Morph.islandArtSide           // 34 artwork
+                  + 10                            // artwork → text gap
+                  + 10                            // text → play gap
+                  + 30                            // play button
+                  + skip
+                  + Morph.islandContentPad        // 12 trailing inset
+        return max(pill - fixed, 1)
+    }
+    /// Current text-zone width (drives layout so the play button sits correctly).
+    private var zoneW: CGFloat { zoneWidth(pill: pillWidth, collapse: collapse) }
+    /// Docked text-zone width — the stable width the text truncates at.
+    private var stableZoneW: CGFloat {
+        zoneWidth(pill: max(maxPillWidth, pillWidth), collapse: 0)
+    }
     // A text line locks (stays put, ignores the thumb) when the track it'd change
     // to shares that line's text — so the artist never "scrolls" when swiping
     // between same-artist tracks. Set at drag time so they stay correct through
@@ -486,6 +551,9 @@ private struct IslandContent: View {
     /// the RIGHT of the artwork rather than exactly at its edge.
     private static let textLeftFadeInset: CGFloat = 1
     private static var textLeftFade: CGFloat { textEdgeFade - textLeftFadeInset }
+    /// The RIGHT fade is longer than the gap so the tail dissolves gradually into
+    /// the play button (a softer, longer ramp than the left).
+    private static let textRightFade: CGFloat = textEdgeFade + 12
 
     /// Horizontal fade mask applied over the text zone AFTER it's been expanded by
     /// the fade widths on each side (see body). The clear→opaque ramps therefore
@@ -493,9 +561,9 @@ private struct IslandContent: View {
     /// button (right) — leaving the whole measured text area opaque. The left strip
     /// is 1pt narrower so it clears just right of the artwork.
     private var edgeFadeMask: some View {
-        let padded = zoneW + Self.textLeftFade + Self.textEdgeFade
+        let padded = zoneW + Self.textLeftFade + Self.textRightFade
         let leftFrac = min(Self.textLeftFade / max(padded, 1), 0.5)
-        let rightFrac = min(Self.textEdgeFade / max(padded, 1), 0.5)
+        let rightFrac = min(Self.textRightFade / max(padded, 1), 0.5)
         return LinearGradient(
             stops: [
                 .init(color: .clear, location: 0),
@@ -518,18 +586,19 @@ private struct IslandContent: View {
 
                 VStack(alignment: .leading, spacing: titleArtistSpacing) {
                     IslandSlideText(text: playback.currentTrack?.title ?? "",
-                                    dir: navDir, zoneW: zoneW, animate: animateSwipe,
+                                    dir: navDir, zoneW: zoneW, renderW: stableZoneW, animate: animateSwipe,
                                     liveDrag: lockTitle ? 0 : dragX, commitStart: commitStart,
-                                    font: .subheadline.weight(.semibold), secondary: false)
+                                    font: .subheadline.weight(.semibold), secondary: false, marquees: true)
                     IslandSlideText(text: playback.currentTrack?.artistName ?? "",
-                                    dir: navDir, zoneW: zoneW, animate: animateSwipe,
+                                    dir: navDir, zoneW: zoneW, renderW: stableZoneW, animate: animateSwipe,
                                     liveDrag: lockArtist ? 0 : dragX, commitStart: commitStart,
-                                    font: .caption2, secondary: true)
+                                    font: .caption2, secondary: true, marquees: false)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: IslandTitleWidthKey.self, value: g.size.width)
-                })
+                // Hard-constrain the text column to the CURRENT zone width (which
+                // shrinks as the pill collapses) and left-align, so the play button
+                // stays pinned to the right and the stable-width labels overflow to
+                // the right where the mask below clips them — no re-truncation.
+                .frame(width: zoneW, alignment: .leading)
                 // Soft fade at the zone edges (replaces a hard clip): the sliding
                 // text dissolves as it enters/leaves. Expand the maskable region by
                 // the fade width on each side, apply the fade there, then restore
@@ -538,16 +607,15 @@ private struct IslandContent: View {
                 // resting text stays fully opaque. The left strip is 1pt narrower so
                 // the fade clears just to the right of the artwork, not on its edge.
                 .padding(.leading, Self.textLeftFade)
-                .padding(.trailing, Self.textEdgeFade)
+                .padding(.trailing, Self.textRightFade)
                 .mask(edgeFadeMask)
                 .padding(.leading, -Self.textLeftFade)
-                .padding(.trailing, -Self.textEdgeFade)
+                .padding(.trailing, -Self.textRightFade)
                 // Nudge the text block up to correct font line-box asymmetry (the
                 // glyphs sit slightly low inside their line boxes, so the visual
                 // top gap is larger than the bottom). Scales with Dynamic Type, so
                 // it's imperceptible at default and evens out the gap at xxxLarge.
                 .offset(y: -textVerticalNudge)
-                .onPreferenceChange(IslandTitleWidthKey.self) { zoneW = max($0, 1) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -569,7 +637,11 @@ private struct IslandContent: View {
             }
             .buttonStyle(.plain)
             .disabled(!playback.snapshot.hasNext)
-            .opacity(playback.snapshot.hasNext ? 1 : 0.4)
+            // Fades out and collapses its width as the island drops into the centre
+            // pill, so the minimized island keeps only play/pause (like Apple's).
+            .opacity((playback.snapshot.hasNext ? 1 : 0.4) * Double(1 - collapse))
+            .frame(width: 30 * (1 - collapse))
+            .allowsHitTesting(collapse < 0.5)
         }
         .padding(.leading, Morph.islandArtLeading)
         .padding(.trailing, Morph.islandContentPad)
@@ -679,11 +751,20 @@ private struct IslandSlideText: View {
     let text: String
     let dir: Int
     let zoneW: CGFloat
+    /// Fixed width the label renders (and truncates) at. Held constant during the
+    /// collapse DROP so the title doesn't re-truncate — which SwiftUI would animate
+    /// as a snapshot cross-fade ("the ellipsis flies off, the full text fades in").
+    /// The narrowing pill clips the tail instead. Equals `zoneW` while docked.
+    let renderW: CGFloat
     let animate: Bool
     let liveDrag: CGFloat
     let commitStart: CGFloat
     let font: Font
     let secondary: Bool
+    /// Whether this line is allowed to auto-scroll (marquee) when it overflows. Only
+    /// the title opts in: running the title AND artist together desynced into a busy
+    /// double-scroll, so the artist stays put and just clips.
+    let marquees: Bool
 
     @State private var current: String
     @State private var outgoing: String?
@@ -691,12 +772,29 @@ private struct IslandSlideText: View {
     @State private var outgoingX: CGFloat = 0
     @State private var transitioning = false
     @State private var gen = 0
+    /// Intrinsic (untruncated) width of `current`, measured off-screen. Drives
+    /// whether the line needs to scroll and how far.
+    @State private var naturalW: CGFloat = 0
+    /// Live marquee scroll offset (0 = start, negative = scrolled left to reveal
+    /// the tail). Only ever non-zero while `scrolling`.
+    @State private var marqueeX: CGFloat = 0
+    /// True ONLY while an actual marquee cycle is animating (post-settle). The
+    /// offset reads `marqueeX` only when this is set; the instant a morph begins we
+    /// flip it false so the offset falls back to a plain 0 and the text rides the
+    /// morph layout — regardless of any lingering `marqueeX` animation. This is what
+    /// makes "snap to start, then morph normally" reliable: we don't fight the
+    /// in-flight linear animation, we just stop reading it.
+    @State private var scrolling = false
 
-    init(text: String, dir: Int, zoneW: CGFloat, animate: Bool,
-         liveDrag: CGFloat, commitStart: CGFloat, font: Font, secondary: Bool) {
-        self.text = text; self.dir = dir; self.zoneW = zoneW; self.animate = animate
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(text: String, dir: Int, zoneW: CGFloat, renderW: CGFloat, animate: Bool,
+         liveDrag: CGFloat, commitStart: CGFloat, font: Font, secondary: Bool,
+         marquees: Bool) {
+        self.text = text; self.dir = dir; self.zoneW = zoneW; self.renderW = renderW
+        self.animate = animate
         self.liveDrag = liveDrag; self.commitStart = commitStart
-        self.font = font; self.secondary = secondary
+        self.font = font; self.secondary = secondary; self.marquees = marquees
         _current = State(initialValue: text)
     }
 
@@ -705,7 +803,56 @@ private struct IslandSlideText: View {
             if let outgoing {
                 label(outgoing).offset(x: outgoingX)
             }
-            label(current).offset(x: transitioning ? currentX : liveDrag)
+            // ONE label structure in every state (no conditional view swap) so the
+            // morph never cross-fades between a truncated and a full-width variant —
+            // that swap is what made the title "race" upward on collapse. `fixedSize`
+            // means it never truncates, so there's a real tail for the marquee to
+            // reveal and no re-truncation snapshot to animate.
+            label(current)
+                .offset(x: transitioning ? currentX : (scrolling ? marqueeX : liveDrag))
+        }
+        // Measure the intrinsic width off-screen so we know when (and how far) to
+        // scroll. A background never affects the ZStack's own size.
+        .background(alignment: .leading) { measuringLabel }
+        .onPreferenceChange(MarqueeWidthKey.self) { naturalW = $0 }
+        // The instant the island starts morphing up/down, its width (zoneW) begins
+        // to change. Stop the marquee IMMEDIATELY: dropping `scrolling` makes the
+        // offset fall back to a plain 0 (no animation), so the text rides the morph
+        // exactly like the non-marquee case — no horizontal glide compositing with
+        // the vertical morph, and no lingering linear animation to fight. The driver
+        // below (keyed on zoneW) then holds it reset and only starts a fresh cycle
+        // once the width settles at either end.
+        .onChange(of: zoneW) { _, _ in
+            guard scrolling || marqueeX != 0 else { return }
+            scrolling = false
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { marqueeX = 0 }
+        }
+        // One driver: restarts whenever the text, its width, the available width,
+        // or the active state changes; auto-cancels when the view goes away or
+        // marquee turns off (drag/swipe/collapse).
+        .task(id: marqueeKey) {
+            scrolling = false
+            marqueeX = 0
+            guard marqueeActive, overflow > marqueeMinOverflow else { return }
+            let dist = overflow
+            let dur = Double(dist / marqueeSpeed)
+            scrolling = true
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: marqueeStartDwell)
+                    withAnimation(.linear(duration: dur)) { marqueeX = -dist }
+                    try await Task.sleep(for: .seconds(dur))
+                    try await Task.sleep(for: marqueeEndDwell)
+                    withAnimation(.linear(duration: dur)) { marqueeX = 0 }
+                    try await Task.sleep(for: .seconds(dur))
+                    try await Task.sleep(for: marqueeLoopGap)
+                } catch {
+                    scrolling = false      // cancelled mid-cycle — reset clean
+                    marqueeX = 0
+                    return
+                }
+            }
         }
         .onChange(of: text) { _, new in
             guard new != current else { return }
@@ -744,24 +891,52 @@ private struct IslandSlideText: View {
         }
     }
 
+    /// ONE label used in every state. `fixedSize` gives it its full intrinsic width
+    /// (never truncates), pinned to a stable `renderW` footprint so the overflow
+    /// spills past the edges where the parent's fade mask dissolves it — and so the
+    /// pill collapse never re-truncates (that recompute is what SwiftUI animated as
+    /// a flying snapshot). The marquee scrolls this same view; the narrowing pill
+    /// just clips more of it.
     private func label(_ s: String) -> some View {
         Text(s)
             .font(font)
             .lineLimit(1)
-            .truncationMode(.tail)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-            // Pin each line to the zone width so long titles truncate to an
-            // ellipsis up front (no full-width overlap that snaps on arrival).
-            .frame(width: zoneW, alignment: .leading)
+            .frame(width: renderW, alignment: .leading)
     }
-}
 
-/// Publishes the island text-zone width so both title and artist share one
-/// travel distance.
-private struct IslandTitleWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+    /// Off-screen twin used only to measure the intrinsic (untruncated) width.
+    private var measuringLabel: some View {
+        Text(current)
+            .font(font)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: MarqueeWidthKey.self, value: g.size.width)
+            })
+            .hidden()
+            .allowsHitTesting(false)
+    }
+
+    /// How far the text runs past the CURRENTLY VISIBLE width (`zoneW`, which shrinks
+    /// as the island drops into the tab-bar pill) — so the collapsed pill scrolls
+    /// its (larger) overflow too, not just the full-width resting island.
+    private var overflow: CGFloat { max(0, naturalW - zoneW) }
+    /// Scroll only at rest: never during a swipe or a finger drag, and never while
+    /// the collapse morph is animating (`zoneW` is changing — see `marqueeKey`, which
+    /// restarts the driver every frame of the morph and only settles once still).
+    /// Honors Reduce Motion, and only runs when there's something to reveal.
+    private var marqueeActive: Bool {
+        marquees && !transitioning && liveDrag == 0 && !reduceMotion
+            && overflow > marqueeMinOverflow && !current.isEmpty
+    }
+    /// Identity for the marquee driver: any change restarts it from the beginning.
+    /// Includes `zoneW` so that WHILE the pill collapses/expands (zoneW animating) the
+    /// driver keeps restarting and holds the text still; once zoneW settles at either
+    /// end (full island OR centre pill) it runs, scrolled to that width's overflow.
+    private var marqueeKey: String {
+        "\(current)|\(Int(zoneW.rounded()))|\(Int(naturalW.rounded()))|\(marqueeActive ? 1 : 0)"
     }
 }
 
@@ -784,6 +959,9 @@ private struct Morph {
     /// The mini controls are hidden whenever this is true, so the drawer opens
     /// OVER them (they never flash during an open).
     let isExpanded: Bool
+    /// Tab-bar minimize progress (0…1). While docked, the island slides DOWN into
+    /// the tab bar's centre pill as this →1. Unwound as the drawer expands.
+    let minimize: CGFloat
 
     var p: CGFloat { min(max(pRaw, 0), 1) }
 
@@ -827,9 +1005,19 @@ private struct Morph {
     // island's bottom and NEVER moves below it (Apple pins the bottom and grows
     // the island UPWARD to receive the drawer). `receiveGrow` extends the TOP up
     // for the catch bounce; the bottom stays put.
-    var surfaceW: CGFloat { lerp(islandW, width, p) }
+    //
+    // On TOP of that island↔drawer morph, the scroll-minimize DROP slides the
+    // docked island DOWN into the tab bar's centre pill (between the split blobs)
+    // and shrinks it to `centerPillW`. `dropT` is the drop amount; it's full while
+    // docked (p≈0) and unwinds as the drawer expands (×(1−p)), so opening the
+    // player is unaffected.
+    var mz: CGFloat { min(max(minimize, 0), 1) }
+    var dropT: CGFloat { mz * (1 - p) }
+    var barCenterY: CGFloat { BottomBar.barCenterY(inHeight: height) }
+    var centerPillW: CGFloat { BottomBar.centerGap(inWidth: width).width }
+    var centerPillCenterX: CGFloat { BottomBar.centerGap(inWidth: width).centerX }
+
     var surfaceHExpanded: CGFloat { height + Self.bottomOverhang }
-    var baseH: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) }
     /// Upward receive-bounce: a half-sine that is 0 at rest (p=0) and 0 at the
     /// zone edge, peaking in between — so as the drawer lands the island grows
     /// taller UPWARD by up to `receiveDepth`pt, then settles with no rebound and
@@ -839,26 +1027,40 @@ private struct Morph {
         let u = Double(p / Self.receiveZone)   // 1 at zone edge → 0 at rest
         return Self.receiveDepth * CGFloat(sin(.pi * u))
     }
-    var surfaceH: CGFloat { baseH + receiveGrow }
-    /// Bottom edge. `dragY`/`p` are clamped ≥ their rest, so the bottom lands on
-    /// islandBottom and never overshoots below (or lifts above) it.
-    var bottomEdge: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) + baseH }
-    var surfaceCenterX: CGFloat { width / 2 }
-    var surfaceCenterY: CGFloat { bottomEdge - surfaceH / 2 }
-    var radius: CGFloat { lerp(islandRadius, Self.expandedRadius, p) }
+
+    // p-only ("natural") surface frame, before the scroll-minimize drop.
+    private var baseH_p: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) }
+    private var surfaceH_p: CGFloat { baseH_p + receiveGrow }
+    private var bottomEdge_p: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) + baseH_p }
+    private var centerY_p: CGFloat { bottomEdge_p - surfaceH_p / 2 }
+
+    var surfaceW: CGFloat { lerp(lerp(islandW, width, p), centerPillW, dropT) }
+    var surfaceH: CGFloat { lerp(surfaceH_p, BottomBar.minElementH, dropT) }
+    var surfaceCenterX: CGFloat { lerp(width / 2, centerPillCenterX, dropT) }
+    var surfaceCenterY: CGFloat { lerp(centerY_p, barCenterY, dropT) }
+    var bottomEdge: CGFloat { surfaceCenterY + surfaceH / 2 }
+    var radius: CGFloat { lerp(lerp(islandRadius, Self.expandedRadius, p), BottomBar.minElementH / 2, dropT) }
     /// The surface's top edge WITHOUT the receive-grow. The mini controls ride
     /// this down into the island, so the grow can raise the glass above them
     /// without carrying them up.
     var baseTop: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) }
-    /// Center of the mini-control row: rides the top edge down, resting centered
-    /// in the island at p=0 (baseTop == islandTop ⇒ islandCenterY).
-    var miniCenterY: CGFloat { baseTop + Self.islandHeight / 2 }
+    /// Center of the mini-control row: rides the top edge down (resting centered
+    /// in the island at p=0), and drops to the bar centre when minimized.
+    var miniCenterY: CGFloat { lerp(baseTop + Self.islandHeight / 2, barCenterY, dropT) }
+    /// Island content frame — shrinks into the centre pill as it drops.
+    var islandDropW: CGFloat { lerp(islandW, centerPillW, dropT) }
+    var islandDropH: CGFloat { lerp(Self.islandHeight, BottomBar.minElementH, dropT) }
 
     // Traveling artwork -------------------------------------------------------
     var artSide: CGFloat { lerp(Self.islandArtSide, expArtSide, p) }
     var artRadius: CGFloat { lerp(Self.islandArtRadius, Self.expandedArtRadius, p) }
-    var artCenterX: CGFloat { lerp(islandArtCenterX, width / 2, p) }
-    var artCenterY: CGFloat { lerp(islandCenterY, expArtCenterY, p) + max(0, dragY) }
+    /// Artwork is left-aligned in the pill; when dropped it follows the centre
+    /// pill's left edge.
+    private var dropArtCenterX: CGFloat {
+        (centerPillCenterX - centerPillW / 2) + Self.islandArtLeading + Self.islandArtSide / 2
+    }
+    var artCenterX: CGFloat { lerp(lerp(islandArtCenterX, width / 2, p), dropArtCenterX, dropT) }
+    var artCenterY: CGFloat { lerp(lerp(islandCenterY, expArtCenterY, p), barCenterY, dropT) + max(0, dragY) }
 
     // Opacities ---------------------------------------------------------------
     // While a finger is down `p` is pinned at 1, so anything keyed purely on `p`

@@ -33,6 +33,7 @@ struct DownloadsView: View {
                 .onDelete(perform: delete)
             }
         }
+        .minimizesBottomBarOnScroll()
         .navigationTitle("Downloads")
         .overlay {
             if tracks.isEmpty {

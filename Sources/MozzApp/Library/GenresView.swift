@@ -19,6 +19,7 @@ struct GenresView: View {
             }
         }
         .listStyle(.plain)
+        .minimizesBottomBarOnScroll()
         .navigationTitle("Genres")
         .overlay {
             if genres.isEmpty && loaded {

@@ -59,6 +59,7 @@ struct SearchView: View {
                 .padding(.bottom, 10)
 
                 resultsList
+                    .minimizesBottomBarOnScroll()
             }
             .animation(.snappy(duration: 0.3), value: isActive)
             .hideNavigationBar()
