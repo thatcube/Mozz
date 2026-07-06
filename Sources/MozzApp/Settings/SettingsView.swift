@@ -14,20 +14,32 @@ struct SettingsView: View {
             Form {
                 if let active = env.active {
                     Section("Server") {
-                        LabeledContent("Name", value: active.connection.name)
-                        LabeledContent("Type", value: active.connection.kind.displayName)
-                        LabeledContent("Address", value: active.connection.baseURL.absoluteString)
+                        LabeledContent {
+                            Text(active.connection.name)
+                        } label: {
+                            Label("Name", systemImage: "tag")
+                        }
+                        LabeledContent {
+                            Text(active.connection.kind.displayName)
+                        } label: {
+                            Label("Type", systemImage: "server.rack")
+                        }
+                        LabeledContent {
+                            Text(active.connection.baseURL.absoluteString)
+                        } label: {
+                            Label("Address", systemImage: "network")
+                        }
                     }
 
                     Section("Capabilities") {
-                        capabilityRow("Offline download", active.capabilities.supportsOriginalFileDownload)
-                        capabilityRow("Transcoding", active.capabilities.supportsTranscoding)
-                        capabilityRow("Favorites", active.capabilities.supportsFavorites)
-                        capabilityRow("Lyrics", active.capabilities.supportsLyrics)
-                        capabilityRow("Normalization gain", active.capabilities.supportsNormalizationGain)
-                        capabilityRow("Scrobble / progress", active.capabilities.supportsProgressReporting)
+                        capabilityRow("Offline download", "arrow.down.circle", active.capabilities.supportsOriginalFileDownload)
+                        capabilityRow("Transcoding", "waveform.path", active.capabilities.supportsTranscoding)
+                        capabilityRow("Favorites", "heart", active.capabilities.supportsFavorites)
+                        capabilityRow("Lyrics", "quote.bubble", active.capabilities.supportsLyrics)
+                        capabilityRow("Normalization gain", "waveform", active.capabilities.supportsNormalizationGain)
+                        capabilityRow("Scrobble / progress", "dot.radiowaves.left.and.right", active.capabilities.supportsProgressReporting)
                         if let plexPass = active.capabilities.hasPlexPass {
-                            capabilityRow("Plex Pass", plexPass)
+                            capabilityRow("Plex Pass", "star", plexPass)
                         }
                     }
 
@@ -36,7 +48,7 @@ struct SettingsView: View {
                             env.startSync()
                         } label: {
                             HStack {
-                                Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                                Label(env.isSyncing ? "Syncing…" : "Sync Now", systemImage: "arrow.triangle.2.circlepath")
                                 Spacer()
                                 if env.isSyncing { ProgressView() }
                             }
@@ -114,13 +126,19 @@ struct SettingsView: View {
         }
     }
 
-    private func capabilityRow(_ title: String, _ enabled: Bool) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
+    /// A capability row that scales with Dynamic Type (LabeledContent reflows the
+    /// value beneath the label at large text sizes) and announces its state to
+    /// VoiceOver as a value rather than relying on icon color alone.
+    private func capabilityRow(_ title: String, _ systemImage: String, _ enabled: Bool) -> some View {
+        LabeledContent {
             Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
-                .foregroundStyle(enabled ? .green : .secondary)
+                .foregroundStyle(enabled ? Color.green : Color.secondary)
+        } label: {
+            Label(title, systemImage: systemImage)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(enabled ? "Supported" : "Not supported")
     }
 
     private static let repoURL = URL(string: "https://github.com/thatcube/mozz")!
