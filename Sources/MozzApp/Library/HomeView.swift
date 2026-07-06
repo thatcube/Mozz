@@ -17,8 +17,6 @@ struct HomeView: View {
     @State private var likedCount = 0
     @State private var loaded = false
 
-    private let gridColumns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -53,9 +51,33 @@ struct HomeView: View {
     }
 
     /// The quick-access grid: Liked Songs plus every precomputed mix, as compact
-    /// two-column shortcut tiles.
+    /// two-column shortcut tiles. A NON-lazy `Grid` (the set is small and bounded)
+    /// — a `LazyVGrid` here collapses the content below it after a pull-to-refresh.
     private var madeForYouGrid: some View {
-        LazyVGrid(columns: gridColumns, spacing: 12) {
+        Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+            ForEach(Array(gridRows.enumerated()), id: \.offset) { _, row in
+                GridRow {
+                    cell(row[0])
+                    if row.count > 1 {
+                        cell(row[1])
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    /// Liked Songs followed by every mix, chunked into rows of two.
+    private var gridRows: [[HomeCell]] {
+        let cells: [HomeCell] = [.liked] + mixes.map(HomeCell.mix)
+        return stride(from: 0, to: cells.count, by: 2).map { Array(cells[$0..<min($0 + 2, cells.count)]) }
+    }
+
+    @ViewBuilder private func cell(_ cell: HomeCell) -> some View {
+        switch cell {
+        case .liked:
             NavigationLink {
                 LikedSongsView()
             } label: {
@@ -65,34 +87,50 @@ struct HomeView: View {
                 }
             }
             .buttonStyle(.plain)
-
-            ForEach(mixes) { mix in
-                NavigationLink {
-                    MixDetailView(setId: mix.id, fallbackTitle: mix.title,
-                                  subtitle: mix.subtitle ?? "Made for You")
-                } label: {
-                    HomeShortcutTile(title: mix.title, subtitle: mix.subtitle) {
-                        ArtworkView(artwork: mix.artworkKey.map(ArtworkRef.init(key:)),
-                                    seed: mix.id, size: 56, cornerRadius: 0)
-                    }
+        case .mix(let mix):
+            NavigationLink {
+                MixDetailView(setId: mix.id, fallbackTitle: mix.title,
+                              subtitle: mix.subtitle ?? "Made for You")
+            } label: {
+                HomeShortcutTile(title: mix.title, subtitle: mix.subtitle) {
+                    ArtworkView(artwork: mix.artworkKey.map(ArtworkRef.init(key:)),
+                                seed: mix.id, size: 56, cornerRadius: 0)
                 }
-                .buttonStyle(.plain)
             }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 20)
     }
 
     private func load() async {
         guard let serverId = env.active?.connection.id else { loaded = true; return }
-        // Refresh the mixes if stale, then read them back (instant + offline).
+        // Read everything into locals with NO @State writes in between: writing
+        // @State mid-refresh re-renders the ScrollView, which can end the refresh
+        // control and cancel the remaining awaits — with `?? []` that wiped every
+        // section below the grid. Assign once at the end, and only for reads that
+        // succeeded (a cancelled/failed read keeps the prior value, never blank).
+        let mixesResult = try? await env.recommendations.homeMixes()
+        let played = try? await env.repository.recentlyPlayedTracks(serverId: serverId, limit: 20)
+        let added = try? await env.repository.recentlyAddedAlbums(serverId: serverId, limit: 20)
+        let lists = try? await env.repository.allPlaylists(serverId: serverId)
+        let liked = try? await env.repository.likedTracksCount(serverId: serverId)
+
+        if let mixesResult { mixes = mixesResult }
+        if let played { recentlyPlayed = played }
+        if let added { recentlyAdded = added }
+        if let lists { playlists = lists }
+        if let liked { likedCount = liked }
+        loaded = true
+
+        // Then refresh the mixes if stale (off-main) and re-read them.
         await env.ensureMozzWeekly()
         await env.ensureHomeMixes()
-        mixes = await env.homeMixes()
-        recentlyPlayed = (try? await env.repository.recentlyPlayedTracks(serverId: serverId, limit: 20)) ?? []
-        recentlyAdded = (try? await env.repository.recentlyAddedAlbums(serverId: serverId, limit: 20)) ?? []
-        playlists = (try? await env.repository.allPlaylists(serverId: serverId)) ?? []
-        likedCount = (try? await env.repository.likedTracksCount(serverId: serverId)) ?? 0
-        loaded = true
+        if let refreshed = try? await env.recommendations.homeMixes() { mixes = refreshed }
+    }
+
+    /// One cell of the quick-access grid.
+    private enum HomeCell {
+        case liked
+        case mix(RecommendationService.HomeMix)
     }
 }
 
