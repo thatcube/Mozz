@@ -20,7 +20,7 @@ private enum RatingTuning {
     static let longPressDuration: Double = 0.18
     /// Vertical offset of the revealed strip above the player star so the finger
     /// doesn't cover it.
-    static let revealYOffset: CGFloat = -74
+    static let revealYOffset: CGFloat = -82
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
     static let revealCornerRadius: CGFloat = 24
@@ -360,7 +360,7 @@ struct FluidRatingControl: View {
     // MARK: Hold-drag reveal
 
     private var revealStrip: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             RatingStripView(value: preview)
                 .background {
                     GeometryReader { geo in
@@ -376,7 +376,7 @@ struct FluidRatingControl: View {
         }
         .padding(.top, 26)
         .padding(.horizontal, 24)
-        .padding(.bottom, 20)
+        .padding(.bottom, 18)
         .padding(.bottom, RatingTuning.revealTailHeight)
         .glassBackground(TailedBubble())
         .transition(.scale(scale: 0.9).combined(with: .opacity))
