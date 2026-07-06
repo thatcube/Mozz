@@ -82,3 +82,13 @@ targets:
           - com.thatcube.mozz.playlist
           - com.thatcube.mozz.genre
           - com.thatcube.mozz.library
+
+  # NOTE: The MozzWidget app-extension target is intentionally NOT wired in here
+  # yet. Its code lives in App/MozzWidget/ and the data pipeline (snapshots in
+  # MozzCore + AppEnvironment) is in place, but WidgetKit needs an App Group
+  # (group.com.thatcube.Mozz) shared by both targets, and that capability cannot
+  # be provisioned from a headless `xcodebuild` (it fails with "doesn't include
+  # the App Groups capability"). To enable widgets: in Xcode, add the App Groups
+  # capability (group.com.thatcube.Mozz) to the Mozz target once, then re-add the
+  # `MozzWidget` target block + the app's `- target: MozzWidget` dependency and
+  # `entitlements` app-group. See AGENTS.local.md → "Enabling widgets".

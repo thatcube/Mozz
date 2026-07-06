@@ -44,9 +44,8 @@ enum DeepLinkTarget: Equatable {
         case "artist":    return first.map { .artist(id: $0) }
         case "playlist":  return first.map { .playlist(id: $0) }
         case "genre":
-            // The name may be the host's path or percent-encoded in the host.
-            if let name = first ?? url.host { return .genre(name.removingPercentEncoding ?? name) }
-            return nil
+            guard let name = first else { return nil }
+            return .genre(name.removingPercentEncoding ?? name)
         case "songs":     return .category(.songs)
         case "liked":     return .category(.likedSongs)
         case "playlists": return .category(.playlists)

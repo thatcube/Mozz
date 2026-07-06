@@ -41,6 +41,11 @@ struct MainTabsView: View {
     /// view watches `\.scrollToTopSignal` and scrolls to the top.
     @State private var scrollToTopToken = 0
 
+    /// Generation guard so that when several deep links arrive in quick
+    /// succession, only the most-recent one applies (older, slower DB lookups
+    /// can't win a race — see `consumePendingDeepLinkIfNeeded`).
+    @State private var deepLinkGeneration = 0
+
     /// A binding to one tab's path (dictionary subscript with an empty default).
     private func pathBinding(_ tab: AppTab) -> Binding<[AppRoute]> {
         Binding(get: { paths[tab] ?? [] }, set: { paths[tab] = $0 })
@@ -149,11 +154,15 @@ struct MainTabsView: View {
     /// record payload from the local catalog). Clears the queue when handled.
     private func consumePendingDeepLinkIfNeeded() {
         guard let target = env.pendingDeepLink else { return }
+        // Clear synchronously and take a generation token BEFORE the async
+        // resolve, so a second link that arrives while this one's DB lookup is in
+        // flight supersedes it (latest intent wins; no out-of-order apply).
+        env.pendingDeepLink = nil
+        deepLinkGeneration &+= 1
+        let generation = deepLinkGeneration
         Task {
-            guard let (tab, routes) = await env.resolveDeepLink(target) else {
-                env.pendingDeepLink = nil
-                return
-            }
+            guard let (tab, routes) = await env.resolveDeepLink(target),
+                  generation == deepLinkGeneration else { return }
             loadedTabs.insert(tab)
             expandLockUntil = Date.now + Self.expandCooldown
             withAnimation(Self.expandSpring) {
@@ -161,7 +170,6 @@ struct MainTabsView: View {
                 paths[tab] = routes
                 minimize = 0
             }
-            env.pendingDeepLink = nil
         }
     }
 
