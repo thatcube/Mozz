@@ -57,7 +57,8 @@ struct SettingsView: View {
 
                     Section {
                         Button(role: .destructive) { env.signOut() } label: {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            Text("Sign Out")
+                                .frame(maxWidth: .infinity)
                         }
                     }
                 }
