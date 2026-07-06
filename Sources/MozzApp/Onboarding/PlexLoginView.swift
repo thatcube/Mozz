@@ -2,16 +2,16 @@ import SwiftUI
 import MozzCore
 import MozzPlex
 
-/// Plex sign-in via the PIN/link flow: request a short code, the user enters it
-/// at plex.tv/link (we offer a button that opens it), we poll until it's
-/// claimed, then discover the account's servers and pin the fastest reachable
-/// address.
+/// Plex sign-in via the hosted OAuth flow: request a (strong) link PIN, send the
+/// user to app.plex.tv to authorize, poll until it's claimed, then discover the
+/// account's servers and pin the fastest reachable address. The PIN is a long
+/// token used only by the hosted page (not typed manually), so this offers a
+/// single "Sign in with Plex" action.
 struct PlexLoginView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
-    @State private var code: String?
     @State private var linkURL: URL?
     @State private var status: String?
     @State private var isBusy = false
@@ -20,18 +20,15 @@ struct PlexLoginView: View {
     var body: some View {
         Form {
             Section {
-                if let code {
+                if let linkURL {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("1. Open plex.tv/link").font(.footnote).foregroundStyle(.secondary)
-                        Text("2. Enter this code:").font(.footnote).foregroundStyle(.secondary)
-                        Text(code).font(.system(.largeTitle, design: .monospaced).bold())
-                        if let linkURL {
-                            Button("Open plex.tv/link") { openURL(linkURL) }
-                                .buttonStyle(.borderedProminent)
-                        }
+                        Text("Authorize Mozz in Plex, then return here — this screen finishes automatically.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button("Open Plex to Sign In") { openURL(linkURL) }
+                            .buttonStyle(.borderedProminent)
                     }
                 } else {
-                    Button("Start Plex sign-in") { start() }
+                    Button("Sign in with Plex") { start() }
                         .disabled(isBusy)
                 }
             }
@@ -48,13 +45,16 @@ struct PlexLoginView: View {
     private func start() {
         let auth = PlexAuthenticator(clientInfo: env.clientInfo, clientIdentifier: env.clientIdentifier)
         isBusy = true
-        status = "Requesting a link code…"
+        status = "Requesting sign-in…"
         task = Task {
             do {
                 let pin = try await auth.requestPin()
-                code = pin.code
-                linkURL = pin.authAppURL(clientInfo: env.clientInfo)
-                status = "Waiting for you to link at plex.tv/link…"
+                let url = pin.authAppURL(clientInfo: env.clientInfo)
+                linkURL = url
+                // Send the user straight to Plex; the button remains as a fallback
+                // if the system declined to open it automatically.
+                if let url { openURL(url) }
+                status = "Waiting for you to authorize in Plex…"
                 let token = try await auth.awaitPin(pin, timeout: 300)
                 status = "Finding your servers…"
                 let session = try await auth.completeLogin(accountToken: token)

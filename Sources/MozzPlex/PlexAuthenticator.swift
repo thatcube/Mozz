@@ -35,11 +35,14 @@ public struct PlexAuthenticator: Sendable {
 
     // MARK: PIN flow
 
-    /// Request a short link code. `strong` is omitted so the code stays short
-    /// (4 chars), which is friendlier to type at plex.tv/link.
+    /// Request a link PIN for the hosted OAuth flow. `strong=true` yields a long
+    /// token code — REQUIRED by `app.plex.tv/auth`, which cannot claim the short
+    /// (`strong=false`) codes that are only meant for manual entry at
+    /// plex.tv/link. (Verified against Plex's API: strong=false → "BHRR"-style
+    /// 4-char code; strong=true → a 25-char token.)
     public func requestPin() async throws -> PlexPinSession {
         let response = try await client.send(
-            Endpoint(method: .post, path: "api/v2/pins", query: [URLQueryItem(name: "strong", value: "false")]),
+            Endpoint(method: .post, path: "api/v2/pins", query: [URLQueryItem(name: "strong", value: "true")]),
             as: PlexPinResponse.self
         )
         return PlexPinSession(id: response.id, code: response.code, clientIdentifier: clientIdentifier)

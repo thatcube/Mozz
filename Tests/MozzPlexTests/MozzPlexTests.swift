@@ -288,6 +288,10 @@ final class PlexAuthTests: XCTestCase {
         XCTAssertEqual(session.id, 424242)
         XCTAssertEqual(session.code, "abcd")
         XCTAssertEqual(session.clientIdentifier, "client-uuid")
+        // The hosted app.plex.tv/auth flow can only claim STRONG pins; a
+        // strong=false short code fails with "unable to complete this request".
+        XCTAssertTrue(authTransport.lastRequest?.url?.absoluteString.contains("strong=true") ?? false,
+                      "PIN must be requested with strong=true for the hosted OAuth flow")
     }
 
     func testCheckPinReturnsToken() async throws {
