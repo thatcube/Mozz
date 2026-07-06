@@ -37,6 +37,10 @@ struct MainTabsView: View {
     /// preserves each tab's depth because its path persists here.
     @State private var paths: [AppTab: [AppRoute]] = [:]
 
+    /// Bumped whenever the active tab is re-tapped; the visible tab's root scroll
+    /// view watches `\.scrollToTopSignal` and scrolls to the top.
+    @State private var scrollToTopToken = 0
+
     /// A binding to one tab's path (dictionary subscript with an empty default).
     private func pathBinding(_ tab: AppTab) -> Binding<[AppRoute]> {
         Binding(get: { paths[tab] ?? [] }, set: { paths[tab] = $0 })
@@ -50,10 +54,12 @@ struct MainTabsView: View {
     /// re-tapping the tab you're already on pops it to root (standard iOS behavior).
     private func pressTab(_ tab: AppTab) {
         if tab == selectedTab {
-            // Re-tap → animated pop to root (no-op if already at root).
+            // Re-tap → animated pop to root (no-op if already at root)…
             if !(paths[tab] ?? []).isEmpty {
                 withAnimation { paths[tab] = [] }
             }
+            // …and scroll the (now root) page to the top.
+            scrollToTopToken &+= 1
         }
         selectedTab = tab
         // Tapping a tab ALWAYS expands the bar — and must always finish expanding.
@@ -151,6 +157,7 @@ struct MainTabsView: View {
                         // nil binding and stay inert. The gated binding also drops
                         // scroll writes during a tab-tap's expand cooldown.
                         .environment(\.bottomBarMinimize, tab == selectedTab ? scrollMinimizeBinding : nil)
+                        .environment(\.scrollToTopSignal, scrollToTopToken)
                         .opacity(tab == selectedTab ? 1 : 0)
                         .allowsHitTesting(tab == selectedTab)
                         .zIndex(tab == selectedTab ? 1 : 0)
@@ -664,5 +671,59 @@ private struct BottomBarScrollMinimize: ViewModifier {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             minimize?.wrappedValue = v
         }
+    }
+}
+
+// MARK: - Scroll-to-top on active-tab re-tap
+
+private struct ScrollToTopSignalKey: EnvironmentKey {
+    static let defaultValue: Int = 0
+}
+
+extension EnvironmentValues {
+    /// A monotonically-increasing token bumped by `MainTabsView` when the user
+    /// re-taps the tab they're already on. A tab's root scroll view watches it and
+    /// scrolls to the top (standard iOS behavior), complementing the pop-to-root.
+    var scrollToTopSignal: Int {
+        get { self[ScrollToTopSignalKey.self] }
+        set { self[ScrollToTopSignalKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Scrolls THIS scroll view to the top whenever the `scrollToTopSignal`
+    /// environment token changes (i.e. the active tab was re-tapped). Apply to a
+    /// tab's root `ScrollView`/`List`. No-op before iOS 18.
+    func scrollsToTopOnSignal() -> some View {
+        modifier(ScrollToTopOnSignal())
+    }
+}
+
+private struct ScrollToTopOnSignal: ViewModifier {
+    @Environment(\.scrollToTopSignal) private var signal
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            ScrollToTopOnSignalModern(signal: signal, content: content)
+        } else {
+            content
+        }
+    }
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+private struct ScrollToTopOnSignalModern<Content: View>: View {
+    let signal: Int
+    let content: Content
+    @State private var position = ScrollPosition(edge: .top)
+
+    var body: some View {
+        content
+            .scrollPosition($position)
+            .onChange(of: signal) { _, _ in
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
+                    position.scrollTo(edge: .top)
+                }
+            }
     }
 }

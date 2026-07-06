@@ -431,6 +431,6 @@ public final class PlaybackEngine: ObservableObject {
     /// image is loaded, in response to `onNeedsArtwork`).
     public func provideArtwork(_ data: Data, for trackID: String) {
         guard currentTrack?.id == trackID else { return }
-        nowPlaying.updateArtwork(data)
+        nowPlaying.updateArtwork(data, for: trackID)
     }
 }

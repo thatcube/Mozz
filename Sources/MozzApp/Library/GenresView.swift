@@ -58,6 +58,7 @@ struct GenreDetailView: View {
         }
         .navigationTitle(genre)
         .inlineNavigationTitle()
+        .minimizesBottomBarOnScroll()
         .overlay {
             if albums.isEmpty && loaded {
                 ContentUnavailableView("No Albums", systemImage: "square.stack")
