@@ -21,7 +21,7 @@ private enum RatingTuning {
     /// Vertical offset of the revealed strip above the player star so the finger
     /// doesn't cover it.
     static let revealYOffset: CGFloat = -68
-    static let tint: Color = .mozzBrand
+    static let tint: Color = .primary
     static let inactiveTint: Color = .secondary
 }
 
