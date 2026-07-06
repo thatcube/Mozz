@@ -21,6 +21,9 @@ private enum RatingTuning {
     /// Vertical offset of the revealed strip above the player star so the finger
     /// doesn't cover it.
     static let revealYOffset: CGFloat = -78
+    /// How long after releasing on a rating the tap popover waits before it grows
+    /// to reveal the "Clear" link.
+    static let clearRevealDelay: Double = 0.5
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
     static let revealCornerRadius: CGFloat = 24
@@ -223,20 +226,25 @@ struct RatingPopoverContent: View {
     let onSet: (Double?) -> Void
 
     @State private var current: Double?
+    /// Drives the Clear link + popover height. Decoupled from `current` so it can
+    /// lag: after you release on a rating it reveals ~`clearRevealDelay` later, and
+    /// it collapses immediately while you're actively adjusting.
+    @State private var showClear: Bool
+    @State private var clearWork: DispatchWorkItem?
 
     init(rating: Double?, onSet: @escaping (Double?) -> Void) {
         self.initialRating = rating
         self.onSet = onSet
         _current = State(initialValue: rating)
+        _showClear = State(initialValue: (rating ?? 0) > 0)
     }
 
     var body: some View {
-        let rated = (current ?? 0) > 0
-        return VStack(spacing: 12) {
+        VStack(spacing: 12) {
             RatingStripView(
                 value: current,
-                onPreview: { current = $0 },
-                onCommit: { current = $0; onSet($0) }
+                onPreview: { previewing($0) },
+                onCommit: { committed($0) }
             )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
@@ -245,10 +253,11 @@ struct RatingPopoverContent: View {
                 adjust(direction)
             }
 
-            // Only present the Clear link when a rating exists, so the popover's
-            // height is dynamic (shorter when unrated — no empty gap).
-            if rated {
+            // Present the Clear link only once `showClear` is set, so the popover's
+            // height is dynamic — and it grows a beat AFTER you lift your finger.
+            if showClear {
                 Button {
+                    setClear(false)
                     current = nil
                     onSet(nil)
                 } label: {
@@ -263,11 +272,39 @@ struct RatingPopoverContent: View {
                 .transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.2), value: rated)
+        .animation(.snappy(duration: 0.2), value: showClear)
         .padding(.horizontal, 28)
         .padding(.top, 24)
-        .padding(.bottom, rated ? 14 : 24)
+        .padding(.bottom, showClear ? 14 : 24)
         .presentationCompactAdaptation(.popover)
+    }
+
+    // Live drag: update the stars immediately and keep the popover collapsed
+    // (cancel any pending reveal) while the finger is down.
+    private func previewing(_ value: Double?) {
+        current = value
+        clearWork?.cancel()
+        if showClear { showClear = false }
+    }
+
+    // Release: commit the rating, then reveal Clear after a short delay (only if
+    // a rating remains); collapse immediately if it was cleared.
+    private func committed(_ value: Double?) {
+        current = value
+        onSet(value)
+        clearWork?.cancel()
+        if (value ?? 0) > 0 {
+            let work = DispatchWorkItem { withAnimation(.snappy(duration: 0.2)) { showClear = true } }
+            clearWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + RatingTuning.clearRevealDelay, execute: work)
+        } else {
+            setClear(false)
+        }
+    }
+
+    private func setClear(_ on: Bool) {
+        clearWork?.cancel()
+        showClear = on
     }
 
     private func adjust(_ direction: AccessibilityAdjustmentDirection) {
@@ -276,6 +313,7 @@ struct RatingPopoverContent: View {
         let next = direction == .increment ? min(base + step, 5) : max(base - step, 0)
         current = next == 0 ? nil : next
         onSet(current)
+        setClear((current ?? 0) > 0)
     }
 }
 
