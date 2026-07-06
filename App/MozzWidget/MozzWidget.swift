@@ -80,12 +80,12 @@ struct NowPlayingWidgetView: View {
     private func smallLayout(_ s: NowPlayingWidgetSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                crispArtwork(s).frame(width: 52, height: 52)
+                crispArtwork(s).frame(width: 64, height: 64)
                 Spacer(minLength: 0)
-                stateBadge(s)
+                playPauseButton(s, compact: true)
             }
-            Spacer(minLength: 6)
-            Text(s.title).font(.headline).fontWeight(.semibold)
+            Spacer(minLength: 8)
+            Text(s.title).font(.subheadline).fontWeight(.semibold)
                 .lineLimit(2).minimumScaleFactor(0.8)
             Text(s.artist).font(.caption).lineLimit(1).opacity(0.8)
         }
@@ -95,14 +95,23 @@ struct NowPlayingWidgetView: View {
     }
 
     private func mediumLayout(_ s: NowPlayingWidgetSnapshot) -> some View {
-        HStack(spacing: 14) {
-            crispArtwork(s).frame(width: 76, height: 76)
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 16) {
+            // Big square cover that fills the widget height, like Apple Music.
+            crispArtwork(s)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(s.isPlaying ? "NOW PLAYING" : "PAUSED")
+                    .font(.caption2).fontWeight(.semibold)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .tracking(0.5)
                 Text(s.title).font(.headline).fontWeight(.semibold)
                     .lineLimit(2).minimumScaleFactor(0.8)
                 Text(s.artist).font(.subheadline).lineLimit(1).opacity(0.85)
-                stateLabel(s).padding(.top, 3)
+                Spacer(minLength: 6)
+                playPauseButton(s, compact: false)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
             Spacer(minLength: 0)
         }
         .foregroundStyle(.white)
@@ -111,6 +120,37 @@ struct NowPlayingWidgetView: View {
     }
 
     // MARK: Pieces
+
+    /// Functional play/pause. On iOS 17+ it's a real interactive `Button(intent:)`
+    /// that toggles playback in the app process without opening the app; on older
+    /// systems it degrades to a static indicator.
+    @ViewBuilder private func playPauseButton(_ s: NowPlayingWidgetSnapshot, compact: Bool) -> some View {
+        if #available(iOS 17.0, *) {
+            Button(intent: TogglePlayPauseIntent()) {
+                playPauseLabel(s, compact: compact)
+            }
+            .buttonStyle(.plain)
+        } else {
+            playPauseLabel(s, compact: compact)
+        }
+    }
+
+    @ViewBuilder private func playPauseLabel(_ s: NowPlayingWidgetSnapshot, compact: Bool) -> some View {
+        let icon = s.isPlaying ? "pause.fill" : "play.fill"
+        if compact {
+            Image(systemName: icon)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(.white.opacity(0.22), in: Circle())
+        } else {
+            Label(s.isPlaying ? "Pause" : "Play", systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 7)
+                .background(.white.opacity(0.22), in: Capsule())
+        }
+    }
 
     /// Sharp, rounded cover thumbnail with a subtle edge + lift.
     @ViewBuilder private func crispArtwork(_ s: NowPlayingWidgetSnapshot) -> some View {
@@ -124,30 +164,9 @@ struct NowPlayingWidgetView: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.white.opacity(0.15)))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.15)))
         .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
-    }
-
-    /// Non-wrapping "Now Playing / Paused" pill (fixes the old label wrap).
-    private func stateLabel(_ s: NowPlayingWidgetSnapshot) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: s.isPlaying ? "waveform" : "pause.fill")
-            Text(s.isPlaying ? "Now Playing" : "Paused")
-        }
-        .font(.caption2).fontWeight(.medium)
-        .lineLimit(1).fixedSize()
-        .foregroundStyle(.white.opacity(0.85))
-        .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(.white.opacity(0.18), in: Capsule())
-    }
-
-    private func stateBadge(_ s: NowPlayingWidgetSnapshot) -> some View {
-        Image(systemName: s.isPlaying ? "waveform" : "pause.fill")
-            .font(.caption).fontWeight(.semibold)
-            .foregroundStyle(.white)
-            .padding(6)
-            .background(.white.opacity(0.2), in: Circle())
     }
 
     /// Blurred cover art as a rich full-bleed background with a legibility scrim;

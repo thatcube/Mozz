@@ -833,6 +833,13 @@ public final class AppEnvironment: ObservableObject {
     /// just the status to avoid rewriting the file (and reloading the widget) on
     /// every progress tick.
     private func wireNowPlayingWidget() {
+        // Let widget / Control-Center AudioPlaybackIntents drive the engine (they
+        // run in this app process). Safe to call the engine directly on the main
+        // actor; a no-op if there's nothing loaded.
+        PlaybackRemoteControl.togglePlayPause = { [weak self] in self?.playback.togglePlayPause() }
+        PlaybackRemoteControl.next = { [weak self] in self?.playback.next() }
+        PlaybackRemoteControl.previous = { [weak self] in self?.playback.previous() }
+
         playback.$currentTrack
             .removeDuplicates { $0?.id == $1?.id }
             .receive(on: RunLoop.main)
