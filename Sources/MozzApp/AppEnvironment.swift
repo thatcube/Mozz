@@ -877,15 +877,17 @@ public final class AppEnvironment: ObservableObject {
             .sink { [weak self] _ in self?.persistPlaybackState() }
             .store(in: &widgetCancellables)
 
-        // Heartbeat: while actually playing, reload the now-playing widget about
-        // once a minute. This rebuilds the widget's timeline and pushes out its
-        // "went stale → neutral" fallback entry. If the app is force-quit, the
-        // heartbeat stops, no reload arrives, and the widget flips to a neutral
-        // (no Pause button) state instead of showing a wrong "Pause". The
-        // snapshot only ticks while playing, so this is silent when paused.
+        // Heartbeat: while actually playing, reload the now-playing widget every
+        // ~30s. This rebuilds the widget's timeline and pushes out its "went
+        // stale → neutral" fallback entry (grace 45s in the widget). If the app
+        // is force-quit, the heartbeat stops, no reload arrives, and the widget
+        // flips to a neutral (no Pause button) state within ~45s instead of
+        // showing a wrong "Pause". The snapshot only ticks while playing, so this
+        // is silent when paused. 30s (≈120 reloads/hr) stays well under
+        // WidgetKit's reload budget, so real playback never falsely goes neutral.
         playback.$snapshot
             .filter { $0.status == .playing }
-            .throttle(for: .seconds(60), scheduler: RunLoop.main, latest: true)
+            .throttle(for: .seconds(30), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in self?.reloadWidget(MozzWidget.nowPlayingKind) }
             .store(in: &widgetCancellables)
     }

@@ -30,10 +30,12 @@ extension Color {
 // MARK: - Now Playing widget
 
 /// How long a "playing" snapshot is trusted without a fresh app heartbeat. The
-/// app reloads the widget periodically while playing (see AppEnvironment); if it
+/// app reloads the widget every ~30s while playing (see AppEnvironment); if it
 /// is force-quit, no reload arrives, so after this grace the widget stops showing
-/// a (now wrong) Pause button and renders a neutral state instead.
-private let nowPlayingLiveGrace: TimeInterval = 100
+/// a (now wrong) Pause button and renders a neutral state instead. Kept
+/// comfortably above the heartbeat interval so a slightly-delayed heartbeat
+/// during real playback can't briefly flip a playing track to neutral.
+private let nowPlayingLiveGrace: TimeInterval = 45
 
 struct NowPlayingEntry: TimelineEntry {
     let date: Date
