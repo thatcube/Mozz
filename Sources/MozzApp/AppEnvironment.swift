@@ -88,6 +88,18 @@ public final class AppEnvironment: ObservableObject {
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
 
+    /// Post-authentication setup (finding the server, capabilities, first sync)
+    /// is in progress. Owned here (not by the sign-in view) so navigating away
+    /// can't cancel it; `RootView` shows a setup screen while this is true and
+    /// `active` isn't ready yet.
+    @Published public private(set) var isSettingUp = false
+    /// True once the first sync has produced something playable, so the setup
+    /// screen can offer a "Browse now" button while the rest syncs in background.
+    @Published public private(set) var canEnterEarly = false
+    /// A human-readable setup failure, shown on the setup screen with a retry.
+    @Published public var setupError: String?
+    private var activationTask: Task<Void, Never>?
+
     /// A deep-link / Handoff destination waiting to be navigated to. Set by
     /// `onOpenURL` / `onContinueUserActivity`; consumed by `MainTabsView` once it
     /// is on screen (a link may arrive during launch/onboarding, before the tab
@@ -187,22 +199,70 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
-    /// Activate a freshly-authenticated Plex/Jellyfin session.
-    public func activate(session: AuthenticatedSession) async throws {
+    /// Activate a freshly-authenticated Plex/Jellyfin session. Runs the setup on
+    /// an environment-owned task (NOT the caller's), so a sign-in view being
+    /// dismissed/backed-out can't cancel it — setup completes and flips `active`,
+    /// switching the UI into the app. `isSettingUp` is set synchronously so
+    /// `RootView` shows the setup screen immediately.
+    public func activate(session: AuthenticatedSession) {
+        isSettingUp = true
+        setupError = nil
+        activationTask?.cancel()
+        activationTask = Task { await self.performActivation(session) }
+    }
+
+    /// Retry the last failed setup, or a fresh one.
+    public func retryActivation(session: AuthenticatedSession) { activate(session: session) }
+
+    private func performActivation(_ session: AuthenticatedSession) async {
+        canEnterEarly = false
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
             clientIdentifier: session.clientIdentifier, musicSectionID: nil,
             accountToken: session.accountToken, selectedMusicSectionIDs: nil
         )
-        // Persist BEFORE activation so buildBackend's Plex section resolution can
-        // load this session, add the resolved section id and save it back (it
-        // would otherwise be a no-op on first sign-in — nothing to load — and the
-        // section would be re-resolved every launch). Do NOT re-save `stored`
-        // afterwards: that clobbered the resolved section back to nil.
+        // Persist before activation so buildBackend's Plex section resolution can
+        // load + update it. On failure/cancel we CLEAR it, so a half-saved session
+        // can never strand the user on onboarding (the original bug).
         SessionPersistence.save(stored, to: credentials)
-        try await activate(stored)
+        do {
+            try await activate(stored)
+            // First real sign-in → run the initial sync and stay on the setup
+            // screen until there's enough to browse (or the user taps "Browse
+            // now"), so we don't drop them onto an empty Home.
+            await gateInitialSync()
+            isSettingUp = false                 // success → enter the app
+        } catch is CancellationError {
+            SessionPersistence.clear(credentials)
+            isSettingUp = false                 // superseded/cancelled → leave setup
+        } catch {
+            SessionPersistence.clear(credentials)
+            setupError = "Couldn't finish setting up: \(error.localizedDescription)"
+            // Keep `isSettingUp` true so the setup screen shows the error + retry.
+        }
     }
+
+    /// If this server has no catalog yet, start the first sync and keep the setup
+    /// screen up until enough content exists (or the sync finishes, or the user
+    /// asked to enter early via `enterAppNow`).
+    private func gateInitialSync() async {
+        guard let serverId = active?.connection.id else { return }
+        let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        if existing > 0 { return }   // re-login with a catalog already present
+        startSync()
+        let enoughToBrowse = 20
+        while isSettingUp {
+            let count = (try? await repository.trackCount(serverId: serverId)) ?? 0
+            if count > 0 { canEnterEarly = true }
+            if count >= enoughToBrowse || !isSyncing { break }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+    }
+
+    /// User tapped "Browse now" on the setup screen: enter the app while the sync
+    /// continues in the background.
+    public func enterAppNow() { isSettingUp = false }
 
     /// Activate the offline demo: generate a synthetic catalog and serve a
     /// full-length tone per track so playback/scrub/downloads behave like real
@@ -259,6 +319,10 @@ public final class AppEnvironment: ObservableObject {
     }
 
     public func signOut() {
+        activationTask?.cancel()
+        isSettingUp = false
+        setupError = nil
+        canEnterEarly = false
         playback.stop()
         SessionPersistence.clear(credentials)
         active = nil
@@ -710,6 +774,9 @@ public final class AppEnvironment: ObservableObject {
             try await activate(stored)
             startSync()
         } catch {
+            // Restore the previously-working session so a failed switch doesn't
+            // strand the user (rather than clearing it entirely).
+            SessionPersistence.save(existing, to: credentials)
             lastSyncSummary = "Couldn't switch server: \(error.localizedDescription)"
         }
     }

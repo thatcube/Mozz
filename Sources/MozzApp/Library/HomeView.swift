@@ -53,6 +53,13 @@ struct HomeView: View {
             .appRouteDestinations()
             .task { await load() }
             .refreshable { await load() }
+            // Live-refresh as the initial/any sync writes: coarse phase changes
+            // fill Home in progressively, and completion does a final refresh —
+            // so a freshly-synced library populates without manual reload.
+            .onChange(of: env.syncProgress?.phase) { _, _ in Task { await load() } }
+            .onChange(of: env.isSyncing) { _, syncing in
+                if !syncing { Task { await load() } }
+            }
         }
     }
 

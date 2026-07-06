@@ -34,6 +34,8 @@ struct RootView: View {
         Group {
             if env.isRestoring {
                 SplashView()
+            } else if env.isSettingUp {
+                SetupView()
             } else if env.active == nil {
                 OnboardingView()
             } else {
@@ -42,6 +44,7 @@ struct RootView: View {
         }
         .animation(.default, value: env.active == nil)
         .animation(.default, value: env.isRestoring)
+        .animation(.default, value: env.isSettingUp)
         .onOpenURL { url in
             env.handle(url: url)
         }

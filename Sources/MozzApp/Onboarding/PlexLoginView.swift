@@ -63,7 +63,6 @@ extension PlexWebAuthSession: ASWebAuthenticationPresentationContextProviding {
 /// the user to Mozz), then discover the account's servers.
 struct PlexLoginView: View {
     @EnvironmentObject private var env: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var webAuth = PlexWebAuthSession()
 
     private enum Phase { case idle, authorizing, completing }
@@ -102,7 +101,10 @@ struct PlexLoginView: View {
         }
         .navigationTitle("Plex")
         .inlineNavigationTitle()
-        .onDisappear { task?.cancel() }
+        .onDisappear {
+            task?.cancel()
+            webAuth.dismiss()
+        }
     }
 
     private func start() {
@@ -119,14 +121,16 @@ struct PlexLoginView: View {
                 webAuth.start(url: url, callbackScheme: callbackScheme)
                 status = "Waiting for you to authorize in Plex…"
                 let token = try await pollForToken(auth: auth, pin: pin)
-                // Authorized — dismiss the browser (auto-return) and finish setup.
+                // Authorized — dismiss the browser (auto-return) and hand off to
+                // the environment, which owns the setup task so backing out of
+                // this screen can't cancel it.
                 webAuth.dismiss()
                 phase = .completing
                 status = "Finding your servers…"
                 let session = try await auth.completeLogin(accountToken: token)
-                status = "Setting up your library…"
-                try await env.activate(session: session)
-                dismiss()
+                env.activate(session: session)
+                // No dismiss needed: RootView switches to the setup screen / app
+                // as soon as `isSettingUp`/`active` flips.
             } catch is CancellationError {
                 webAuth.dismiss()
                 phase = .idle

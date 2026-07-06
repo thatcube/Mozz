@@ -6,7 +6,6 @@ import MozzJellyfin
 /// (approve a code in an existing Jellyfin session) or username/password.
 struct JellyfinLoginView: View {
     @EnvironmentObject private var env: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
 
     @State private var serverURL = ""
     @State private var username = ""
@@ -74,8 +73,7 @@ struct JellyfinLoginView: View {
                 quickConnectCode = session.code
                 status = "Waiting for approval…"
                 let result = try await auth.awaitQuickConnect(session, timeout: 300)
-                try await env.activate(session: result)
-                dismiss()
+                env.activate(session: result)
             } catch is CancellationError {
                 // View dismissed.
             } catch {
@@ -92,8 +90,7 @@ struct JellyfinLoginView: View {
         Task {
             do {
                 let result = try await auth.authenticate(username: username, password: password)
-                try await env.activate(session: result)
-                dismiss()
+                env.activate(session: result)
             } catch {
                 status = "Sign-in failed: \(error.localizedDescription)"
             }
