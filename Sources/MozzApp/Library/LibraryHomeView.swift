@@ -53,6 +53,7 @@ struct LibraryHomeView: View {
             }
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()
+            .scrollsToTopOnSignal()
             .appRouteDestinations()
             .task { await loadRecent() }
         }

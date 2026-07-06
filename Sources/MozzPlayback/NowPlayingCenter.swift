@@ -22,6 +22,12 @@ public final class NowPlayingCenter {
 
     private var commandsConfigured = false
 
+    /// The current track's cover art, cached so it survives the 0.5s progress
+    /// ticks (`update` rebuilds the info dict from scratch). Keyed by track id so
+    /// a stale image is never re-applied to a newly-started track.
+    private var currentArtwork: MPMediaItemArtwork?
+    private var artworkTrackID: String?
+
     public init() {}
 
     public func configureCommands() {
@@ -69,21 +75,33 @@ public final class NowPlayingCenter {
         info[MPMediaItemPropertyPlaybackDuration] = duration > 0 ? duration : track.duration
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        // Carry the cover art forward: this dict is rebuilt from scratch on every
+        // 0.5s progress tick, so without re-applying it here the artwork set by
+        // `updateArtwork` would be dropped on the next tick. Only re-apply art
+        // that belongs to the track being published.
+        if let art = currentArtwork, artworkTrackID == track.id {
+            info[MPMediaItemPropertyArtwork] = art
+        }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     /// Attach downsampled artwork once it has loaded (kept separate so the text
     /// metadata can appear instantly without waiting on an image fetch).
-    public func updateArtwork(_ data: Data) {
+    public func updateArtwork(_ data: Data, for trackID: String) {
         #if canImport(UIKit)
         guard let image = UIImage(data: data) else { return }
+        let art = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        currentArtwork = art
+        artworkTrackID = trackID
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        info[MPMediaItemPropertyArtwork] = art
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         #endif
     }
 
     public func clear() {
+        currentArtwork = nil
+        artworkTrackID = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 }
@@ -103,7 +121,7 @@ public final class NowPlayingCenter {
     public func configureCommands() {}
     public func setSkipEnabled(next: Bool, previous: Bool) {}
     public func update(track: Track, elapsed: TimeInterval, duration: TimeInterval, isPlaying: Bool) {}
-    public func updateArtwork(_ data: Data) {}
+    public func updateArtwork(_ data: Data, for trackID: String) {}
     public func clear() {}
 }
 

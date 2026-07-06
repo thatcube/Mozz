@@ -49,6 +49,7 @@ struct HomeView: View {
             }
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()
+            .scrollsToTopOnSignal()
             .appRouteDestinations()
             .task { await load() }
             .refreshable { await load() }
