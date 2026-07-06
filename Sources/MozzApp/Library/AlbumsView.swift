@@ -17,6 +17,11 @@ struct AlbumsView: View {
 
     var body: some View {
         ScrollView {
+            if !list.items.isEmpty {
+                LibraryPlayShuffleBar(play: playAll, shuffle: shuffleAll)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+            }
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(Array(list.items.enumerated()), id: \.element.id) { index, album in
                     NavigationLink {
@@ -41,6 +46,26 @@ struct AlbumsView: View {
             }
         }
         .task { await bootstrap() }
+    }
+
+    /// Play every album's tracks in album order (not just the loaded window).
+    private func playAll() {
+        Task {
+            let all = (try? await env.repository.allAlbumTracksForPlayback(serverId: env.active?.connection.id)) ?? []
+            guard !all.isEmpty else { return }
+            env.playback.setShuffle(false)
+            env.playback.play(tracks: all, startAt: 0)
+        }
+    }
+
+    /// Shuffle every album's tracks, starting on a random track.
+    private func shuffleAll() {
+        Task {
+            let all = (try? await env.repository.allAlbumTracksForPlayback(serverId: env.active?.connection.id)) ?? []
+            guard !all.isEmpty else { return }
+            env.playback.setShuffle(true)
+            env.playback.play(tracks: all, startAt: Int.random(in: 0..<all.count))
+        }
     }
 
     private func bootstrap() async {

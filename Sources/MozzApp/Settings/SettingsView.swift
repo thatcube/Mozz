@@ -42,6 +42,13 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(env.isSyncing)
+                        if active.connection.kind == .plex {
+                            NavigationLink {
+                                PlexLibraryPickerView()
+                            } label: {
+                                Label("Server & Libraries", systemImage: "square.stack.3d.up")
+                            }
+                        }
                         if let text = env.syncStatusText {
                             Text(text).font(.caption).foregroundStyle(.secondary)
                         }

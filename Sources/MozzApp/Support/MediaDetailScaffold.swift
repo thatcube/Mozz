@@ -36,16 +36,30 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     let title: String
     var subtitle: String?
     var meta: String?
+    /// Horizontal inset applied to `content`. Defaults to 16 (song lists); the
+    /// artist page passes 0 so its horizontal shelves can bleed to the edge and
+    /// pad each section itself.
+    var contentHorizontalPadding: CGFloat = 16
     @ViewBuilder var actions: () -> Actions
     @ViewBuilder var content: () -> Content
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @State private var bg: Color = Color(white: 0.12)
-    @State private var resolvedColor = false
+    @State private var deepBg: Color = .mozzDetailBackground
 
     private static var fullBleedHeight: CGFloat { 500 }
     private static var centeredArtworkSize: CGFloat { 240 }
+    /// Name for the ScrollView's coordinate space, so the full-bleed header can
+    /// measure how far the page has been pulled down (overscroll) and reveal the
+    /// mirrored reflection above the artwork.
+    private static var scrollSpace: String { "mozzDetailScroll" }
+
+    /// Identity for the palette `.task`. Includes the artwork key so the palette
+    /// re-derives when the hero art arrives (or changes) after first render —
+    /// otherwise a late fallback cover (e.g. an art-less artist borrowing an album
+    /// cover) would show the right image but keep the seed-based placeholder color.
+    private var paletteToken: String { "\(hero.seed)\u{1}\(hero.artwork?.key ?? "")" }
 
     /// The device's top safe-area inset (status bar / Dynamic Island height),
     /// read from the key window so the full-bleed image can be pulled up under it
@@ -64,22 +78,30 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Base color fills the entire screen (incl. under the status bar), so
-            // there's never a white band.
-            bg.ignoresSafeArea()
+            // Deep, same-hue base fills the whole screen (incl. under the status
+            // bar) — it's the dark end of the seamless bleed and the high-contrast
+            // backdrop the song list settles onto.
+            deepBg.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 0) {
                     header
                     content()
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, contentHorizontalPadding)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
                         .frame(maxWidth: .infinity)
-                        .background(Color.mozzDetailBackground)
+                        // Seamless bleed: the hero's color continues at the very
+                        // top of the list, then darkens into `deepBg` a few rows
+                        // down (closure form, so it's a decorative layer that
+                        // never affects layout width — see the horizontal-overflow
+                        // history above).
+                        .background { contentBackground }
                 }
             }
             .scrollIndicators(.hidden)
+            .coordinateSpace(name: Self.scrollSpace)
+            .minimizesBottomBarOnScroll()
 
             // Back button stays BELOW the status bar (the ZStack respects the
             // safe area even though the full-bleed image bleeds under it).
@@ -90,11 +112,22 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         .environment(\.colorScheme, .dark)
         .hideNavigationBar()
         .enableInteractivePop()
-        .task(id: hero.seed) {
-            resolvedColor = false
-            let color = await DominantColor.background(
-                for: hero.artwork, seed: hero.seed, backend: env.active?.backend)
-            withAnimation(.easeOut(duration: 0.35)) { bg = color; resolvedColor = true }
+        // Recompute the palette whenever the seed OR the artwork changes. The
+        // artwork can arrive late (e.g. the artist page falls back to a
+        // representative album cover only once its albums finish loading); keying
+        // on the artwork too means the background re-derives from that cover
+        // instead of staying stuck on the seed-based placeholder color.
+        .task(id: paletteToken) {
+            // If the artwork was preloaded, resolve the palette synchronously so
+            // it's correct on the first frame; otherwise fade it in when it lands.
+            if let p = DominantColor.cachedPalette(
+                for: hero.artwork, seed: hero.seed, backend: env.active?.backend) {
+                bg = p.hero; deepBg = p.deep
+            } else {
+                let p = await DominantColor.palette(
+                    for: hero.artwork, seed: hero.seed, backend: env.active?.backend)
+                withAnimation(.easeOut(duration: 0.35)) { bg = p.hero; deepBg = p.deep }
+            }
         }
     }
 
@@ -107,48 +140,57 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
 
     // MARK: Full-bleed
 
+    /// Full-bleed hero with an Apple-Music-style stretchy top: pulling the page
+    /// DOWN grows (and zooms) the artwork to fill the opening instead of revealing
+    /// the page base, so you can't pull anything empty into view. The image is
+    /// bottom-anchored and always extends up under the status bar; on overscroll
+    /// it grows by exactly the pull distance with its top pinned to the screen
+    /// edge, while the title/actions ride the bottom down with the content.
     private var fullBleedHeader: some View {
-        ZStack(alignment: .bottom) {
-            fullBleedImage
-                .overlay {
-                    // Keep text legible + fade the image into the page color.
-                    LinearGradient(
-                        colors: [.clear, .clear, bg.opacity(0.55), bg],
-                        startPoint: .top, endPoint: .bottom)
+        GeometryReader { geo in
+            // Overscroll distance (0 at rest, positive when pulled down). The
+            // ScrollView has already translated the header down by this amount, so
+            // growing the image by the same amount keeps its top pinned to the
+            // screen edge — the artwork appears to stretch/zoom.
+            let stretch = max(0, geo.frame(in: .named(Self.scrollSpace)).minY)
+            ZStack(alignment: .bottom) {
+                Color.clear
+                    .frame(width: geo.size.width, height: Self.fullBleedHeight + stretch)
+                    .overlay { heroArtwork }
+                    .clipped()
+                    .overlay {
+                        // Keep text legible + fade the image into the page color.
+                        LinearGradient(
+                            colors: [.clear, .clear, bg.opacity(0.55), bg],
+                            startPoint: .top, endPoint: .bottom)
+                    }
+                VStack(spacing: 14) {
+                    titleBlock(onDark: true)
+                    actions()
                 }
-                // Pull ONLY the image up under the status bar (the ScrollView
-                // still respects safe areas, so horizontal margins are intact).
-                .padding(.top, -topSafeInset)
-            VStack(spacing: 14) {
-                titleBlock(onDark: true)
-                actions()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
+            // Reserve the hero height MINUS the status-bar inset: the image is
+            // taller than this box and bottom-anchored, so it bleeds up under the
+            // status bar without the ScrollView ignoring safe areas (which broke
+            // the horizontal margins — see the overflow history above).
+            .frame(width: geo.size.width,
+                   height: Self.fullBleedHeight - topSafeInset,
+                   alignment: .bottom)
         }
+        .frame(height: Self.fullBleedHeight - topSafeInset)
     }
 
-    private var fullBleedImage: some View {
-        // A neutral, fully-flexible Color establishes the box at exactly the
-        // container width × a fixed height; the artwork is rendered as an OVERLAY
-        // that is clipped to that box. This is load-bearing: `CachedArtworkImage`
-        // fills via `.aspectRatio(.fill)`, which REPORTS a size larger than the
-        // proposal (it scales up to cover), so letting the image drive the frame
-        // dragged the whole page wider than the screen — content then centered
-        // and clipped on BOTH edges (row titles lost their first characters,
-        // durations their last). An overlay never affects its parent's size, so
-        // the layout width stays pinned to the screen regardless of the artwork.
-        Color.clear
-            .frame(height: Self.fullBleedHeight)
-            .frame(maxWidth: .infinity)
-            .overlay {
-                if let url = heroURL(pixels: 1200) {
-                    CachedArtworkImage(url: url) { heroFallback }
-                } else {
-                    heroFallback
-                }
-            }
-            .clipped()
+    /// The hero artwork content (real image or the deterministic fallback). Filled
+    /// via aspect-fill inside a fixed-width box, so as the box grows taller during
+    /// an overscroll pull the image scales up (zooms) to keep covering it.
+    @ViewBuilder private var heroArtwork: some View {
+        if let url = heroURL(pixels: 1200) {
+            CachedArtworkImage(url: url) { heroFallback }
+        } else {
+            heroFallback
+        }
     }
 
     // MARK: Centered artwork
@@ -166,10 +208,19 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 18)
-        .background(
-            LinearGradient(colors: [bg, bg, bg.opacity(0)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
-        )
+        // Solid extracted color behind the centered artwork. It bleeds up under
+        // the status bar AND grows into any downward overscroll pull, so pulling
+        // the page down just reveals more of the same page color (nothing scales)
+        // instead of the dark page base. The list below continues from this exact
+        // color, so the fade into the deep base stays seamless.
+        .background(alignment: .top) {
+            GeometryReader { geo in
+                let up = topSafeInset + max(0, geo.frame(in: .named(Self.scrollSpace)).minY)
+                bg
+                    .frame(width: geo.size.width, height: geo.size.height + up)
+                    .offset(y: -up)
+            }
+        }
     }
 
     // MARK: Shared bits
@@ -196,6 +247,24 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                     .multilineTextAlignment(.center)
             }
         }
+    }
+
+    /// The seamless page background behind the scrolling content. The hero's
+    /// extracted color holds through the first row (so the artwork continues
+    /// straight into the list with no seam) then eases into `deepBg` — the SAME
+    /// hue, kept tinted rather than black — over ~420pt. `deepBg` also fills the
+    /// whole page base, so the entire page carries the artwork's color while the
+    /// white song text stays high-contrast on the settled tone.
+    private var contentBackground: some View {
+        LinearGradient(
+            stops: [
+                .init(color: bg, location: 0.0),
+                .init(color: bg, location: 0.08),
+                .init(color: deepBg, location: 1.0),
+            ],
+            startPoint: .top, endPoint: .bottom)
+            .frame(height: 420)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var heroFallback: some View {

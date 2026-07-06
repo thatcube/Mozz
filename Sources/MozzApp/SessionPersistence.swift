@@ -13,6 +13,12 @@ struct StoredSession: Codable, Sendable {
     var clientIdentifier: String
     var musicSectionID: String?
     var isDemo: Bool = false
+    /// Plex account token (for re-discovering servers in the picker). Nil for
+    /// Jellyfin/demo.
+    var accountToken: String? = nil
+    /// The music library section ids the user chose to sync (Plex). Nil = all
+    /// (the default). Decodes to nil for sessions saved before this field.
+    var selectedMusicSectionIDs: [String]? = nil
 }
 
 /// Reads/writes the single active ``StoredSession`` as a JSON blob under one

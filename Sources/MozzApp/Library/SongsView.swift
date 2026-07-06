@@ -15,6 +15,11 @@ struct SongsView: View {
 
     var body: some View {
         List {
+            if !list.items.isEmpty {
+                LibraryPlayShuffleBar(play: playAll, shuffle: shuffleAll)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+            }
             ForEach(Array(list.items.enumerated()), id: \.element.id) { index, track in
                 TrackRow(track: track, showArtist: true)
                     .contentShape(Rectangle())
@@ -38,6 +43,28 @@ struct SongsView: View {
 
     private func play(from index: Int) {
         env.playback.play(tracks: list.items.map { $0.toDomain() }, startAt: index)
+    }
+
+    /// Play the whole song catalog in order (not just the loaded window). The
+    /// full, ordered set is fetched + mapped off the main thread.
+    private func playAll() {
+        Task {
+            let all = (try? await env.repository.allTracksForPlayback(serverId: env.active?.connection.id)) ?? []
+            guard !all.isEmpty else { return }
+            env.playback.setShuffle(false)
+            env.playback.play(tracks: all, startAt: 0)
+        }
+    }
+
+    /// Shuffle the whole song catalog, starting on a random track so it doesn't
+    /// always open on the alphabetically-first song.
+    private func shuffleAll() {
+        Task {
+            let all = (try? await env.repository.allTracksForPlayback(serverId: env.active?.connection.id)) ?? []
+            guard !all.isEmpty else { return }
+            env.playback.setShuffle(true)
+            env.playback.play(tracks: all, startAt: Int.random(in: 0..<all.count))
+        }
     }
 
     private func bootstrap() async {

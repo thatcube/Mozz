@@ -23,17 +23,24 @@ public struct PlexBackend: MusicBackend {
     private let token: String
     private let clientInfo: ClientInfo
     private let client: HTTPClient
+    /// The music library section ids to browse during sync. Plex is
+    /// section-scoped and a server can host several music libraries; a sync spans
+    /// ALL of these into the one catalog (the user's default is "all"). Defaults
+    /// to the connection's single resolved section for back-compat.
+    public let musicSectionIDs: [String]
 
     public init(
         connection: ServerConnection,
         token: String,
         clientInfo: ClientInfo,
         transport: any HTTPTransport = URLSessionTransport(),
-        logger: any NetworkLogger = NoopNetworkLogger()
+        logger: any NetworkLogger = NoopNetworkLogger(),
+        musicSectionIDs: [String]? = nil
     ) {
         self.connection = connection
         self.token = token
         self.clientInfo = clientInfo
+        self.musicSectionIDs = musicSectionIDs ?? connection.musicSectionID.map { [$0] } ?? []
         self.client = HTTPClient(
             baseURL: connection.baseURL,
             transport: transport,
@@ -61,6 +68,23 @@ public struct PlexBackend: MusicBackend {
                 guard let key = directory.key else { return nil }
                 return MusicSection(id: key, title: directory.title ?? "Music")
             }
+    }
+
+    /// A library section of any kind, used only for diagnostics when no *music*
+    /// section is found — so the failure can name what the server DOES expose.
+    public struct AnySection: Sendable, Hashable {
+        public var key: String?
+        public var type: String?
+        public var title: String?
+    }
+
+    /// Every library section on the server (any type). Kept separate from
+    /// ``musicSections()`` so the happy path stays lean; called only to build a
+    /// helpful error when music resolution comes back empty.
+    public func allLibrarySections() async throws -> [AnySection] {
+        let response = try await client.send(Endpoint(path: "library/sections"), as: PlexContainerResponse.self)
+        return (response.MediaContainer.Directory ?? [])
+            .map { AnySection(key: $0.key, type: $0.type, title: $0.title) }
     }
 
     // MARK: Capabilities
@@ -220,18 +244,49 @@ public struct PlexBackend: MusicBackend {
         limit: Int,
         map: (PlexMetadata) -> T?
     ) async throws -> CatalogPage<T> {
-        guard !sectionID.isEmpty else {
+        let sections = musicSectionIDs.isEmpty ? (sectionID.isEmpty ? [] : [sectionID]) : musicSectionIDs
+        guard !sections.isEmpty else {
             throw MozzError.unsupported("Plex music section not resolved; call musicSections() first")
         }
-        let response = try await client.send(
-            Endpoint(path: "library/sections/\(sectionID)/all", query: [
-                URLQueryItem(name: "type", value: "\(type)"),
-                URLQueryItem(name: "sort", value: "titleSort:asc"),
-            ] + containerQuery(offset: offset, limit: limit)),
-            as: PlexContainerResponse.self
-        )
-        let items = (response.MediaContainer.Metadata ?? []).compactMap(map)
-        return CatalogPage(items: items, totalCount: response.MediaContainer.totalSize)
+        // Present the selected sections as one concatenated stream so the generic
+        // (global-offset) sync paging spans them all. We advance to the next
+        // section only when the current one is truly EXHAUSTED (start + returned
+        // >= its totalSize) — never on a merely short page, which some servers
+        // return mid-section (advancing on a short page would skip or duplicate
+        // items). Every section's `totalSize` is summed into the combined total,
+        // so the sync's completeness/prune guard sees the true grand total and a
+        // truncated section can't authorize a wipe. `X-Plex-Container-Size: 0`
+        // cheaply returns just a section's total once the window is full.
+        var skip = offset
+        var items: [T] = []
+        var combinedTotal = 0
+        var windowFilled = false
+        for section in sections {
+            let want = windowFilled ? 0 : max(0, limit - items.count)
+            let response = try await client.send(
+                Endpoint(path: "library/sections/\(section)/all", query: [
+                    URLQueryItem(name: "type", value: "\(type)"),
+                    URLQueryItem(name: "sort", value: "titleSort:asc"),
+                ] + containerQuery(offset: max(0, skip), limit: want)),
+                as: PlexContainerResponse.self
+            )
+            let sectionTotal = response.MediaContainer.totalSize ?? (response.MediaContainer.Metadata?.count ?? 0)
+            combinedTotal += sectionTotal
+            if windowFilled { continue } // only summing remaining sections' totals
+            if skip >= sectionTotal {
+                skip -= sectionTotal // this whole section precedes the window
+                continue
+            }
+            let batch = (response.MediaContainer.Metadata ?? []).compactMap(map)
+            items.append(contentsOf: batch)
+            if skip + batch.count >= sectionTotal {
+                skip = 0 // section exhausted — the window may continue into the next
+            } else {
+                windowFilled = true // short page mid-section: resume here next call
+            }
+            if items.count >= limit { windowFilled = true }
+        }
+        return CatalogPage(items: items, totalCount: combinedTotal)
     }
 
     private func containerQuery(offset: Int, limit: Int) -> [URLQueryItem] {

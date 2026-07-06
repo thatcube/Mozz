@@ -41,6 +41,20 @@ public struct ActiveServer: Sendable {
     public var capabilities: ServerCapabilities
 }
 
+/// A Plex server the account can reach, for the server picker.
+public struct PlexServerOption: Identifiable, Sendable, Hashable {
+    public let id: String   // Plex machine identifier
+    public let name: String
+    public let isCurrent: Bool
+}
+
+/// A music library on the active Plex server, for the library picker.
+public struct PlexMusicLibraryOption: Identifiable, Sendable, Hashable {
+    public let id: String   // section key
+    public let title: String
+    public let isSelected: Bool
+}
+
 /// The composition root. Owns the long-lived services (database, repository,
 /// download manager, playback engine, credential store) and knows how to build
 /// a backend from a stored or freshly-authenticated session. Created once and
@@ -150,10 +164,16 @@ public final class AppEnvironment: ObservableObject {
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
-            clientIdentifier: session.clientIdentifier, musicSectionID: nil
+            clientIdentifier: session.clientIdentifier, musicSectionID: nil,
+            accountToken: session.accountToken, selectedMusicSectionIDs: nil
         )
-        try await activate(stored)
+        // Persist BEFORE activation so buildBackend's Plex section resolution can
+        // load this session, add the resolved section id and save it back (it
+        // would otherwise be a no-op on first sign-in — nothing to load — and the
+        // section would be re-resolved every launch). Do NOT re-save `stored`
+        // afterwards: that clobbered the resolved section back to nil.
         SessionPersistence.save(stored, to: credentials)
+        try await activate(stored)
     }
 
     /// Activate the offline demo: generate a synthetic catalog and serve a
@@ -344,6 +364,11 @@ public final class AppEnvironment: ObservableObject {
 
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+        guard active != nil else { throw MozzError.unsupported("No active server") }
+        // Plex can't browse without a music-library section id. Resolve it now if
+        // activation didn't (self-healing), so a plain "Sync Now" recovers without
+        // a re-login — and surfaces a clear error if the server has no music.
+        try await ensurePlexMusicSection()
         guard let active else { throw MozzError.unsupported("No active server") }
         // Catalog sync uses a bulk-timeout backend: a single page of a few
         // hundred items can take tens of seconds to generate on a large/slow
@@ -462,6 +487,125 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
+    /// Ensure the active Plex backend is set up to sync ALL the server's music
+    /// libraries. Plex browse endpoints require a section id, and a server can
+    /// host several music libraries — the user's default is to sync them all — so
+    /// we resolve the full set of `artist` sections here (fresh each sync, so
+    /// newly-added libraries are picked up) and rebuild the active backend to span
+    /// them. On success it persists the primary section to the connection/DB/
+    /// keychain (a "music resolved" marker + back-compat). If the server exposes
+    /// no music library it throws a clear error naming the sections it DOES have,
+    /// instead of the later cryptic "section not resolved". No-op for non-Plex.
+    private func ensurePlexMusicSection() async throws {
+        guard let current = active, current.connection.kind == .plex,
+              let plex = current.backend as? PlexBackend else { return }
+
+        guard let sections = try? await plex.musicSections(), !sections.isEmpty else {
+            let summary: String
+            do {
+                let all = try await plex.allLibrarySections()
+                summary = all.isEmpty
+                    ? "the server returned no library sections"
+                    : "found only " + all.map { "\($0.title ?? "?") (\($0.type ?? "?"))" }.joined(separator: ", ")
+            } catch {
+                summary = "couldn't list sections: \(error.localizedDescription)"
+            }
+            throw MozzError.unsupported("No music library on ‘\(current.connection.name)’ — \(summary)")
+        }
+
+        let allIDs = sections.map(\.id)
+        // Honor the user's library selection (nil = all); ignore stale ids the
+        // server no longer has, and fall back to all if the selection resolves to
+        // nothing (e.g. every chosen library was removed).
+        let stored = SessionPersistence.load(credentials)
+        let selected = stored?.selectedMusicSectionIDs
+        var ids = allIDs
+        if let selected {
+            let filtered = allIDs.filter { selected.contains($0) }
+            if !filtered.isEmpty { ids = filtered }
+        }
+        // Already spanning exactly this set — nothing to rebuild.
+        if Set(ids) == Set(plex.musicSectionIDs), current.connection.musicSectionID != nil { return }
+        guard let token = stored?.token else { return }
+
+        var connection = current.connection
+        connection.musicSectionID = ids.first
+        let backend = PlexBackend(connection: connection, token: token, clientInfo: clientInfo, musicSectionIDs: ids)
+        try await CatalogWriter(database).saveServer(connection)
+        if var stored = SessionPersistence.load(credentials) {
+            stored.musicSectionID = ids.first
+            SessionPersistence.save(stored, to: credentials)
+        }
+        finishActivation(connection: connection, backend: backend, capabilities: current.capabilities)
+    }
+
+    // MARK: Plex server & library picker
+
+    /// Discover the account's Plex servers for the picker (grouped by server, one
+    /// entry each). Empty for non-Plex or when the account token isn't stored.
+    public func plexServers() async -> [PlexServerOption] {
+        guard active?.connection.kind == .plex,
+              let accountToken = SessionPersistence.load(credentials)?.accountToken else { return [] }
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: clientIdentifier)
+        guard let connections = try? await auth.discoverConnections(accountToken: accountToken) else { return [] }
+        let currentName = active?.connection.name
+        var seen = Set<String>()
+        var options: [PlexServerOption] = []
+        for connection in connections where !connection.clientIdentifier.isEmpty {
+            if seen.insert(connection.clientIdentifier).inserted {
+                options.append(PlexServerOption(id: connection.clientIdentifier,
+                                                name: connection.serverName,
+                                                isCurrent: connection.serverName == currentName))
+            }
+        }
+        return options
+    }
+
+    /// The active Plex server's music libraries, with the user's current
+    /// selection (nil selection = all selected).
+    public func plexMusicLibraries() async -> [PlexMusicLibraryOption] {
+        guard let plex = active?.backend as? PlexBackend,
+              let sections = try? await plex.musicSections() else { return [] }
+        let selected = SessionPersistence.load(credentials)?.selectedMusicSectionIDs
+        return sections.map { section in
+            PlexMusicLibraryOption(id: section.id, title: section.title,
+                                   isSelected: selected?.contains(section.id) ?? true)
+        }
+    }
+
+    /// Switch to a different Plex server (by machine identifier): pick its best
+    /// music connection, reset the library selection to "all", persist, activate
+    /// and re-sync.
+    public func selectPlexServer(id serverMachineID: String) async {
+        guard let existing = SessionPersistence.load(credentials),
+              let accountToken = existing.accountToken else { return }
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: clientIdentifier)
+        guard let connections = try? await auth.discoverConnections(accountToken: accountToken) else { return }
+        let serverConnections = connections.filter { $0.clientIdentifier == serverMachineID }
+        guard let chosen = await auth.firstMusicConnection(serverConnections) else { return }
+        let stored = StoredSession(
+            kind: .plex, baseURL: chosen.uri, token: chosen.accessToken,
+            userID: nil, serverName: chosen.serverName, clientIdentifier: clientIdentifier,
+            musicSectionID: nil, accountToken: accountToken, selectedMusicSectionIDs: nil)
+        SessionPersistence.save(stored, to: credentials)
+        do {
+            try await activate(stored)
+            startSync()
+        } catch {
+            lastSyncSummary = "Couldn't switch server: \(error.localizedDescription)"
+        }
+    }
+
+    /// Persist which music libraries to sync (empty = all) and re-sync. The next
+    /// sync's `ensurePlexMusicSection` applies the selection, and its prune drops
+    /// tracks from deselected libraries.
+    public func setSelectedMusicLibraries(_ ids: [String]) {
+        guard var stored = SessionPersistence.load(credentials) else { return }
+        stored.selectedMusicSectionIDs = ids.isEmpty ? nil : ids
+        SessionPersistence.save(stored, to: credentials)
+        startSync()
+    }
+
     /// Rebuild the active backend with a bulk-timeout transport for catalog
     /// sync. Returns `nil` for the demo (or if the session can't be loaded), so
     /// the caller falls back to the interactive backend.
@@ -475,8 +619,12 @@ public final class AppEnvironment: ObservableObject {
             return JellyfinBackend(connection: active.connection, token: stored.token,
                                    clientInfo: clientInfo, transport: bulk)
         case .plex:
+            // Span whatever set of music libraries the active backend resolved
+            // (see ensurePlexMusicSection, which runs first in syncNow).
+            let sectionIDs = (active.backend as? PlexBackend)?.musicSectionIDs
             return PlexBackend(connection: active.connection, token: stored.token,
-                               clientInfo: clientInfo, transport: bulk)
+                               clientInfo: clientInfo, transport: bulk,
+                               musicSectionIDs: sectionIDs)
         }
     }
 

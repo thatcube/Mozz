@@ -1,0 +1,18 @@
+{
+  "MediaContainer": {
+    "size": 1,
+    "totalSize": 1,
+    "offset": 0,
+    "Metadata": [
+      {
+        "ratingKey": "2001",
+        "type": "artist",
+        "title": "Aphex Twin",
+        "titleSort": "Aphex Twin",
+        "thumb": "/library/metadata/2001/thumb/1700000000",
+        "childCount": 5,
+        "Genre": [{ "tag": "IDM" }]
+      }
+    ]
+  }
+}

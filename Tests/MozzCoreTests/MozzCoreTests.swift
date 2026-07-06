@@ -140,6 +140,19 @@ final class MozzErrorTests: XCTestCase {
         XCTAssertFalse(MozzError.unauthorized.isReachabilityFailure)
         XCTAssertFalse(MozzError.badStatus(500).isReachabilityFailure)
     }
+
+    func testLocalizedDescriptionSurfacesDetail() {
+        // `unsupported`/`transport`/`decodingFailed` carry a human message that
+        // must reach `localizedDescription` (used in the sync-failed banner) —
+        // otherwise it falls back to the opaque "error N" NSError text.
+        XCTAssertEqual(
+            MozzError.unsupported("No music library on ‘X’").errorDescription,
+            "No music library on ‘X’")
+        XCTAssertEqual(MozzError.transport("timed out").errorDescription, "timed out")
+        let localized = (MozzError.unsupported("why") as Error).localizedDescription
+        XCTAssertEqual(localized, "why")
+        XCTAssertFalse(localized.contains("error 2"))
+    }
 }
 
 final class CredentialStoreTests: XCTestCase {
@@ -180,5 +193,18 @@ final class PlexAuthURLTests: XCTestCase {
         XCTAssertTrue(string.contains("code=WXYZ"))
         XCTAssertTrue(string.contains("clientID=client-uuid-123"))
         XCTAssertTrue(string.contains("Mozz"))
+    }
+
+    func testAuthAppURLContextParamsAreSingleEncoded() throws {
+        // Regression: the fragment was percent-encoded twice, turning the
+        // `context[device][product]` brackets into "%255B"/"%255D" — Plex then
+        // rejected the link ("we were unable to complete this request"). Brackets
+        // must be encoded exactly once (%5B/%5D).
+        let session = PlexPinSession(id: 1, code: "WXYZ", clientIdentifier: "cid")
+        let info = ClientInfo(product: "Mozz", version: "1.0", deviceName: "iPhone", platform: "iOS", platformVersion: "17.0")
+        let string = try XCTUnwrap(session.authAppURL(clientInfo: info)).absoluteString
+        XCTAssertFalse(string.contains("%255"), "fragment must not be double percent-encoded")
+        XCTAssertTrue(string.contains("context%5Bdevice%5D%5Bproduct%5D=Mozz"),
+                      "context param name must be single-encoded")
     }
 }

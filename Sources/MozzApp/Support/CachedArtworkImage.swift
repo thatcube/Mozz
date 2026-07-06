@@ -54,6 +54,14 @@ actor ArtworkImageLoader {
         if let result { artworkMemoryCache.insert(result, for: url) }
         return result
     }
+
+    /// Warm the cache for a URL ahead of time (fire-and-forget), so a view that
+    /// appears later renders the artwork on its first frame instead of popping it
+    /// in. Deduped by the same cache check + in-flight coalescing as `image(for:)`.
+    nonisolated func prefetch(_ url: URL) {
+        if artworkMemoryCache.image(for: url) != nil { return }
+        Task.detached(priority: .utility) { _ = await ArtworkImageLoader.shared.image(for: url) }
+    }
 }
 
 private extension Image {

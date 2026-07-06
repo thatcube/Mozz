@@ -122,6 +122,39 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// Every track as a domain model, alphabetical (matching ``tracksPage``), for
+    /// a "Play/Shuffle all songs" action. The fetch AND the record→domain mapping
+    /// run inside the database read (off the main thread), so tapping Play never
+    /// hitches even on a very large library.
+    public func allTracksForPlayback(serverId: ServerID? = nil) async throws -> [Track] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                \(Self.serverClause(serverId))
+                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE
+                """, arguments: Self.serverArgs(serverId))
+                .map { $0.toDomain() }
+        }
+    }
+
+    /// Every track as a domain model, grouped by album (album → disc → track
+    /// order), for a "Play/Shuffle all albums" action on the album grid. Fetch +
+    /// mapping run off the main thread.
+    public func allAlbumTracksForPlayback(serverId: ServerID? = nil) async throws -> [Track] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM track
+                JOIN album ON album.serverId = track.serverId AND album.remoteId = track.albumRemoteId
+                \(serverId != nil ? "WHERE track.serverId = ?" : "")
+                ORDER BY album.albumGroupKey,
+                         COALESCE(track.discNumber, 1),
+                         COALESCE(track.trackNumber, 999999),
+                         track.sortTitle COLLATE NOCASE
+                """, arguments: Self.serverArgs(serverId))
+                .map { $0.toDomain() }
+        }
+    }
+
     // MARK: Detail
 
     /// Albums by an artist, newest first (then alphabetical). Fragments of the
@@ -297,6 +330,31 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// An artist's tracks ranked by local play count (most-played first), then a
+    /// stable disc/track/title order. Membership is via the artist's albums, so
+    /// it also works for album-artists that no track directly references. Used
+    /// for the "Top Songs" section (limit 5) and its "See All" list (large limit).
+    public func topTracks(forArtistRemoteId artistRemoteId: String, serverId: ServerID, limit: Int) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT track.* FROM track
+                LEFT JOIN (
+                    SELECT track_ref, COUNT(*) AS plays
+                    FROM play_event
+                    WHERE kind IN ('started', 'completed')
+                    GROUP BY track_ref
+                ) pe ON (track.serverId || ':' || track.remoteId) = pe.track_ref
+                WHERE track.serverId = ? AND track.albumRemoteId IN (
+                    SELECT remoteId FROM album WHERE serverId = ? AND artistRemoteId = ?
+                )
+                ORDER BY COALESCE(pe.plays, 0) DESC,
+                         track.discNumber, track.trackNumber,
+                         track.sortTitle COLLATE NOCASE, track.title COLLATE NOCASE
+                LIMIT ?
+                """, arguments: [serverId, serverId, artistRemoteId, limit])
+        }
+    }
+
     /// The "Liked Songs" list: Jellyfin favorites plus Plex tracks rated at or
     /// above ``LikePolicy/ratingThreshold`` — unified so one query serves both
     /// backends (a track carries only one of the two signals). Highest-rated
@@ -319,6 +377,20 @@ public struct LibraryRepository: Sendable {
                 """
             args.append(limit)
             return try TrackRecord.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+        }
+    }
+
+    /// Count of liked tracks (Jellyfin favorites or Plex ≥ threshold rating) —
+    /// for the Home "Liked Songs" tile, without materializing the rows.
+    public func likedTracksCount(serverId: ServerID? = nil) async throws -> Int {
+        try await database.read { db in
+            var sql = "SELECT COUNT(*) FROM track WHERE (isFavorite = 1 OR COALESCE(rating, 0) >= \(LikePolicy.ratingThreshold))"
+            var args: [DatabaseValueConvertible?] = []
+            if let serverId {
+                sql += " AND serverId = ?"
+                args.append(serverId)
+            }
+            return try Int.fetchOne(db, sql: sql, arguments: StatementArguments(args)) ?? 0
         }
     }
 

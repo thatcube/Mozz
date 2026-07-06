@@ -109,6 +109,18 @@ final class JellyfinCatalogTests: XCTestCase {
         XCTAssertTrue(track.isFavorite)
     }
 
+    func testTrackArtworkFallsBackToAlbumArt() async throws {
+        let page = try await makeBackend().fetchTracks(offset: 0, limit: 50)
+        // t2 has no own ImageTags but the album has a Primary image: the key must
+        // fall back to the ALBUM's art, not a bare (404-ing) track id.
+        let withAlbumArt = try XCTUnwrap(page.items.first { $0.id == "t2" })
+        XCTAssertEqual(withAlbumArt.artwork?.key, "al1|talb1")
+        // t3 has neither its own art nor an album image tag: no artwork at all,
+        // so the UI shows a placeholder instead of requesting a 404 URL.
+        let noArt = try XCTUnwrap(page.items.first { $0.id == "t3" })
+        XCTAssertNil(noArt.artwork)
+    }
+
     func testDecodesPlaylists() async throws {
         let page = try await makeBackend().fetchPlaylists(offset: 0, limit: 50)
         let playlist = try XCTUnwrap(page.items.first)

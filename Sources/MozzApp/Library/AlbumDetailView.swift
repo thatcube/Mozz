@@ -3,9 +3,9 @@ import MozzCore
 import MozzDatabase
 import MozzDownloads
 
-/// An album's track list with play, shuffle, and offline-download controls.
-/// Download state is read from the DB and reflected live via the
-/// ``DownloadManager`` progress map.
+/// An album on the shared media-detail scaffold: a full square cover hero that
+/// fades into the extracted color, Play/Shuffle + Download actions, and numbered
+/// track rows with a footer (year · N songs · duration).
 struct AlbumDetailView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var downloads: DownloadManager
@@ -15,78 +15,70 @@ struct AlbumDetailView: View {
     @State private var downloadStates: [Int64: DownloadState] = [:]
     @State private var loaded = false
 
+    private var canDownload: Bool { env.active?.capabilities.supportsOriginalFileDownload != false }
+
     var body: some View {
-        List {
-            Section {
-                header
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-            }
-            Section {
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                    TrackRow(
-                        track: track,
-                        downloadState: track.id.flatMap { downloadStates[$0] },
-                        progress: track.id.flatMap { downloads.progress[$0] }
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture { play(from: index) }
+        MediaDetailScaffold(
+            hero: MediaHero(style: .centeredArtwork,
+                            artwork: album.artworkKey.map(ArtworkRef.init(key:)),
+                            seed: album.title),
+            title: album.title,
+            subtitle: album.artistName,
+            meta: metaLine,
+            actions: {
+                VStack(spacing: 10) {
+                    DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle)
+                    if canDownload {
+                        Button {
+                            Task {
+                                await env.downloadAlbum(groupKey: album.albumGroupKey)
+                                await refreshDownloadStates()
+                            }
+                        } label: {
+                            Label("Download Album", systemImage: "arrow.down.circle")
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white)
+                        .controlSize(.large)
+                    }
                 }
+            },
+            content: {
+                DetailSongRows(
+                    tracks: tracks,
+                    showArtist: false,
+                    downloadStates: downloadStates,
+                    progress: downloads.progress,
+                    onPlay: { play(from: $0) }
+                )
             }
-        }
-        .listStyle(.plain)
-        .navigationTitle(album.title)
-        .inlineNavigationTitle()
+        )
         .task { await load() }
         .onChange(of: downloads.progress.count) { _, _ in
             Task { await refreshDownloadStates() }
         }
     }
 
-    private var header: some View {
-        VStack(spacing: 12) {
-            ArtworkView(artwork: album.artworkKey.map(ArtworkRef.init(key:)), seed: album.title, size: 200, cornerRadius: 12)
-            VStack(spacing: 2) {
-                Text(album.title).font(.title3.bold()).multilineTextAlignment(.center)
-                Text(album.artistName).foregroundStyle(.secondary)
-                if let year = album.year {
-                    Text(String(year)).font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            HStack(spacing: 12) {
-                Button { play(from: 0) } label: {
-                    Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button { shuffle() } label: {
-                    Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            Button {
-                Task {
-                    await env.downloadAlbum(groupKey: album.albumGroupKey)
-                    await refreshDownloadStates()
-                }
-            } label: {
-                Label("Download Album", systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(env.active?.capabilities.supportsOriginalFileDownload == false)
-        }
-        .frame(maxWidth: .infinity)
+    /// "2021 · 12 songs · 48 min" — omits pieces that aren't known yet.
+    private var metaLine: String? {
+        guard loaded else { return album.year.map(String.init) }
+        var parts: [String] = []
+        if let year = album.year { parts.append(String(year)) }
+        parts.append(tracks.count == 1 ? "1 song" : "\(tracks.count) songs")
+        let total = Format.longDuration(tracks.reduce(0) { $0 + $1.duration })
+        if !total.isEmpty { parts.append(total) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func play(from index: Int) {
-        let domain = tracks.map { $0.toDomain() }
-        env.playback.play(tracks: domain, startAt: index)
+        env.playback.play(tracks: tracks.map { $0.toDomain() }, startAt: index)
     }
 
     private func shuffle() {
-        let domain = tracks.map { $0.toDomain() }
         env.playback.setShuffle(true)
-        env.playback.play(tracks: domain, startAt: 0)
+        env.playback.play(tracks: tracks.map { $0.toDomain() }, startAt: 0)
     }
 
     private func load() async {

@@ -47,7 +47,9 @@ struct MozzWeeklyDetailView: View {
         tracks = (try? await env.recommendations.mozzWeeklyTracks()) ?? []
         if let set = try? await env.recommendations.mozzWeeklySet() { title = set.title }
         // Pick a stable random track's artwork as the hero backdrop source.
-        if let pick = tracks.filter({ $0.artworkKey != nil }).randomElement() ?? tracks.first {
+        // Deterministic pick (matches Home's representative track) so the hero
+        // artwork can be preloaded before the page opens — no image pop-in.
+        if let pick = tracks.first(where: { $0.artworkKey != nil }) ?? tracks.first {
             heroArtwork = pick.artworkKey.map(ArtworkRef.init(key:))
             heroSeed = pick.artworkKey ?? pick.title
         }

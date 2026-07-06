@@ -54,3 +54,34 @@ public enum MozzError: Error, Sendable, Hashable {
         }
     }
 }
+
+extension MozzError: LocalizedError {
+    /// A human-readable message. Without this, `localizedDescription` falls back
+    /// to the opaque "The operation couldn't be completed. (MozzCore.MozzError
+    /// error N.)" — which hid the descriptive text carried by `unsupported`,
+    /// `decodingFailed` and `transport` (e.g. the reason a Plex sync failed).
+    public var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            return "Your sign-in has expired or was rejected. Please sign in again."
+        case .notFound:
+            return "The requested item was not found on the server."
+        case .conflict:
+            return "The request conflicted with the server's current state."
+        case .badStatus(let code):
+            return "The server returned an unexpected status (\(code))."
+        case .serverUnreachable:
+            return "Couldn't reach the server. Check your connection and try again."
+        case .decodingFailed(let detail):
+            return "Couldn't read the server's response. \(detail)"
+        case .invalidResponse:
+            return "The server's response was not in the expected format."
+        case .unsupported(let detail):
+            return detail
+        case .cancelled:
+            return "The operation was cancelled."
+        case .transport(let detail):
+            return detail
+        }
+    }
+}
