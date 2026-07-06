@@ -864,6 +864,15 @@ private struct IslandSlideText: View {
                 transitioning = false
                 outgoing = nil
                 current = new
+                // Reset the marquee offset to home WITHOUT animating, or the new
+                // title would paint at the previous title's scroll offset and then
+                // visibly slide in when the task eases it home. (Swipe/skip changes
+                // are masked by `transitioning`→`currentX`, but auto-advance and
+                // library selection take this instant path.)
+                if marqueeX != 0 {
+                    var t = Transaction(); t.disablesAnimations = true
+                    withTransaction(t) { marqueeX = 0 }
+                }
                 return
             }
             let enter = dir > 0 ? zoneW * islandEnterOvershoot : -zoneW * islandEnterOvershoot  // incoming from the correct side, beyond the fade

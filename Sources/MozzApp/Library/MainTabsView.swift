@@ -240,6 +240,14 @@ struct MainTabBar: View {
     @State private var blobLead: CGFloat = .nan
     @State private var blobTrail: CGFloat = .nan
     @State private var draggingBlob = false
+    /// Finger x at touch-down, and whether it has since moved beyond `blobDragSlop`.
+    /// Used to distinguish a genuine drag (the touch reader commits it) from a
+    /// stationary tap (the tab Button commits it) — so a tap doesn't fire BOTH
+    /// paths, which would double-invoke `onPressTab` and bump the pop-to-root token
+    /// on every tab switch.
+    @State private var blobDownX: CGFloat = 0
+    @State private var blobMoved = false
+    private static let blobDragSlop: CGFloat = 10
     /// Tab under the finger while dragging (drives the accent colour live).
     @State private var hoverTab: AppTab?
     private static let leadSpring = Animation.spring(response: 0.24, dampingFraction: 0.72)
@@ -419,11 +427,14 @@ struct MainTabBar: View {
             // First touch: GRAB — both endpoints spring over to the finger (so a
             // stationary press-and-hold pulls the blob to you, no swipe needed).
             draggingBlob = true
+            blobDownX = x
+            blobMoved = false
             withAnimation(Self.leadSpring) { blobLead = c }
             withAnimation(Self.trailSpring) { blobTrail = c }
         } else {
             // Then follow: leading edge tracks the finger 1:1, trailing edge lags
             // on a softer spring → the capsule stretches (liquid) while moving.
+            if abs(x - blobDownX) > Self.blobDragSlop { blobMoved = true }
             blobLead = c
             withAnimation(Self.trailSpring) { blobTrail = c }
         }
@@ -431,18 +442,30 @@ struct MainTabBar: View {
 
     private func onBlobTouchEnded(x rawX: CGFloat, W: CGFloat, expanded: Bool) {
         let x = min(max(rawX, 0), W)
+        let moved = blobMoved
+        let wasGrab = draggingBlob
+        draggingBlob = false
+        blobMoved = false
+        hoverTab = nil
         // Centre-gap touches belong to the island (see onBlobTouchChanged) — never
         // let a release there undock/navigate.
-        if barTouchIgnored(x: x, W: W, expanded: expanded) { draggingBlob = false; return }
+        if barTouchIgnored(x: x, W: W, expanded: expanded) { return }
         let target = tab(at: x, W: W, expanded: expanded)
-        let wasDragging = draggingBlob
-        draggingBlob = false
-        hoverTab = nil
-        // Only commit if we actually engaged (grabbed). A stray end without a begin
-        // shouldn't navigate.
-        guard wasDragging || !expanded else { return }
-        onPressTab(target)          // switch + pop to root + expand the bar
-        moveBlob(to: expandedCenterX(target, W: W))
+        if moved {
+            // Genuine drag: the touch reader owns the commit. The Button the touch
+            // began on won't fire (the touch ended elsewhere), so this is the only
+            // commit — no double onPressTab.
+            onPressTab(target)
+            moveBlob(to: expandedCenterX(target, W: W))
+        } else if wasGrab {
+            // Stationary tap that grabbed the blob: the tab Button commits the
+            // selection (so we DON'T call onPressTab here — that double-call is what
+            // bumped the pop-to-root token on every switch). Just settle the grabbed
+            // blob onto the target's centre so it doesn't rest at the finger offset.
+            moveBlob(to: expandedCenterX(target, W: W))
+        }
+        // Minimized taps (no grab, no move) are handled entirely by the circle's
+        // Button — nothing to commit here.
     }
 
     /// True when a touch at `x` should be IGNORED by the bar because it falls in the
