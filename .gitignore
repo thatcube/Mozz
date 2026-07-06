@@ -24,3 +24,10 @@ App/Mozz/Info.plist
 
 # Editor
 *.swp
+
+# AI/agent working docs — kept local, never committed (keeps `main` human-authored)
+AGENTS.local.md
+CLAUDE.local.md
+.ai/
+.agents/
+*.agent.md

@@ -81,8 +81,12 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Text("Mozz · GPL-3.0 · offline-first music for Plex & Jellyfin")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Mozz \(Self.appVersion)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("GPL-3.0 · offline-first music for Plex & Jellyfin")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -105,5 +109,13 @@ struct SettingsView: View {
             Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
                 .foregroundStyle(enabled ? .green : .secondary)
         }
+    }
+
+    /// Marketing version + build from the bundle, e.g. "0.1.0 (1)".
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
     }
 }
