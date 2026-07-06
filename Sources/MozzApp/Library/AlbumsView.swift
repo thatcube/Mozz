@@ -56,13 +56,12 @@ struct AlbumsView: View {
         }
     }
 
-    /// Shuffle every album's tracks, starting on a random track.
+    /// Shuffle every album's tracks with a balanced (artist-spread) order.
     private func shuffleAll() {
         Task {
             let all = (try? await env.repository.allAlbumTracksForPlayback(serverId: env.active?.connection.id)) ?? []
             guard !all.isEmpty else { return }
-            env.playback.setShuffle(true)
-            env.playback.play(tracks: all, startAt: Int.random(in: 0..<all.count))
+            env.playback.playShuffled(all)
         }
     }
 

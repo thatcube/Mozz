@@ -56,14 +56,12 @@ struct SongsView: View {
         }
     }
 
-    /// Shuffle the whole song catalog, starting on a random track so it doesn't
-    /// always open on the alphabetically-first song.
+    /// Shuffle the whole song catalog with a balanced (artist-spread) order.
     private func shuffleAll() {
         Task {
             let all = (try? await env.repository.allTracksForPlayback(serverId: env.active?.connection.id)) ?? []
             guard !all.isEmpty else { return }
-            env.playback.setShuffle(true)
-            env.playback.play(tracks: all, startAt: Int.random(in: 0..<all.count))
+            env.playback.playShuffled(all)
         }
     }
 

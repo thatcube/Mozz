@@ -108,6 +108,17 @@ public final class PlaybackEngine: ObservableObject {
         reload(autoplay: true)
     }
 
+    /// Load a set of tracks and start playing a freshly balanced shuffle. The
+    /// single "Shuffle" entry point for every browse/detail surface: it turns
+    /// shuffle on and picks a random-feeling first track, so behavior is
+    /// identical everywhere.
+    public func playShuffled(_ tracks: [Track]) {
+        logTerminal(.skipped, position: snapshot.elapsed)
+        queue.setItemsShuffled(tracks)
+        try? session.activate()
+        reload(autoplay: true)
+    }
+
     /// A serializable snapshot of the current session (queue + position), or
     /// `nil` when nothing is loaded. The app persists this to resume on relaunch.
     public var persistentState: PlaybackPersistentState? {
@@ -198,7 +209,7 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     public func setRepeatMode(_ mode: RepeatMode) {
-        queue.repeatMode = mode
+        queue.setRepeatMode(mode)
         refillLookahead()
         publish()
     }
