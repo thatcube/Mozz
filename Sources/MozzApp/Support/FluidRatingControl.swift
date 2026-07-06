@@ -21,7 +21,7 @@ private enum RatingTuning {
     /// Vertical offset of the revealed strip above the player star so the finger
     /// doesn't cover it.
     static let revealYOffset: CGFloat = -68
-    static let tint: Color = .yellow
+    static let tint: Color = .mozzBrand
     static let inactiveTint: Color = .secondary
 }
 
@@ -99,7 +99,7 @@ struct RatingStripView: View {
             ForEach(0..<RatingTuning.starCount, id: \.self) { i in
                 Image(systemName: symbol(for: i))
                     .font(.system(size: starSize * 0.9))
-                    .foregroundStyle(RatingTuning.tint)
+                    .foregroundStyle(isFilled(i) ? RatingTuning.tint : RatingTuning.inactiveTint)
                     .symbolRenderingMode(.hierarchical)
                     .frame(width: starSize, height: starSize)
             }
@@ -137,6 +137,12 @@ struct RatingStripView: View {
         if v >= starValue { return "star.fill" }
         if v >= starValue - 0.5 { return "star.leadinghalf.filled" }
         return "star"
+    }
+
+    /// A star is "filled" (brand-colored) once it holds at least a half; empty
+    /// stars stay gray so the red fill stands out.
+    private func isFilled(_ index: Int) -> Bool {
+        (value ?? 0) >= Double(index + 1) - 0.5
     }
 }
 

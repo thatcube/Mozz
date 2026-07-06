@@ -109,6 +109,10 @@ extension Color {
     /// The near-black content background for the (always-dark, Apple-Music-style)
     /// media detail page, below the colored hero.
     static var mozzDetailBackground: Color { Color(white: 0.07) }
+
+    /// The Mozz brand color (#F50031) — a vivid crimson used for brand accents
+    /// such as the star rating fill.
+    static var mozzBrand: Color { Color(red: 245.0 / 255.0, green: 0.0, blue: 49.0 / 255.0) }
 }
 
 #if os(iOS)
