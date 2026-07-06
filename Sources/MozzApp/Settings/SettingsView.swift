@@ -72,16 +72,21 @@ struct SettingsView: View {
                         Label("Support Development", systemImage: "heart")
                     }
                     .accessibilityHint("Opens in Safari")
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Mozz \(Self.appVersion)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("GPL-3.0 · offline-first music for Plex & Jellyfin")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                    if let reviewURL = Self.appStoreReviewURL {
+                        Link(destination: reviewURL) {
+                            Label("Rate on the App Store", systemImage: "star")
+                        }
+                        .accessibilityHint("Opens the App Store")
                     }
-                    .accessibilityElement(children: .combine)
+                    LabeledContent {
+                        Text(Self.appVersion)
+                    } label: {
+                        Label("Version", systemImage: "info.circle")
+                    }
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("Mozz is a free, open-source, offline-first player for your own Plex & Jellyfin music. If you enjoy it, a GitHub star, an App Store review, or a small tip goes a long way — thank you! · GPL-3.0")
                 }
             }
             .navigationTitle("Settings")
@@ -99,6 +104,18 @@ struct SettingsView: View {
 
     private static let repoURL = URL(string: "https://github.com/thatcube/mozz")!
     private static let sponsorURL = URL(string: "https://github.com/sponsors/thatcube")!
+
+    /// App Store numeric ID, assigned once Mozz is published (e.g. "1234567890").
+    /// While empty, the "Rate on the App Store" row stays hidden so it never
+    /// points at a broken link.
+    private static let appStoreID = ""
+
+    /// Deep link straight to the App Store review composer, or `nil` until the
+    /// app has an App Store ID.
+    private static var appStoreReviewURL: URL? {
+        guard !appStoreID.isEmpty else { return nil }
+        return URL(string: "https://apps.apple.com/app/id\(appStoreID)?action=write-review")
+    }
 
     /// Marketing version + build from the bundle, e.g. "0.1.0 (1)".
     private static var appVersion: String {
