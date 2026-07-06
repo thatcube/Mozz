@@ -121,6 +121,13 @@ public final class AppEnvironment: ObservableObject {
     /// the widgets. Keyed by track id; bounded by the widget artwork pruning.
     private var widgetTintByTrack: [String: String] = [:]
 
+    /// Guards playback-state persistence: the widget/status Combine sinks fire
+    /// their INITIAL (empty) values the moment they're attached in `init` — before
+    /// `restoreSession()` runs — which would otherwise `clear()` the saved file
+    /// before we ever read it. We only allow persisting/clearing once a restore
+    /// has been attempted.
+    private var didAttemptPlaybackRestore = false
+
     public init(database: MusicDatabase, credentials: any CredentialStore, fileStore: DownloadFileStore) {
         self.database = database
         self.credentials = credentials
@@ -170,7 +177,7 @@ public final class AppEnvironment: ObservableObject {
     // MARK: Session lifecycle
 
     public func restoreSession() async {
-        defer { isRestoring = false }
+        defer { isRestoring = false; didAttemptPlaybackRestore = true }
         guard let saved = SessionPersistence.load(credentials) else { return }
         do {
             try await activate(saved)
@@ -874,6 +881,9 @@ public final class AppEnvironment: ObservableObject {
     /// Save (or clear) the on-disk playback session so it can be resumed after a
     /// cold launch.
     private func persistPlaybackState() {
+        // Don't touch the saved file until launch restore has been attempted —
+        // otherwise the sinks' initial empty emissions clear it before we read it.
+        guard didAttemptPlaybackRestore else { return }
         if let state = playback.persistentState {
             PlaybackStatePersistence.save(state)
         } else {

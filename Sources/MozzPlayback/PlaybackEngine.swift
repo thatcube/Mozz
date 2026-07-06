@@ -235,6 +235,10 @@ public final class PlaybackEngine: ObservableObject {
     private func reload(autoplay: Bool) {
         loadGeneration += 1
         let generation = loadGeneration
+        // Capture + clear the restore seek so it applies to exactly this load and
+        // never leaks onto a later, unrelated track.
+        let seekTarget = pendingSeek
+        pendingSeek = nil
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
@@ -261,8 +265,7 @@ public final class PlaybackEngine: ObservableObject {
                 self.applyNormalization(to: item, gainDB: track.normalizationGainDB)
                 self.player.insert(item, after: nil)
                 self.loaded = [(item, track, resolved.sessionID)]
-                if let seek = self.pendingSeek {
-                    self.pendingSeek = nil
+                if let seek = seekTarget {
                     self.player.seek(to: CMTime(seconds: seek, preferredTimescale: 600),
                                      completionHandler: { _ in })
                 }
