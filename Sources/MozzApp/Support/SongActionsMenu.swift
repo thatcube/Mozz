@@ -53,24 +53,11 @@ struct SongActionsMenu: View {
                 }
             }
         } label: {
-            // On ratings backends the trigger shows the current rating at a glance
-            // (★ N) before the menu is opened — matching the player. Plain ellipsis
-            // when unrated or on favorites backends.
-            HStack(spacing: 4) {
-                if env.usesRatings, let r = rating, r > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "star.fill")
-                        Text(Self.format(r)).monospacedDigit()
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.yellow)
-                }
-                Image(systemName: "ellipsis")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(minWidth: 32, minHeight: 32)
-            .contentShape(Rectangle())
+            Image(systemName: "ellipsis")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("More actions")
@@ -102,9 +89,5 @@ struct SongActionsMenu: View {
                 Label(liked ? "Unlike" : "Like", systemImage: liked ? "heart.fill" : "heart")
             }
         }
-    }
-
-    static func format(_ r: Double) -> String {
-        LikeControl.format(r)
     }
 }

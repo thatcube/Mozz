@@ -11,9 +11,13 @@ private enum RatingTuning {
     static let stripStarSize: CGFloat = 30
     /// Gap between stars in the expanded strip.
     static let stripStarSpacing: CGFloat = 10
-    /// Dead-zone at the strip's leading edge that maps to "no rating" (nil).
-    /// Dragging (or tapping) here clears — no 6th icon needed.
+    /// Dead-zone at the strip's leading edge that maps to "no rating" (nil) during
+    /// the hold-drag reveal. Dragging left into it clears — no 6th icon needed.
+    /// (The tap popover uses zero here and clears via a subtle "Clear" link.)
     static let zeroZoneWidth: CGFloat = 24
+    /// Movement (points) past which a press is treated as a drag-to-rate instead
+    /// of a tap.
+    static let moveSlop: CGFloat = 10
     /// How long the finger must rest on the player star before the strip reveals
     /// and drag-to-rate begins. Short so it feels immediate but still lets a
     /// quick tap open the sticky popover instead.
@@ -154,9 +158,12 @@ struct RatingPopoverContent: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            RatingStripView(value: current) { newValue in
-                current = newValue
-                onSet(newValue)
+            // No leading zero-zone here (symmetric padding); clearing is via the
+            // "Clear" link below rather than a tap-left dead-zone.
+            RatingStripView(value: current, zeroZone: 0) { newValue in
+                let picked = newValue ?? 0.5
+                current = picked
+                onSet(picked)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
@@ -211,6 +218,9 @@ struct FluidRatingControl: View {
     @State private var showingPicker = false
     @State private var stripFrame: CGRect = .zero
     @State private var lastHapticValue: Double?
+    @State private var touchDownAt: Date?
+    @State private var lastX: CGFloat = 0
+    @State private var revealWork: DispatchWorkItem?
 
     private let haptic = RatingHaptic()
     private let space = "fluidRating"
@@ -221,14 +231,7 @@ struct FluidRatingControl: View {
     }
 
     var body: some View {
-        collapsedStar
-            .overlay(alignment: .center) {
-                if isDragging { revealStrip.offset(y: RatingTuning.revealYOffset) }
-            }
-            .coordinateSpace(name: space)
-            .contentShape(Rectangle())
-            .highPriorityGesture(reduceMotion ? nil : holdDrag)
-            .onTapGesture { showingPicker = true }
+        surface
             .popover(isPresented: $showingPicker) {
                 RatingPopoverContent(rating: rating) { newValue in
                     rating = newValue
@@ -242,6 +245,26 @@ struct FluidRatingControl: View {
             .accessibilityAdjustableAction { direction in accessibilityAdjust(direction) }
             .onChange(of: track.id) { _, _ in rating = track.rating }
             .onChange(of: track.rating) { _, new in rating = new }
+    }
+
+    // Reduce Motion: a plain tap opens the sticky picker (no hold-drag reveal).
+    // Otherwise a single drag gesture handles both a quick tap (→ popover) and a
+    // press-hold-drag (→ live preview + commit); it fully resolves on touch-up
+    // BEFORE the popover is presented, so the popover reliably captures touches.
+    @ViewBuilder private var surface: some View {
+        if reduceMotion {
+            collapsedStar
+                .contentShape(Rectangle())
+                .onTapGesture { showingPicker = true }
+        } else {
+            collapsedStar
+                .overlay(alignment: .center) {
+                    if isDragging { revealStrip.offset(y: RatingTuning.revealYOffset) }
+                }
+                .coordinateSpace(name: space)
+                .contentShape(Rectangle())
+                .gesture(rateGesture)
+        }
     }
 
     // MARK: Collapsed display (single star + number when rated)
@@ -282,35 +305,51 @@ struct FluidRatingControl: View {
         .allowsHitTesting(false)
     }
 
-    private var holdDrag: some Gesture {
-        LongPressGesture(minimumDuration: RatingTuning.longPressDuration)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(space)))
+    private var rateGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(space))
             .onChanged { value in
-                switch value {
-                case .first(true):
-                    beginDragging()
-                case .second(true, let drag?):
-                    beginDragging()
-                    updatePreview(forX: drag.location.x)
-                default:
-                    break
+                lastX = value.location.x
+                if touchDownAt == nil {
+                    touchDownAt = Date()
+                    haptic.prepare()
+                    scheduleReveal()
                 }
+                let moved = hypot(value.translation.width, value.translation.height) > RatingTuning.moveSlop
+                if moved && !isDragging { engage() }
+                if isDragging { updatePreview(forX: value.location.x) }
             }
             .onEnded { value in
-                if case .second(true, let drag?) = value {
-                    updatePreview(forX: drag.location.x)
+                revealWork?.cancel(); revealWork = nil
+                let elapsed = touchDownAt.map { Date().timeIntervalSince($0) } ?? 0
+                let moved = hypot(value.translation.width, value.translation.height) > RatingTuning.moveSlop
+                if isDragging {
+                    updatePreview(forX: value.location.x)
                     commit(preview)
+                    endDragging()
+                } else if !moved && elapsed < RatingTuning.longPressDuration + 0.25 {
+                    showingPicker = true
                 }
-                endDragging()
+                touchDownAt = nil
             }
     }
 
-    private func beginDragging() {
+    /// After the hold threshold, reveal the strip even if the finger is stationary
+    /// (a plain DragGesture emits no updates for a still finger).
+    private func scheduleReveal() {
+        let work = DispatchWorkItem {
+            guard touchDownAt != nil, !isDragging else { return }
+            engage()
+            updatePreview(forX: lastX)
+        }
+        revealWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + RatingTuning.longPressDuration, execute: work)
+    }
+
+    private func engage() {
         guard !isDragging else { return }
-        withAnimation(.snappy(duration: 0.18)) { isDragging = true }
         preview = rating
         lastHapticValue = rating
-        haptic.prepare()
+        withAnimation(.snappy(duration: 0.18)) { isDragging = true }
     }
 
     private func updatePreview(forX x: CGFloat) {
