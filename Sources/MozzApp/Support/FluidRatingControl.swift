@@ -24,14 +24,14 @@ private enum RatingTuning {
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
     static let revealCornerRadius: CGFloat = 24
-    /// The downward tail on the reveal bubble that points at the star. It flows
-    /// smoothly out of the bottom edge (a morphed teardrop) rather than a bolted-
-    /// on triangle: `revealTailBase` is its width where it meets the body,
-    /// `revealTailHeight` how far it drops, `revealTailTip` the rounding of its tip
-    /// (small = a sharper, more native-looking beak).
-    static let revealTailBase: CGFloat = 38
-    static let revealTailHeight: CGFloat = 16
-    static let revealTailTip: CGFloat = 3
+    /// The downward tail on the reveal bubble that points at the star. Modeled on
+    /// the system popover beak: it flares wide where it meets the body (a smooth
+    /// concave fillet at `revealTailBase`), necks to `revealTailNeck`, then runs
+    /// in near-straight sides down to a softly rounded point (`revealTailTip`).
+    static let revealTailBase: CGFloat = 52
+    static let revealTailNeck: CGFloat = 26
+    static let revealTailHeight: CGFloat = 17
+    static let revealTailTip: CGFloat = 7
     static let tint: Color = .primary
     static let inactiveTint: Color = .secondary
 }
@@ -43,6 +43,7 @@ private enum RatingTuning {
 private struct TailedBubble: Shape {
     var cornerRadius: CGFloat = RatingTuning.revealCornerRadius
     var tailBase: CGFloat = RatingTuning.revealTailBase
+    var tailNeck: CGFloat = RatingTuning.revealTailNeck
     var tailHeight: CGFloat = RatingTuning.revealTailHeight
     var tailTip: CGFloat = RatingTuning.revealTailTip
 
@@ -52,8 +53,10 @@ private struct TailedBubble: Shape {
         let bottom = rect.maxY - tailHeight        // body's bottom edge (tail base)
         let cx = rect.midX
         let baseHalf = tailBase / 2
+        let neckHalf = tailNeck / 2
         let tipHalf = tailTip / 2
         let tipY = rect.maxY
+        let fillet = min(tailHeight * 0.35, 4)
 
         var p = Path()
         // Top edge + corners, right edge (clockwise from top-left).
@@ -66,18 +69,18 @@ private struct TailedBubble: Shape {
                  startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
         // Bottom edge toward the tail (right side).
         p.addLine(to: CGPoint(x: cx + baseHalf, y: bottom))
-        // Neck smoothly down into the tail, round across the tip, and back up —
-        // all with quad curves so the tip is an unambiguous rounded point.
-        p.addCurve(to: CGPoint(x: cx + tipHalf, y: tipY - tipHalf),
-                   control1: CGPoint(x: cx + baseHalf * 0.5, y: bottom),
-                   control2: CGPoint(x: cx + tipHalf, y: tipY - tailHeight * 0.5))
+        // Beak: concave fillet out of the body, near-straight side down, rounded
+        // tip, and mirror back up into the body.
+        p.addQuadCurve(to: CGPoint(x: cx + neckHalf, y: bottom + fillet),
+                       control: CGPoint(x: cx + neckHalf, y: bottom))
+        p.addLine(to: CGPoint(x: cx + tipHalf, y: tipY - tipHalf))
         p.addQuadCurve(to: CGPoint(x: cx, y: tipY),
                        control: CGPoint(x: cx + tipHalf, y: tipY))
         p.addQuadCurve(to: CGPoint(x: cx - tipHalf, y: tipY - tipHalf),
                        control: CGPoint(x: cx - tipHalf, y: tipY))
-        p.addCurve(to: CGPoint(x: cx - baseHalf, y: bottom),
-                   control1: CGPoint(x: cx - tipHalf, y: tipY - tailHeight * 0.5),
-                   control2: CGPoint(x: cx - baseHalf * 0.5, y: bottom))
+        p.addLine(to: CGPoint(x: cx - neckHalf, y: bottom + fillet))
+        p.addQuadCurve(to: CGPoint(x: cx - baseHalf, y: bottom),
+                       control: CGPoint(x: cx - neckHalf, y: bottom))
         // Bottom edge (left side) + bottom-left corner, left edge, top-left corner.
         p.addLine(to: CGPoint(x: rect.minX + r, y: bottom))
         p.addArc(center: CGPoint(x: rect.minX + r, y: bottom - r), radius: r,
