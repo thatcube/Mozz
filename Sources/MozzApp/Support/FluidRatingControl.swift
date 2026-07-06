@@ -20,7 +20,7 @@ private enum RatingTuning {
     static let longPressDuration: Double = 0.18
     /// Vertical offset of the revealed strip above the player star so the finger
     /// doesn't cover it.
-    static let revealYOffset: CGFloat = -82
+    static let revealYOffset: CGFloat = -78
     /// Corner radius of the hold-drag reveal bubble (matches the tap popover's
     /// rounded-rect look rather than a full capsule).
     static let revealCornerRadius: CGFloat = 24
@@ -231,7 +231,8 @@ struct RatingPopoverContent: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        let rated = (current ?? 0) > 0
+        return VStack(spacing: 12) {
             RatingStripView(
                 value: current,
                 onPreview: { current = $0 },
@@ -244,25 +245,28 @@ struct RatingPopoverContent: View {
                 adjust(direction)
             }
 
-            Button {
-                current = nil
-                onSet(nil)
-            } label: {
-                Text("Clear")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 24)
-                    .contentShape(Rectangle())
+            // Only present the Clear link when a rating exists, so the popover's
+            // height is dynamic (shorter when unrated — no empty gap).
+            if rated {
+                Button {
+                    current = nil
+                    onSet(nil)
+                } label: {
+                    Text("Clear")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
             }
-            .buttonStyle(.plain)
-            .opacity((current ?? 0) > 0 ? 1 : 0)
-            .allowsHitTesting((current ?? 0) > 0)
-            .animation(.easeInOut(duration: 0.15), value: (current ?? 0) > 0)
         }
+        .animation(.snappy(duration: 0.2), value: rated)
         .padding(.horizontal, 28)
         .padding(.top, 24)
-        .padding(.bottom, 14)
+        .padding(.bottom, rated ? 14 : 24)
         .presentationCompactAdaptation(.popover)
     }
 
