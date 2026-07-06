@@ -42,6 +42,10 @@ struct MainTabsView: View {
         Binding(get: { paths[tab] ?? [] }, set: { paths[tab] = $0 })
     }
 
+    /// While `Date.now < expandLockUntil`, scroll-driven minimize writes are dropped
+    /// (see `scrollMinimizeBinding`) so a tab-tap's expand animation isn't interrupted.
+    @State private var expandLockUntil: Date = .distantPast
+
     /// Handle a tab-bar press. Switching tabs preserves each tab's navigation depth;
     /// re-tapping the tab you're already on pops it to root (standard iOS behavior).
     private func pressTab(_ tab: AppTab) {
@@ -52,8 +56,33 @@ struct MainTabsView: View {
             }
         }
         selectedTab = tab
+        // Tapping a tab ALWAYS expands the bar — and must always finish expanding.
+        // Start a cooldown so scroll-driven minimize (from momentum, or the content
+        // inset shifting as the bar grows / the page transitions) can't re-collapse
+        // it mid-animation. See `scrollMinimizeBinding`. (The expand itself animates
+        // via MainTabBar's `.animation(barSpring, value: minimize)`.)
+        expandLockUntil = Date.now + Self.expandCooldown
         minimize = 0
         loadedTabs.insert(tab)
+    }
+
+    /// How long after a tab press to ignore scroll-driven collapse, so the expand
+    /// animation always plays out. Covers the spring settle + any page-transition
+    /// layout that shifts the scroll geometry.
+    private static let expandCooldown: TimeInterval = 0.7
+
+    /// The binding handed to page scroll views to drive the bar's minimize. Unlike a
+    /// plain `$minimize`, its setter DROPS writes while the expand cooldown is active,
+    /// so a tab tap's expand-to-full always completes even if the page is mid-scroll
+    /// or its height is changing during a transition.
+    private var scrollMinimizeBinding: Binding<CGFloat> {
+        Binding(
+            get: { minimize },
+            set: { newValue in
+                if Date.now < expandLockUntil { return }
+                minimize = newValue
+            }
+        )
     }
 
     private var hasTrack: Bool { playback.currentTrack != nil }
@@ -113,8 +142,9 @@ struct MainTabsView: View {
                         // Inject the minimize binding ONLY into the selected tab's
                         // subtree (incl. its pushed subpages), so only the visible
                         // tab's scroll views drive the bar — background tabs get a
-                        // nil binding and stay inert.
-                        .environment(\.bottomBarMinimize, tab == selectedTab ? $minimize : nil)
+                        // nil binding and stay inert. The gated binding also drops
+                        // scroll writes during a tab-tap's expand cooldown.
+                        .environment(\.bottomBarMinimize, tab == selectedTab ? scrollMinimizeBinding : nil)
                         .opacity(tab == selectedTab ? 1 : 0)
                         .allowsHitTesting(tab == selectedTab)
                         .zIndex(tab == selectedTab ? 1 : 0)
