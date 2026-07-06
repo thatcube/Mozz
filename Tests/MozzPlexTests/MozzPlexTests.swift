@@ -295,7 +295,7 @@ final class PlexAuthTests: XCTestCase {
     }
 
     func testCheckPinReturnsToken() async throws {
-        let token = try await makeAuthenticator().checkPin(id: 424242)
+        let token = try await makeAuthenticator().checkPin(id: 424242, code: "abcd")
         XCTAssertEqual(token, "plex-account-token")
     }
 

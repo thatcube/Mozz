@@ -94,12 +94,13 @@ public struct PlexPinSession: Sendable, Hashable {
             else { return nil }
             return "\(name)=\(value)"
         }.joined(separator: "&")
-        // NOTE: app.plex.tv is a hashbang-routed SPA — the auth route lives at
-        // `#!?` (bang), NOT `#?`. With a plain `#?` the router doesn't match the
-        // auth handler, so after the user signs in there's no PIN context and
-        // Plex shows "We were unable to complete this request." (Matches the
-        // battle-tested Seerr/Overseerr flow.)
-        return URL(string: "https://app.plex.tv/auth#!?\(query)")
+        // NOTE: parameters live in the URL FRAGMENT as `#?a=b&...` — this is the
+        // format Plex's app.plex.tv/auth SPA reads (matches the reference native
+        // clients kunish/zeroflix and Playerseerr). No forwardUrl: a custom-scheme
+        // forwardUrl makes Plex skip the authorize screen and bounce to plex.tv
+        // without ever linking the PIN (http/https only), so native apps omit it
+        // and finish via polling instead.
+        return URL(string: "https://app.plex.tv/auth#?\(query)")
     }
 }
 

@@ -49,10 +49,12 @@ public struct PlexAuthenticator: Sendable {
     }
 
     /// Poll a PIN once; returns the account token when the user has claimed it,
-    /// otherwise `nil`.
-    public func checkPin(id: Int) async throws -> String? {
+    /// otherwise `nil`. The PIN `code` is REQUIRED on the poll (it proves this is
+    /// the client that created the PIN) — Plex may return a null token without it
+    /// even after the PIN is claimed.
+    public func checkPin(id: Int, code: String) async throws -> String? {
         let response = try await client.send(
-            Endpoint(path: "api/v2/pins/\(id)"),
+            Endpoint(path: "api/v2/pins/\(id)", query: [URLQueryItem(name: "code", value: code)]),
             as: PlexPinResponse.self
         )
         if let token = response.authToken, !token.isEmpty { return token }
@@ -72,7 +74,7 @@ public struct PlexAuthenticator: Sendable {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             try Task.checkCancellation()
-            if let token = try? await checkPin(id: session.id), !token.isEmpty { return token }
+            if let token = try? await checkPin(id: session.id, code: session.code), !token.isEmpty { return token }
             try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
         }
         throw MozzError.cancelled

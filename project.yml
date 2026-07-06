@@ -68,10 +68,3 @@ targets:
         NSLocalNetworkUsageDescription: "Mozz connects to Plex and Jellyfin media servers on your local network."
         NSBonjourServices:
           - _jellyfin._tcp
-        # Custom URL scheme so Plex's post-auth forwardUrl (mozz://plex-auth)
-        # deep-links back into Mozz, foregrounding the app automatically after the
-        # user authorizes in Safari. The PIN poll then finishes the sign-in.
-        CFBundleURLTypes:
-          - CFBundleURLName: com.thatcube.Mozz.plexauth
-            CFBundleURLSchemes:
-              - mozz
