@@ -318,17 +318,23 @@ struct NowPlayingMorphContainer: View {
     }
 
     private var secondaryControls: some View {
-        HStack(spacing: 60) {
+        HStack(spacing: 0) {
             Button { playback.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
                     .foregroundStyle(playback.snapshot.isShuffled ? Color.accentColor : .secondary)
             }
+            Spacer()
+            if let track = playback.currentTrack {
+                PlayerLikeControl(track: track)
+            }
+            Spacer()
             Button { playback.cycleRepeatMode() } label: {
                 Image(systemName: repeatIcon(playback.snapshot.repeatMode))
                     .foregroundStyle(playback.snapshot.repeatMode == .off ? .secondary : Color.accentColor)
             }
         }
         .font(.title3)
+        .padding(.horizontal, 56)
     }
 
     private func formatBadge(track: Track) -> some View {
