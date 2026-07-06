@@ -174,6 +174,7 @@ public final class AppEnvironment: ObservableObject {
         guard let saved = SessionPersistence.load(credentials) else { return }
         do {
             try await activate(saved)
+            restoreLastPlaybackSession()
         } catch {
             SessionPersistence.clear(credentials)
         }
@@ -847,6 +848,7 @@ public final class AppEnvironment: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] track in
                 self?.updateNowPlayingWidget()
+                self?.persistPlaybackState()
                 if let track { self?.recordRecentlyPlayed(track) }
             }
             .store(in: &widgetCancellables)
@@ -855,8 +857,38 @@ public final class AppEnvironment: ObservableObject {
             .map(\.status)
             .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateNowPlayingWidget() }
+            .sink { [weak self] _ in
+                self?.updateNowPlayingWidget()
+                self?.persistPlaybackState()
+            }
             .store(in: &widgetCancellables)
+
+        // Keep the persisted elapsed position reasonably fresh while playing,
+        // without hammering the disk on every 0.5s tick.
+        playback.$snapshot
+            .throttle(for: .seconds(10), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] _ in self?.persistPlaybackState() }
+            .store(in: &widgetCancellables)
+    }
+
+    /// Save (or clear) the on-disk playback session so it can be resumed after a
+    /// cold launch.
+    private func persistPlaybackState() {
+        if let state = playback.persistentState {
+            PlaybackStatePersistence.save(state)
+        } else {
+            PlaybackStatePersistence.clear()
+        }
+    }
+
+    /// Reload the last session into the engine (paused, seeked to where it left
+    /// off) so the user or the widget's play button can resume it. Skipped when
+    /// something is already playing or launch automation will start playback.
+    private func restoreLastPlaybackSession() {
+        guard playback.currentTrack == nil,
+              ProcessInfo.processInfo.environment["MOZZ_AUTOPLAY"] != "1",
+              let state = PlaybackStatePersistence.load() else { return }
+        playback.restore(state)
     }
 
     private func updateNowPlayingWidget() {

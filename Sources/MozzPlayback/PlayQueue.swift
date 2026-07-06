@@ -2,7 +2,7 @@ import Foundation
 import MozzCore
 
 /// How the queue behaves when it reaches the end of a track / the queue.
-public enum RepeatMode: String, Sendable, Hashable, CaseIterable {
+public enum RepeatMode: String, Sendable, Hashable, CaseIterable, Codable {
     /// Advance to the next track; stop at the end of the queue.
     case off
     /// Repeat the current track indefinitely.
@@ -34,7 +34,7 @@ public enum RepeatMode: String, Sendable, Hashable, CaseIterable {
 /// The distinction between ``advance()`` (user pressed *next*) and
 /// ``trackDidFinish()`` (a track played to its end) matters for repeat-one:
 /// finishing repeats the track, but pressing next always skips forward.
-public struct PlayQueue: Sendable, Equatable {
+public struct PlayQueue: Sendable, Equatable, Codable {
     public private(set) var tracks: [Track]
     public private(set) var order: [Int]
     public private(set) var position: Int

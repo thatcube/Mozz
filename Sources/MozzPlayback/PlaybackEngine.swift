@@ -3,6 +3,19 @@ import AVFoundation
 import Combine
 import MozzCore
 
+/// A serializable snapshot of what's playing — the queue (order/shuffle/repeat/
+/// position) plus the elapsed position — so the app can restore the session on a
+/// later cold launch (loaded and paused, ready to resume).
+public struct PlaybackPersistentState: Codable, Sendable {
+    public var queue: PlayQueue
+    public var elapsed: TimeInterval
+
+    public init(queue: PlayQueue, elapsed: TimeInterval) {
+        self.queue = queue
+        self.elapsed = elapsed
+    }
+}
+
 /// The playback engine. Wraps an `AVQueuePlayer` to get **gapless** playback
 /// (the player pre-rolls the next item so there is no silence at track
 /// boundaries), while a pure ``PlayQueue`` owns ordering / shuffle / repeat.
@@ -62,6 +75,9 @@ public final class PlaybackEngine: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var wasPlayingBeforeInterruption = false
+    /// A position to seek to once the (paused) current item finishes loading —
+    /// used to restore a saved session at the right spot.
+    private var pendingSeek: TimeInterval?
     /// The id of the track we've emitted `.started` for and not yet terminated,
     /// so every start is paired with exactly one `completed`/`skipped`.
     private var loggedTrackID: String?
@@ -90,6 +106,23 @@ public final class PlaybackEngine: ObservableObject {
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
         reload(autoplay: true)
+    }
+
+    /// A serializable snapshot of the current session (queue + position), or
+    /// `nil` when nothing is loaded. The app persists this to resume on relaunch.
+    public var persistentState: PlaybackPersistentState? {
+        guard !queue.isEmpty, currentTrack != nil else { return nil }
+        return PlaybackPersistentState(queue: queue, elapsed: snapshot.elapsed)
+    }
+
+    /// Restore a saved session WITHOUT autoplaying: loads the current track
+    /// paused and seeks to the saved position, so the user (or a remote command /
+    /// widget button) can pick up where they left off. No-op for an empty queue.
+    public func restore(_ state: PlaybackPersistentState) {
+        guard !state.queue.isEmpty, currentTrack == nil, queue.isEmpty else { return }
+        queue = state.queue
+        pendingSeek = state.elapsed > 1 ? state.elapsed : nil
+        reload(autoplay: false)
     }
 
     /// Enqueue tracks to play after the current track.
@@ -228,6 +261,11 @@ public final class PlaybackEngine: ObservableObject {
                 self.applyNormalization(to: item, gainDB: track.normalizationGainDB)
                 self.player.insert(item, after: nil)
                 self.loaded = [(item, track, resolved.sessionID)]
+                if let seek = self.pendingSeek {
+                    self.pendingSeek = nil
+                    self.player.seek(to: CMTime(seconds: seek, preferredTimescale: 600),
+                                     completionHandler: { _ in })
+                }
                 if autoplay {
                     self.player.play()
                     self.publish(status: .playing)
