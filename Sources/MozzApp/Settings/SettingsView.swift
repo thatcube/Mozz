@@ -84,9 +84,11 @@ struct SettingsView: View {
                     Link(destination: Self.repoURL) {
                         Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
+                    .accessibilityHint("Opens in Safari")
                     Link(destination: Self.sponsorURL) {
                         Label("Support Development", systemImage: "heart")
                     }
+                    .accessibilityHint("Opens in Safari")
                 }
 
                 Section {
@@ -96,6 +98,7 @@ struct SettingsView: View {
                         Text("GPL-3.0 · offline-first music for Plex & Jellyfin")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
             .navigationTitle("Settings")
