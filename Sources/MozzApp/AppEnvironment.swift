@@ -117,6 +117,10 @@ public final class AppEnvironment: ObservableObject {
     /// sync with playback.
     private var widgetCancellables = Set<AnyCancellable>()
 
+    /// Muted background colour ("#RRGGBB") derived from each track's artwork, for
+    /// the widgets. Keyed by track id; bounded by the widget artwork pruning.
+    private var widgetTintByTrack: [String: String] = [:]
+
     public init(database: MusicDatabase, credentials: any CredentialStore, fileStore: DownloadFileStore) {
         self.database = database
         self.credentials = credentials
@@ -810,6 +814,7 @@ public final class AppEnvironment: ObservableObject {
         // Also stash it for the widgets and refresh their snapshots with the art.
         if track.id == playback.currentTrack?.id {
             WidgetSnapshotStore.writeArtwork(data, name: Self.widgetArtworkName(track.id))
+            if let hex = WidgetTint.mutedHex(from: data) { widgetTintByTrack[track.id] = hex }
             updateNowPlayingWidget()
             patchRecentArtwork(trackID: track.id)
         }
@@ -858,6 +863,7 @@ public final class AppEnvironment: ObservableObject {
             artist: track.artistName,
             isPlaying: playback.snapshot.status == .playing,
             artworkFile: artworkFile,
+            tintHex: widgetTintByTrack[track.id],
             deepLink: "mozz://tab/library")
         WidgetSnapshotStore.writeNowPlaying(snapshot)
         reloadWidget(MozzWidget.nowPlayingKind)
@@ -870,7 +876,8 @@ public final class AppEnvironment: ObservableObject {
         let artworkFile = WidgetSnapshotStore.artworkURL(name) != nil ? name : nil
         items.insert(RecentlyPlayedItem(
             id: track.id, title: track.title, subtitle: track.artistName,
-            artworkFile: artworkFile, deepLink: "mozz://tab/library"), at: 0)
+            artworkFile: artworkFile, tintHex: widgetTintByTrack[track.id],
+            deepLink: "mozz://tab/library"), at: 0)
         let capped = Array(items.prefix(12))
         WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: capped))
         pruneWidgetArtwork(referencedBy: capped)
@@ -886,6 +893,9 @@ public final class AppEnvironment: ObservableObject {
             keep.insert(Self.widgetArtworkName(track.id))
         }
         WidgetSnapshotStore.pruneArtwork(keeping: keep)
+        // Keep the in-memory tint cache bounded to the tracks still referenced.
+        let keepIDs = Set(recents.map(\.id) + [playback.currentTrack?.id].compactMap { $0 })
+        widgetTintByTrack = widgetTintByTrack.filter { keepIDs.contains($0.key) }
     }
 
     /// Once artwork lands, fill it into the most-recent entry that referenced this
@@ -894,6 +904,7 @@ public final class AppEnvironment: ObservableObject {
         guard var items = WidgetSnapshotStore.readRecentlyPlayed()?.items,
               let idx = items.firstIndex(where: { $0.id == trackID && $0.artworkFile == nil }) else { return }
         items[idx].artworkFile = Self.widgetArtworkName(trackID)
+        items[idx].tintHex = widgetTintByTrack[trackID]
         WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: items))
         reloadWidget(MozzWidget.recentlyPlayedKind)
     }

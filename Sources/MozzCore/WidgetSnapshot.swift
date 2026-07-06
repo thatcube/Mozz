@@ -22,14 +22,19 @@ public struct NowPlayingWidgetSnapshot: Codable, Equatable, Sendable {
     public var isPlaying: Bool
     /// Filename (within the App Group artwork dir) of the cover art, if written.
     public var artworkFile: String?
+    /// A muted, dark background colour derived from the artwork ("#RRGGBB"), so
+    /// the widget can tint itself like Apple Music without doing image analysis
+    /// in the extension process.
+    public var tintHex: String?
     /// `mozz://` deep link the widget opens when tapped.
     public var deepLink: String
 
-    public init(title: String, artist: String, isPlaying: Bool, artworkFile: String?, deepLink: String) {
+    public init(title: String, artist: String, isPlaying: Bool, artworkFile: String?, tintHex: String? = nil, deepLink: String) {
         self.title = title
         self.artist = artist
         self.isPlaying = isPlaying
         self.artworkFile = artworkFile
+        self.tintHex = tintHex
         self.deepLink = deepLink
     }
 }
@@ -40,13 +45,15 @@ public struct RecentlyPlayedItem: Codable, Equatable, Sendable, Identifiable {
     public var title: String
     public var subtitle: String
     public var artworkFile: String?
+    public var tintHex: String?
     public var deepLink: String
 
-    public init(id: String, title: String, subtitle: String, artworkFile: String?, deepLink: String) {
+    public init(id: String, title: String, subtitle: String, artworkFile: String?, tintHex: String? = nil, deepLink: String) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.artworkFile = artworkFile
+        self.tintHex = tintHex
         self.deepLink = deepLink
     }
 }
