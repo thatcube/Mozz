@@ -238,27 +238,23 @@ public struct JellyfinBackend: MusicBackend {
             URLQueryItem(name: "userId", value: userID),
             URLQueryItem(name: "StartIndex", value: "\(offset)"),
             URLQueryItem(name: "Limit", value: "\(limit)"),
-            // NO SortBy. Diagnostics on a real library showed the recursive
-            // /Items phases (albums, tracks) crawling at ~6 items/s = ~42s PER
-            // PAGE, ~100% network wait, while the unsorted /Artists endpoint ran
-            // 5x faster. `SortBy=SortName` makes Jellyfin re-sort the ENTIRE
-            // result set on every paged request — dozens of full library sorts
-            // per sync. A bulk catalog mirror needs no server order (the local DB
-            // sorts on its own indexes), so we omit it: items come back in the
-            // server's natural DB order, which is stable across a sync's requests
-            // (the library isn't changing mid-sync) — exactly what StartIndex/
-            // Limit paging needs. UPSERTs make any rare duplicate harmless, and
-            // the prune only runs when the enumeration is provably complete
-            // (seen >= total), so an unsorted page can never cause wrongful
-            // deletion.
+            // Sort by DateCreated (a direct, indexed column — cheap server-side,
+            // unlike Artist/AlbumArtist/PlayCount sorts which are per-row
+            // subqueries). A stable sort is REQUIRED for correct StartIndex/Limit
+            // paging: omitting SortBy entirely gives only `ORDER BY SortName` with
+            // no tiebreaker, so items sharing a SortName can reorder between pages
+            // and be missed or duplicated. DateCreated gets an automatic SortName
+            // tiebreaker server-side, and its append-order also sets up future
+            // incremental syncs. (SortName itself is equally cheap; DateCreated is
+            // chosen for the incremental-sync affordance.)
+            URLQueryItem(name: "SortBy", value: "DateCreated"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
             URLQueryItem(name: "Recursive", value: "true"),
-            // Request the total record count ONLY on the first page. Jellyfin
-            // recomputes it with a full COUNT query on every request, which is
-            // cheap for a few thousand artists but expensive for tens of
-            // thousands of albums/songs — and doing it on every page was a major
-            // drag on large libraries. The first page's total is all the sync
-            // engine needs (prune-completeness + the progress bar's total); later
-            // pages skip the COUNT entirely.
+            // Total record count ONLY on the first page. With EnableTotalRecordCount
+            // the server runs a separate full COUNT(*) before the page SELECT;
+            // false takes Jellyfin's single-query fast path. We need the total once
+            // (progress bar + the prune-completeness guard), so page 0 pays it and
+            // every later page skips it.
             URLQueryItem(name: "EnableTotalRecordCount", value: offset == 0 ? "true" : "false"),
         ]
     }

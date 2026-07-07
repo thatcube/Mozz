@@ -162,24 +162,17 @@ public struct LibrarySyncEngine: Sendable {
             await aggregator?.report(phase: phase, seen: seen, total: total)
         }
 
+        // Artists (light, dedicated endpoint) and playlists (few) run
+        // concurrently, but the two HEAVY /Items phases — albums and tracks —
+        // run SEQUENTIALLY. Measured: this self-hosted server serves a heavy
+        // /Items page in ~60s and does NOT parallelize them; running albums and
+        // tracks at once just starved the tracks request past its timeout
+        // (serverUnreachable) and aborted the whole sync. One heavy stream at a
+        // time keeps every request served promptly and well within the timeout.
         async let artistsTask = syncPages(
             phase: .artists,
             fetch: { try await backend.fetchArtists(offset: $0, limit: $1) },
             write: { try await writer.upsertArtists($0, serverId: serverId) },
-            id: \.id,
-            report: report
-        )
-        async let albumsTask = syncPages(
-            phase: .albums,
-            fetch: { try await backend.fetchAlbums(offset: $0, limit: $1) },
-            write: { try await writer.upsertAlbums($0, serverId: serverId) },
-            id: \.id,
-            report: report
-        )
-        async let tracksTask = syncPages(
-            phase: .tracks,
-            fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
-            write: { try await writer.upsertTracks($0, serverId: serverId) },
             id: \.id,
             report: report
         )
@@ -190,9 +183,21 @@ public struct LibrarySyncEngine: Sendable {
         let trackIDs: PagedEnumeration
         let playlistIDs: PagedEnumeration
         do {
+            albumIDs = try await syncPages(
+                phase: .albums,
+                fetch: { try await backend.fetchAlbums(offset: $0, limit: $1) },
+                write: { try await writer.upsertAlbums($0, serverId: serverId) },
+                id: \.id,
+                report: report
+            )
+            trackIDs = try await syncPages(
+                phase: .tracks,
+                fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
+                write: { try await writer.upsertTracks($0, serverId: serverId) },
+                id: \.id,
+                report: report
+            )
             artistIDs = try await artistsTask
-            albumIDs = try await albumsTask
-            trackIDs = try await tracksTask
             playlistIDs = try await playlistsTask
         } catch {
             diag?("SYNC ERROR: \(error)")

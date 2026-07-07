@@ -36,8 +36,13 @@ public struct URLSessionTransport: HTTPTransport {
             config.timeoutIntervalForRequest = 3
             config.timeoutIntervalForResource = 5
         case .bulk:
-            config.timeoutIntervalForRequest = 90
-            config.timeoutIntervalForResource = 600
+            // Self-hosted servers can take a long time to generate a single page
+            // of a large library (measured ~60s per 1000-item /Items page on a
+            // real server, and slower under load). A generous per-request
+            // (inactivity/time-to-first-byte) timeout keeps a slow-but-working
+            // server from being abandoned as "unreachable" mid-sync.
+            config.timeoutIntervalForRequest = 180
+            config.timeoutIntervalForResource = 1200
         }
         config.waitsForConnectivity = false
         config.httpAdditionalHeaders = ["Accept-Encoding": "gzip, deflate"]
