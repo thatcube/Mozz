@@ -142,7 +142,11 @@ public final class AppEnvironment: ObservableObject {
         self.downloads = DownloadManager(database: database, fileStore: fileStore)
         self.playback = PlaybackEngine(resolver: resolver)
         self.playEvents = PlayEventStore(database)
-        self.recommendations = RecommendationService(store: RecommendationStore(database))
+        self.recommendations = RecommendationService(
+            store: RecommendationStore(database),
+            isEnrichmentEnabled: {
+                UserDefaults.standard.object(forKey: AppEnvironment.enrichmentEnabledKey) as? Bool ?? true
+            })
         let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
         let enrichmentConfig = EnrichmentConfig(
             userAgent: "Mozz/\(appVersion) ( https://github.com/thatcube/Mozz )")
@@ -1055,9 +1059,21 @@ public final class AppEnvironment: ObservableObject {
                    initialExcluding: [track.id])
     }
 
-    /// Start an endless station seeded from an artist.
+    /// Start an endless station seeded from an artist. When enrichment is on, the
+    /// seed genres are the artist's CANONICAL (normalized + mb_tags-merged) genres —
+    /// symmetric with the candidate pool — resolved off the caller-provided raw
+    /// genres, which remain the fallback if the artist has no local rows.
     public func startRadio(artistRemoteId: String, name: String, genres: [String]) {
-        startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
+        guard let serverId = active?.connection.id else {
+            startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
+            return
+        }
+        let recommendations = self.recommendations
+        Task { [weak self] in
+            let enriched = await recommendations.artistSeedGenres(artistId: artistRemoteId, serverId: serverId)
+            let seedGenres = enriched.isEmpty ? genres : enriched
+            self?.startRadio(seed: RadioSeed(title: name, genres: seedGenres, artistIds: [artistRemoteId]))
+        }
     }
 
     /// Load an initial station batch and keep the queue topped up as it plays.
