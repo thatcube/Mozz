@@ -107,6 +107,38 @@ public struct CatalogWriter: Sendable {
                     track.addedAt?.timeIntervalSince1970, Self.jsonText(track.genres),
                 ])
             }
+            // Tier-1 enrichment (ADR-0007/B1): capture MBIDs the backend already
+            // embedded (Plex Guid / Jellyfin ProviderIds), in the SAME transaction
+            // so every upsertTracks call site is covered with no extra network.
+            // `tags`/`embedding`/`bpm`/`feature_source` are never touched.
+            var recordings: [(ref: String, mbid: String, artist: String?)] = []
+            var artistOnly: [(ref: String, artist: String)] = []
+            for track in tracks {
+                let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
+                if let mbid = MusicBrainzID.normalized(track.mbid) {
+                    recordings.append((ref, mbid, MusicBrainzID.normalized(track.artistMbid)))
+                } else if let artist = MusicBrainzID.normalized(track.artistMbid) {
+                    // Tagged only at the artist level (common on Jellyfin): keep the
+                    // artist MBID as an `arid:` hint, but DON'T record a lookup — the
+                    // track still needs recording resolution, so `mbid`/lookup stay
+                    // untouched and it remains eligible.
+                    artistOnly.append((ref, artist))
+                }
+            }
+            if !recordings.isEmpty {
+                let now = Date().timeIntervalSince1970
+                let stmt = try db.makeStatement(sql: Self.embeddedMBIDUpsertSQL)
+                for row in recordings {
+                    try stmt.execute(arguments: [row.ref, row.mbid, row.artist, now, now])
+                }
+            }
+            if !artistOnly.isEmpty {
+                let now = Date().timeIntervalSince1970
+                let stmt = try db.makeStatement(sql: Self.embeddedArtistMBIDUpsertSQL)
+                for row in artistOnly {
+                    try stmt.execute(arguments: [row.ref, row.artist, now])
+                }
+            }
         }
     }
 
@@ -246,6 +278,57 @@ public struct CatalogWriter: Sendable {
     private static let playlistUpsertSQL = upsertSQL(table: "playlist", columns: [
         "title", "trackCount", "durationSeconds", "artworkKey", "isSmart",
     ])
+
+    /// Partial UPSERT of a backend-embedded RECORDING MBID into `track_features`,
+    /// keyed on the durable `track_ref`. Writes ONLY the MBID columns + lookup
+    /// provenance; never touches `tags`/`embedding`/`bpm`/`feature_source`.
+    /// `artist_mbid` is COALESCEd so a null (Plex) can't overwrite a resolved
+    /// value. The `WHERE` guard skips a no-op rewrite when nothing would change,
+    /// but still fires when a real artist MBID becomes available for an
+    /// already-known recording (avoids rewriting a row + its indexes for every
+    /// track on every sync while not blocking a genuine back-fill).
+    /// Derived enrichment is invalidated when its key changes: the B2 canonical/
+    /// similar caches when `mbid` changes, and the B4 `mb_tags` (keyed on
+    /// `artist_mbid`) when the artist MBID changes to a new value — otherwise a
+    /// re-tagged/merged artist would keep the previous artist's genres until the
+    /// unrelated 30-day TTL lapsed.
+    /// Arguments: (track_ref, mbid, artist_mbid, lookup_at, updated_at).
+    private static let embeddedMBIDUpsertSQL = """
+    INSERT INTO track_features (track_ref, mbid, artist_mbid, mbid_lookup_status, mbid_lookup_at, updated_at)
+    VALUES (?, ?, ?, 'embedded', ?, ?)
+    ON CONFLICT(track_ref) DO UPDATE SET
+        mbid = excluded.mbid,
+        artist_mbid = COALESCE(excluded.artist_mbid, track_features.artist_mbid),
+        mbid_lookup_status = 'embedded',
+        mbid_lookup_at = excluded.mbid_lookup_at,
+        updated_at = excluded.updated_at,
+        canonical_mbid = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.canonical_mbid END,
+        canonical_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.canonical_lookup_at END,
+        similar_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.similar_lookup_at END,
+        mb_tags = CASE WHEN excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid THEN NULL ELSE track_features.mb_tags END,
+        mb_tags_lookup_at = CASE WHEN excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid THEN NULL ELSE track_features.mb_tags_lookup_at END
+    WHERE track_features.mbid IS NOT excluded.mbid
+       OR (excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid)
+    """
+
+    /// Partial UPSERT of an embedded ARTIST MBID for a track that has NO recording
+    /// MBID (e.g. a Jellyfin track tagged only at the artist level). Records just
+    /// the artist MBID as a name-search hint; deliberately leaves `mbid`,
+    /// `mbid_lookup_status`, and `mbid_lookup_at` untouched so the track stays
+    /// eligible for recording resolution. The `WHERE` guard fires only when the
+    /// artist MBID actually changes; when it does, the B4 `mb_tags` (keyed on the
+    /// old artist) are cleared so the tag pass refetches for the new artist.
+    /// Arguments: (track_ref, artist_mbid, updated_at).
+    private static let embeddedArtistMBIDUpsertSQL = """
+    INSERT INTO track_features (track_ref, artist_mbid, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(track_ref) DO UPDATE SET
+        artist_mbid = excluded.artist_mbid,
+        updated_at = excluded.updated_at,
+        mb_tags = NULL,
+        mb_tags_lookup_at = NULL
+    WHERE track_features.artist_mbid IS NOT excluded.artist_mbid
+    """
 
     private static let genresEncoder = JSONEncoder()
 

@@ -177,6 +177,14 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
     /// ReplayGain / normalization gain in dB, when the server exposes it.
     public var normalizationGainDB: Double?
     public var addedAt: Date?
+    /// MusicBrainz *recording* MBID, when the backend embeds one (Plex `Guid`,
+    /// Jellyfin `ProviderIds.MusicBrainzTrack`). Captured during sync into
+    /// `track_features.mbid`; `nil` when the server exposes none.
+    public var mbid: String?
+    /// MusicBrainz artist MBID for this track's primary artist, when embedded
+    /// (Jellyfin `ProviderIds.MusicBrainzArtist`). Plex does not carry it on the
+    /// track item, so it stays `nil` there until name-search resolves it.
+    public var artistMbid: String?
 
     public init(
         id: String,
@@ -198,7 +206,9 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
         isFavorite: Bool = false,
         rating: Double? = nil,
         normalizationGainDB: Double? = nil,
-        addedAt: Date? = nil
+        addedAt: Date? = nil,
+        mbid: String? = nil,
+        artistMbid: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -220,6 +230,8 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
         self.rating = rating
         self.normalizationGainDB = normalizationGainDB
         self.addedAt = addedAt
+        self.mbid = mbid
+        self.artistMbid = artistMbid
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import MozzCore
 import MozzDatabase
 
 /// A single scored recommendation candidate produced by a ``Recommender``,
@@ -83,7 +84,7 @@ public struct ContentRecommender: Recommender {
             if artistAffinity > 0, artistWeight * artistAffinity >= genreWeight * genreSim {
                 reason = "More from \(c.artistName)"
             } else if genreSim > 0, let g = bestGenre(c, taste: taste) {
-                reason = "Because you're into \(g)"
+                reason = "Because you're into \(GenreNormalizer.display(g))"
             } else {
                 reason = nil
             }
@@ -119,7 +120,7 @@ public struct ContentRecommender: Recommender {
             if artistAffinity * artistWeight >= (bestGenre?.affinity ?? 0) * genreWeight, artistAffinity > 0 {
                 reason = "More from \(c.artistName)"
             } else if let g = bestGenre {
-                reason = "Because you're into \(g.name)"
+                reason = "Because you're into \(GenreNormalizer.display(g.name))"
             } else {
                 reason = nil
             }

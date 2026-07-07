@@ -106,6 +106,20 @@ final class PlexCatalogTests: XCTestCase {
         XCTAssertEqual(artist.genres, ["IDM", "Electronic"])
     }
 
+    func testDecodesTrackRecordingMBID() async throws {
+        let page = try await makeBackend().fetchTracks(offset: 0, limit: 50)
+        let track = try XCTUnwrap(page.items.first)
+        XCTAssertEqual(track.mbid, "b1a9c0e9-d987-4042-ae91-78d6a3267d69")
+    }
+
+    func testTrackListingRequestsGuids() async throws {
+        // Tier-1 embedded MBID capture requires the bulk listing to inline Guids.
+        let transport = PlexFixtureTransport([.init(contains: "all?type=10", fixture: "plex_tracks")])
+        _ = try await makeBackend(transport).fetchTracks(offset: 0, limit: 50)
+        let url = try XCTUnwrap(transport.lastRequest?.url?.absoluteString)
+        XCTAssertTrue(url.contains("includeGuids=1"), "expected includeGuids=1 in \(url)")
+    }
+
     func testFetchArtistsSpansMultipleMusicSections() async throws {
         // A server with two music libraries: a sync must span BOTH into one
         // catalog and report the combined total (so pruning sees the true count).

@@ -8,6 +8,14 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     /// Persisted across launches; mirrors `PlaybackEngine.normalizationEnabled`.
     @AppStorage("mozz.normalizationEnabled") private var normalizationEnabled = true
+    /// Open metadata enrichment on/off (default on). Read live by
+    /// `AppEnvironment.enrichment`, so no wiring is needed beyond this store.
+    @AppStorage("mozz.enrichmentEnabled") private var enrichmentEnabled = true
+    /// Live enrichment coverage for the status line; polled while Settings is open
+    /// (the task is hosted on the always-present Form — see `.task` below — because
+    /// a `.task` on a view whose only content is conditional never fires until the
+    /// content exists, a chicken-and-egg that leaves it permanently hidden).
+    @State private var recCoverage: (total: Int, matched: Int, genreTagged: Int)?
 
     var body: some View {
         NavigationStack {
@@ -45,6 +53,25 @@ struct SettingsView: View {
                         }
                         Text("Plays tracks at a consistent loudness using each track's normalization gain, when available.")
                             .font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    Section {
+                        Toggle(isOn: $enrichmentEnabled) {
+                            Label("Improve Recommendations", systemImage: "sparkles")
+                        }
+                        .onChange(of: enrichmentEnabled) { _, enabled in
+                            // Resume the crawl on ON; on OFF, promptly stop any
+                            // in-flight enrichment/seed-prep so no further request
+                            // goes out (the "fully offline" promise).
+                            env.setEnrichmentEnabled(enabled)
+                        }
+                        Text("Looks up open music data from MusicBrainz to make radio and mixes more accurate. Only song and artist names are sent, no account or personal data. Turn this off to keep the app fully offline.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if enrichmentEnabled, let c = recCoverage, c.total > 0 {
+                            EnrichmentCoverageRow(coverage: c)
+                        }
+                    } header: {
+                        Text("Recommendations")
                     }
 
                     Section {
@@ -99,6 +126,16 @@ struct SettingsView: View {
             .onChange(of: normalizationEnabled) { _, enabled in
                 env.playback.normalizationEnabled = enabled
             }
+            .task {
+                // Poll the cheap coverage count while Settings is open so the status
+                // line ticks up live as the rate-limited background pass runs.
+                // Hosted here on the always-present Form (not inside the conditional
+                // row) so it reliably fires. Cancelled automatically on dismiss.
+                while !Task.isCancelled {
+                    recCoverage = await env.enrichmentCoverage()
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                }
+            }
         }
     }
 
@@ -123,5 +160,65 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(short) (\(build))"
+    }
+}
+
+/// A live, non-intrusive readout of how much of the library has been enhanced
+/// with open MusicBrainz data — the signal that answers "are my radio/mixes
+/// using the improved engine yet?". Pure presentational: `SettingsView` owns the
+/// polling `.task` (hosted on the always-present Form) and only renders this row
+/// once there's coverage to show, so the count ticks up live as the rate-limited
+/// background pass runs.
+private struct EnrichmentCoverageRow: View {
+    let coverage: (total: Int, matched: Int, genreTagged: Int)
+
+    var body: some View {
+        let c = coverage
+        let done = c.matched >= c.total
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: done ? "checkmark.seal.fill" : "sparkles")
+                    .font(.footnote)
+                    .foregroundStyle(done ? Color.green : Color.accentColor)
+                Text(headline(c, done: done))
+                    .font(.footnote.weight(.medium))
+                    .contentTransition(.numericText())
+                Spacer(minLength: 0)
+                Text("\(percent(c))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            ProgressView(value: Double(c.matched), total: Double(max(c.total, 1)))
+                .progressViewStyle(.linear)
+                .tint(done ? .green : .accentColor)
+            Text(caption(c, done: done))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .animation(.default, value: c.matched)
+    }
+
+    private func headline(_ c: (total: Int, matched: Int, genreTagged: Int), done: Bool) -> String {
+        if done { return "Library enhanced" }
+        return "Enhancing your library"
+    }
+
+    private func caption(_ c: (total: Int, matched: Int, genreTagged: Int), done: Bool) -> String {
+        let matched = "\(fmt(c.matched)) of \(fmt(c.total)) songs matched to MusicBrainz"
+        if done {
+            return "All songs matched. Radio and mixes use the improved engine."
+        }
+        return matched + ". This keeps improving in the background as you listen."
+    }
+
+    private func percent(_ c: (total: Int, matched: Int, genreTagged: Int)) -> Int {
+        guard c.total > 0 else { return 0 }
+        return Int((Double(c.matched) / Double(c.total) * 100).rounded())
+    }
+
+    private func fmt(_ n: Int) -> String {
+        NumberFormatter.localizedString(from: NSNumber(value: n), number: .decimal)
     }
 }

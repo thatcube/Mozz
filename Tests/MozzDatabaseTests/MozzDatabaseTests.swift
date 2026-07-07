@@ -330,12 +330,13 @@ final class SchemaAndWriteTests: XCTestCase {
         let ref2 = PlayEventStore.trackRef(serverId: server.id, remoteId: "t2")
 
         // track_features round-trip, including the reserved embedding BLOB.
+        // (upsertTrackFeatures writes only the sonic/tag columns; MBID columns are
+        // owned by the enrichment path.)
         let emb = Data([1, 2, 3, 4])
         try await store.upsertTrackFeatures(TrackFeaturesRecord(
-            trackRef: ref1, mbid: "mb1", genres: "[\"Rock\"]", bpm: 120,
+            trackRef: ref1, genres: "[\"Rock\"]", bpm: 120,
             embedding: emb, embeddingDim: 1, featureSource: "ondevice"))
         let features = try await store.trackFeatures(forTrackRef: ref1)
-        XCTAssertEqual(features?.mbid, "mb1")
         XCTAssertEqual(features?.bpm, 120)
         XCTAssertEqual(features?.embedding, emb)
         XCTAssertEqual(features?.featureSource, "ondevice")

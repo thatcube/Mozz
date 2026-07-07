@@ -66,7 +66,9 @@ enum JellyfinMapper {
             genres: item.Genres ?? [],
             isFavorite: item.UserData?.IsFavorite ?? false,
             normalizationGainDB: item.NormalizationGain,
-            addedAt: date(item.DateCreated)
+            addedAt: date(item.DateCreated),
+            mbid: mbid(item.ProviderIds, key: "MusicBrainzTrack"),
+            artistMbid: mbid(item.ProviderIds, key: "MusicBrainzArtist")
         )
     }
 
@@ -95,6 +97,13 @@ enum JellyfinMapper {
     static func date(_ string: String?) -> Date? {
         guard let string else { return nil }
         return isoFractional.date(from: string) ?? isoPlain.date(from: string)
+    }
+
+    /// Read and validate an MBID from Jellyfin's `ProviderIds`. `MusicBrainzTrack`
+    /// is the *recording* MBID (Picard's `MUSICBRAINZ_TRACKID`), which is what
+    /// ListenBrainz similarity keys on — not `MusicBrainzReleaseTrack`.
+    static func mbid(_ providerIds: [String: String]?, key: String) -> String? {
+        MusicBrainzID.extract(fromGUID: providerIds?[key])
     }
 
     private static let isoFractional: ISO8601DateFormatter = {

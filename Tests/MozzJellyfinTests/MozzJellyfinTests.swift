@@ -109,6 +109,21 @@ final class JellyfinCatalogTests: XCTestCase {
         XCTAssertTrue(track.isFavorite)
     }
 
+    func testDecodesTrackProviderMBIDs() async throws {
+        let page = try await makeBackend().fetchTracks(offset: 0, limit: 50)
+        let track = try XCTUnwrap(page.items.first)
+        // MusicBrainzTrack is the RECORDING id (not MusicBrainzReleaseTrack).
+        XCTAssertEqual(track.mbid, "d3b8e2a1-1111-4222-8333-444455556666")
+        XCTAssertEqual(track.artistMbid, "f22942a1-6f70-4f48-866e-238cb2308fbd")
+    }
+
+    func testTrackFetchRequestsProviderIds() async throws {
+        let transport = FixtureTransport([.init(contains: "IncludeItemTypes=Audio", fixture: "jf_tracks")])
+        _ = try await makeBackend(transport).fetchTracks(offset: 0, limit: 50)
+        let url = try XCTUnwrap(transport.lastRequest?.url?.absoluteString)
+        XCTAssertTrue(url.contains("ProviderIds"), "expected ProviderIds in Fields: \(url)")
+    }
+
     func testTrackArtworkFallsBackToAlbumArt() async throws {
         let page = try await makeBackend().fetchTracks(offset: 0, limit: 50)
         // t2 has no own ImageTags but the album has a Primary image: the key must
