@@ -82,11 +82,36 @@ public struct JellyfinBackend: MusicBackend {
     }
 
     public func fetchTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track> {
+        // NOTE: deliberately WITHOUT `MediaSources`. On a large (esp. lossless)
+        // library that field is the single heaviest part of the payload — the
+        // server serializes every media stream for every track — which dominates
+        // sync time. The catalog is fully browsable without it (lists don't show
+        // codec/bitrate), so we sync tracks light and fast here and backfill the
+        // audio format + file size lazily via `fetchTrackDetails` (see the
+        // background media backfill). `NormalizationGain` is a cheap top-level
+        // field, so loudness normalization keeps working immediately.
         let response = try await client.send(
-            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,MediaSources,NormalizationGain")),
+            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain")),
             as: JFItemsResponse.self
         )
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
+    }
+
+    /// Backfill audio format + file size for specific tracks (the data omitted
+    /// from `fetchTracks` for speed) by fetching them with `MediaSources`.
+    public func fetchTrackDetails(ids: [String]) async throws -> [Track] {
+        guard !ids.isEmpty else { return [] }
+        let response = try await client.send(
+            Endpoint(path: "Items", query: [
+                URLQueryItem(name: "userId", value: userID),
+                URLQueryItem(name: "Ids", value: ids.joined(separator: ",")),
+                URLQueryItem(name: "Fields", value: "Genres,DateCreated,MediaSources,NormalizationGain"),
+                URLQueryItem(name: "EnableImageTypes", value: "Primary"),
+                URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
+            ]),
+            as: JFItemsResponse.self
+        )
+        return (response.Items ?? []).map(JellyfinMapper.track)
     }
 
     public func fetchPlaylists(offset: Int, limit: Int) async throws -> CatalogPage<Playlist> {

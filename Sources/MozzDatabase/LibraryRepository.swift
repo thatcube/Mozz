@@ -78,6 +78,19 @@ public struct LibraryRepository: Sendable {
         try await count(table: TrackRecord.self, serverId: serverId)
     }
 
+    /// Remote ids of tracks whose audio format hasn't been backfilled yet (the
+    /// light catalog sync omits `MediaSources` for speed). Drives the background
+    /// media backfill; returns at most `limit` ids.
+    public func trackRemoteIdsMissingFormat(serverId: ServerID, limit: Int) async throws -> [String] {
+        try await database.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT remoteId FROM track
+                WHERE serverId = ? AND container IS NULL
+                LIMIT ?
+                """, arguments: [serverId, limit])
+        }
+    }
+
     private func count<R: TableRecord>(table: R.Type, serverId: ServerID?) async throws -> Int {
         try await database.read { db in
             var request = R.all()

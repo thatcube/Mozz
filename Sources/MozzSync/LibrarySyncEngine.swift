@@ -1,6 +1,9 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+import os
+
+private let syncLog = Logger(subsystem: "com.thatcube.Mozz", category: "sync")
 
 /// Progress emitted as a catalog sync advances, for a progress bar / status
 /// line. `totalCount` is advisory (the backend may not report it).
@@ -14,16 +17,50 @@ public struct SyncProgress: Sendable, Hashable {
         case playlists
         case pruning
         case done
+
+        /// Short, user-facing label.
+        public var label: String {
+            switch self {
+            case .capabilities: return "Connecting"
+            case .syncing:      return "Syncing"
+            case .artists:      return "Artists"
+            case .albums:       return "Albums"
+            case .tracks:       return "Songs"
+            case .playlists:    return "Playlists"
+            case .pruning:      return "Finishing up"
+            case .done:         return "Done"
+            }
+        }
+    }
+
+    /// Progress for one concurrently-running entity phase, so the UI can show a
+    /// live per-type breakdown (Songs 3.7k/20k · Albums 1.2k/2.5k · …) instead of
+    /// one opaque total that appears to jump and stall.
+    public struct PhaseDetail: Sendable, Hashable, Identifiable {
+        public let phase: Phase
+        public let synced: Int
+        public let total: Int?
+        public var id: Phase { phase }
+        public var isComplete: Bool { total.map { synced >= $0 } ?? false }
+
+        public init(phase: Phase, synced: Int, total: Int?) {
+            self.phase = phase
+            self.synced = synced
+            self.total = total
+        }
     }
 
     public var phase: Phase
     public var itemsSynced: Int
     public var totalCount: Int?
+    /// Per-phase breakdown during the concurrent `.syncing` phase (empty otherwise).
+    public var details: [PhaseDetail]
 
-    public init(phase: Phase, itemsSynced: Int, totalCount: Int? = nil) {
+    public init(phase: Phase, itemsSynced: Int, totalCount: Int? = nil, details: [PhaseDetail] = []) {
         self.phase = phase
         self.itemsSynced = itemsSynced
         self.totalCount = totalCount
+        self.details = details
     }
 }
 
@@ -168,6 +205,7 @@ public struct LibrarySyncEngine: Sendable {
             duration: Date().timeIntervalSince(started)
         )
         progress?(SyncProgress(phase: .done, itemsSynced: summary.tracks, totalCount: summary.tracks))
+        syncLog.info("sync complete: \(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists, \(summary.playlists) playlists, \(summary.deleted) pruned in \(String(format: "%.1f", summary.duration))s")
         return summary
     }
 
@@ -207,6 +245,7 @@ public struct LibrarySyncEngine: Sendable {
         id: @Sendable (Item) -> String,
         report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
     ) async throws -> PagedEnumeration {
+        let started = Date()
         var offset = 0
         var seen: [String] = []
         var reportedTotal: Int?
@@ -220,6 +259,9 @@ public struct LibrarySyncEngine: Sendable {
             await report(phase, seen.count, reportedTotal)
             offset += page.items.count
         }
+        let elapsed = Date().timeIntervalSince(started)
+        let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
+        syncLog.info("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal)
     }
 
@@ -264,26 +306,42 @@ public struct LibrarySyncEngine: Sendable {
 }
 
 /// Merges progress from the concurrently-running entity phases into one combined
-/// `SyncProgress` (phase `.syncing`): the sum of items seen across phases, and a
-/// determinate total only once every phase has reported its server total (so the
-/// bar shows a spinner + live count first, then a smooth determinate bar — never
-/// a total that lurches as each phase's count arrives).
+/// `SyncProgress` (phase `.syncing`): the sum of items seen across phases, a live
+/// per-phase breakdown, and a determinate total as soon as the three main phases
+/// (artists/albums/tracks) have reported their server totals — so the bar shows a
+/// spinner + live counts first, then a smooth determinate bar, and never a total
+/// that lurches as each phase's count arrives.
 private actor ProgressAggregator {
-    private let phases: Set<SyncProgress.Phase>
+    /// Fixed display order for the breakdown.
+    private let order: [SyncProgress.Phase]
+    private let mainPhases: Set<SyncProgress.Phase>
     private let emit: @Sendable (SyncProgress) -> Void
     private var seen: [SyncProgress.Phase: Int] = [:]
     private var totals: [SyncProgress.Phase: Int] = [:]
 
-    init(phases: Set<SyncProgress.Phase>, emit: @escaping @Sendable (SyncProgress) -> Void) {
-        self.phases = phases
+    init(phases: [SyncProgress.Phase], emit: @escaping @Sendable (SyncProgress) -> Void) {
+        self.order = phases
+        // The big phases whose totals gate a trustworthy overall percentage.
+        let main: Set<SyncProgress.Phase> = [.artists, .albums, .tracks]
+        self.mainPhases = main.intersection(Set(phases))
         self.emit = emit
     }
 
     func report(phase: SyncProgress.Phase, seen count: Int, total: Int?) {
         seen[phase] = count
         if let total { totals[phase] = max(totals[phase] ?? 0, total) }
+
+        let details = order.compactMap { p -> SyncProgress.PhaseDetail? in
+            // Only surface a phase once it has started (reported a count or total).
+            guard seen[p] != nil || totals[p] != nil else { return nil }
+            return SyncProgress.PhaseDetail(phase: p, synced: seen[p] ?? 0, total: totals[p])
+        }
         let combinedSeen = seen.values.reduce(0, +)
-        let combinedTotal = totals.count == phases.count ? totals.values.reduce(0, +) : nil
-        emit(SyncProgress(phase: .syncing, itemsSynced: combinedSeen, totalCount: combinedTotal))
+        // Show a determinate total once the main phases have theirs (playlists can
+        // lag); include any other known totals so the number is as complete as
+        // possible without waiting on a slow tail.
+        let mainKnown = mainPhases.isSubset(of: Set(totals.keys))
+        let combinedTotal = mainKnown ? totals.values.reduce(0, +) : nil
+        emit(SyncProgress(phase: .syncing, itemsSynced: combinedSeen, totalCount: combinedTotal, details: details))
     }
 }

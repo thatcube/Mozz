@@ -115,6 +115,9 @@ public final class AppEnvironment: ObservableObject {
     @Published public private(set) var isSyncing = false
     @Published public private(set) var syncProgress: SyncProgress?
     private var syncTask: Task<Void, Never>?
+    /// Background pass that backfills audio format/size the light track sync
+    /// omits (Jellyfin). Single-flight; silent (never flips `isSyncing`).
+    private var mediaBackfillTask: Task<Void, Never>?
 
     /// A short human status for the sync UI, or `nil` when idle.
     public var syncStatusText: String? {
@@ -362,11 +365,15 @@ public final class AppEnvironment: ObservableObject {
         )
         resolver.setDelegate(offline)
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
+        // Fill in any track format the light sync skipped (covers relaunch/restore
+        // where no fresh sync runs). Cheap no-op once everything's backfilled.
+        startMediaBackfillIfNeeded()
     }
 
     public func signOut() {
         activationTask?.cancel()
         cancelSync()                 // stop any in-flight catalog sync for the old account
+        mediaBackfillTask?.cancel()  // and the background format backfill
         isSettingUp = false
         setupError = nil
         canEnterEarly = false
@@ -509,15 +516,16 @@ public final class AppEnvironment: ObservableObject {
         // a re-login — and surfaces a clear error if the server has no music.
         try await ensurePlexMusicSection()
         guard let active else { throw MozzError.unsupported("No active server") }
-        // Catalog sync uses a bulk-timeout backend: a single page of several
-        // hundred items can take tens of seconds to generate on a large/slow
-        // self-hosted server, which would blow the 12s interactive timeout and
-        // abort the sync — hence the 90s bulk transport. A 500-item page keeps
-        // each request comfortably inside that window while halving the round
-        // trips vs. the old 200, and the engine runs the entity phases
-        // concurrently (peak memory is a handful of pages, not the library).
+        // Catalog sync uses a bulk-timeout backend: a page of items can take
+        // many seconds to generate on a large/slow self-hosted server, which
+        // would blow the 12s interactive timeout — hence the 90s bulk transport.
+        // With the entity phases running CONCURRENTLY, total time is dominated by
+        // the overlap, not the round-trip count, so a smaller 250-item page is
+        // the better trade: each page returns ~2x sooner, so the progress UI
+        // updates roughly twice as often in half-as-big steps (much less
+        // "stuck at a number" feel) while memory stays a handful of pages.
         let backend = makeBulkSyncBackend() ?? active.backend
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 500)
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 250)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         // New catalog + listening → refresh the mixes off-main. Non-fatal.
@@ -525,7 +533,40 @@ public final class AppEnvironment: ObservableObject {
         await regenerateHomeMixes()
         // Flush any likes/ratings that were made offline.
         await flushFavoriteOutbox()
+        // Quietly fill in the audio format/size the light track sync skipped.
+        startMediaBackfillIfNeeded()
         return summary
+    }
+
+    /// Backfill the audio format + file size that the light catalog sync omits
+    /// for speed (Jellyfin drops the heavy `MediaSources` field there). Runs in
+    /// the background at low priority: it pages through the tracks still missing
+    /// format, fetches their details in batches, and updates just those rows. It
+    /// never touches `isSyncing`/`syncProgress` (so the sync bar isn't re-shown)
+    /// and no-ops for backends whose bulk sync already carries full format
+    /// (`fetchTrackDetails` defaults to `[]`). Single-flight + resumable: it only
+    /// looks at rows where `container IS NULL`, so an interrupted pass just
+    /// continues next time.
+    public func startMediaBackfillIfNeeded() {
+        guard mediaBackfillTask == nil, let active else { return }
+        let serverId = active.connection.id
+        // A bulk-timeout backend: a MediaSources batch can be sizable.
+        let backend = makeBulkSyncBackend() ?? active.backend
+        let repository = self.repository
+        let database = self.database
+        mediaBackfillTask = Task(priority: .utility) { [weak self] in
+            defer { Task { @MainActor in self?.mediaBackfillTask = nil } }
+            let writer = CatalogWriter(database)
+            while !Task.isCancelled {
+                guard let ids = try? await repository.trackRemoteIdsMissingFormat(serverId: serverId, limit: 200),
+                      !ids.isEmpty else { return }
+                guard let details = try? await backend.fetchTrackDetails(ids: ids), !details.isEmpty else { return }
+                try? await writer.upsertTracks(details, serverId: serverId)
+                // Yield briefly so the backfill stays a low-priority trickle that
+                // never competes with the user's browsing/playback.
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+        }
     }
 
     // MARK: Recommendations
