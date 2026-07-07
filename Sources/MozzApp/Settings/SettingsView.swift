@@ -11,6 +11,11 @@ struct SettingsView: View {
     /// Open metadata enrichment on/off (default on). Read live by
     /// `AppEnvironment.enrichment`, so no wiring is needed beyond this store.
     @AppStorage("mozz.enrichmentEnabled") private var enrichmentEnabled = true
+    /// Live enrichment coverage for the status line; polled while Settings is open
+    /// (the task is hosted on the always-present Form — see `.task` below — because
+    /// a `.task` on a view whose only content is conditional never fires until the
+    /// content exists, a chicken-and-egg that leaves it permanently hidden).
+    @State private var recCoverage: (total: Int, matched: Int, genreTagged: Int)?
 
     var body: some View {
         NavigationStack {
@@ -56,8 +61,8 @@ struct SettingsView: View {
                         }
                         Text("Looks up open music data from MusicBrainz to make radio and mixes more accurate. Only song and artist names are sent, no account or personal data. Turn this off to keep the app fully offline.")
                             .font(.caption).foregroundStyle(.secondary)
-                        if enrichmentEnabled {
-                            EnrichmentCoverageView()
+                        if enrichmentEnabled, let c = recCoverage, c.total > 0 {
+                            EnrichmentCoverageRow(coverage: c)
                         }
                     } header: {
                         Text("Recommendations")
@@ -115,6 +120,16 @@ struct SettingsView: View {
             .onChange(of: normalizationEnabled) { _, enabled in
                 env.playback.normalizationEnabled = enabled
             }
+            .task {
+                // Poll the cheap coverage count while Settings is open so the status
+                // line ticks up live as the rate-limited background pass runs.
+                // Hosted here on the always-present Form (not inside the conditional
+                // row) so it reliably fires. Cancelled automatically on dismiss.
+                while !Task.isCancelled {
+                    recCoverage = await env.enrichmentCoverage()
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                }
+            }
         }
     }
 
@@ -144,34 +159,15 @@ struct SettingsView: View {
 
 /// A live, non-intrusive readout of how much of the library has been enhanced
 /// with open MusicBrainz data — the signal that answers "are my radio/mixes
-/// using the improved engine yet?". Coverage grows in the background (rate-
-/// limited) after each sync, so this polls the cheap count while Settings is
-/// open and the number ticks up on its own.
-private struct EnrichmentCoverageView: View {
-    @EnvironmentObject private var env: AppEnvironment
-    @State private var coverage: (total: Int, matched: Int, genreTagged: Int)?
+/// using the improved engine yet?". Pure presentational: `SettingsView` owns the
+/// polling `.task` (hosted on the always-present Form) and only renders this row
+/// once there's coverage to show, so the count ticks up live as the rate-limited
+/// background pass runs.
+private struct EnrichmentCoverageRow: View {
+    let coverage: (total: Int, matched: Int, genreTagged: Int)
 
     var body: some View {
-        Group {
-            if let c = coverage, c.total > 0 {
-                content(c)
-            }
-            // Before the first count loads (or nothing synced yet), show nothing —
-            // the toggle's own description already explains the feature.
-        }
-        .task(id: env.isSyncing) {
-            // Reload on appear and whenever a sync starts/finishes, then poll so
-            // the count climbs live while the background pass runs. Cancels when
-            // the view goes away or a sync toggles this task's id.
-            while !Task.isCancelled {
-                coverage = await env.enrichmentCoverage()
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func content(_ c: (total: Int, matched: Int, genreTagged: Int)) -> some View {
+        let c = coverage
         let done = c.matched >= c.total
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -200,7 +196,6 @@ private struct EnrichmentCoverageView: View {
 
     private func headline(_ c: (total: Int, matched: Int, genreTagged: Int), done: Bool) -> String {
         if done { return "Library enhanced" }
-        if c.matched == 0 { return "Enhancing your library…" }
         return "Enhancing your library"
     }
 
