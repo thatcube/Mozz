@@ -114,31 +114,44 @@ final class MusicBrainzClientRequestTests: XCTestCase {
     func testAridFallbackWhenConstrainedSearchEmpty() async throws {
         // Empty for the arid-constrained query; a match for the unconstrained one.
         let transport = QueryVaryingTransport(
-            emptyWhenQueryContains: "arid:",
-            matchJSON: "{\"recordings\":[{\"id\":\"\(recA)\",\"score\":95}]}")
+            aridJSON: "{\"recordings\":[]}",
+            plainJSON: "{\"recordings\":[{\"id\":\"\(recA)\",\"score\":95}]}")
         let match = try await makeClient(transport).bestRecording(
             artist: "Aphex Twin", title: "Xtal", durationMs: nil,
             artistMBID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         XCTAssertEqual(match?.recordingMBID, recA) // found via fallback
-        XCTAssertEqual(transport.requestCount, 2)  // constrained, then fallback
+        XCTAssertEqual(transport.requestCount, 2)  // constrained (empty), then fallback
+    }
+
+    func testNoFallbackWhenConstrainedResultsRejected() async throws {
+        // Constrained search returns a candidate, but it fails the score gate.
+        // We must NOT drop the arid and accept a different-artist match.
+        let transport = QueryVaryingTransport(
+            aridJSON: "{\"recordings\":[{\"id\":\"\(recA)\",\"score\":40}]}",
+            plainJSON: "{\"recordings\":[{\"id\":\"\(recA)\",\"score\":100}]}")
+        let match = try await makeClient(transport).bestRecording(
+            artist: "Aphex Twin", title: "Xtal", durationMs: nil,
+            artistMBID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        XCTAssertNil(match)                        // rejected → no fallback
+        XCTAssertEqual(transport.requestCount, 1)  // no second request
     }
 }
 
-/// Returns empty results when the query contains a marker, otherwise a match —
-/// so the arid-fallback path can be exercised.
+/// Returns one JSON body for arid-constrained queries and another otherwise, so
+/// the arid fallback / no-fallback paths can be exercised.
 private final class QueryVaryingTransport: HTTPTransport, @unchecked Sendable {
-    let emptyWhenQueryContains: String
-    let matchJSON: String
+    let aridJSON: String
+    let plainJSON: String
     private let lock = NSLock()
     private(set) var requestCount = 0
-    init(emptyWhenQueryContains: String, matchJSON: String) {
-        self.emptyWhenQueryContains = emptyWhenQueryContains
-        self.matchJSON = matchJSON
+    init(aridJSON: String, plainJSON: String) {
+        self.aridJSON = aridJSON
+        self.plainJSON = plainJSON
     }
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         lock.lock(); requestCount += 1; lock.unlock()
         let url = request.url?.absoluteString.removingPercentEncoding ?? ""
-        let json = url.contains(emptyWhenQueryContains) ? "{\"recordings\":[]}" : matchJSON
+        let json = url.contains("arid:") ? aridJSON : plainJSON
         return (Data(json.utf8),
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }

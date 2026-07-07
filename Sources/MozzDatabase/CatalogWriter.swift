@@ -266,8 +266,10 @@ public struct CatalogWriter: Sendable {
     /// keyed on the durable `track_ref`. Writes ONLY the MBID columns + lookup
     /// provenance; never touches `tags`/`embedding`/`bpm`/`feature_source`.
     /// `artist_mbid` is COALESCEd so a null (Plex) can't overwrite a resolved
-    /// value. The `WHERE` guard skips a no-op rewrite when the MBID is unchanged
-    /// (avoids rewriting a row + its indexes for every track on every sync).
+    /// value. The `WHERE` guard skips a no-op rewrite when nothing would change,
+    /// but still fires when a real artist MBID becomes available for an
+    /// already-known recording (avoids rewriting a row + its indexes for every
+    /// track on every sync while not blocking a genuine back-fill).
     /// Arguments: (track_ref, mbid, artist_mbid, lookup_at, updated_at).
     private static let embeddedMBIDUpsertSQL = """
     INSERT INTO track_features (track_ref, mbid, artist_mbid, mbid_lookup_status, mbid_lookup_at, updated_at)
@@ -279,6 +281,7 @@ public struct CatalogWriter: Sendable {
         mbid_lookup_at = excluded.mbid_lookup_at,
         updated_at = excluded.updated_at
     WHERE track_features.mbid IS NOT excluded.mbid
+       OR (excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid)
     """
 
     /// Partial UPSERT of an embedded ARTIST MBID for a track that has NO recording

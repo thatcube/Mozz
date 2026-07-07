@@ -154,4 +154,24 @@ final class EnrichmentStoreTests: XCTestCase {
         let candidate = needing.first { $0.remoteId == "t5" }
         XCTAssertEqual(candidate?.existingArtistMbid, artistMbid)
     }
+
+    func testEmbeddedArtistMbidBackfilledWhenRecordingUnchanged() async throws {
+        let (_, writer, store) = try await setup()
+        // First sync: recording MBID present, artist MBID not yet known.
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "S", artistName: "A", mbid: mbidA, artistMbid: nil),
+        ], serverId: "srv1")
+        var state = try await store.mbidState(trackRef: "srv1:t1")
+        XCTAssertEqual(state?.mbid, mbidA)
+        XCTAssertNil(state?.artistMbid)
+        // Re-sync: SAME recording MBID, now carrying an artist MBID. The no-op
+        // WHERE guard must still allow this legitimate back-fill (a WHERE that only
+        // checked mbid would silently drop it).
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "S", artistName: "A", mbid: mbidA, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        state = try await store.mbidState(trackRef: "srv1:t1")
+        XCTAssertEqual(state?.mbid, mbidA)
+        XCTAssertEqual(state?.artistMbid, artistMbid)
+    }
 }

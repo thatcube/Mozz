@@ -33,22 +33,27 @@ public actor AsyncRateLimiter {
     /// Block until this caller's reserved slot (and any active back-off penalty);
     /// throws `CancellationError` if the wait is cancelled.
     public func acquire() async throws {
-        let current = now()
-        let scheduled = max(current, nextAllowed)
-        // Reserve BEFORE awaiting so concurrent callers serialize.
-        nextAllowed = scheduled.addingTimeInterval(minInterval)
-        // Wait for the reserved slot; re-check on wake because a back-off penalty
-        // may have landed (or extended) while we slept — it must delay in-flight
-        // callers too, not just future reservations.
+        // Reserve the earliest slot not before now, the last reservation, or an
+        // active back-off floor.
+        var slot = max(now(), nextAllowed, penaltyUntil)
+        nextAllowed = slot.addingTimeInterval(minInterval)
         while true {
-            let target = max(scheduled, penaltyUntil)
-            let wait = target.timeIntervalSince(now())
-            if wait <= 0 { return }
-            try await sleep(wait)
+            let wait = slot.timeIntervalSince(now())
+            if wait > 0 { try await sleep(wait) }
+            // A penalty (503/429 Retry-After) that landed while we slept must
+            // re-space us — NOT collapse every waiter onto the same instant. Take a
+            // fresh unique slot past the penalty so callers stay minInterval apart.
+            if penaltyUntil > slot {
+                slot = max(now(), nextAllowed, penaltyUntil)
+                nextAllowed = slot.addingTimeInterval(minInterval)
+                continue
+            }
+            return
         }
     }
 
-    /// Delay all callers (in-flight and future) until at least `date`.
+    /// Delay all callers (in-flight and future) until at least `date`. Also pushes
+    /// the reservation cursor so re-reservations chain (and stay spaced) past it.
     public func penalize(until date: Date) {
         if date > penaltyUntil { penaltyUntil = date }
         if date > nextAllowed { nextAllowed = date }

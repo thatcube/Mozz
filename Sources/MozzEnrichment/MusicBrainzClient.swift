@@ -68,22 +68,26 @@ public struct MusicBrainzClient: Sendable {
 
         let arid = MusicBrainzID.normalized(artistMBID)
             .flatMap { $0 == MusicBrainzID.variousArtists ? nil : $0 }
-        // Try the artist-constrained search first when we have an MBID; if it
-        // returns nothing (a stale/mismatched arid would), fall back to an
-        // unconstrained title+artist search before giving up — otherwise a bad
-        // artist MBID would negative-cache the track forever.
+        // Try the artist-constrained search first when we have an MBID. Fall back
+        // to an unconstrained search ONLY when the constrained one returned no
+        // candidates at all (a stale/mismatched arid). If it returned candidates
+        // that simply didn't clear the score/duration gate, do NOT drop the arid —
+        // an unconstrained search could otherwise accept a confident match from a
+        // different same-named artist.
         if let arid {
-            if let match = try await search(artist: trimmedArtist, title: trimmedTitle,
-                                            arid: arid, durationMs: durationMs) {
+            let recordings = try await searchRecordings(artist: trimmedArtist, title: trimmedTitle, arid: arid)
+            if let match = Self.pickMatch(from: recordings, durationMs: durationMs,
+                                          minScore: minScore, durationToleranceMs: durationToleranceMs) {
                 return match
             }
+            if !recordings.isEmpty { return nil }
         }
-        return try await search(artist: trimmedArtist, title: trimmedTitle,
-                                arid: nil, durationMs: durationMs)
+        let recordings = try await searchRecordings(artist: trimmedArtist, title: trimmedTitle, arid: nil)
+        return Self.pickMatch(from: recordings, durationMs: durationMs,
+                              minScore: minScore, durationToleranceMs: durationToleranceMs)
     }
 
-    private func search(artist: String, title: String, arid: String?,
-                        durationMs: Double?) async throws -> MusicBrainzRecordingMatch? {
+    private func searchRecordings(artist: String, title: String, arid: String?) async throws -> [MBRecording] {
         var terms = ["recording:\(Self.phrase(title))", "artist:\(Self.phrase(artist))"]
         if let arid { terms.append("arid:\(arid)") }
         let endpoint = Endpoint(path: "ws/2/recording", query: [
@@ -92,8 +96,7 @@ public struct MusicBrainzClient: Sendable {
             URLQueryItem(name: "limit", value: "5"),
         ])
         let response = try await client.send(endpoint, as: MBRecordingSearchResponse.self)
-        return Self.pickMatch(from: response.recordings ?? [], durationMs: durationMs,
-                              minScore: minScore, durationToleranceMs: durationToleranceMs)
+        return response.recordings ?? []
     }
 
     /// Pure match selection (unit-tested): highest-scoring recording that clears

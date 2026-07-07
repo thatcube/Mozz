@@ -96,6 +96,21 @@ final class AsyncRateLimiterTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(next.timeIntervalSince(start), 30)
     }
 
+    func testPenaltyDelaysSubsequentAcquireAndKeepsSpacing() async throws {
+        let start = Date(timeIntervalSince1970: 1_000)
+        let clock = TestClock(start)
+        let limiter = AsyncRateLimiter(
+            minInterval: 1.0, now: { clock.now },
+            sleep: { clock.recordSleep($0) })
+        try await limiter.acquire()                                    // slot t0, no wait
+        await limiter.penalize(until: start.addingTimeInterval(30))    // back off to t0+30
+        try await limiter.acquire()                                    // must wait to t0+30
+        XCTAssertEqual(clock.sleeps, [30.0])
+        // Spacing continues past the penalty for the NEXT reservation.
+        let next = await limiter.currentNextAllowed()
+        XCTAssertEqual(next.timeIntervalSince(start), 31.0, accuracy: 0.0001)
+    }
+
     func testRetryAfterParsing() {
         func resp(_ headers: [String: String]) -> HTTPURLResponse {
             HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 503,
@@ -105,4 +120,42 @@ final class AsyncRateLimiterTests: XCTestCase {
         XCTAssertEqual(RateLimitingTransport.retryAfterSeconds(resp(["Retry-After": "99999"])), 120) // clamped
         XCTAssertNil(RateLimitingTransport.retryAfterSeconds(resp([:])))
     }
+
+    /// Real-concurrency test (real clock + real Task.sleep): several callers
+    /// acquire concurrently while a back-off penalty lands mid-flight. Whatever
+    /// the interleaving, every pair of grants must stay >= minInterval apart — the
+    /// invariant the herd bug violated. A fake-clock test can't exercise this
+    /// because a synchronous fake sleep never yields to interleave the actor.
+    func testConcurrentAcquiresStaySpacedUnderPenalty() async throws {
+        let interval: TimeInterval = 0.1
+        let limiter = AsyncRateLimiter(minInterval: interval)
+        let recorder = GrantRecorder()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 {
+                group.addTask {
+                    try? await limiter.acquire()
+                    await recorder.record(Date())
+                }
+            }
+            group.addTask {
+                // Land a back-off while the callers are still waiting on their slots.
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                await limiter.penalize(until: Date().addingTimeInterval(0.15))
+            }
+        }
+        let times = await recorder.sorted()
+        XCTAssertEqual(times.count, 4)
+        for i in 1..<times.count {
+            let gap = times[i].timeIntervalSince(times[i - 1])
+            // Generous tolerance (half the interval) vs. the ~0 gaps a herd produces.
+            XCTAssertGreaterThanOrEqual(gap, interval * 0.5, "grants \(i-1),\(i) only \(gap)s apart")
+        }
+    }
+}
+
+/// Collects grant timestamps from concurrent tasks.
+private actor GrantRecorder {
+    private var times: [Date] = []
+    func record(_ t: Date) { times.append(t) }
+    func sorted() -> [Date] { times.sorted() }
 }
