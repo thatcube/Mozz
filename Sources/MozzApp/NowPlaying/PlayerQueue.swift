@@ -88,18 +88,18 @@ final class AudioRouteMonitor: ObservableObject {
         case .usbAudio:
             return Output(name: name, icon: "headphones", showsLabel: true, showsSourcePrefix: false)
         case .airPlay:
-            // External room/speaker: "iPhone → Name". Public API can't tell a
-            // HomePod from an Apple TV (and often reports a generic "AirPlay"
-            // name), so fall back to the AirPlay glyph unless the name hints at
-            // a specific device.
-            return Output(name: name, icon: airPlayIcon(name: name),
+            // External room/speaker: "iPhone → Name". Public API can't identify
+            // the AirPlay target (HomePod vs Apple TV vs 3rd-party) and usually
+            // reports a generic "AirPlay" name, so we always show the generic
+            // AirPlay glyph rather than risk a confidently-wrong specific icon.
+            return Output(name: name, icon: airPlaySymbol,
                           showsLabel: true, showsSourcePrefix: true)
         case .carAudio:
             return Output(name: name, icon: "car.fill", showsLabel: true, showsSourcePrefix: true)
         case .HDMI, .displayPort:
             return Output(name: name, icon: "tv.fill", showsLabel: true, showsSourcePrefix: true)
         default:
-            return Output(name: name, icon: "airplayaudio", showsLabel: true, showsSourcePrefix: true)
+            return Output(name: name, icon: airPlaySymbol, showsLabel: true, showsSourcePrefix: true)
         }
     }
 
@@ -121,10 +121,10 @@ final class AudioRouteMonitor: ObservableObject {
     /// already lowercased.
     private static func airPodsIcon(name n: String) -> String {
         if n.contains("max") {
-            return firstAvailableSymbol(["airpodsmax", "airpods"])
+            return firstAvailableSymbol(["airpods.max", "airpodsmax", "airpods"])
         }
         if n.contains("pro") {
-            return firstAvailableSymbol(["airpodspro", "airpods"])
+            return firstAvailableSymbol(["airpods.pro", "airpodspro", "airpods"])
         }
         if n.contains("gen 4") || n.contains("gen4") || n.contains("4th gen") || n.contains("generation 4") {
             return firstAvailableSymbol(["airpods.gen4", "airpods.gen3", "airpods"])
@@ -142,13 +142,10 @@ final class AudioRouteMonitor: ObservableObject {
         return candidates.last ?? "airpods"
     }
 
-    /// Best glyph for an AirPlay endpoint from its (often generic) name.
-    private static func airPlayIcon(name: String) -> String {
-        let n = name.lowercased()
-        if n.contains("homepod") { return "homepod.fill" }
-        if n.contains("apple tv") || n.contains("appletv") { return "appletv.fill" }
-        if n.contains("tv") { return "tv.fill" }
-        return "airplayaudio"
+    /// The generic AirPlay glyph — the honest icon for any AirPlay target, since
+    /// public API can't identify the specific device.
+    private static var airPlaySymbol: String {
+        firstAvailableSymbol(["airplayaudio", "airplay.audio"])
     }
 }
 #endif
