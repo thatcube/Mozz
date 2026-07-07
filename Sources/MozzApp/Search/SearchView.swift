@@ -41,6 +41,10 @@ struct SearchView: View {
     /// `easeInOut`, which felt slightly draggy at the ends.
     private let fieldTransition: Animation = .smooth(duration: 0.4)
 
+    /// Scroll-view anchor id for the very top, so beginning a search can animate
+    /// back to the top instead of hard-snapping there.
+    private let topAnchor = "search-top-anchor"
+
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
     /// Drives the collapse of the title header and the Cancel button.
@@ -54,40 +58,56 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                // Only the search field pins (it's the section header); the title
-                // + avatar sit above it as ordinary content so they scroll away
-                // 1:1 like the system large title, and every other header
-                // ("Recently Searched", "Artists", …) is plain inline content so
-                // it scrolls too.
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if showsHeader {
-                        TightHeader(title: "Search")
-                            .transition(.move(edge: .top).combined(with: .opacity))
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // Only the search field pins (it's the section header); the
+                    // title + avatar sit above it as ordinary content so they
+                    // scroll away 1:1 like the system large title, and every other
+                    // header ("Recently Searched", "Artists", …) is plain inline
+                    // content so it scrolls too.
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        // Zero-height scroll anchor so beginning a search can
+                        // animate back to the very top (see onChange below).
+                        Color.clear.frame(height: 0).id(topAnchor)
+                        if showsHeader {
+                            TightHeader(title: "Search")
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        Section {
+                            resultsContent
+                        } header: {
+                            searchFieldBar
+                        }
                     }
-                    Section {
-                        resultsContent
-                    } header: {
-                        searchFieldBar
+                    // Animate on isActive (what changes on focus): at the top this
+                    // also flips showsHeader, so the title collapse + field slide-up
+                    // + Cancel fade-in all animate together; when scrolled it
+                    // animates just the Cancel button in. Scoped to the content (not
+                    // the outer ScrollView) so it doesn't compound with the
+                    // keyboard's safe-area animation and thrash the pinned layout.
+                    .animation(fieldTransition, value: isActive)
+                }
+                .overlay { emptyState }
+                .safeAreaInset(edge: .bottom) { latencyLabel }
+                .tracksScrolled($scrolled)
+                .minimizesBottomBarOnScroll()
+                .scrollsToTopOnSignal()
+                .hideNavigationBar()
+                .appRouteDestinations()
+                .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
+                // Beginning a search (empty → non-empty) swaps recents for results,
+                // which would hard-snap the scroll view to the top. Get ahead of it
+                // with a smooth scroll-to-top so the jump reads as an intentional
+                // glide rather than a flash.
+                .onChange(of: trimmedQuery.isEmpty) { wasEmpty, isEmpty in
+                    if wasEmpty && !isEmpty {
+                        withAnimation(fieldTransition) {
+                            proxy.scrollTo(topAnchor, anchor: .top)
+                        }
                     }
                 }
-                // Animate on isActive (what changes on focus): at the top this
-                // also flips showsHeader, so the title collapse + field slide-up +
-                // Cancel fade-in all animate together; when scrolled it animates
-                // just the Cancel button in. Scoped to the content (not the outer
-                // ScrollView) so it doesn't compound with the keyboard's
-                // safe-area animation and thrash the pinned layout.
-                .animation(fieldTransition, value: isActive)
+                .task(id: recents.items) { await resolveRecents() }
             }
-            .overlay { emptyState }
-            .safeAreaInset(edge: .bottom) { latencyLabel }
-            .tracksScrolled($scrolled)
-            .minimizesBottomBarOnScroll()
-            .scrollsToTopOnSignal()
-            .hideNavigationBar()
-            .appRouteDestinations()
-            .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
-            .task(id: recents.items) { await resolveRecents() }
         }
     }
 
