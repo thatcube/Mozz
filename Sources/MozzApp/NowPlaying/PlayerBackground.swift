@@ -38,16 +38,31 @@ struct ArtworkColorGrid: Equatable {
 enum ArtworkPalette {
     /// How the sampled grid is shaped into a backdrop.
     enum Tuning {
-        /// How strongly each cell is pulled toward the artwork's overall color.
-        /// 0 = raw regional colors (harsh bands / center "lane"); 1 = a single
-        /// flat color. ~0.5 keeps hue variety but dissolves regional seams for a
-        /// broad, Apple-Music-like field.
-        static let cohesion: CGFloat = 0.5
+        /// How strongly each cell's HUE + SATURATION is pulled toward the
+        /// artwork's *vibrant* accent color (not its flat average). 0 = raw
+        /// regional colors (harsh bands / center "lane"); 1 = every cell shares
+        /// the accent hue. ~0.6 unifies the field around the accent (surfacing a
+        /// small vivid area like a bright dress) while keeping per-region
+        /// brightness for depth. Blending in HSB — not RGB — avoids muddy
+        /// mixes when a region's hue clashes with the accent.
+        static let cohesion: CGFloat = 0.62
         static let minBrightness: CGFloat = 0.14
-        static let maxBrightness: CGFloat = 0.52
-        static let saturationBoost: CGFloat = 1.12
-        /// Mesh point drift amplitude (fraction of the frame).
-        static let driftAmplitude: Float = 0.05
+        static let maxBrightness: CGFloat = 0.56
+        /// Extra saturation on the final cells so the accent reads as vivid.
+        static let saturationBoost: CGFloat = 1.3
+        /// Floor the accent's saturation so a mostly-muted cover still shows some
+        /// color, without forcing color onto a genuinely grayscale cover.
+        static let accentSaturationFloor: CGFloat = 0.35
+        /// Resolution the artwork is downsampled to before extraction. Higher =
+        /// small vivid regions (accents) survive averaging. Divisible by the
+        /// 3×3 grid so regional aggregation is even.
+        static let sampleDim = 12
+        /// Emphasis on saturation when weighting the vibrant accent. Higher =
+        /// a small saturated area outvotes a large flat one more strongly.
+        static let vibrancyExponent: CGFloat = 1.7
+        /// Mesh point drift amplitude (fraction of the frame). A touch of travel
+        /// so the color field drifts around the page (Apple-style) unnoticeably.
+        static let driftAmplitude: Float = 0.07
     }
 
     /// Sample the artwork into a color grid, or derive a pleasant deterministic
@@ -189,61 +204,100 @@ extension Color {
 
 #if canImport(UIKit)
 extension UIImage {
-    /// Downsample the image to `dim × dim` pixels, pull each cell toward the
-    /// overall average (cohesion) so there are no harsh regional seams / center
-    /// "lane", then adjust into rich-but-legible backdrop tones.
+    /// Sample the artwork into a `dim × dim` backdrop grid that surfaces the
+    /// cover's *vivid accent* color (Apple-Music style) rather than its muddy
+    /// average. Steps:
+    ///  1. Downsample to a higher-res `sampleDim × sampleDim` buffer so small
+    ///     saturated regions (a bright dress, a neon sign) survive.
+    ///  2. Compute a vibrancy-weighted dominant color — pixels count in
+    ///     proportion to `saturation^exp × brightness`, so a small vivid area
+    ///     outvotes a large flat one.
+    ///  3. For each of the `dim × dim` regions, take the regional average but
+    ///     pull its HUE + SATURATION toward that accent (cohesion), keeping the
+    ///     region's own brightness for vertical depth. Blending in HSB avoids
+    ///     the gray "mud" that RGB-averaging complementary hues produces, and
+    ///     unifying hue removes the old center "lane".
     func mozzColorGrid(dim: Int) -> [Color]? {
         guard let cg = cgImage else { return nil }
-        let count = dim * dim
-        var px = [UInt8](repeating: 0, count: count * 4)
+        let sampleDim = max(dim, ArtworkPalette.Tuning.sampleDim)
+        let sCount = sampleDim * sampleDim
+        var px = [UInt8](repeating: 0, count: sCount * 4)
         let space = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
-            data: &px, width: dim, height: dim, bitsPerComponent: 8,
-            bytesPerRow: dim * 4, space: space,
+            data: &px, width: sampleDim, height: sampleDim, bitsPerComponent: 8,
+            bytesPerRow: sampleDim * 4, space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
         ctx.interpolationQuality = .medium
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: dim, height: dim))
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: sampleDim, height: sampleDim))
 
-        // Raw cell RGB + running mean.
-        var rs = [CGFloat](repeating: 0, count: count)
-        var gs = [CGFloat](repeating: 0, count: count)
-        var bs = [CGFloat](repeating: 0, count: count)
-        var mr: CGFloat = 0, mg: CGFloat = 0, mb: CGFloat = 0
-        for i in 0..<count {
-            let r = CGFloat(px[i * 4]) / 255
-            let g = CGFloat(px[i * 4 + 1]) / 255
-            let b = CGFloat(px[i * 4 + 2]) / 255
-            rs[i] = r; gs[i] = g; bs[i] = b
-            mr += r; mg += g; mb += b
+        @inline(__always) func rgb(_ i: Int) -> (CGFloat, CGFloat, CGFloat) {
+            (CGFloat(px[i * 4]) / 255, CGFloat(px[i * 4 + 1]) / 255, CGFloat(px[i * 4 + 2]) / 255)
         }
-        let n = CGFloat(count)
-        mr /= n; mg /= n; mb /= n
 
-        // Blend each cell toward the mean (cohesion), then adjust for legibility.
+        // Vibrancy-weighted accent: saturated pixels dominate, so a small vivid
+        // region drives the field's hue instead of being averaged away.
+        var vr: CGFloat = 0, vg: CGFloat = 0, vb: CGFloat = 0, vw: CGFloat = 0
+        let exp = ArtworkPalette.Tuning.vibrancyExponent
+        for i in 0..<sCount {
+            let (r, g, b) = rgb(i)
+            let maxC = max(r, max(g, b)), minC = min(r, min(g, b))
+            let sat = maxC <= 0 ? 0 : (maxC - minC) / maxC
+            let w = pow(sat, exp) * maxC + 0.0002   // epsilon keeps grayscale art safe
+            vr += r * w; vg += g * w; vb += b * w; vw += w
+        }
+        let accent = UIColor(red: vr / vw, green: vg / vw, blue: vb / vw, alpha: 1)
+        var accentH: CGFloat = 0, accentS: CGFloat = 0, accentB: CGFloat = 0, accentA: CGFloat = 0
+        accent.getHue(&accentH, saturation: &accentS, brightness: &accentB, alpha: &accentA)
+        // Only floor saturation if the accent already has real color, so a truly
+        // grayscale cover stays grayscale.
+        if accentS > 0.08 { accentS = max(accentS, ArtworkPalette.Tuning.accentSaturationFloor) }
+
+        // Regional cells, each pulled toward the accent in HSB space.
         let k = ArtworkPalette.Tuning.cohesion
         var out: [Color] = []
-        out.reserveCapacity(count)
-        for i in 0..<count {
-            let r = rs[i] + (mr - rs[i]) * k
-            let g = gs[i] + (mg - gs[i]) * k
-            let b = bs[i] + (mb - bs[i]) * k
-            out.append(Color(UIColor(red: r, green: g, blue: b, alpha: 1).mozzBackdropAdjusted()))
+        out.reserveCapacity(dim * dim)
+        for gr in 0..<dim {
+            let y0 = gr * sampleDim / dim, y1 = (gr + 1) * sampleDim / dim
+            for gc in 0..<dim {
+                let x0 = gc * sampleDim / dim, x1 = (gc + 1) * sampleDim / dim
+                var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, cnt: CGFloat = 0
+                for y in y0..<y1 {
+                    for x in x0..<x1 {
+                        let (r, g, b) = rgb(y * sampleDim + x)
+                        ar += r; ag += g; ab += b; cnt += 1
+                    }
+                }
+                let cell = UIColor(red: ar / cnt, green: ag / cnt, blue: ab / cnt, alpha: 1)
+                out.append(Color(cell.mozzBackdropBlended(towardHue: accentH,
+                                                           saturation: accentS,
+                                                           cohesion: k)))
+            }
         }
         return out
     }
 }
 
 extension UIColor {
-    /// Adjust a sampled color into a backdrop tone: keep vivid mids vivid, darken
-    /// light covers so white text stays legible, lift pure blacks slightly, and
-    /// nudge saturation up for richness.
-    func mozzBackdropAdjusted() -> UIColor {
+    /// Blend this regional color toward the accent's hue + saturation (in HSB,
+    /// via the shortest angular path so hues never pass through gray), keep the
+    /// region's own brightness for depth, boost saturation for vividness, and
+    /// clamp brightness so overlaid white text stays legible.
+    func mozzBackdropBlended(towardHue targetH: CGFloat, saturation targetS: CGFloat,
+                             cohesion k: CGFloat) -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
+
+        // Shortest-path hue rotation toward the accent.
+        var dh = targetH - h
+        if dh > 0.5 { dh -= 1 } else if dh < -0.5 { dh += 1 }
+        var nh = (h + dh * k).truncatingRemainder(dividingBy: 1)
+        if nh < 0 { nh += 1 }
+
+        let blendedS = s + (targetS - s) * k
+        let ns = min(blendedS * ArtworkPalette.Tuning.saturationBoost, 1)
         let nb = min(max(b, ArtworkPalette.Tuning.minBrightness), ArtworkPalette.Tuning.maxBrightness)
-        let ns = min(s * ArtworkPalette.Tuning.saturationBoost, 1)
-        return UIColor(hue: h, saturation: ns, brightness: nb, alpha: 1)
+        return UIColor(hue: nh, saturation: ns, brightness: nb, alpha: 1)
     }
 }
 #endif
