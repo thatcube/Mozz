@@ -41,87 +41,62 @@ struct SearchView: View {
     /// `easeInOut`, which felt slightly draggy at the ends.
     private let fieldTransition: Animation = .smooth(duration: 0.4)
 
-    /// Scroll-view anchor id for the very top, so beginning a search can animate
-    /// back to the top instead of hard-snapping there.
-    private let topAnchor = "search-top-anchor"
-
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
     /// Drives the collapse of the title header and the Cancel button.
     private var isActive: Bool { focused || !trimmedQuery.isEmpty }
-    /// Whether the "Search" title + avatar are in the scroll content. Hidden only
-    /// when active AND at the top: focusing from the top collapses the title away
-    /// (native). When already scrolled, the title is off-screen anyway, so we keep
-    /// it in the tree — removing off-screen content above the viewport would shift
-    /// everything down (a jarring "drag") the moment the Cancel button appears.
-    private var showsHeader: Bool { !isActive || scrolled }
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // Only the search field pins (it's the section header); the
-                    // title + avatar sit above it as ordinary content so they
-                    // scroll away 1:1 like the system large title, and every other
-                    // header ("Recently Searched", "Artists", …) is plain inline
-                    // content so it scrolls too.
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        // Zero-height scroll anchor so beginning a search can
-                        // animate back to the very top (see onChange below).
-                        Color.clear.frame(height: 0).id(topAnchor)
-                        if showsHeader {
-                            TightHeader(title: "Search")
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
-                        Section {
-                            resultsContent
-                        } header: {
-                            searchFieldBar
-                        }
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // Title + avatar are ordinary scroll content, so they scroll
+                    // away exactly 1:1 with the finger (a jump is impossible).
+                    // Removed only when active (focus/query) — an animated collapse,
+                    // never a scroll-driven one.
+                    if !isActive {
+                        TightHeader(title: "Search")
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    // Animate on isActive (what changes on focus): at the top this
-                    // also flips showsHeader, so the title collapse + field slide-up
-                    // + Cancel fade-in all animate together; when scrolled it
-                    // animates just the Cancel button in. Scoped to the content (not
-                    // the outer ScrollView) so it doesn't compound with the
-                    // keyboard's safe-area animation and thrash the pinned layout.
-                    .animation(fieldTransition, value: isActive)
-                    // Also animate the recents↔results swap (driven by the query
-                    // going empty↔non-empty). Without this the branch flips
-                    // instantly on the first keystroke — recents torn out, results
-                    // swapped in — collapsing the content and snapping the scroll,
-                    // which read as a jarring flash.
-                    .animation(fieldTransition, value: trimmedQuery.isEmpty)
-                }
-                .overlay { emptyState }
-                .safeAreaInset(edge: .bottom) { latencyLabel }
-                .tracksScrolled($scrolled)
-                .minimizesBottomBarOnScroll()
-                .scrollsToTopOnSignal()
-                .hideNavigationBar()
-                .appRouteDestinations()
-                .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
-                // Beginning a search (empty → non-empty) swaps recents for results,
-                // which would hard-snap the scroll view to the top. Get ahead of it
-                // with a smooth scroll-to-top so the jump reads as an intentional
-                // glide rather than a flash.
-                .onChange(of: trimmedQuery.isEmpty) { wasEmpty, isEmpty in
-                    if wasEmpty && !isEmpty {
-                        withAnimation(fieldTransition) {
-                            proxy.scrollTo(topAnchor, anchor: .top)
+                    // The field is scroll content too, but a render-time
+                    // visualEffect holds it at the top once it would scroll past —
+                    // a continuous pin with no @State round-trip (so no per-frame
+                    // jitter) and no pinned-section-header machinery (so content
+                    // swaps/focus can't make it recompute/jump). zIndex keeps it
+                    // above the content that scrolls underneath it.
+                    searchFieldBar
+                        .zIndex(1)
+                        .visualEffect { content, proxy in
+                            let minY = proxy.frame(in: .scrollView).minY
+                            return content.offset(y: minY < 0 ? -minY : 0)
                         }
-                    }
+                    resultsContent
+                        // Crossfade the recents↔results swap; it happens below the
+                        // pinned field, which stays dead still.
+                        .animation(fieldTransition, value: trimmedQuery.isEmpty)
                 }
-                .task(id: recents.items) { await resolveRecents() }
+                // Collapse/restore the title + fade the Cancel button as active
+                // toggles. Scoped to the content, not the outer ScrollView, so it
+                // doesn't compound with the keyboard's safe-area animation.
+                .animation(fieldTransition, value: isActive)
             }
+            .overlay { emptyState }
+            .safeAreaInset(edge: .bottom) { latencyLabel }
+            .tracksScrolled($scrolled)
+            .minimizesBottomBarOnScroll()
+            .scrollsToTopOnSignal()
+            .hideNavigationBar()
+            .appRouteDestinations()
+            .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
+            .task(id: recents.items) { await resolveRecents() }
         }
     }
 
-    /// The pinned top bar: the search field (+ Cancel while active). Its
-    /// background is left visually clear so, once pinned, the scrolling content
-    /// shows around/through the Liquid Glass pill — like the native search bar —
-    /// but it still absorbs touches (`contentShape`) so you can't tap a result
-    /// that has scrolled underneath it.
+    /// The pinned top bar: the search field (+ Cancel while active). It carries a
+    /// solid page-colored background so the content scrolling underneath the
+    /// pinned bar is fully occluded (no rows peeking in the padding around the
+    /// pill), and it absorbs touches (`contentShape`) so you can't tap a result
+    /// that has scrolled beneath it. The pill itself still animates gray↔glass.
     private var searchFieldBar: some View {
         HStack(spacing: 12) {
             searchField
@@ -149,8 +124,10 @@ struct SearchView: View {
         // otherwise focusing would nudge the pinned field up ~4pt.
         .padding(.top, (isActive && !scrolled) ? 8 : 12)
         .padding(.bottom, 10)
-        // Absorb taps across the whole bar so content scrolled under the pinned
-        // header isn't interactable through the bar's clear regions.
+        // Solid page-colored fill so content scrolling under the pinned bar is
+        // occluded (including the padding around the pill), and taps in the whole
+        // bar are absorbed rather than falling through to a result beneath it.
+        .background(Color.mozzBackground)
         .contentShape(Rectangle())
         .onTapGesture { }
     }
