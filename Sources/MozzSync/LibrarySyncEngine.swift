@@ -185,10 +185,19 @@ public struct LibrarySyncEngine: Sendable {
         )
         async let playlistsTask = syncPlaylists(report: report)
 
-        let artistIDs = try await artistsTask
-        let albumIDs = try await albumsTask
-        let trackIDs = try await tracksTask
-        let playlistIDs = try await playlistsTask
+        let artistIDs: PagedEnumeration
+        let albumIDs: PagedEnumeration
+        let trackIDs: PagedEnumeration
+        let playlistIDs: PagedEnumeration
+        do {
+            artistIDs = try await artistsTask
+            albumIDs = try await albumsTask
+            trackIDs = try await tracksTask
+            playlistIDs = try await playlistsTask
+        } catch {
+            diag?("SYNC ERROR: \(error)")
+            throw error
+        }
 
         // Some album-artists (DJs, producers, combined credits) are referenced by
         // albums but never returned by the artist listing, leaving their albums
@@ -297,14 +306,19 @@ public struct LibrarySyncEngine: Sendable {
         // fetch-wait ⇒ network/server-bound.
         var fetchWait: TimeInterval = 0
         var writeTime: TimeInterval = 0
+        var pageNo = 0
+        diag?("\(phase.rawValue): phase start")
         var pending = Task { try await fetch(0, pageSize) }
         do {
             while true {
                 try Task.checkCancellation()
                 let waitStart = Date()
                 let page = try await pending.value
-                fetchWait += Date().timeIntervalSince(waitStart)
+                let waited = Date().timeIntervalSince(waitStart)
+                fetchWait += waited
                 if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
+                diag?("\(phase.rawValue): page \(pageNo) off=\(offset) got=\(page.items.count) total=\(reportedTotal.map(String.init) ?? "?") fetch=\(String(format: "%.1f", waited))s")
+                pageNo += 1
                 if page.items.isEmpty { break }
                 let nextOffset = offset + page.items.count
                 pending = Task { try await fetch(nextOffset, pageSize) }
@@ -317,6 +331,7 @@ public struct LibrarySyncEngine: Sendable {
             }
         } catch {
             pending.cancel()
+            diag?("\(phase.rawValue): ERROR after \(seen.count) items: \(error)")
             throw error
         }
         pending.cancel()
