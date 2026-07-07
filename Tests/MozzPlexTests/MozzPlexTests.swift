@@ -280,7 +280,7 @@ final class PlexAuthTests: XCTestCase {
     ])
 
     private func makeAuthenticator() -> PlexAuthenticator {
-        PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "client-uuid", transport: authTransport)
+        PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "client-uuid", transport: authTransport, probeTransport: authTransport)
     }
 
     func testRequestPin() async throws {
@@ -324,7 +324,7 @@ final class PlexAuthTests: XCTestCase {
             .init(contains: "movies-box", fixture: "plex_sections_movies_only"),
             .init(contains: "music-box", fixture: "plex_sections"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
         let movies = PlexResourceConnection(
             serverName: "The Movies", clientIdentifier: "m1",
             uri: URL(string: "https://movies-box.plex.direct:32400")!,
@@ -346,7 +346,7 @@ final class PlexAuthTests: XCTestCase {
         let transport = PlexFixtureTransport([
             .init(contains: "movies-box", fixture: "plex_sections_movies_only"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
         let movies = PlexResourceConnection(
             serverName: "The Movies", clientIdentifier: "m1",
             uri: URL(string: "https://movies-box.plex.direct:32400")!,
@@ -372,7 +372,7 @@ final class PlexAuthTests: XCTestCase {
             // Sections list for both boxes (has an artist section, key "3").
             .init(contains: "library/sections", fixture: "plex_sections"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
         let empty = PlexResourceConnection(
             serverName: "Empty Music", clientIdentifier: "e1",
             uri: URL(string: "https://empty-box.plex.direct:32400")!,

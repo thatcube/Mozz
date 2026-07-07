@@ -64,6 +64,18 @@ struct DiagnosticsView: View {
                     Label("Performance Benchmarks", systemImage: "speedometer")
                 }
             }
+
+            if let report = env.lastSyncReport {
+                Section {
+                    Text(report)
+                        .font(.footnote.monospaced())
+                        .textSelection(.enabled)
+                } header: {
+                    Label("Last sync", systemImage: "arrow.triangle.2.circlepath")
+                } footer: {
+                    Text("Per-phase throughput from the most recent sync. The slowest phase is listed first — that's the bottleneck.")
+                }
+            }
         }
         .navigationTitle("Diagnostics")
         .inlineNavigationTitle()
