@@ -71,12 +71,13 @@ struct SearchView: View {
                         searchFieldBar
                     }
                 }
-                // Header collapse / field slide-up shares the field's surface
-                // timing (fieldTransition) so, on focus, the move-up and the
-                // gray→glass crossfade run in lockstep. Scoped to the content (not
-                // the outer ScrollView) so it doesn't compound with the keyboard's
+                // Animate on isActive (what changes on focus): at the top this
+                // also flips showsHeader, so the title collapse + field slide-up +
+                // Cancel fade-in all animate together; when scrolled it animates
+                // just the Cancel button in. Scoped to the content (not the outer
+                // ScrollView) so it doesn't compound with the keyboard's
                 // safe-area animation and thrash the pinned layout.
-                .animation(fieldTransition, value: showsHeader)
+                .animation(fieldTransition, value: isActive)
             }
             .overlay { emptyState }
             .safeAreaInset(edge: .bottom) { latencyLabel }
@@ -117,7 +118,10 @@ struct SearchView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, isActive ? 8 : 12)
+        // Tighten the top gap only when collapsing from the top (title going
+        // away). When scrolled the field is pinned, so keep it constant —
+        // otherwise focusing would nudge the pinned field up ~4pt.
+        .padding(.top, (isActive && !scrolled) ? 8 : 12)
         .padding(.bottom, 10)
         // Absorb taps across the whole bar so content scrolled under the pinned
         // header isn't interactable through the bar's clear regions.
