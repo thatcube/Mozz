@@ -182,6 +182,10 @@ public final class PlaybackEngine: ObservableObject {
     /// Enqueue tracks to play after the current track.
     public func playNext(_ tracks: [Track]) {
         let wasEmpty = queue.isEmpty
+        // Starting fresh playback from an empty queue is a new session — end any
+        // pending/active station so a slow radio fetch can't hijack it. (Adding
+        // to a non-empty queue, incl. a live station's own extend, must not.)
+        if wasEmpty { invalidateStation() }
         queue.insertNext(tracks)
         if wasEmpty { reload(autoplay: true) } else { refillLookahead() }
         publish()
@@ -190,6 +194,7 @@ public final class PlaybackEngine: ObservableObject {
     /// Append tracks to the end of the queue.
     public func append(_ tracks: [Track]) {
         let wasEmpty = queue.isEmpty
+        if wasEmpty { invalidateStation() }
         queue.append(tracks)
         if wasEmpty { reload(autoplay: true) } else { refillLookahead() }
         publish()

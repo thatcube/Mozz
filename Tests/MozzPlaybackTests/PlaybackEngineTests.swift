@@ -117,6 +117,37 @@ final class PlaybackEngineTests: XCTestCase {
         XCTAssertTrue(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4,
                       "each content-replacing action must advance the transport epoch")
     }
+
+    /// The transport epoch must NOT advance on in-session actions (skip, pause,
+    /// toggle) — the radio auto-extend guard relies on those NOT ending a station.
+    func testTransportEpochStableAcrossInSessionActions() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        let base = engine.transportEpoch
+        engine.next()
+        engine.previous()
+        engine.pause()
+        engine.resume()
+        engine.setShuffle(true)
+        engine.setRepeatMode(.all)
+        engine.seek(to: 1)
+        XCTAssertEqual(engine.transportEpoch, base,
+                       "skip/pause/resume/shuffle/repeat/seek must not advance the epoch")
+    }
+
+    /// Starting fresh playback from an empty queue via playNext/append must
+    /// advance the epoch, so a slow radio fetch in flight can't hijack it.
+    func testPlayNextFromEmptyAdvancesEpoch() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let e0 = engine.transportEpoch
+        engine.playNext([Track(id: "a", title: "A", artistName: "X")])
+        XCTAssertGreaterThan(engine.transportEpoch, e0)
+        // Adding to the now-non-empty queue must NOT advance it (that would end
+        // a live station on a mere "Add to Queue").
+        let e1 = engine.transportEpoch
+        engine.append([Track(id: "b", title: "B", artistName: "X")])
+        XCTAssertEqual(engine.transportEpoch, e1)
+    }
 }
 
 /// Thread-safe counter for the station auto-extend test's `@Sendable` closure.

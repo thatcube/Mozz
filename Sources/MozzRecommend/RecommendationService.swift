@@ -107,12 +107,19 @@ public actor RecommendationService {
         // radio may revisit tracks. Pull a generous pool to blend from, excluding
         // already-surfaced tracks in SQL so the random sample is drawn from unseen
         // tracks (avoids stalling near the tail of a large catalog).
-        let pool = try await store.candidateTracks(
-            serverId: serverId, genres: seed.genres, artistIds: seed.artistIds,
-            notPlayedSince: now().timeIntervalSince1970, excludingRemoteIds: excluding, limit: 500)
-        // Backstop: drop any seen tracks that slipped past the (bounded) SQL
-        // exclusion, before scoring/limiting.
-        let fresh = pool.filter { !excluding.contains($0.remoteId) }
+        //
+        // The SQL exclusion is bounded (SQLite param limit), so in a marathon
+        // session the random sample can still come back all-seen; resample a few
+        // times (each draws a fresh RANDOM() slice) before concluding the pool is
+        // genuinely exhausted, so the station doesn't stop early.
+        var fresh: [TrackCandidate] = []
+        for _ in 0..<3 {
+            let pool = try await store.candidateTracks(
+                serverId: serverId, genres: seed.genres, artistIds: seed.artistIds,
+                notPlayedSince: now().timeIntervalSince1970, excludingRemoteIds: excluding, limit: 500)
+            fresh = pool.filter { !excluding.contains($0.remoteId) }
+            if !fresh.isEmpty { break }
+        }
         guard !fresh.isEmpty else { return [] }
 
         // Score by similarity to the SEED (treat the seed's genres/artists as a
