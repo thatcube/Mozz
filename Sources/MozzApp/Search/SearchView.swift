@@ -140,26 +140,28 @@ struct SearchView: View {
         if !results.artists.isEmpty {
             Section("Artists") {
                 ForEach(results.artists) { artist in
-                    NavigationLink(value: AppRoute.artist(artist)) {
+                    Button {
+                        record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
+                        path.append(.artist(artist))
+                    } label: {
                         SearchResultRow(artworkKey: artist.artworkKey, seed: artist.name,
                                         title: artist.name, circular: true)
                     }
-                    .simultaneousGesture(TapGesture().onEnded {
-                        record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
-                    })
+                    .buttonStyle(.plain)
                 }
             }
         }
         if !results.albums.isEmpty {
             Section("Albums") {
                 ForEach(results.albums) { album in
-                    NavigationLink(value: AppRoute.album(album)) {
+                    Button {
+                        record(.album, serverId: album.serverId, remoteId: album.remoteId)
+                        path.append(.album(album))
+                    } label: {
                         SearchResultRow(artworkKey: album.artworkKey, seed: album.title,
                                         title: album.title, subtitle: album.artistName)
                     }
-                    .simultaneousGesture(TapGesture().onEnded {
-                        record(.album, serverId: album.serverId, remoteId: album.remoteId)
-                    })
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -180,21 +182,23 @@ struct SearchView: View {
     @ViewBuilder private func recentRow(_ resolved: RecentResolved) -> some View {
         switch resolved {
         case .artist(let a):
-            NavigationLink(value: AppRoute.artist(a)) {
+            Button {
+                record(.artist, serverId: a.serverId, remoteId: a.remoteId)
+                path.append(.artist(a))
+            } label: {
                 SearchResultRow(artworkKey: a.artworkKey, seed: a.name,
                                 title: a.name, subtitle: "Artist", circular: true)
             }
-            .simultaneousGesture(TapGesture().onEnded {
-                record(.artist, serverId: a.serverId, remoteId: a.remoteId)
-            })
+            .buttonStyle(.plain)
         case .album(let a):
-            NavigationLink(value: AppRoute.album(a)) {
+            Button {
+                record(.album, serverId: a.serverId, remoteId: a.remoteId)
+                path.append(.album(a))
+            } label: {
                 SearchResultRow(artworkKey: a.artworkKey, seed: a.title,
                                 title: a.title, subtitle: "Album · \(a.artistName)")
             }
-            .simultaneousGesture(TapGesture().onEnded {
-                record(.album, serverId: a.serverId, remoteId: a.remoteId)
-            })
+            .buttonStyle(.plain)
         case .track(let t):
             Button {
                 record(.track, serverId: t.serverId, remoteId: t.remoteId)
