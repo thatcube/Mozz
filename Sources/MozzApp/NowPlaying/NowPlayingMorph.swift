@@ -56,6 +56,19 @@ struct NowPlayingMorphContainer: View {
     /// Whether the sticky tap picker (hosted at the morph root) is open.
     @State private var ratingPickerOpen = false
 
+    @AppStorage(PlayerBackgroundStyle.storageKey) private var bgStyleRaw = PlayerBackgroundStyle.default.rawValue
+    @Environment(\.colorScheme) private var systemColorScheme
+    /// Colors sampled from the current artwork for the adaptive backdrop.
+    @State private var artGrid: ArtworkColorGrid?
+
+    private var bgStyle: PlayerBackgroundStyle {
+        PlayerBackgroundStyle(rawValue: bgStyleRaw) ?? .default
+    }
+    /// Identity for the palette task: re-derive when the artwork changes.
+    private var artworkToken: String {
+        (playback.currentTrack?.artwork?.key) ?? (playback.currentTrack?.id ?? "none")
+    }
+
     /// How much the docked island grows while touched.
     private static let pressScale: CGFloat = 1.04
     private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
@@ -165,6 +178,18 @@ struct NowPlayingMorphContainer: View {
                     if !open { ratingPickerOpen = false }
                 }
                 .onAppear { playerRating = playback.currentTrack?.rating }
+                // Derive the adaptive backdrop palette from the artwork; resolve
+                // synchronously if cached (correct on first frame), else crossfade.
+                .task(id: artworkToken) {
+                    if let cached = ArtworkPalette.cachedGrid(
+                        for: playback.currentTrack?.artwork, backend: env.active?.backend, seed: artworkToken) {
+                        artGrid = cached
+                    } else {
+                        let g = await ArtworkPalette.grid(
+                            for: playback.currentTrack?.artwork, backend: env.active?.backend, seed: artworkToken)
+                        withAnimation(.easeInOut(duration: 0.5)) { artGrid = g }
+                    }
+                }
             }
             .ignoresSafeArea()
         }
@@ -224,21 +249,26 @@ struct NowPlayingMorphContainer: View {
 
     private func surface(_ m: Morph) -> some View {
         ZStack(alignment: .top) {
-            // Opaque frosted panel for the expanded drawer. It fades out during
-            // the collapse, revealing the Liquid Glass behind — so mid-collapse
-            // the shrinking bubble is translucent, exactly like Apple's.
+            // Opaque panel for the expanded drawer. A frosted material base (so
+            // mid-collapse the shrinking bubble stays translucent, revealing the
+            // Liquid Glass behind) with the artwork-adaptive backdrop painted on
+            // top. Both fade out together via `solidBgOpacity` during the collapse.
             RoundedRectangle(cornerRadius: m.radius, style: .continuous)
                 .fill(.regularMaterial)
-                .overlay(
-                    LinearGradient(colors: [.black.opacity(0.04), .black.opacity(0.26)],
-                                   startPoint: .top, endPoint: .bottom)
-                )
+                .overlay {
+                    PlayerBackdrop(style: bgStyle, grid: artGrid, animated: ui.isFullPresented)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
                 .opacity(m.solidBgOpacity)
 
             drawerBody(m)
                 .frame(width: m.width, height: m.surfaceHExpanded, alignment: .top)
                 .opacity(m.bodyOpacity)
                 .allowsHitTesting(m.p > 0.5)
+                // On the adaptive/OLED backdrop the surface is dark-colored, so
+                // render the drawer content light (matches the detail pages). In
+                // `theme` mode it follows the system scheme.
+                .environment(\.colorScheme, bgStyle == .theme ? systemColorScheme : .dark)
         }
         .frame(width: m.surfaceW, height: m.surfaceH, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
