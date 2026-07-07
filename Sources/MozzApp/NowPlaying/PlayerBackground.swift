@@ -36,6 +36,20 @@ struct ArtworkColorGrid: Equatable {
 }
 
 enum ArtworkPalette {
+    /// How the sampled grid is shaped into a backdrop.
+    enum Tuning {
+        /// How strongly each cell is pulled toward the artwork's overall color.
+        /// 0 = raw regional colors (harsh bands / center "lane"); 1 = a single
+        /// flat color. ~0.5 keeps hue variety but dissolves regional seams for a
+        /// broad, Apple-Music-like field.
+        static let cohesion: CGFloat = 0.5
+        static let minBrightness: CGFloat = 0.14
+        static let maxBrightness: CGFloat = 0.52
+        static let saturationBoost: CGFloat = 1.12
+        /// Mesh point drift amplitude (fraction of the frame).
+        static let driftAmplitude: Float = 0.05
+    }
+
     /// Sample the artwork into a color grid, or derive a pleasant deterministic
     /// grid from `seed` when there's no artwork (offline demo / art-less server).
     static func grid(for artwork: ArtworkRef?, backend: (any MusicBackend)?, seed: String) async -> ArtworkColorGrid {
@@ -142,7 +156,7 @@ struct PlayerBackdrop: View {
     /// ALONG their edge; the center drifts in both axes — so the field breathes
     /// without ever opening a gap.
     private func meshPoints(_ t: TimeInterval) -> [SIMD2<Float>] {
-        let a: Float = drift ? 0.08 : 0
+        let a: Float = drift ? ArtworkPalette.Tuning.driftAmplitude : 0
         func s(_ speed: Double, _ phase: Double) -> Float { Float(sin(t * speed + phase)) }
         return [
             SIMD2(0, 0),
@@ -175,9 +189,9 @@ extension Color {
 
 #if canImport(UIKit)
 extension UIImage {
-    /// Downsample the image to `dim × dim` pixels and return those colors,
-    /// adjusted into rich-but-legible backdrop tones. CoreGraphics averages each
-    /// cell for us during the downscale.
+    /// Downsample the image to `dim × dim` pixels, pull each cell toward the
+    /// overall average (cohesion) so there are no harsh regional seams / center
+    /// "lane", then adjust into rich-but-legible backdrop tones.
     func mozzColorGrid(dim: Int) -> [Color]? {
         guard let cg = cgImage else { return nil }
         let count = dim * dim
@@ -190,12 +204,30 @@ extension UIImage {
         ) else { return nil }
         ctx.interpolationQuality = .medium
         ctx.draw(cg, in: CGRect(x: 0, y: 0, width: dim, height: dim))
-        var out: [Color] = []
-        out.reserveCapacity(count)
+
+        // Raw cell RGB + running mean.
+        var rs = [CGFloat](repeating: 0, count: count)
+        var gs = [CGFloat](repeating: 0, count: count)
+        var bs = [CGFloat](repeating: 0, count: count)
+        var mr: CGFloat = 0, mg: CGFloat = 0, mb: CGFloat = 0
         for i in 0..<count {
             let r = CGFloat(px[i * 4]) / 255
             let g = CGFloat(px[i * 4 + 1]) / 255
             let b = CGFloat(px[i * 4 + 2]) / 255
+            rs[i] = r; gs[i] = g; bs[i] = b
+            mr += r; mg += g; mb += b
+        }
+        let n = CGFloat(count)
+        mr /= n; mg /= n; mb /= n
+
+        // Blend each cell toward the mean (cohesion), then adjust for legibility.
+        let k = ArtworkPalette.Tuning.cohesion
+        var out: [Color] = []
+        out.reserveCapacity(count)
+        for i in 0..<count {
+            let r = rs[i] + (mr - rs[i]) * k
+            let g = gs[i] + (mg - gs[i]) * k
+            let b = bs[i] + (mb - bs[i]) * k
             out.append(Color(UIColor(red: r, green: g, blue: b, alpha: 1).mozzBackdropAdjusted()))
         }
         return out
@@ -209,8 +241,8 @@ extension UIColor {
     func mozzBackdropAdjusted() -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
-        let nb = min(max(b, 0.14), 0.52)
-        let ns = min(s * 1.12, 1)
+        let nb = min(max(b, ArtworkPalette.Tuning.minBrightness), ArtworkPalette.Tuning.maxBrightness)
+        let ns = min(s * ArtworkPalette.Tuning.saturationBoost, 1)
         return UIColor(hue: h, saturation: ns, brightness: nb, alpha: 1)
     }
 }
