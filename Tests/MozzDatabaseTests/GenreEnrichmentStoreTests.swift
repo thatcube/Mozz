@@ -105,6 +105,20 @@ final class GenreEnrichmentStoreTests: XCTestCase {
         XCTAssertEqual(viaRaw.first?.genres, ["Rock"])   // raw, exact
     }
 
+    func testCandidatesMatchSeparatorVariantGenreWithoutMbTags() async throws {
+        let (_, writer, store, _) = try await setup()
+        // A hyphenated Plex genre with NO mb_tags must still be matched by the
+        // normalized key "hip hop" (else enrich-on would MISS it vs today).
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "AA", artistID: "a1", genres: ["Hip-Hop"]),
+        ], serverId: "s1")
+        let pool = try await store.candidateTracks(
+            serverId: "s1", genres: ["hip hop"], artistIds: [],
+            notPlayedSince: 9_999_999_999, limit: 100, enrich: true)
+        XCTAssertEqual(pool.count, 1)
+        XCTAssertEqual(pool[0].genres, ["hip hop"])   // normalized in the returned candidate
+    }
+
     // MARK: taste signals
 
     func testPlayedSignalsMergeMbTagsWhenEnriched() async throws {

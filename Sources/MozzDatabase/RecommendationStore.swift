@@ -343,18 +343,22 @@ public struct RecommendationStore: Sendable {
             if !genres.isEmpty {
                 let ph = databasePlaceholders(genres.count)
                 if enrich {
-                    // `genres` are normalized keys. Recall-oriented match: LOWER on
-                    // track.genres (catches case variants; a rarer separator-only
-                    // variant with no mb_tags is left to today's recall) OR exact on
-                    // the already-normalized mb_tags. json_valid guards so one
-                    // malformed row can't abort the whole scan.
+                    // `genres` are normalized keys (case + separators folded). Match
+                    // track.genres by applying the SAME fold in SQL (lowercase +
+                    // fold -/_/ to space) so "Hip-Hop" matches the key "hip hop" —
+                    // otherwise an un-enriched hyphenated genre would be missed
+                    // (a recall regression vs today). OR exact on the already-
+                    // normalized mb_tags. json_valid guards so one malformed row
+                    // can't abort the whole scan. (A rare double-space genre still
+                    // won't fold whitespace runs here; scoring stays authoritative.)
                     matchClauses.append("""
                         (EXISTS (SELECT 1 FROM json_each(track.genres) je
-                                 WHERE json_valid(track.genres) AND LOWER(je.value) IN (\(ph)))
+                                 WHERE json_valid(track.genres)
+                                   AND LOWER(REPLACE(REPLACE(REPLACE(je.value, '-', ' '), '_', ' '), '/', ' ')) IN (\(ph)))
                          OR EXISTS (SELECT 1 FROM json_each(tf.mb_tags) je
                                  WHERE tf.mb_tags IS NOT NULL AND json_valid(tf.mb_tags) AND je.value IN (\(ph))))
                         """)
-                    args.append(contentsOf: genres)   // track.genres LOWER arm
+                    args.append(contentsOf: genres)   // track.genres folded arm
                     args.append(contentsOf: genres)   // mb_tags exact arm
                 } else {
                     matchClauses.append("EXISTS (SELECT 1 FROM json_each(track.genres) je WHERE je.value IN (\(ph)))")
