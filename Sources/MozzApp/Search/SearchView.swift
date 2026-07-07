@@ -86,6 +86,12 @@ struct SearchView: View {
                     // the outer ScrollView) so it doesn't compound with the
                     // keyboard's safe-area animation and thrash the pinned layout.
                     .animation(fieldTransition, value: isActive)
+                    // Also animate the recents↔results swap (driven by the query
+                    // going empty↔non-empty). Without this the branch flips
+                    // instantly on the first keystroke — recents torn out, results
+                    // swapped in — collapsing the content and snapping the scroll,
+                    // which read as a jarring flash.
+                    .animation(fieldTransition, value: trimmedQuery.isEmpty)
                 }
                 .overlay { emptyState }
                 .safeAreaInset(edge: .bottom) { latencyLabel }
@@ -212,18 +218,24 @@ struct SearchView: View {
     @ViewBuilder private var resultsContent: some View {
         if trimmedQuery.isEmpty {
             if !resolvedRecents.isEmpty {
-                recentlyHeader
-                ForEach(resolvedRecents) { resolved in
-                    VStack(spacing: 0) {
-                        recentRow(resolved)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 5)
-                        rowDivider
-                    }
-                }
+                recentsList.transition(.opacity)
             }
         } else {
-            resultSections
+            resultSections.transition(.opacity)
+        }
+    }
+
+    private var recentsList: some View {
+        VStack(spacing: 0) {
+            recentlyHeader
+            ForEach(resolvedRecents) { resolved in
+                VStack(spacing: 0) {
+                    recentRow(resolved)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 5)
+                    rowDivider
+                }
+            }
         }
     }
 
