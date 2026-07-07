@@ -193,9 +193,14 @@ struct NowPlayingMorphContainer: View {
                         .glassBackground(TailedBubble())
                         .fixedSize()
                         .offset(x: rect.midX - geo.size.width / 2)
+                        // Native popover feel: scale-pop UP OUT OF the tail (the
+                        // anchor at the star) on present; a quick pure fade on
+                        // dismiss (no scale/slide).
                         .transition(reduceMotion
                             ? .opacity
-                            : .scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                            : .asymmetric(
+                                insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
+                                removal: .opacity))
                         .accessibilityAddTraits(.isModal)
                         .accessibilityAction(.escape) { closeRatingPicker() }
                     Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
@@ -212,7 +217,7 @@ struct NowPlayingMorphContainer: View {
     }
 
     private func closeRatingPicker() {
-        withAnimation(.snappy(duration: 0.28)) { ratingPickerOpen = false }
+        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.16)) { ratingPickerOpen = false }
     }
 
     // MARK: Surface (Liquid Glass background + fading drawer body)
@@ -384,7 +389,7 @@ struct NowPlayingMorphContainer: View {
                         rating: $playerRating,
                         onSet: { setPlayerRating($0, track: track) },
                         onRequestPicker: {
-                            withAnimation(.snappy(duration: 0.28)) { ratingPickerOpen = true }
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
                         }
                     )
                 } else {
