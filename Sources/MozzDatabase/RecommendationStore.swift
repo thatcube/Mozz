@@ -225,6 +225,31 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// Library-wide genre document frequencies on a server: how many tracks carry
+    /// each genre, plus the total track count. Feeds TF-IDF genre similarity (rare
+    /// genres are discriminative, ubiquitous ones like "Rock" are not). Computed
+    /// off the main thread with a single grouped scan over `json_each`.
+    public func genreFrequencies(serverId: ServerID) async throws -> (total: Int, counts: [String: Int]) {
+        try await database.read { db in
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?",
+                                         arguments: [serverId]) ?? 0
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT je.value AS genre, COUNT(*) AS df
+                FROM track, json_each(track.genres) je
+                WHERE track.serverId = ?
+                GROUP BY je.value
+                """, arguments: [serverId])
+            var counts: [String: Int] = [:]
+            counts.reserveCapacity(rows.count)
+            for row in rows {
+                if let genre: String = row["genre"], !genre.isEmpty {
+                    counts[genre] = row["df"]
+                }
+            }
+            return (total, counts)
+        }
+    }
+
     /// Library tracks eligible for in-library rediscovery: on this server, NOT
     /// played since `notPlayedSince`, and matching at least one taste genre or
     /// artist. Capped to a pool `limit`; the pool is sampled randomly so a huge

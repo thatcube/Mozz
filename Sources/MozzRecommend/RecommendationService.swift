@@ -34,8 +34,19 @@ public actor RecommendationService {
     private let blender: Blender
     private let now: @Sendable () -> Date
 
+    /// Cached per-server TF-IDF genre space (a full-catalog aggregate), refreshed
+    /// on a TTL so repeated radio/shuffle scoring doesn't re-scan every call.
+    private var genreSpaceCache: [ServerID: (space: GenreSimilarity, computedAt: Date)] = [:]
+    private static let genreSpaceTTL: TimeInterval = 3600
+
     /// Stable id of the weekly rediscovery set.
     public static let mozzWeeklyId = "mozz-weekly"
+
+    /// Minimum TF-IDF genre cosine similarity for a (non-same-artist) track to
+    /// join a radio station. Below this, a candidate shares only broad/ubiquitous
+    /// tags with the seed and is a genre outlier. Tunable; kept conservative so
+    /// the station stays populated. Same-artist tracks bypass this floor.
+    private static let minRadioSimilarity = 0.15
 
     public init(store: RecommendationStore,
                 content: ContentRecommender = ContentRecommender(),
@@ -49,33 +60,57 @@ public actor RecommendationService {
         self.now = now
     }
 
-    /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →    /// normalized score in `(0, 1]` (1 == best match to the listener's taste).
+    /// The TF-IDF genre space for a server (cached with a TTL), or `nil` when no
+    /// genre corpus is available. Feeds cosine similarity for radio / Smart
+    /// Shuffle / Weekly.
+    private func genreSpace(for serverId: ServerID) async -> GenreSimilarity? {
+        if let cached = genreSpaceCache[serverId],
+           now().timeIntervalSince(cached.computedAt) < Self.genreSpaceTTL {
+            return cached.space
+        }
+        guard let freq = try? await store.genreFrequencies(serverId: serverId), freq.total > 0 else {
+            return nil
+        }
+        let space = GenreSimilarity(totalTracks: freq.total, counts: freq.counts)
+        genreSpaceCache[serverId] = (space, now())
+        return space
+    }
+
+    /// A cosine-similarity `ContentRecommender` for a server, or the default
+    /// affinity-sum scorer when no genre corpus is available.
+    private func contentScorer(for serverId: ServerID) async -> ContentRecommender {
+        guard let space = await genreSpace(for: serverId) else { return content }
+        return ContentRecommender(genreSpace: space)
+    }
+
+    /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →
+    /// normalized score in `(0, 1]` (1 == best match to the listener's taste).
     /// Tracks with no affinity are absent. Returns `[:]` when history is too thin
     /// to personalize (cold start), so the caller falls back to a plain shuffle.
-    /// Mirrors `ContentRecommender`'s 0.6·genre + 0.4·artist scoring, but over the
-    /// caller's own tracks (no candidate-pool fetch).
-    public func tasteScores(serverId: ServerID, tracks: [Track],
-                            genreWeight: Double = 0.6, artistWeight: Double = 0.4) async throws -> [String: Double] {
+    /// Uses TF-IDF cosine genre similarity + artist affinity (see ``ContentRecommender``).
+    public func tasteScores(serverId: ServerID, tracks: [Track]) async throws -> [String: Double] {
         let nowDate = now()
         let lookback = nowDate.addingTimeInterval(-90 * 24 * 3600).timeIntervalSince1970
         let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback)
         let taste = TasteProfile.build(from: signals, now: nowDate)
         guard !taste.isThin else { return [:] }
 
-        var raw: [String: Double] = [:]
-        var maxScore = 0.0
-        for track in tracks {
-            var genreSum = 0.0
-            for genre in track.genres { genreSum += max(0, taste.genreAffinity[genre] ?? 0) }
-            let artistAffinity = track.artistID.map { max(0, taste.artistAffinity[$0] ?? 0) } ?? 0
-            let score = genreWeight * genreSum + artistWeight * artistAffinity
-            if score > 0 {
-                raw[track.id] = score
-                maxScore = max(maxScore, score)
-            }
+        // Score the caller's own tracks against the taste profile via the shared
+        // content scorer (cosine genre similarity + artist affinity), mapping
+        // domain Tracks into the TrackCandidate shape the scorer consumes.
+        let scorer = await contentScorer(for: serverId)
+        let candidates = tracks.map {
+            TrackCandidate(trackRef: $0.id, remoteId: $0.id, title: $0.title,
+                           artistName: $0.artistName, artistRemoteId: $0.artistID,
+                           albumRemoteId: $0.albumID, genres: $0.genres, addedAt: nil)
         }
+        let scored = scorer.score(candidates: candidates, taste: taste)
+        let maxScore = scored.map(\.score).max() ?? 0
         guard maxScore > 0 else { return [:] }
-        return raw.mapValues { $0 / maxScore }
+        var out: [String: Double] = [:]
+        out.reserveCapacity(scored.count)
+        for s in scored { out[s.candidate.remoteId] = s.score / maxScore }
+        return out
     }
 
     /// A freshness map for recency-biased shuffle: track `remoteId` → score in
@@ -122,17 +157,40 @@ public actor RecommendationService {
         }
         guard !fresh.isEmpty else { return [] }
 
+        // Drop genre outliers up front: keep the seed's own artist(s) always, but
+        // require a genre-tagged candidate to clear a minimum TF-IDF cosine
+        // similarity to the seed. This is what excludes a hard-rock track that
+        // merely shares a broad "Rock" tag with a dream-pop seed — IDF makes that
+        // shared broad tag nearly weightless, so its cosine falls below the floor.
+        // A genre-less (artist-only) seed keeps its same-artist pool as-is.
+        let space = await genreSpace(for: serverId)
+        let seedArtists = Set(seed.artistIds)
+        let relevant: [TrackCandidate]
+        if let space, !seed.genres.isEmpty {
+            let seedVector = space.vector(for: seed.genres)
+            relevant = fresh.filter { candidate in
+                if let artist = candidate.artistRemoteId, seedArtists.contains(artist) { return true }
+                return space.cosine(seedVector, space.vector(for: candidate.genres)) >= Self.minRadioSimilarity
+            }
+        } else {
+            relevant = fresh
+        }
+        // If the floor rejected everything (e.g. sparse/absent genre tags), fall
+        // back to the unfiltered pool so the station still plays rather than stalls.
+        let candidates = relevant.isEmpty ? fresh : relevant
+
         // Score by similarity to the SEED (treat the seed's genres/artists as a
         // synthetic taste), so the station stays close to what it was seeded on.
         let seedTaste = TasteProfile(
             genreAffinity: Dictionary(seed.genres.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             artistAffinity: Dictionary(seed.artistIds.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             positiveSignal: TasteProfile.coldStartThreshold + 1)
-        let scored = content.score(candidates: fresh, taste: seedTaste)
-        // Fall back to the raw pool when nothing scored (e.g. artist-only seed
-        // whose tracks carry no genres): still a valid same-artist station.
+        let scorer = space.map { ContentRecommender(genreSpace: $0) } ?? content
+        let scored = scorer.score(candidates: candidates, taste: seedTaste)
+        // Fall back to the pool when nothing scored (e.g. artist-only seed whose
+        // tracks carry no genres): still a valid same-artist station.
         let sources = scored.isEmpty
-            ? [fresh.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
+            ? [candidates.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
             : [scored]
 
         // Relax the variety caps for radio: an artist-only seed would otherwise
@@ -171,7 +229,7 @@ public actor RecommendationService {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: taste.topGenres(12), artistIds: taste.topArtists(20),
                 notPlayedSince: notPlayedSince, limit: 2000)
-            scored = [content.score(candidates: pool, taste: taste)]
+            scored = [await contentScorer(for: serverId).score(candidates: pool, taste: taste)]
             title = "Mozz Weekly"
         }
 
@@ -247,12 +305,13 @@ public actor RecommendationService {
 
         try await store.deleteSets(kinds: Self.homeBatchKinds)
         guard !taste.isThin else { return }
+        let scorer = await contentScorer(for: serverId)
 
         // Supermix — broad, familiar-leaning blend across all of the listener's taste.
         let superPool = try await store.candidateTracks(
             serverId: serverId, genres: taste.topGenres(20), artistIds: taste.topArtists(30),
             notPlayedSince: includeFamiliar, limit: 3000)
-        if let ranked = ranked(superPool, taste: taste,
+        if let ranked = ranked(superPool, taste: taste, scorer: scorer,
                                config: .init(limit: 60, explorationJitter: 0.12, maxPerArtist: 5, maxPerAlbum: 3),
                                rng: &rng) {
             try await save(id: "supermix", title: "Supermix", kind: Self.kindSupermix, items: ranked)
@@ -263,7 +322,7 @@ public actor RecommendationService {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: [genre], artistIds: [],
                 notPlayedSince: includeFamiliar, limit: 1000)
-            if let ranked = ranked(pool, taste: taste,
+            if let ranked = ranked(pool, taste: taste, scorer: scorer,
                                    config: .init(limit: 40, explorationJitter: 0.12, maxPerArtist: 4, maxPerAlbum: 2),
                                    rng: &rng) {
                 try await save(id: "daily-mix-\(i + 1)", title: "Daily Mix \(i + 1)", kind: Self.kindDaily, items: ranked)
@@ -276,7 +335,7 @@ public actor RecommendationService {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: Array(seedArtist.genres.prefix(4)), artistIds: [artistId],
                 notPlayedSince: includeFamiliar, limit: 1000)
-            if let ranked = ranked(pool, taste: taste,
+            if let ranked = ranked(pool, taste: taste, scorer: scorer,
                                    config: .init(limit: 40, explorationJitter: 0.1, maxPerArtist: 6, maxPerAlbum: 3),
                                    rng: &rng) {
                 let title = seedArtist.name.isEmpty ? "Artist Mix" : "\(seedArtist.name) Mix"
@@ -321,10 +380,10 @@ public actor RecommendationService {
     // MARK: - Home mix helpers
 
     /// Content-score a pool and blend it; nil if the result is too thin to ship.
-    private func ranked(_ pool: [TrackCandidate], taste: TasteProfile,
+    private func ranked(_ pool: [TrackCandidate], taste: TasteProfile, scorer: ContentRecommender,
                         config: Blender.Config, rng: inout SeededGenerator) -> [ScoredCandidate]? {
         guard pool.count >= Self.minTracks else { return nil }
-        let scored = content.score(candidates: pool, taste: taste)
+        let scored = scorer.score(candidates: pool, taste: taste)
         let blended = blender.blend(sources: [scored], config: config, using: &rng)
         return blended.count >= Self.minTracks ? blended : nil
     }
