@@ -101,9 +101,9 @@ struct SearchView: View {
     /// A custom search field. We can't use the system `.searchable` here because
     /// it requires a visible navigation bar, which is incompatible with the tight
     /// top-aligned title — so we recreate the field (focus animation + Cancel).
-    /// At rest it's a theme-aware gray fill; once the page scrolls (or the field
-    /// is focused) it becomes real Liquid Glass so content shows through it as it
-    /// pins, matching the system search bar.
+    /// At rest it's a plain theme-aware gray fill (no glass); once the page
+    /// scrolls (or the field is focused) it becomes real Liquid Glass so content
+    /// shows through it as it pins, matching the system search bar.
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -124,19 +124,22 @@ struct SearchView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: fieldHeight)
-        // Keep the Liquid Glass ALWAYS applied (stable view identity) and
-        // cross-fade an opaque gray capsule over it by opacity — at rest the gray
-        // hides the glass; scrolled/focused it fades out to reveal the glass. This
-        // mirrors NowPlayingMorph's island. Crucially it avoids swapping the
-        // field's view identity (a `_ConditionalContent` branch), which would
-        // tear down and rebuild the TextField at the instant it becomes first
-        // responder on focus — that rebuild was freezing the app.
+        // The gray/glass surface lives in a BACKGROUND layer, never wrapping the
+        // content — so the TextField's identity is stable (swapping it on focus
+        // was tearing down the field mid-first-responder and freezing the app),
+        // and the glass is genuinely ABSENT at rest (Apple's field is a plain
+        // gray capsule until it pins under scrolling content — no glass, no glass
+        // shadow). The glass only fades in once scrolled/focused.
         .background {
-            Capsule().fill(Color.searchFieldRest)
-                .opacity(fieldShowsGlass ? 0 : 1)
-                .animation(.easeInOut(duration: 0.2), value: fieldShowsGlass)
+            ZStack {
+                Capsule().fill(Color.searchFieldRest)
+                    .opacity(fieldShowsGlass ? 0 : 1)
+                if fieldShowsGlass {
+                    GlassCapsuleFill().transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: fieldShowsGlass)
         }
-        .glassCapsule()
         // The visible pill is 44pt tall, but a bare custom TextField only takes
         // focus when the glyphs themselves are tapped — the icon, padding and
         // capsule margins are dead zones (unlike the system search bar, which
@@ -403,7 +406,25 @@ private struct SearchResultRow: View {
     }
 }
 
-/// Tracks whether a scroll view has moved off its top, animating a `Bool`. Used
+/// A standalone Liquid Glass capsule for use as a background layer (iOS 26+),
+/// with a material fallback below. Unlike `glassCapsule()` it does NOT wrap the
+/// field's content, so the search field's surface can be swapped gray↔glass in a
+/// background layer without ever changing the content's (TextField's) identity.
+private struct GlassCapsuleFill: View {
+    var body: some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: Capsule())
+        } else {
+            Capsule().fill(.regularMaterial)
+        }
+        #else
+        Capsule().fill(.regularMaterial)
+        #endif
+    }
+}
+
+/// Tracks whether a scroll view has moved off its top, toggling a `Bool`. Used
 /// to swap the search field from its at-rest gray fill to Liquid Glass once
 /// content scrolls under it. No-op before iOS 18 (the field just stays gray).
 private struct ScrolledTracker: ViewModifier {
