@@ -33,10 +33,11 @@ struct SearchView: View {
     /// Shared height for the search field and the cancel ✕ so they line up.
     private let fieldHeight: CGFloat = 44
 
-    /// Crossfade for the field's gray↔glass surface. Kept deliberately slow so
-    /// the material change reads as a smooth, refined transition rather than a
-    /// snap as you cross the scroll threshold.
-    private let fieldSurfaceAnimation: Animation = .easeInOut(duration: 0.5)
+    /// One shared timing for everything that changes when the field activates or
+    /// the page scrolls: the header collapse / field slide-up AND the field's
+    /// gray↔glass crossfade. Using a single curve+duration keeps them in lockstep
+    /// (they previously ran at different timings, which felt disjointed).
+    private let fieldTransition: Animation = .easeInOut(duration: 0.5)
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
@@ -62,10 +63,12 @@ struct SearchView: View {
                         searchFieldBar
                     }
                 }
-                // Scope the header collapse animation to the content only, so it
-                // doesn't compound with the keyboard's safe-area animation on the
-                // outer ScrollView (that pairing could thrash the pinned layout).
-                .animation(.snappy(duration: 0.3), value: isActive)
+                // Header collapse / field slide-up shares the field's surface
+                // timing (fieldTransition) so, on focus, the move-up and the
+                // gray→glass crossfade run in lockstep. Scoped to the content (not
+                // the outer ScrollView) so it doesn't compound with the keyboard's
+                // safe-area animation and thrash the pinned layout.
+                .animation(fieldTransition, value: isActive)
             }
             .overlay { emptyState }
             .safeAreaInset(edge: .bottom) { latencyLabel }
@@ -154,7 +157,7 @@ struct SearchView: View {
                     GlassCapsuleFill().transition(.opacity)
                 }
             }
-            .animation(fieldSurfaceAnimation, value: fieldShowsGlass)
+            .animation(fieldTransition, value: fieldShowsGlass)
         }
         // The visible pill is 44pt tall, but a bare custom TextField only takes
         // focus when the glyphs themselves are tapped — the icon, padding and
