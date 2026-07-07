@@ -79,7 +79,7 @@ private final class CannedTransport: HTTPTransport, @unchecked Sendable {
 }
 
 final class MusicBrainzClientRequestTests: XCTestCase {
-    private func makeClient(_ transport: CannedTransport) -> MusicBrainzClient {
+    private func makeClient(_ transport: any HTTPTransport) -> MusicBrainzClient {
         MusicBrainzClient.make(
             config: EnrichmentConfig(userAgent: "MozzTest/1 ( test@example.com )"),
             limiter: AsyncRateLimiter(minInterval: 0),
@@ -109,5 +109,37 @@ final class MusicBrainzClientRequestTests: XCTestCase {
         let match = try await makeClient(transport).bestRecording(
             artist: "X", title: "Y", durationMs: nil, artistMBID: nil)
         XCTAssertNil(match)
+    }
+
+    func testAridFallbackWhenConstrainedSearchEmpty() async throws {
+        // Empty for the arid-constrained query; a match for the unconstrained one.
+        let transport = QueryVaryingTransport(
+            emptyWhenQueryContains: "arid:",
+            matchJSON: "{\"recordings\":[{\"id\":\"\(recA)\",\"score\":95}]}")
+        let match = try await makeClient(transport).bestRecording(
+            artist: "Aphex Twin", title: "Xtal", durationMs: nil,
+            artistMBID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        XCTAssertEqual(match?.recordingMBID, recA) // found via fallback
+        XCTAssertEqual(transport.requestCount, 2)  // constrained, then fallback
+    }
+}
+
+/// Returns empty results when the query contains a marker, otherwise a match —
+/// so the arid-fallback path can be exercised.
+private final class QueryVaryingTransport: HTTPTransport, @unchecked Sendable {
+    let emptyWhenQueryContains: String
+    let matchJSON: String
+    private let lock = NSLock()
+    private(set) var requestCount = 0
+    init(emptyWhenQueryContains: String, matchJSON: String) {
+        self.emptyWhenQueryContains = emptyWhenQueryContains
+        self.matchJSON = matchJSON
+    }
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        lock.lock(); requestCount += 1; lock.unlock()
+        let url = request.url?.absoluteString.removingPercentEncoding ?? ""
+        let json = url.contains(emptyWhenQueryContains) ? "{\"recordings\":[]}" : matchJSON
+        return (Data(json.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }

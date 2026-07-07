@@ -20,6 +20,9 @@ public actor EnrichmentService {
     private let log: @Sendable (String) -> Void
 
     private var backgroundPass: Task<Void, Never>?
+    /// Bumped whenever a pass is started or cancelled, so a stale task's cleanup
+    /// can't clear a newer pass's registration (single-flight/cancellation safety).
+    private var generation = 0
 
     public init(store: EnrichmentStore,
                 musicBrainz: MusicBrainzClient,
@@ -44,19 +47,27 @@ public actor EnrichmentService {
     public func resolvePending(serverId: ServerID) {
         guard isEnabled() else { return }
         guard backgroundPass == nil else { return }
+        generation += 1
+        let gen = generation
         backgroundPass = Task { [weak self] in
             await self?.runResolvePending(serverId: serverId)
-            await self?.finishBackgroundPass()
+            await self?.finishBackgroundPass(gen)
         }
     }
 
     /// Cancel any in-flight background pass (server switch / sign-out).
     public func cancel() {
+        generation += 1 // invalidate the running task's cleanup
         backgroundPass?.cancel()
         backgroundPass = nil
     }
 
-    private func finishBackgroundPass() { backgroundPass = nil }
+    /// Clear the handle only if this task is still the current pass — a stale
+    /// (cancelled/superseded) task must not clear a newer pass's registration.
+    private func finishBackgroundPass(_ gen: Int) {
+        guard gen == generation else { return }
+        backgroundPass = nil
+    }
 
     /// Test hook: await the in-flight background pass, if any.
     func waitForBackgroundPass() async { await backgroundPass?.value }
@@ -88,6 +99,8 @@ public actor EnrichmentService {
                     at: now().timeIntervalSince1970)
             } catch is CancellationError {
                 return // Never swallow cancellation.
+            } catch let error as MozzError where error == .cancelled {
+                return // URLSession maps a cancelled request to MozzError.cancelled.
             } catch {
                 // A transient failure (network/decoding) shouldn't poison the
                 // negative cache — leave the track for a future pass.

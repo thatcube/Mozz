@@ -118,4 +118,40 @@ final class EnrichmentStoreTests: XCTestCase {
         XCTAssertEqual(state?.mbid, mbidA)
         XCTAssertEqual(state?.lookupStatus, "found")
     }
+
+    func testEmbeddingUpsertPreservesResolvedMBID() async throws {
+        let (db, _, store) = try await setup()
+        // Enrichment resolved an MBID first.
+        try await store.recordTrackResolution(trackRef: "srv1:t1", mbid: mbidA,
+                                              artistMbid: artistMbid, at: 100)
+        // A later sonic-embedding write (the natural whole-record pattern) must NOT
+        // blank the MBID columns.
+        let rec = RecommendationStore(db)
+        try await rec.upsertTrackFeatures(TrackFeaturesRecord(
+            trackRef: "srv1:t1", genres: "[\"rock\"]", embedding: Data([9, 9]),
+            embeddingDim: 1, featureSource: "ondevice"))
+        let state = try await store.mbidState(trackRef: "srv1:t1")
+        XCTAssertEqual(state?.mbid, mbidA)             // preserved
+        XCTAssertEqual(state?.artistMbid, artistMbid)  // preserved
+        XCTAssertEqual(state?.lookupStatus, "found")   // preserved
+        let feat = try await rec.trackFeatures(forTrackRef: "srv1:t1")
+        XCTAssertEqual(feat?.embedding, Data([9, 9]))  // embedding written
+    }
+
+    func testArtistOnlyEmbeddedKeepsTrackEligible() async throws {
+        let (_, writer, store) = try await setup()
+        // A Jellyfin track tagged only at the artist level (no recording MBID).
+        try await writer.upsertTracks([
+            Track(id: "t5", title: "Artist-only", artistName: "A", mbid: nil, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        let state = try await store.mbidState(trackRef: "srv1:t5")
+        XCTAssertEqual(state?.artistMbid, artistMbid) // artist hint captured
+        XCTAssertNil(state?.mbid)                      // no recording MBID
+        XCTAssertNil(state?.lookupStatus)              // not marked looked-up
+        // Still eligible for recording resolution, with the artist MBID as a hint.
+        let needing = try await store.tracksNeedingResolution(
+            serverId: "srv1", notLookedUpSince: 1_000, limit: 10)
+        let candidate = needing.first { $0.remoteId == "t5" }
+        XCTAssertEqual(candidate?.existingArtistMbid, artistMbid)
+    }
 }

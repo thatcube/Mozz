@@ -108,4 +108,46 @@ final class EnrichmentServiceTests: XCTestCase {
             durationMs: nil, artistMBID: nil)
         XCTAssertNil(result)
     }
+
+    func testSingleFlightPreventsOverlappingPasses() async throws {
+        let (_, store) = try await makeDB()
+        let transport = GatedTransport(json: hitJSON)
+        let client = MusicBrainzClient.make(
+            config: EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )"),
+            limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
+        let service = EnrichmentService(
+            store: store, musicBrainz: client,
+            config: EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )"),
+            isEnabled: { true })
+        await service.resolvePending(serverId: "srv1") // pass 1 starts, blocks in transport
+        try await Task.sleep(nanoseconds: 60_000_000)   // let pass 1 reach the request
+        await service.resolvePending(serverId: "srv1") // must be a no-op (single-flight)
+        transport.open()
+        await service.waitForBackgroundPass()
+        XCTAssertEqual(transport.sendCount, 1) // exactly one pass ran
+    }
+}
+
+/// Blocks the first request until `open()` so a pass can be held in-flight while
+/// single-flight is exercised.
+private final class GatedTransport: HTTPTransport, @unchecked Sendable {
+    let json: String
+    private let lock = NSLock()
+    private(set) var sendCount = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+    init(json: String) { self.json = json }
+    func open() {
+        lock.lock(); opened = true; let c = continuation; continuation = nil; lock.unlock()
+        c?.resume()
+    }
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        lock.lock(); sendCount += 1; lock.unlock()
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if opened { lock.unlock(); c.resume() } else { continuation = c; lock.unlock() }
+        }
+        return (Data(json.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
 }

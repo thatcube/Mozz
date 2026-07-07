@@ -66,11 +66,26 @@ public struct MusicBrainzClient: Sendable {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedArtist.isEmpty, !trimmedTitle.isEmpty else { return nil }
 
-        var terms = ["recording:\(Self.phrase(trimmedTitle))",
-                     "artist:\(Self.phrase(trimmedArtist))"]
-        if let arid = MusicBrainzID.normalized(artistMBID), arid != MusicBrainzID.variousArtists {
-            terms.append("arid:\(arid)")
+        let arid = MusicBrainzID.normalized(artistMBID)
+            .flatMap { $0 == MusicBrainzID.variousArtists ? nil : $0 }
+        // Try the artist-constrained search first when we have an MBID; if it
+        // returns nothing (a stale/mismatched arid would), fall back to an
+        // unconstrained title+artist search before giving up — otherwise a bad
+        // artist MBID would negative-cache the track forever.
+        if let arid {
+            if let match = try await search(artist: trimmedArtist, title: trimmedTitle,
+                                            arid: arid, durationMs: durationMs) {
+                return match
+            }
         }
+        return try await search(artist: trimmedArtist, title: trimmedTitle,
+                                arid: nil, durationMs: durationMs)
+    }
+
+    private func search(artist: String, title: String, arid: String?,
+                        durationMs: Double?) async throws -> MusicBrainzRecordingMatch? {
+        var terms = ["recording:\(Self.phrase(title))", "artist:\(Self.phrase(artist))"]
+        if let arid { terms.append("arid:\(arid)") }
         let endpoint = Endpoint(path: "ws/2/recording", query: [
             URLQueryItem(name: "query", value: terms.joined(separator: " AND ")),
             URLQueryItem(name: "fmt", value: "json"),
@@ -91,7 +106,9 @@ public struct MusicBrainzClient: Sendable {
             let score = recording.score ?? 0
             guard score >= minScore else { continue }
             let lengthMs = recording.length.map(Double.init)
-            if let want = durationMs, let have = lengthMs,
+            // Only apply the duration gate when BOTH lengths are actually known
+            // (a non-positive want means "unknown" — see EnrichmentStore).
+            if let want = durationMs, want > 0, let have = lengthMs,
                abs(have - want) > durationToleranceMs { continue }
             var artistMBID = MusicBrainzID.normalized(recording.artistCredit?.first?.artist?.id)
             if artistMBID == MusicBrainzID.variousArtists { artistMBID = nil }

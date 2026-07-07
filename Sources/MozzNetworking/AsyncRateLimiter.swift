@@ -14,6 +14,9 @@ public actor AsyncRateLimiter {
     private let now: @Sendable () -> Date
     private let sleep: @Sendable (TimeInterval) async throws -> Void
     private var nextAllowed: Date = .distantPast
+    /// A server-requested back-off floor (503/429 Retry-After) that applies to
+    /// ALL callers — including ones that already reserved an earlier slot.
+    private var penaltyUntil: Date = .distantPast
 
     public init(
         minInterval: TimeInterval,
@@ -27,19 +30,27 @@ public actor AsyncRateLimiter {
         self.sleep = sleep
     }
 
-    /// Block until this caller's reserved slot; throws `CancellationError` if the
-    /// wait is cancelled.
+    /// Block until this caller's reserved slot (and any active back-off penalty);
+    /// throws `CancellationError` if the wait is cancelled.
     public func acquire() async throws {
         let current = now()
         let scheduled = max(current, nextAllowed)
         // Reserve BEFORE awaiting so concurrent callers serialize.
         nextAllowed = scheduled.addingTimeInterval(minInterval)
-        let wait = scheduled.timeIntervalSince(current)
-        if wait > 0 { try await sleep(wait) }
+        // Wait for the reserved slot; re-check on wake because a back-off penalty
+        // may have landed (or extended) while we slept — it must delay in-flight
+        // callers too, not just future reservations.
+        while true {
+            let target = max(scheduled, penaltyUntil)
+            let wait = target.timeIntervalSince(now())
+            if wait <= 0 { return }
+            try await sleep(wait)
+        }
     }
 
-    /// Delay all future acquisitions until at least `date` (server back-off).
+    /// Delay all callers (in-flight and future) until at least `date`.
     public func penalize(until date: Date) {
+        if date > penaltyUntil { penaltyUntil = date }
         if date > nextAllowed { nextAllowed = date }
     }
 

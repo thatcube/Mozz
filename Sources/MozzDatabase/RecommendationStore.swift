@@ -69,9 +69,32 @@ public struct RecommendationStore: Sendable {
 
     // MARK: - track_features
 
-    /// Insert or update the feature row for a track (UPSERT on `track_ref`).
+    /// Insert or update the sonic/tag feature columns for a track (UPSERT on
+    /// `track_ref`). Deliberately writes ONLY the embedding/tag/bpm columns and
+    /// PRESERVES the MBID columns (`mbid`, `artist_mbid`, `mbid_lookup_status`,
+    /// `mbid_lookup_at`), which are owned by the enrichment path (`EnrichmentStore`
+    /// / `CatalogWriter`). A whole-record `upsert()` would blank the MBID columns
+    /// this record doesn't carry, destroying resolved enrichment — so this uses an
+    /// explicit column list.
     public func upsertTrackFeatures(_ features: TrackFeaturesRecord) async throws {
-        try await database.write { db in try features.upsert(db) }
+        try await database.write { db in
+            try db.execute(sql: """
+                INSERT INTO track_features
+                    (track_ref, genres, tags, bpm, replaygain_db, embedding, embedding_dim, feature_source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(track_ref) DO UPDATE SET
+                    genres = excluded.genres,
+                    tags = excluded.tags,
+                    bpm = excluded.bpm,
+                    replaygain_db = excluded.replaygain_db,
+                    embedding = excluded.embedding,
+                    embedding_dim = excluded.embedding_dim,
+                    feature_source = excluded.feature_source,
+                    updated_at = excluded.updated_at
+                """, arguments: [features.trackRef, features.genres, features.tags, features.bpm,
+                                 features.replaygainDb, features.embedding, features.embeddingDim,
+                                 features.featureSource, features.updatedAt])
+        }
     }
 
     public func trackFeatures(forTrackRef ref: String) async throws -> TrackFeaturesRecord? {

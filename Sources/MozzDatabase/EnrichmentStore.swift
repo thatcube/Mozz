@@ -93,7 +93,12 @@ public struct EnrichmentStore: Sendable {
                     trackRef: $0["track_ref"], remoteId: $0["remoteId"], title: $0["title"],
                     artistName: $0["artistName"], artistRemoteId: $0["artistRemoteId"],
                     existingArtistMbid: $0["artist_mbid"],
-                    durationMs: duration.map { $0 * 1000 })
+                    // The `duration` column is NOT NULL DEFAULT 0 and mappers coerce
+                    // an unknown runtime to 0, so treat a non-positive value as
+                    // "unknown" — otherwise the MusicBrainz duration gate would
+                    // compare against 0ms and reject (and negative-cache) every
+                    // track whose backend didn't report a length.
+                    durationMs: duration.flatMap { $0 > 0 ? $0 * 1000 : nil })
             }
         }
     }
