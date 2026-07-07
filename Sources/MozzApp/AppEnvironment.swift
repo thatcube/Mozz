@@ -248,9 +248,11 @@ public final class AppEnvironment: ObservableObject {
             fallback: StreamingTrackURLResolver(backend: backend)
         )
         resolver.setDelegate(offline)
-        // Switching the active server ends any station: its extend fetches would
-        // otherwise run against the new server's catalog. (No-op on first sign-in.)
-        invalidateRadio()
+        // End any station only on an actual server SWITCH — not on same-server
+        // rebuilds (Sync Now / library-selection changes also route through here),
+        // which must not kill a live station's auto-extend. `active` still holds
+        // the previous server at this point.
+        if connection.id != active?.connection.id { invalidateRadio() }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
     }
 
