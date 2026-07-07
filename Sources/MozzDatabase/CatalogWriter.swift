@@ -270,6 +270,11 @@ public struct CatalogWriter: Sendable {
     /// but still fires when a real artist MBID becomes available for an
     /// already-known recording (avoids rewriting a row + its indexes for every
     /// track on every sync while not blocking a genuine back-fill).
+    /// Derived enrichment is invalidated when its key changes: the B2 canonical/
+    /// similar caches when `mbid` changes, and the B4 `mb_tags` (keyed on
+    /// `artist_mbid`) when the artist MBID changes to a new value — otherwise a
+    /// re-tagged/merged artist would keep the previous artist's genres until the
+    /// unrelated 30-day TTL lapsed.
     /// Arguments: (track_ref, mbid, artist_mbid, lookup_at, updated_at).
     private static let embeddedMBIDUpsertSQL = """
     INSERT INTO track_features (track_ref, mbid, artist_mbid, mbid_lookup_status, mbid_lookup_at, updated_at)
@@ -282,7 +287,9 @@ public struct CatalogWriter: Sendable {
         updated_at = excluded.updated_at,
         canonical_mbid = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.canonical_mbid END,
         canonical_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.canonical_lookup_at END,
-        similar_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.similar_lookup_at END
+        similar_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.similar_lookup_at END,
+        mb_tags = CASE WHEN excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid THEN NULL ELSE track_features.mb_tags END,
+        mb_tags_lookup_at = CASE WHEN excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid THEN NULL ELSE track_features.mb_tags_lookup_at END
     WHERE track_features.mbid IS NOT excluded.mbid
        OR (excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid)
     """
@@ -291,13 +298,18 @@ public struct CatalogWriter: Sendable {
     /// MBID (e.g. a Jellyfin track tagged only at the artist level). Records just
     /// the artist MBID as a name-search hint; deliberately leaves `mbid`,
     /// `mbid_lookup_status`, and `mbid_lookup_at` untouched so the track stays
-    /// eligible for recording resolution. Arguments: (track_ref, artist_mbid, updated_at).
+    /// eligible for recording resolution. The `WHERE` guard fires only when the
+    /// artist MBID actually changes; when it does, the B4 `mb_tags` (keyed on the
+    /// old artist) are cleared so the tag pass refetches for the new artist.
+    /// Arguments: (track_ref, artist_mbid, updated_at).
     private static let embeddedArtistMBIDUpsertSQL = """
     INSERT INTO track_features (track_ref, artist_mbid, updated_at)
     VALUES (?, ?, ?)
     ON CONFLICT(track_ref) DO UPDATE SET
         artist_mbid = excluded.artist_mbid,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        mb_tags = NULL,
+        mb_tags_lookup_at = NULL
     WHERE track_features.artist_mbid IS NOT excluded.artist_mbid
     """
 

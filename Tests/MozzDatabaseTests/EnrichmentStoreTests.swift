@@ -255,4 +255,88 @@ final class EnrichmentStoreTests: XCTestCase {
         XCTAssertEqual(EnrichmentStore.encodeTagArray(["Rock", "Trip Hop"]),
                        "[\"rock\",\"trip hop\"]")
     }
+
+    // A changed artist_mbid must invalidate the old artist's mb_tags so the tag
+    // pass refetches — otherwise the wrong genres persist until the 30-day TTL.
+
+    private func mbTagsRow(_ db: MusicDatabase, _ ref: String) async throws
+        -> (tags: String?, at: Double?) {
+        let row = try await db.read { try Row.fetchOne($0, sql: """
+            SELECT mb_tags, mb_tags_lookup_at FROM track_features WHERE track_ref = ?
+            """, arguments: [ref]) }
+        return (row?["mb_tags"], row?["mb_tags_lookup_at"])
+    }
+
+    func testEmbeddedArtistMbidChangeClearsMbTags() async throws {
+        let (db, writer, store) = try await setup()
+        // Artist-only tagged track (no recording MBID), then tagged.
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: nil, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        try await store.setArtistTags(artistMbid: artistMbid, tags: ["rock"], at: 100)
+        var row = try await mbTagsRow(db, "srv1:t1")
+        XCTAssertEqual(row.tags, "[\"rock\"]")
+
+        // A later sync re-tags the track with a DIFFERENT embedded artist MBID.
+        let otherArtist = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: nil, artistMbid: otherArtist),
+        ], serverId: "srv1")
+        row = try await mbTagsRow(db, "srv1:t1")
+        XCTAssertNil(row.tags)   // stale genres cleared
+        XCTAssertNil(row.at)     // and re-queued for the new artist
+        let needing = try await store.artistsNeedingTags(
+            serverId: "srv1", notLookedUpSince: 50, limit: 10)
+        XCTAssertEqual(needing, [otherArtist])
+    }
+
+    func testEmbeddedRecordingArtistMbidChangeClearsMbTags() async throws {
+        let (db, writer, store) = try await setup()
+        // Track with an embedded recording + artist MBID, then tagged.
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        try await store.setArtistTags(artistMbid: artistMbid, tags: ["rock"], at: 100)
+
+        // Re-sync: same recording, but the embedded artist MBID now differs.
+        let otherArtist = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: otherArtist),
+        ], serverId: "srv1")
+        let row = try await mbTagsRow(db, "srv1:t1")
+        XCTAssertNil(row.tags)
+        XCTAssertNil(row.at)
+    }
+
+    func testEmbeddedArtistMbidUnchangedKeepsMbTags() async throws {
+        let (db, writer, store) = try await setup()
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        try await store.setArtistTags(artistMbid: artistMbid, tags: ["rock"], at: 100)
+        // Re-sync with the SAME artist MBID must NOT clear the tags (no needless
+        // refetch churn).
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        let row = try await mbTagsRow(db, "srv1:t1")
+        XCTAssertEqual(row.tags, "[\"rock\"]")
+        XCTAssertEqual(row.at, 100)
+    }
+
+    func testResolutionArtistMbidChangeClearsMbTags() async throws {
+        let (db, writer, store) = try await setup()
+        // Artist-only embedded track gets tagged, then a name-search resolves it
+        // to a recording carrying a DIFFERENT artist MBID.
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: nil, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        try await store.setArtistTags(artistMbid: artistMbid, tags: ["rock"], at: 100)
+        let otherArtist = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        try await store.recordTrackResolution(
+            trackRef: "srv1:t1", mbid: mbidA, artistMbid: otherArtist, at: 200)
+        let row = try await mbTagsRow(db, "srv1:t1")
+        XCTAssertNil(row.tags)
+        XCTAssertNil(row.at)
+    }
 }

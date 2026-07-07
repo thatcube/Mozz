@@ -120,7 +120,9 @@ public struct EnrichmentStore: Sendable {
     /// Record the outcome of a MusicBrainz name-search for a track.
     ///
     /// Found (`mbid != nil`): writes the recording MBID + `found` status;
-    /// `artist_mbid` is COALESCEd so a null can't wipe an existing value.
+    /// `artist_mbid` is COALESCEd so a null can't wipe an existing value. If the
+    /// artist MBID changes to a new value, the B4 `mb_tags` (keyed on the old
+    /// artist) are cleared so the tag pass refetches for the new artist.
     /// Miss (`mbid == nil`): records only `notfound` + the lookup time (the
     /// negative cache), leaving `mbid`/`artist_mbid` untouched. Neither path
     /// touches `tags`/`embedding`/`bpm`/`feature_source`. Keyed on `track_ref`.
@@ -139,7 +141,9 @@ public struct EnrichmentStore: Sendable {
                         artist_mbid = COALESCE(excluded.artist_mbid, track_features.artist_mbid),
                         mbid_lookup_status = 'found',
                         mbid_lookup_at = excluded.mbid_lookup_at,
-                        updated_at = excluded.updated_at
+                        updated_at = excluded.updated_at,
+                        mb_tags = CASE WHEN excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid THEN NULL ELSE track_features.mb_tags END,
+                        mb_tags_lookup_at = CASE WHEN excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid THEN NULL ELSE track_features.mb_tags_lookup_at END
                     """, arguments: [trackRef, recording, normalizedArtist, at, at])
             } else {
                 try db.execute(sql: """

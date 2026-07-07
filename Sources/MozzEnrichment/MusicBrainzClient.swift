@@ -69,14 +69,22 @@ public struct MusicBrainzClient: Sendable {
             URLQueryItem(name: "fmt", value: "json"),
         ])
         let response = try await client.send(endpoint, as: MBArtistGenresResponse.self)
-        let genres = (response.genres ?? [])
+        // Lowercase first so case variants collapse; sort by count desc with a
+        // name tiebreak (deterministic across fetches even when counts tie); then
+        // de-dupe BEFORE the cap so duplicates can't consume cap slots.
+        let ranked = (response.genres ?? [])
             .filter { ($0.count ?? 0) >= minTagVotes }
-            .sorted { ($0.count ?? 0) > ($1.count ?? 0) }
-            .prefix(maxTags)
-            .compactMap { $0.name?.lowercased() }
-        // De-dupe preserving order.
+            .compactMap { genre -> (name: String, count: Int)? in
+                genre.name.map { ($0.lowercased(), genre.count ?? 0) }
+            }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.name < $1.name }
         var seen = Set<String>()
-        return genres.filter { seen.insert($0).inserted }
+        var result: [String] = []
+        for entry in ranked where seen.insert(entry.name).inserted {
+            result.append(entry.name)
+            if result.count == maxTags { break }
+        }
+        return result
     }
 
     /// The best recording match for a track, or `nil` if none clears the score
