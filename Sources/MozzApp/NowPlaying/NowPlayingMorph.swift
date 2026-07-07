@@ -357,7 +357,10 @@ struct NowPlayingMorphContainer: View {
             Spacer(minLength: 8)
             bottomButtonRow
                 .padding(.horizontal, 48)
-                .padding(.bottom, m.safeBottom + 12)
+                // The surface overhangs the screen by `bottomOverhang`; lift the
+                // row out of that off-screen region so it sits at the safe-area
+                // bottom rather than 120pt below it.
+                .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
