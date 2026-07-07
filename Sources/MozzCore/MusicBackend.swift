@@ -120,6 +120,12 @@ public protocol MusicBackend: Sendable {
     /// Ordered items of a single playlist.
     func fetchPlaylistItems(playlistID: String, offset: Int, limit: Int) async throws -> CatalogPage<Track>
 
+    /// Fetch full media details (audio format, file size) for specific tracks.
+    /// Used to backfill data a backend deliberately omits from its light catalog
+    /// sync for speed. Default: `[]` — a backend whose bulk `fetchTracks` already
+    /// carries full format needs no backfill.
+    func fetchTrackDetails(ids: [String]) async throws -> [Track]
+
     // MARK: Playback & downloads
 
     /// Resolve a playable stream URL for a track.
@@ -153,4 +159,7 @@ public extension MusicBackend {
 
     /// Default: progress reporting is optional and silently ignored.
     func reportPlayback(_ report: PlaybackReport) async throws {}
+
+    /// Default: no backfill needed (the bulk sync already carries full details).
+    func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }
 }

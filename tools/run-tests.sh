@@ -34,6 +34,6 @@ if [[ "$MODE" == "sim" ]]; then
     | { command -v xcbeautify >/dev/null 2>&1 && xcbeautify || cat; }
 else
   echo "▸ Testing MozzKit on the host toolchain…"
-  swift test "${EXTRA[@]}"
+  swift test ${EXTRA[@]+"${EXTRA[@]}"}
 fi
 echo "✓ Tests passed."

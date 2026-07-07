@@ -115,6 +115,39 @@ final class LibrarySyncEngineTests: XCTestCase {
         XCTAssertEqual(servers.count, 1)
     }
 
+    func testQuickStartPlanSyncsBoundedSliceAndDoesNotPrune() async throws {
+        let database = try MusicDatabase.inMemory()
+        let repository = LibraryRepository(database)
+
+        // Pre-seed a stale catalog (as if from a previous full sync) so we can
+        // verify the quick-start plan does NOT prune the rows it doesn't re-see.
+        var backend = MockBackend()
+        backend.artists = makeArtists(3)
+        backend.albums = makeAlbums(30)
+        backend.tracks = makeTracks(100)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+        let seededTracks = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(seededTracks, 100)
+
+        // Quick start: newest tracks in ONE page (engine pageSize 10), no albums,
+        // no artists, no playlists, no prune. (plan.pageSize is applied by
+        // AppEnvironment when it builds the engine; here the engine's own
+        // pageSize governs, so 1 track page = 10 tracks.)
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 10)
+        let summary = try await engine.sync(plan: .quickStart(tracks: 300))
+
+        // Only the bounded slice was enumerated this run…
+        XCTAssertEqual(summary.albums, 0)    // albums skipped entirely
+        XCTAssertEqual(summary.tracks, 10)   // 1 page × 10
+        XCTAssertEqual(summary.deleted, 0)   // MUST NOT prune on a bounded plan
+
+        // …and the pre-existing catalog is fully intact (nothing pruned).
+        let tracksAfter = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(tracksAfter, 100, "quick start must not delete previously-synced rows")
+        let albumsAfter = try await repository.albumCount(serverId: "srv")
+        XCTAssertEqual(albumsAfter, 30)
+    }
+
     func testProgressPhasesAreReportedInOrder() async throws {
         let database = try MusicDatabase.inMemory()
         var backend = MockBackend()
@@ -125,10 +158,19 @@ final class LibrarySyncEngineTests: XCTestCase {
         let engine = LibrarySyncEngine(backend: backend, database: database)
         _ = try await engine.sync { collector.record($0.phase) }
 
+        // Setup still brackets the run with capabilities → … → pruning → done.
         XCTAssertEqual(collector.phases.first, .capabilities)
         XCTAssertEqual(collector.phases.last, .done)
-        XCTAssertTrue(collector.phases.contains(.tracks))
         XCTAssertTrue(collector.phases.contains(.pruning))
+        // The entity phases now run concurrently and report a single combined
+        // `.syncing` phase (not per-type artists/albums/tracks progress).
+        XCTAssertTrue(collector.phases.contains(.syncing))
+        // capabilities must come before any bulk syncing, and pruning after it.
+        let firstSyncing = collector.phases.firstIndex(of: .syncing)
+        let capabilitiesIdx = collector.phases.firstIndex(of: .capabilities)
+        let pruningIdx = collector.phases.firstIndex(of: .pruning)
+        if let firstSyncing, let capabilitiesIdx { XCTAssertLessThan(capabilitiesIdx, firstSyncing) }
+        if let firstSyncing, let pruningIdx { XCTAssertLessThan(firstSyncing, pruningIdx) }
     }
 
     func testResyncPrunesDeletedItems() async throws {

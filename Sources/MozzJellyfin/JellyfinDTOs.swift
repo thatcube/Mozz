@@ -67,13 +67,16 @@ struct JFBaseItem: Decodable {
     /// External ids Jellyfin exposes when `Fields=ProviderIds` is requested, e.g.
     /// `MusicBrainzTrack` (recording), `MusicBrainzArtist`, `MusicBrainzAlbum`.
     let ProviderIds: [String: String]?
+    /// Top-level library folders report their kind here ("music", "movies", …).
+    /// Used to find the music library's id for ParentId-scoped catalog queries.
+    let CollectionType: String?
 
     enum CodingKeys: String, CodingKey {
         case itemType = "Type"
         case Id, Name, SortName, AlbumArtist, AlbumArtists, ArtistItems, Artists
         case Album, AlbumId, ProductionYear, IndexNumber, ParentIndexNumber
         case RunTimeTicks, Genres, ImageTags, AlbumPrimaryImageTag, ChildCount
-        case UserData, MediaSources, NormalizationGain, DateCreated, ProviderIds
+        case UserData, MediaSources, NormalizationGain, DateCreated, ProviderIds, CollectionType
     }
 }
 

@@ -14,6 +14,10 @@ public struct PlexAuthenticator: Sendable {
     private let clientInfo: ClientInfo
     private let clientIdentifier: String
     private let transport: any HTTPTransport
+    /// A tight-timeout transport for probing candidate server connections, so an
+    /// unreachable address (e.g. a LAN URI when off-network) is abandoned in a
+    /// few seconds instead of blocking discovery on the 12s interactive timeout.
+    private let probeTransport: any HTTPTransport
     private let client: HTTPClient
 
     private static let plexTVBase = URL(string: "https://plex.tv")!
@@ -21,11 +25,13 @@ public struct PlexAuthenticator: Sendable {
     public init(
         clientInfo: ClientInfo,
         clientIdentifier: String,
-        transport: any HTTPTransport = URLSessionTransport()
+        transport: any HTTPTransport = URLSessionTransport(),
+        probeTransport: any HTTPTransport = URLSessionTransport(role: .discovery)
     ) {
         self.clientInfo = clientInfo
         self.clientIdentifier = clientIdentifier
         self.transport = transport
+        self.probeTransport = probeTransport
         self.client = HTTPClient(
             baseURL: Self.plexTVBase,
             transport: transport,
@@ -114,14 +120,16 @@ public struct PlexAuthenticator: Sendable {
 
     /// Probe candidates in preference order and return the first that answers,
     /// so the app pins the fastest working address (local LAN over relay).
+    /// Probes use `probeTransport` (a tight discovery timeout), so an unreachable
+    /// candidate is abandoned in a few seconds rather than blocking on the 12s
+    /// interactive timeout.
     public func firstReachableConnection(
-        _ connections: [PlexResourceConnection],
-        perProbeTimeout: TimeInterval = 3
+        _ connections: [PlexResourceConnection]
     ) async -> PlexResourceConnection? {
         for connection in connections {
             let probe = HTTPClient(
                 baseURL: connection.uri,
-                transport: transport,
+                transport: probeTransport,
                 defaultHeaders: PlexHeaders.common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: connection.accessToken),
                 retryPolicy: .none
             )
@@ -141,15 +149,14 @@ public struct PlexAuthenticator: Sendable {
     /// section reports a non-zero item count, then fall back to any server with a
     /// music section, then the first reachable one, then the first candidate.
     public func firstMusicConnection(
-        _ connections: [PlexResourceConnection],
-        perProbeTimeout: TimeInterval = 4
+        _ connections: [PlexResourceConnection]
     ) async -> PlexResourceConnection? {
         var firstReachable: PlexResourceConnection?
         var firstWithAnyMusic: PlexResourceConnection?
         for connection in connections {
             let probe = HTTPClient(
                 baseURL: connection.uri,
-                transport: transport,
+                transport: probeTransport,
                 defaultHeaders: PlexHeaders.common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: connection.accessToken),
                 retryPolicy: .none
             )

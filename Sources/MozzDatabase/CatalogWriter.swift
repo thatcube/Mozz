@@ -56,6 +56,23 @@ public struct CatalogWriter: Sendable {
         try await database.write { db in try AlbumArtistSynthesis.run(db, serverId: serverId) }
     }
 
+    /// Derive each album's track count locally from the synced tracks, so the
+    /// album fetch doesn't have to ask the server for the (expensive) per-album
+    /// `ChildCount`. Runs once at the end of a sync; uses the
+    /// (serverId, albumRemoteId) track index, so it's a cheap local pass.
+    public func deriveAlbumTrackCounts(serverId: ServerID) async throws {
+        try await database.write { db in
+            try db.execute(sql: """
+                UPDATE album SET trackCount = (
+                    SELECT COUNT(*) FROM track
+                    WHERE track.serverId = album.serverId
+                      AND track.albumRemoteId = album.remoteId
+                )
+                WHERE album.serverId = ?
+                """, arguments: [serverId])
+        }
+    }
+
     public func upsertAlbums(_ albums: [Album], serverId: ServerID) async throws {
         guard !albums.isEmpty else { return }
         try await database.write { db in
