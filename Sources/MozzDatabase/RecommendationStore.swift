@@ -202,6 +202,29 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// Most-recent play epoch (seconds) per track `remoteId` on a server — the
+    /// basis for recency-biased shuffle. A track counts as played on `started`
+    /// or `completed` (a pure skip doesn't). Off the main thread.
+    public func lastPlayedByRemoteID(serverId: ServerID) async throws -> [String: Double] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT track.remoteId AS remoteId, MAX(pe.created_at) AS last_played
+                FROM play_event pe
+                JOIN track ON \(Self.refExpr) = pe.track_ref
+                WHERE track.serverId = ? AND pe.kind IN ('started', 'completed')
+                GROUP BY track.remoteId
+                """, arguments: [serverId])
+            var map: [String: Double] = [:]
+            map.reserveCapacity(rows.count)
+            for row in rows {
+                if let id: String = row["remoteId"], let ts: Double = row["last_played"] {
+                    map[id] = ts
+                }
+            }
+            return map
+        }
+    }
+
     /// Library tracks eligible for in-library rediscovery: on this server, NOT
     /// played since `notPlayedSince`, and matching at least one taste genre or
     /// artist. Capped to a pool `limit`; the pool is sampled randomly so a huge

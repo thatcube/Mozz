@@ -171,7 +171,13 @@ public struct PlayQueue: Sendable, Equatable, Codable {
     /// Replace the queue with `newTracks` and start playing a freshly balanced
     /// shuffle (no pinned start, so the first track feels random). Forces shuffle
     /// on — the single entry point every "Shuffle" button in the app uses.
-    public mutating func setItemsShuffled(_ newTracks: [Track]) {
+    ///
+    /// `recencyScores` (optional, keyed by track id, 0…1 where 1 == just played)
+    /// biases recently-played tracks toward the end so a big shuffle feels fresh
+    /// across sessions. Only the initial order is biased; wrap reshuffles are
+    /// plain balanced.
+    public mutating func setItemsShuffled(_ newTracks: [Track],
+                                          recencyScores: [String: Double]? = nil) {
         tracks = newTracks
         isShuffled = true
         nextLoopOrder = nil
@@ -180,7 +186,7 @@ public struct PlayQueue: Sendable, Equatable, Codable {
             position = -1
             return
         }
-        order = balancedOrder(pinning: nil)
+        order = balancedOrder(pinning: nil, recencyScores: recencyScores)
         position = 0
         refreshWrapCache()
     }
@@ -301,10 +307,21 @@ public struct PlayQueue: Sendable, Equatable, Codable {
     /// then album (secondary) so same-artist and, within that, same-album tracks
     /// don't clump. When `pinned` is non-nil that track is forced to the front so
     /// it keeps playing when shuffle turns on mid-track; the remainder stays spread.
-    private func balancedOrder(pinning pinned: Int?) -> [Int] {
+    ///
+    /// `recencyScores` (optional, track id → 0…1) biases recently-played tracks
+    /// later via `BalancedShuffle`'s position bias.
+    private func balancedOrder(pinning pinned: Int?,
+                               recencyScores: [String: Double]? = nil) -> [Int] {
+        let bias: (Int) -> Double
+        if let recencyScores {
+            bias = { Self.recencyBiasStrength * (recencyScores[tracks[$0].id] ?? 0) }
+        } else {
+            bias = { _ in 0 }
+        }
         var result = BalancedShuffle.order(
             of: Array(tracks.indices),
-            keys: [{ Self.artistKey(tracks[$0]) }, { Self.albumKey(tracks[$0]) }]
+            keys: [{ Self.artistKey(tracks[$0]) }, { Self.albumKey(tracks[$0]) }],
+            bias: bias
         )
         if let pinned {
             result.removeAll { $0 == pinned }
@@ -312,6 +329,12 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         }
         return result
     }
+
+    /// How hard recency de-weighting pushes recently-played tracks back. Balanced
+    /// positions live in `[0, 1)`, so a strength of 1 pushes a just-played track a
+    /// full "lap" later (into the back half), while long-unplayed tracks stay up
+    /// front — a soft, continuous bias rather than a hard exclusion.
+    private static let recencyBiasStrength = 1.0
 
     /// Primary grouping key: the normalized artist, so same-artist tracks spread.
     private static func artistKey(_ track: Track) -> String {

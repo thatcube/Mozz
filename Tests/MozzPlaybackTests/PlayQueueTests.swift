@@ -235,6 +235,25 @@ final class PlayQueueTests: XCTestCase {
         XCTAssertEqual(collisions, 0, "same-album tracks must spread within a single artist")
     }
 
+    func testRecencyBiasPushesRecentlyPlayedTracksLater() {
+        var q = PlayQueue()
+        // t0…t9 "just played" (score 1.0), t10…t19 fresh (absent from the map).
+        var scores: [String: Double] = [:]
+        for i in 0..<10 { scores["t\(i)"] = 1.0 }
+        q.setItemsShuffled(tracks(20), recencyScores: scores)
+        let ordered = [q.current!] + q.upNext
+        XCTAssertEqual(ordered.count, 20)
+        XCTAssertEqual(Set(ordered.prefix(10).map(\.id)), Set((10..<20).map { "t\($0)" }),
+                       "recently-played tracks are biased into the back half")
+    }
+
+    func testRecencyNilLeavesShufflePlain() {
+        var q = PlayQueue()
+        q.setItemsShuffled(tracks(10), recencyScores: nil)
+        XCTAssertTrue(q.isShuffled)
+        XCTAssertEqual(Set(([q.current!] + q.upNext).map(\.id)).count, 10)
+    }
+
     func testWrapSeamAvoidsRepeatingTheOutgoingArtist() {
         var q = PlayQueue()
         q.setItemsShuffled(multiArtistTracks())   // 3 artists A/B/C

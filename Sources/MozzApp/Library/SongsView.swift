@@ -56,12 +56,18 @@ struct SongsView: View {
         }
     }
 
-    /// Shuffle the whole song catalog with a balanced (artist-spread) order.
+    /// Shuffle the whole song catalog with a balanced (artist-spread) order,
+    /// biased away from recently-played tracks so it feels fresh each session.
     private func shuffleAll() {
         Task {
-            let all = (try? await env.repository.allTracksForPlayback(serverId: env.active?.connection.id)) ?? []
+            let serverId = env.active?.connection.id
+            let all = (try? await env.repository.allTracksForPlayback(serverId: serverId)) ?? []
             guard !all.isEmpty else { return }
-            env.playback.playShuffled(all)
+            var recency: [String: Double]?
+            if let serverId {
+                recency = try? await env.recommendations.recencyScores(serverId: serverId)
+            }
+            env.playback.playShuffled(all, recencyScores: recency)
         }
     }
 

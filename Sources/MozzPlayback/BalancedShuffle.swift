@@ -26,17 +26,26 @@ public enum BalancedShuffle {
     /// - Parameters:
     ///   - indices: the elements to order (usually indices into a track array).
     ///   - keyFns: ordered grouping keys, most significant first.
+    ///   - bias: an optional per-element position offset added to each element's
+    ///     final position (higher = later). Used for recency "freshness" — a
+    ///     recently-played track gets a positive bias so it drifts toward the end
+    ///     while long-unplayed/never-played tracks (bias 0) keep their balanced
+    ///     spread up front. Defaults to 0 for every element (no effect).
     ///   - generator: the randomness source, injected so callers/tests control it.
     public static func order<G: RandomNumberGenerator>(
         of indices: [Int],
         keys keyFns: [(Int) -> String],
+        bias: (Int) -> Double = { _ in 0 },
         using generator: inout G
     ) -> [Int] {
         guard indices.count > 1 else { return indices }
         guard let firstKey = keyFns.first else {
-            var shuffled = indices
-            shuffled.shuffle(using: &generator)
-            return shuffled
+            // No grouping key left: a uniform shuffle (random key in [0,1)),
+            // offset later by `bias`. With bias == 0 this is a plain shuffle.
+            return indices
+                .map { (position: Double.random(in: 0..<1, using: &generator) + bias($0), index: $0) }
+                .sorted { $0.position < $1.position }
+                .map(\.index)
         }
         let rest = Array(keyFns.dropFirst())
 
@@ -46,12 +55,13 @@ public enum BalancedShuffle {
         }
         // Nothing to spread against at this level → defer to the remaining keys.
         if groups.count == 1 {
-            return order(of: indices, keys: rest, using: &generator)
+            return order(of: indices, keys: rest, bias: bias, using: &generator)
         }
 
         // Iterate groups in a stable (sorted-key) order so RNG consumption is
         // deterministic given a seeded generator; the final ordering is decided
-        // purely by absolute position, so this doesn't bias the result.
+        // purely by absolute position, so this doesn't bias the result. `bias` is
+        // applied once here (the absolute placement), not in the member suborder.
         var positioned: [(position: Double, index: Int)] = []
         positioned.reserveCapacity(indices.count)
         for groupKey in groups.keys.sorted() {
@@ -61,7 +71,7 @@ public enum BalancedShuffle {
             let spacing = 1.0 / Double(suborder.count)
             let phase = Double.random(in: 0..<spacing, using: &generator)  // random comb rotation
             for (offset, index) in suborder.enumerated() {
-                positioned.append((phase + Double(offset) * spacing, index))
+                positioned.append((phase + Double(offset) * spacing + bias(index), index))
             }
         }
 
@@ -80,9 +90,13 @@ public enum BalancedShuffle {
     }
 
     /// Convenience overload using the system randomness source.
-    public static func order(of indices: [Int], keys keyFns: [(Int) -> String]) -> [Int] {
+    public static func order(
+        of indices: [Int],
+        keys keyFns: [(Int) -> String],
+        bias: (Int) -> Double = { _ in 0 }
+    ) -> [Int] {
         var generator = SystemRandomNumberGenerator()
-        return order(of: indices, keys: keyFns, using: &generator)
+        return order(of: indices, keys: keyFns, bias: bias, using: &generator)
     }
 
     /// Convenience overload using the system randomness source.

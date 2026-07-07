@@ -132,4 +132,29 @@ final class BalancedShuffleTests: XCTestCase {
         let second = BalancedShuffle.order(of: Array(0..<40), keys: [artist, album], using: &b)
         XCTAssertEqual(first, second)
     }
+
+    // MARK: Position bias (recency freshness)
+
+    func testBiasPushesHigherBiasedItemsLater() {
+        // Items 0..<10 carry a full-lap bias (1.0), 10..<20 carry none. Balanced
+        // positions live in [0,1), so biased items land in [1,2) and must all
+        // sort behind the unbiased ones.
+        var rng = SeededGenerator(seed: 3)
+        let biased: Set<Int> = Set(0..<10)
+        let result = BalancedShuffle.order(
+            of: Array(0..<20), keys: [{ _ in "A" }],
+            bias: { biased.contains($0) ? 1.0 : 0.0 }, using: &rng)
+        XCTAssertEqual(Set(result), Set(0..<20))
+        XCTAssertEqual(Set(result.prefix(10)), Set(10..<20),
+                       "zero-bias items sort ahead of full-lap-biased items")
+    }
+
+    func testZeroBiasEqualsUnbiased() {
+        var a = SeededGenerator(seed: 8)
+        var b = SeededGenerator(seed: 8)
+        let biased = BalancedShuffle.order(of: Array(0..<25), keys: [{ "g\($0 % 3)" }],
+                                           bias: { _ in 0 }, using: &a)
+        let plain = BalancedShuffle.order(of: Array(0..<25), keys: [{ "g\($0 % 3)" }], using: &b)
+        XCTAssertEqual(biased, plain, "a zero bias must not change the order")
+    }
 }

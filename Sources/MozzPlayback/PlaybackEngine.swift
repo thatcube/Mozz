@@ -112,9 +112,12 @@ public final class PlaybackEngine: ObservableObject {
     /// single "Shuffle" entry point for every browse/detail surface: it turns
     /// shuffle on and picks a random-feeling first track, so behavior is
     /// identical everywhere.
-    public func playShuffled(_ tracks: [Track]) {
+    ///
+    /// `recencyScores` (optional, track id → 0…1) biases recently-played tracks
+    /// toward the end so large shuffles (whole library / all albums) feel fresh.
+    public func playShuffled(_ tracks: [Track], recencyScores: [String: Double]? = nil) {
         logTerminal(.skipped, position: snapshot.elapsed)
-        queue.setItemsShuffled(tracks)
+        queue.setItemsShuffled(tracks, recencyScores: recencyScores)
         try? session.activate()
         reload(autoplay: true)
     }

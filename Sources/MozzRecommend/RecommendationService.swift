@@ -34,6 +34,22 @@ public actor RecommendationService {
         self.now = now
     }
 
+    /// A freshness map for recency-biased shuffle: track `remoteId` → score in
+    /// `[0, 1]`, where 1 means "just played" and it decays toward 0 with age
+    /// (0.5 at `halfLife`). Tracks never played are simply absent (treated as
+    /// fully fresh by the caller). Reads the play log off the main thread.
+    public func recencyScores(serverId: ServerID,
+                              halfLife: TimeInterval = 7 * 24 * 3600) async throws -> [String: Double] {
+        let lastPlayed = try await store.lastPlayedByRemoteID(serverId: serverId)
+        guard halfLife > 0 else { return [:] }
+        let nowSec = now().timeIntervalSince1970
+        let lambda = log(2) / halfLife
+        return lastPlayed.mapValues { playedAt in
+            let age = max(0, nowSec - playedAt)
+            return exp(-lambda * age)
+        }
+    }
+
     /// (Re)generate "Mozz Weekly" for a server and persist it. Pass a `seed` for
     /// a deterministic ranking (tests); omit it for fresh weekly variety.
     @discardableResult
