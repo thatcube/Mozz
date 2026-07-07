@@ -25,6 +25,10 @@ public actor EnrichmentService {
     private let log: @Sendable (String) -> Void
 
     private var backgroundPass: Task<Void, Never>?
+    /// The server the in-flight `backgroundPass` is crawling, so a call for a
+    /// DIFFERENT server (a raced server switch) can cancel-and-restart rather than
+    /// no-op behind the stale pass.
+    private var currentPassServerId: ServerID?
     /// Bumped whenever a pass is started or cancelled, so a stale task's cleanup
     /// can't clear a newer pass's registration (single-flight/cancellation safety).
     private var generation = 0
@@ -48,13 +52,23 @@ public actor EnrichmentService {
     // MARK: - Background pass (fire-and-forget, single-flight, 3 stages)
 
     /// Kick a bounded background enrichment pass (resolve -> canonicalize ->
-    /// similarity -> tags). No-op when disabled or already running. Never awaited
-    /// by the caller (a sync must not appear to hang for minutes).
+    /// similarity -> tags). No-op when disabled or already crawling THIS server
+    /// (single-flight — so repeated launch/foreground kicks don't restart the drain
+    /// from scratch). A call for a DIFFERENT server cancels the stale pass and
+    /// starts fresh, so a raced server switch can't leave the wrong library
+    /// crawling. Never awaited by the caller (a sync must not appear to hang).
     public func enrich(serverId: ServerID) {
         guard isEnabled() else { return }
-        guard backgroundPass == nil else { return }
+        if backgroundPass != nil {
+            if currentPassServerId == serverId { return }   // same server already crawling
+            generation += 1                                 // different server raced in — replace
+            backgroundPass?.cancel()
+            backgroundPass = nil
+            currentPassServerId = nil
+        }
         generation += 1
         let gen = generation
+        currentPassServerId = serverId
         backgroundPass = Task { [weak self] in
             await self?.runPipeline(serverId: serverId)
             await self?.finishBackgroundPass(gen)
@@ -66,11 +80,13 @@ public actor EnrichmentService {
         generation += 1 // invalidate the running task's cleanup
         backgroundPass?.cancel()
         backgroundPass = nil
+        currentPassServerId = nil
     }
 
     private func finishBackgroundPass(_ gen: Int) {
         guard gen == generation else { return }
         backgroundPass = nil
+        currentPassServerId = nil
     }
 
     /// Test hook: await the in-flight background pass, if any.
@@ -226,6 +242,7 @@ public actor EnrichmentService {
         }
         guard let mbid = recordingMbid else { return nil }
         if canonical == nil {
+            guard isEnabled() else { return nil }   // re-check: honor an OFF toggle mid-flight
             // Mirror the background stage: a genuine no-mapping (nil) is stamped
             // (negative cache); a throw (transport/decode/cancel) is NOT stamped so
             // it's retried later. `try?` would collapse both into nil.
@@ -246,6 +263,7 @@ public actor EnrichmentService {
                                                notFetchedSince: cutoff)) == true {
             return canonicalMbid
         }
+        guard isEnabled() else { return canonicalMbid }   // re-check before the last outbound call
         do {
             let similar = try await listenBrainz.similarRecordings(forCanonicalMbid: canonicalMbid)
             try await store.replaceSimilarRecordings(
@@ -266,6 +284,7 @@ public actor EnrichmentService {
         if let state = try? await store.mbidState(trackRef: trackRef), let mbid = state.mbid {
             return mbid
         }
+        guard isEnabled() else { return nil }   // re-check after the DB await, before egress
         do {
             let match = try await musicBrainz.bestRecording(
                 artist: artistName, title: title, durationMs: durationMs, artistMBID: artistMBID)

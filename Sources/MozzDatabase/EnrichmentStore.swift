@@ -405,12 +405,15 @@ public struct EnrichmentStore: Sendable {
         }
     }
 
-    /// Encode tags as a compact lowercased JSON array (nil for empty, so the column
-    /// reads NULL rather than "[]"). Lowercasing here keeps the stored form
-    /// case-consistent for the future B4.5 genre-engine merge.
+    /// Encode tags as a compact JSON array of CANONICAL genre keys (nil for empty,
+    /// so the column reads NULL rather than "[]"). Normalizing here — case AND
+    /// separator folding via `GenreNormalizer.key`, deduped — means the stored
+    /// `mb_tags` are byte-identical to the keys the genre engine matches against, so
+    /// the candidate mb_tags match arm (an exact `IN`) works for hyphenated MB
+    /// genres like "post-punk" too, not just space-separated ones.
     static func encodeTagArray(_ tags: [String]) -> String? {
-        guard !tags.isEmpty else { return nil }
-        let normalized = tags.map { $0.lowercased() }
+        let normalized = GenreNormalizer.keys(tags)
+        guard !normalized.isEmpty else { return nil }
         guard let data = try? JSONEncoder().encode(normalized),
               let string = String(data: data, encoding: .utf8) else { return nil }
         return string

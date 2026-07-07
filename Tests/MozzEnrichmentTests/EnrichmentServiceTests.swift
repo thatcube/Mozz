@@ -9,6 +9,21 @@ import GRDB
 private let recA = "b1a9c0e9-d987-4042-ae91-78d6a3267d69"
 private let artistA = "f22942a1-6f70-4f48-866e-238cb2308fbd"
 
+/// A thread-safe bool for driving `isEnabled` in tests. Returns `initial` for the
+/// first `trueReads` calls, then `!initial` — to simulate the toggle flipping
+/// mid-flight between the entry check and a later re-check.
+private final class EnabledFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reads = 0
+    private let trueReads: Int
+    init(trueReads: Int) { self.trueReads = trueReads }
+    var value: Bool {
+        lock.lock(); defer { lock.unlock() }
+        reads += 1
+        return reads <= trueReads
+    }
+}
+
 private final class ServiceCannedTransport: HTTPTransport, @unchecked Sendable {
     let json: String
     private let lock = NSLock()
@@ -159,6 +174,36 @@ final class EnrichmentServiceTests: XCTestCase {
         XCTAssertNil(result)
     }
 
+    /// If enrichment is toggled OFF mid-flight (after the seed is already resolved +
+    /// canonicalized locally), prepareSeedSimilarity must NOT issue the ListenBrainz
+    /// similar-recordings request — honoring the "fully offline" promise.
+    func testSeedPrepReGatesBeforeSimilarFetchWhenDisabledMidFlight() async throws {
+        let (_, store) = try await makeDB()
+        // Pre-resolve + pre-canonicalize t1 so prepareSeedSimilarity skips straight
+        // to the similarity fetch (the only remaining outbound call).
+        try await store.recordTrackResolution(trackRef: "srv1:t1", mbid: recA, artistMbid: artistA, at: 100)
+        try await store.setCanonical(mbid: recA, canonical: recA, at: 100)
+
+        // isEnabled is true for the entry check, then false — simulating the user
+        // turning the toggle off during seed prep (before the similarity fetch).
+        let flag = EnabledFlag(trueReads: 1)
+        let lbTransport = ServiceCannedTransport(json: "[]")
+        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )")
+        let mb = MusicBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0),
+            baseTransport: ServiceCannedTransport(json: hitJSON))
+        let lb = ListenBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0), baseTransport: lbTransport)
+        let service = EnrichmentService(
+            store: store, musicBrainz: mb, listenBrainz: lb, config: config,
+            isEnabled: { flag.value })
+        let result = await service.prepareSeedSimilarity(
+            trackRef: "srv1:t1", artistName: "Aphex Twin", title: "Xtal",
+            durationMs: nil, artistMBID: nil)
+        XCTAssertEqual(result, recA)               // returns the canonical it already had
+        XCTAssertEqual(lbTransport.sendCount, 0)   // but issued NO outbound request
+    }
+
     func testTagStageCapturesArtistGenres() async throws {
         let (db, store) = try await makeDB()
         // Routes recording-search vs artist-genres by path so stage 1 (resolve) and
@@ -251,6 +296,39 @@ final class EnrichmentServiceTests: XCTestCase {
         // stage-4 artist tags); a second overlapping pass would add more. So this
         // proves single-flight held.
         XCTAssertEqual(transport.sendCount, 2)
+    }
+
+    /// A same-server re-kick while crawling is a single-flight no-op, but a kick for
+    /// a DIFFERENT server cancels the stale pass and starts fresh — so a raced
+    /// server switch can't leave the previous library crawling.
+    func testEnrichForDifferentServerCancelsAndRestarts() async throws {
+        let (db, store) = try await makeDB()   // srv1 has t1
+        let writer = CatalogWriter(db)
+        try await writer.saveServer(ServerConnection(
+            id: "srv2", kind: .plex, name: "T2",
+            baseURL: URL(string: "https://y.local")!, userID: nil, clientIdentifier: "c2"))
+        try await writer.upsertTracks([
+            Track(id: "u1", title: "Windowlicker", artistName: "Aphex Twin", duration: 300),
+        ], serverId: "srv2")
+        let transport = GatedTransport(json: hitJSON)
+        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )")
+        let mb = MusicBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
+        let lb = ListenBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0),
+            baseTransport: ServiceCannedTransport(json: "[]"))
+        let service = EnrichmentService(
+            store: store, musicBrainz: mb, listenBrainz: lb, config: config, isEnabled: { true })
+        await service.enrich(serverId: "srv1")            // pass for srv1 starts, blocks
+        try await Task.sleep(nanoseconds: 60_000_000)
+        await service.enrich(serverId: "srv1")            // same server → no-op
+        await service.enrich(serverId: "srv2")            // switch → cancel srv1, start srv2
+        transport.open()
+        await service.waitForBackgroundPass()
+        // srv2's track got resolved (the new pass ran); the cancelled srv1 pass
+        // stopped, so its track is left unresolved.
+        let u1 = try await store.mbidState(trackRef: "srv2:u1")
+        XCTAssertEqual(u1?.mbid, recA, "the new server's crawl must run")
     }
 }
 

@@ -282,10 +282,14 @@ final class EnrichmentStoreTests: XCTestCase {
         XCTAssertEqual(needing, [artistMbid])
     }
 
-    func testEncodeTagArrayLowercasesAndNilsEmpty() {
+    func testEncodeTagArrayNormalizesFoldsSeparatorsAndNilsEmpty() {
         XCTAssertNil(EnrichmentStore.encodeTagArray([]))
         XCTAssertEqual(EnrichmentStore.encodeTagArray(["Rock", "Trip Hop"]),
                        "[\"rock\",\"trip hop\"]")
+        // Hyphenated MB genres are separator-folded to the canonical key, so the
+        // stored form matches what the genre engine queries with.
+        XCTAssertEqual(EnrichmentStore.encodeTagArray(["Post-Punk", "Synth-Pop"]),
+                       "[\"post punk\",\"synth pop\"]")
     }
 
     // A changed artist_mbid must invalidate the old artist's mb_tags so the tag

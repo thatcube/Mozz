@@ -59,6 +59,12 @@ struct SettingsView: View {
                         Toggle(isOn: $enrichmentEnabled) {
                             Label("Improve Recommendations", systemImage: "sparkles")
                         }
+                        .onChange(of: enrichmentEnabled) { _, enabled in
+                            // Resume the crawl on ON; on OFF, promptly stop any
+                            // in-flight enrichment/seed-prep so no further request
+                            // goes out (the "fully offline" promise).
+                            env.setEnrichmentEnabled(enabled)
+                        }
                         Text("Looks up open music data from MusicBrainz to make radio and mixes more accurate. Only song and artist names are sent, no account or personal data. Turn this off to keep the app fully offline.")
                             .font(.caption).foregroundStyle(.secondary)
                         if enrichmentEnabled, let c = recCoverage, c.total > 0 {

@@ -424,17 +424,12 @@ public final class AppEnvironment: ObservableObject {
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
-        // On a server SWITCH, abandon the previous library's enrichment crawl THEN
-        // start the new one — serialized in a single task so cancel always precedes
-        // resume (two separate tasks race on the actor and can lose or self-cancel
-        // the new pass). On a same-server rebuild, just resume (single-flight makes
-        // it a no-op if already crawling). Toggle-gated inside the service.
-        let enrichment = self.enrichment
-        let serverId = connection.id
-        Task {
-            if switchingServer { await enrichment.cancel() }
-            await enrichment.enrich(serverId: serverId)
-        }
+        // Resume the enrichment crawl for the now-active server. `enrich` is
+        // server-aware: a same-server rebuild is a single-flight no-op (doesn't
+        // restart the drain), and a switch to a different server cancels the stale
+        // pass and starts fresh — so even a raced concurrent resume can't leave the
+        // previous library crawling. Toggle-gated inside the service.
+        resumeEnrichmentIfNeeded()
     }
 
     /// Kick the background enrichment crawl for the active server if one isn't
@@ -445,6 +440,22 @@ public final class AppEnvironment: ObservableObject {
         guard let serverId = active?.connection.id else { return }
         let enrichment = self.enrichment
         Task { await enrichment.enrich(serverId: serverId) }
+    }
+
+    /// React to the enrichment on/off switch. Turning it ON resumes the crawl;
+    /// turning it OFF promptly cancels any in-flight background pass and on-demand
+    /// seed prep so no further MetaBrainz request goes out — honoring the Settings
+    /// promise that off keeps the app fully offline. (Each network call is also
+    /// re-gated inside the service, so this just stops the remaining work early.)
+    public func setEnrichmentEnabled(_ enabled: Bool) {
+        if enabled {
+            resumeEnrichmentIfNeeded()
+        } else {
+            seedPrepTask?.cancel()
+            seedPrepTask = nil
+            let enrichment = self.enrichment
+            Task { await enrichment.cancel() }
+        }
     }
 
     public func signOut() {

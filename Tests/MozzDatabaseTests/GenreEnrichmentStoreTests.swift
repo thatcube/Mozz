@@ -119,6 +119,22 @@ final class GenreEnrichmentStoreTests: XCTestCase {
         XCTAssertEqual(pool[0].genres, ["hip hop"])   // normalized in the returned candidate
     }
 
+    func testCandidatesMatchHyphenatedMbTagGenre() async throws {
+        let (_, writer, store, enrich) = try await setup()
+        // A candidate whose ONLY link to "post punk" is a hyphenated MB genre
+        // ("post-punk") on its artist — must still be matched (the mb_tag is stored
+        // separator-folded, so the exact-match arm works for it).
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "AA", artistID: "a1", genres: ["Rock"], artistMbid: artistA),
+        ], serverId: "s1")
+        try await enrich.setArtistTags(artistMbid: artistA, tags: ["Post-Punk"], at: 100)
+        let pool = try await store.candidateTracks(
+            serverId: "s1", genres: ["post punk"], artistIds: [],
+            notPlayedSince: 9_999_999_999, limit: 100, enrich: true)
+        XCTAssertEqual(pool.count, 1)
+        XCTAssertEqual(Set(pool[0].genres), ["rock", "post punk"])
+    }
+
     // MARK: taste signals
 
     func testPlayedSignalsMergeMbTagsWhenEnriched() async throws {
