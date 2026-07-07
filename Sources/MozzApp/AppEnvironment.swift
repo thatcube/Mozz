@@ -408,6 +408,15 @@ public final class AppEnvironment: ObservableObject {
         // Headless sync measurement: force a full re-sync of the active server on
         // launch (restore runs first). Writes timings to the pullable diagnostics
         // log, so the sync speed can be measured without any user interaction.
+        // Controlled server-cost probe: run a matrix of /Items queries varying
+        // ONE parameter at a time (page size, sort, fields, images, ParentId,
+        // count) back-to-back against the live server, logging each timing. This
+        // isolates what actually makes the album/track queries slow — instead of
+        // guessing — without any credentials leaving the device.
+        if env["MOZZ_SYNCPROBE"] == "1", active != nil {
+            await runSyncProbe()
+            return
+        }
         if env["MOZZ_FORCESYNC"] == "1", active != nil {
             startSync()
         }
@@ -422,6 +431,29 @@ public final class AppEnvironment: ObservableObject {
                 if !tracks.isEmpty { playback.play(tracks: tracks.map { $0.toDomain() }) }
             }
         }
+    }
+
+    /// Controlled server-cost probe (triggered by `MOZZ_SYNCPROBE=1`). Runs a
+    /// matrix of `/Items` queries against the live Jellyfin server, varying one
+    /// parameter at a time, and appends each timing to the pullable diagnostics
+    /// log. Lets us isolate what makes album/track queries slow (fixed per-query
+    /// overhead vs per-item cost, sort, fields, images, ParentId, count) with
+    /// real data instead of guesses. Jellyfin only.
+    private func runSyncProbe() async {
+        let diag = SyncDiagnosticsLog()
+        guard let active, active.connection.kind == .jellyfin else {
+            diag.append("SYNCPROBE skipped (no active Jellyfin server)")
+            return
+        }
+        let parentId = await resolvedMusicLibraryId()
+        guard let backend = makeBulkSyncBackend(requestTotals: false, musicLibraryId: parentId) as? JellyfinBackend else {
+            diag.append("SYNCPROBE skipped (no bulk backend)")
+            return
+        }
+        diag.append("SYNCPROBE START parentId=\(parentId ?? "none")")
+        let report = await backend.diagnoseItemQueryCost()
+        for line in report { diag.append("SYNCPROBE \(line)") }
+        diag.append("SYNCPROBE DONE")
     }
 
     /// Full performance run on-device: generate the 100k-track catalog, measure
@@ -544,9 +576,12 @@ public final class AppEnvironment: ObservableObject {
                     if let serverId = active?.connection.id {
                         isEmpty = ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0
                     }
-                    // Tier 1 (empty catalog only): make the app playable in ~10s.
+                    // Tier 1 (empty catalog only): make the app playable in ~6-10s.
+                    // 150 tracks: /Items is a flat ~40ms/row hard ceiling on the
+                    // server (see SyncPlan.quickStart), so this is the sweet spot
+                    // between "instant" and "enough to browse".
                     if isEmpty {
-                        _ = try await runSync(plan: .quickStart(tracks: 300), progress: emitProgress)
+                        _ = try await runSync(plan: .quickStart(tracks: 150), progress: emitProgress)
                     }
                     // Tier 2 (always): the full library + housekeeping + prune.
                     _ = try await syncNow(progress: emitProgress)

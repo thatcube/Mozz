@@ -77,6 +77,129 @@ public struct JellyfinBackend: MusicBackend {
         )
     }
 
+    // MARK: Diagnostics
+
+    /// Run a controlled matrix of `/Items` queries (varying one parameter at a
+    /// time) against the live server and return a human-readable timing line for
+    /// each. Used by the `MOZZ_SYNCPROBE` launch hook to isolate what actually
+    /// drives album/track query cost. Best-effort: a failing probe reports the
+    /// error instead of throwing so the rest of the matrix still runs.
+    public func diagnoseItemQueryCost() async -> [String] {
+        func run(_ label: String, _ query: [URLQueryItem]) async -> String {
+            let start = Date()
+            do {
+                let r = try await client.send(Endpoint(path: "Items", query: query), as: JFItemsResponse.self)
+                let dt = Date().timeIntervalSince(start)
+                let n = r.Items?.count ?? 0
+                let rate = dt > 0 && n > 0 ? Double(n) / dt : 0
+                return String(format: "%@: %d in %.2fs (%.0f/s)", label, n, dt, rate)
+            } catch {
+                return "\(label): ERROR \(String(describing: error))"
+            }
+        }
+        // Build an /Items query with individually toggleable cost factors so each
+        // probe differs from the baseline in exactly one dimension.
+        func q(type: String, limit: Int, sort: String?, fields: String,
+               images: Bool, count: Bool, parent: Bool,
+               userData: Bool = true, includeUserId: Bool = true) -> [URLQueryItem] {
+            var items: [URLQueryItem] = [
+                URLQueryItem(name: "StartIndex", value: "0"),
+                URLQueryItem(name: "Limit", value: "\(limit)"),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: type),
+                URLQueryItem(name: "EnableTotalRecordCount", value: count ? "true" : "false"),
+            ]
+            if includeUserId { items.append(URLQueryItem(name: "userId", value: userID)) }
+            if !userData { items.append(URLQueryItem(name: "EnableUserData", value: "false")) }
+            if let sort {
+                items.append(URLQueryItem(name: "SortBy", value: sort))
+                items.append(URLQueryItem(name: "SortOrder", value: "Descending"))
+            }
+            if !fields.isEmpty { items.append(URLQueryItem(name: "Fields", value: fields)) }
+            if images {
+                items.append(URLQueryItem(name: "EnableImageTypes", value: "Primary"))
+                items.append(URLQueryItem(name: "ImageTypeLimit", value: "1"))
+            } else {
+                items.append(URLQueryItem(name: "EnableImages", value: "false"))
+            }
+            if parent, let musicLibraryId {
+                items.append(URLQueryItem(name: "ParentId", value: musicLibraryId))
+            }
+            return items
+        }
+        let trackFields = "Genres,DateCreated,NormalizationGain"
+        var out: [String] = ["--- /Items cost probe (Audio) ---"]
+        // Warm the server/query caches so the measured probes are all warm.
+        _ = await run("warmup", q(type: "Audio", limit: 100, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true))
+        // (1) Page-size sweep at fixed params: separates a fixed per-query cost
+        //     (sort/count/plan) from per-item serialization cost.
+        out.append(await run("size=50   base", q(type: "Audio", limit: 50, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)))
+        out.append(await run("size=200  base", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)))
+        out.append(await run("size=500  base", q(type: "Audio", limit: 500, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)))
+        // (2) One-variable-off probes at size=200 vs the size=200 baseline above.
+        out.append(await run("size=200  sort=SortName", q(type: "Audio", limit: 200, sort: "SortName", fields: trackFields, images: true, count: false, parent: true)))
+        out.append(await run("size=200  sort=none", q(type: "Audio", limit: 200, sort: nil, fields: trackFields, images: true, count: false, parent: true)))
+        out.append(await run("size=200  fields=none", q(type: "Audio", limit: 200, sort: "DateCreated", fields: "", images: true, count: false, parent: true)))
+        out.append(await run("size=200  images=off", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: false, count: false, parent: true)))
+        out.append(await run("size=200  parent=off", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: false)))
+        out.append(await run("size=200  count=on", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: true, parent: true)))
+        // (2b) The untested suspect: per-row UserData (favorite/play-state) work,
+        //      and dropping userId entirely. Plus a ParentId on/off re-check.
+        out.append(await run("size=200  userdata=off", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true, userData: false)))
+        out.append(await run("size=200  no-userid", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true, includeUserId: false)))
+        out.append(await run("size=200  lean(all-off)", q(type: "Audio", limit: 200, sort: nil, fields: "", images: false, count: false, parent: true, userData: false)))
+        out.append(await run("size=200  parent=on #2", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)))
+        out.append(await run("size=200  parent=off #2", q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: false)))
+        // (3) Album parallels — albums measured ~8x slower than /Artists.
+        out.append("--- /Items cost probe (MusicAlbum) ---")
+        out.append(await run("album size=200 base", q(type: "MusicAlbum", limit: 200, sort: "DateCreated", fields: "Genres,DateCreated", images: true, count: false, parent: true)))
+        out.append(await run("album size=200 sort=SortName", q(type: "MusicAlbum", limit: 200, sort: "SortName", fields: "Genres,DateCreated", images: true, count: false, parent: true)))
+        out.append(await run("album size=200 fields=none", q(type: "MusicAlbum", limit: 200, sort: "DateCreated", fields: "", images: true, count: false, parent: true)))
+        out.append(await run("album size=200 images=off", q(type: "MusicAlbum", limit: 200, sort: "DateCreated", fields: "Genres,DateCreated", images: false, count: false, parent: true)))
+        // (4) THE big lever: can the server serve parallel /Items requests? Cost
+        //     is purely per-item with an idle CPU, so if N concurrent requests
+        //     overlap we get an ~Nx speedup. Compare 4x200-item track pages
+        //     fetched sequentially vs concurrently (distinct StartIndex windows).
+        out.append("--- concurrency probe (4x200 Audio pages) ---")
+        func page(_ start: Int) -> [URLQueryItem] {
+            q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)
+                .filter { $0.name != "StartIndex" } + [URLQueryItem(name: "StartIndex", value: "\(start)")]
+        }
+        let starts = [0, 200, 400, 600]
+        let httpClient = self.client
+        let seqStart = Date()
+        for s in starts {
+            _ = try? await httpClient.send(Endpoint(path: "Items", query: page(s)), as: JFItemsResponse.self)
+        }
+        let seqDt = Date().timeIntervalSince(seqStart)
+        out.append(String(format: "sequential 4x200: %.2fs", seqDt))
+        let conStart = Date()
+        await withTaskGroup(of: Void.self) { group in
+            for s in starts {
+                let query = page(s)
+                group.addTask {
+                    _ = try? await httpClient.send(Endpoint(path: "Items", query: query), as: JFItemsResponse.self)
+                }
+            }
+        }
+        let conDt = Date().timeIntervalSince(conStart)
+        out.append(String(format: "concurrent 4x200: %.2fs (%.1fx vs sequential)", conDt, conDt > 0 ? seqDt / conDt : 0))
+        // Also try 8-wide to see if the server scales further or saturates.
+        let starts8 = stride(from: 0, to: 1600, by: 200).map { $0 }
+        let con8Start = Date()
+        await withTaskGroup(of: Void.self) { group in
+            for s in starts8 {
+                let query = page(s)
+                group.addTask {
+                    _ = try? await httpClient.send(Endpoint(path: "Items", query: query), as: JFItemsResponse.self)
+                }
+            }
+        }
+        let con8Dt = Date().timeIntervalSince(con8Start)
+        out.append(String(format: "concurrent 8x200: %.2fs (%.0f items/s)", con8Dt, con8Dt > 0 ? 1600 / con8Dt : 0))
+        return out
+    }
+
     // MARK: Catalog enumeration
 
     /// Find the music library's item id so catalog queries can scope to it via

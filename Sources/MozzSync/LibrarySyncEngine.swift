@@ -136,12 +136,18 @@ public struct SyncPlan: Sendable {
     )
 
     /// A tiny, immediately-usable slice: the newest `tracks` in ONE small request
-    /// (newest-first), no albums/artists/playlists, no prune. On a ~26 item/s
-    /// server ~300 tracks lands in ~10-12s — just enough to make the app playable
-    /// on first launch. Albums/artists fill in via the background full sync that
-    /// follows (empty album shells are hidden until their tracks arrive), and a
-    /// track carries its own album art + title so "Recently Added" songs render.
-    public static func quickStart(tracks: Int = 300) -> SyncPlan {
+    /// (newest-first), no albums/artists/playlists, no prune.
+    ///
+    /// Sizing (from on-device probing of a real server): the `/Items` endpoint
+    /// costs a FLAT ~40ms per returned row with essentially ZERO fixed per-query
+    /// overhead, and that rate can't be improved by query params or concurrency —
+    /// it's a hard server-side ceiling that drifts ~15-26 rows/s with load. So
+    /// quick-start time ≈ tracks × ~40ms. 150 tracks lands in ~6s (fast) to ~10s
+    /// (slow) — a reliably snappy first impression that's still plenty to browse
+    /// and play. Albums/artists fill in via the background full sync that follows
+    /// (empty album shells are hidden until their tracks arrive), and a track
+    /// carries its own album art + title so "Recently Added" songs render.
+    public static func quickStart(tracks: Int = 150) -> SyncPlan {
         SyncPlan(
             maxArtistPages: 0, maxAlbumPages: 0, maxTrackPages: 1,
             includePlaylists: false, prune: false, pageSize: tracks
