@@ -254,6 +254,18 @@ final class PlayQueueTests: XCTestCase {
         XCTAssertEqual(Set(([q.current!] + q.upNext).map(\.id)).count, 10)
     }
 
+    func testTasteBiasPullsHighAffinityTracksEarlier() {
+        var q = PlayQueue()
+        // t10…t19 are high-taste (score 1.0), t0…t9 have no affinity (absent).
+        var taste: [String: Double] = [:]
+        for i in 10..<20 { taste["t\(i)"] = 1.0 }
+        q.setItemsShuffled(tracks(20), tasteScores: taste)
+        let ordered = [q.current!] + q.upNext
+        XCTAssertEqual(ordered.count, 20)
+        XCTAssertEqual(Set(ordered.prefix(10).map(\.id)), Set((10..<20).map { "t\($0)" }),
+                       "high-taste tracks are pulled into the front half")
+    }
+
     func testWrapSeamAvoidsRepeatingTheOutgoingArtist() {
         var q = PlayQueue()
         q.setItemsShuffled(multiArtistTracks())   // 3 artists A/B/C

@@ -16,7 +16,7 @@ struct SongsView: View {
     var body: some View {
         List {
             if !list.items.isEmpty {
-                LibraryPlayShuffleBar(play: playAll, shuffle: shuffleAll)
+                LibraryPlayShuffleBar(play: playAll, shuffle: shuffleAll, smartShuffle: smartShuffleAll)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
             }
@@ -68,6 +68,24 @@ struct SongsView: View {
                 recency = try? await env.recommendations.recencyScores(serverId: serverId)
             }
             env.playback.playShuffled(all, recencyScores: recency)
+        }
+    }
+
+    /// "Smart Shuffle": the whole catalog shuffled with your-taste tracks pulled
+    /// earlier (and recently-played pushed later), while keeping artist/album
+    /// spread. Falls back to a plain fresh shuffle when history is too thin.
+    private func smartShuffleAll() {
+        Task {
+            let serverId = env.active?.connection.id
+            let all = (try? await env.repository.allTracksForPlayback(serverId: serverId)) ?? []
+            guard !all.isEmpty else { return }
+            var recency: [String: Double]?
+            var taste: [String: Double]?
+            if let serverId {
+                recency = try? await env.recommendations.recencyScores(serverId: serverId)
+                taste = try? await env.recommendations.tasteScores(serverId: serverId, tracks: all)
+            }
+            env.playback.playShuffled(all, recencyScores: recency, tasteScores: taste)
         }
     }
 

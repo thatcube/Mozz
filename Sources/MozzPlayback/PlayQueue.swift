@@ -174,10 +174,13 @@ public struct PlayQueue: Sendable, Equatable, Codable {
     ///
     /// `recencyScores` (optional, keyed by track id, 0…1 where 1 == just played)
     /// biases recently-played tracks toward the end so a big shuffle feels fresh
-    /// across sessions. Only the initial order is biased; wrap reshuffles are
-    /// plain balanced.
+    /// across sessions. `tasteScores` (optional, 0…1 where 1 == best match)
+    /// biases higher-affinity tracks toward the front ("Smart Shuffle"). Both are
+    /// applied on top of the balanced spread; only the initial order is biased,
+    /// wrap reshuffles are plain balanced.
     public mutating func setItemsShuffled(_ newTracks: [Track],
-                                          recencyScores: [String: Double]? = nil) {
+                                          recencyScores: [String: Double]? = nil,
+                                          tasteScores: [String: Double]? = nil) {
         tracks = newTracks
         isShuffled = true
         nextLoopOrder = nil
@@ -186,7 +189,7 @@ public struct PlayQueue: Sendable, Equatable, Codable {
             position = -1
             return
         }
-        order = balancedOrder(pinning: nil, recencyScores: recencyScores)
+        order = balancedOrder(pinning: nil, recencyScores: recencyScores, tasteScores: tasteScores)
         position = 0
         refreshWrapCache()
     }
@@ -308,13 +311,20 @@ public struct PlayQueue: Sendable, Equatable, Codable {
     /// don't clump. When `pinned` is non-nil that track is forced to the front so
     /// it keeps playing when shuffle turns on mid-track; the remainder stays spread.
     ///
-    /// `recencyScores` (optional, track id → 0…1) biases recently-played tracks
-    /// later via `BalancedShuffle`'s position bias.
+    /// `recencyScores` (track id → 0…1) biases recently-played tracks later;
+    /// `tasteScores` (track id → 0…1) biases higher-affinity tracks earlier. The
+    /// two combine into a single per-track position bias for `BalancedShuffle`.
     private func balancedOrder(pinning pinned: Int?,
-                               recencyScores: [String: Double]? = nil) -> [Int] {
+                               recencyScores: [String: Double]? = nil,
+                               tasteScores: [String: Double]? = nil) -> [Int] {
         let bias: (Int) -> Double
-        if let recencyScores {
-            bias = { Self.recencyBiasStrength * (recencyScores[tracks[$0].id] ?? 0) }
+        if recencyScores != nil || tasteScores != nil {
+            bias = { idx in
+                let id = tracks[idx].id
+                let recent = recencyScores?[id] ?? 0
+                let taste = tasteScores?[id] ?? 0
+                return Self.recencyBiasStrength * recent - Self.tasteBiasStrength * taste
+            }
         } else {
             bias = { _ in 0 }
         }
@@ -330,11 +340,12 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         return result
     }
 
-    /// How hard recency de-weighting pushes recently-played tracks back. Balanced
-    /// positions live in `[0, 1)`, so a strength of 1 pushes a just-played track a
-    /// full "lap" later (into the back half), while long-unplayed tracks stay up
-    /// front — a soft, continuous bias rather than a hard exclusion.
+    /// How hard recency de-weighting pushes recently-played tracks back, and how
+    /// hard taste affinity pulls preferred tracks forward. Balanced positions
+    /// live in `[0, 1)`, so a strength of 1 shifts a track about a full "lap" —
+    /// a soft, continuous bias rather than a hard partition.
     private static let recencyBiasStrength = 1.0
+    private static let tasteBiasStrength = 1.0
 
     /// Primary grouping key: the normalized artist, so same-artist tracks spread.
     private static func artistKey(_ track: Track) -> String {

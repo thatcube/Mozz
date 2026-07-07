@@ -34,6 +34,36 @@ public actor RecommendationService {
         self.now = now
     }
 
+    /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →
+    /// normalized score in `(0, 1]` (1 == best match to the listener's taste).
+    /// Tracks with no affinity are absent. Returns `[:]` when history is too thin
+    /// to personalize (cold start), so the caller falls back to a plain shuffle.
+    /// Mirrors `ContentRecommender`'s 0.6·genre + 0.4·artist scoring, but over the
+    /// caller's own tracks (no candidate-pool fetch).
+    public func tasteScores(serverId: ServerID, tracks: [Track],
+                            genreWeight: Double = 0.6, artistWeight: Double = 0.4) async throws -> [String: Double] {
+        let nowDate = now()
+        let lookback = nowDate.addingTimeInterval(-90 * 24 * 3600).timeIntervalSince1970
+        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback)
+        let taste = TasteProfile.build(from: signals, now: nowDate)
+        guard !taste.isThin else { return [:] }
+
+        var raw: [String: Double] = [:]
+        var maxScore = 0.0
+        for track in tracks {
+            var genreSum = 0.0
+            for genre in track.genres { genreSum += max(0, taste.genreAffinity[genre] ?? 0) }
+            let artistAffinity = track.artistID.map { max(0, taste.artistAffinity[$0] ?? 0) } ?? 0
+            let score = genreWeight * genreSum + artistWeight * artistAffinity
+            if score > 0 {
+                raw[track.id] = score
+                maxScore = max(maxScore, score)
+            }
+        }
+        guard maxScore > 0 else { return [:] }
+        return raw.mapValues { $0 / maxScore }
+    }
+
     /// A freshness map for recency-biased shuffle: track `remoteId` → score in
     /// `[0, 1]`, where 1 means "just played" and it decays toward 0 with age
     /// (0.5 at `halfLife`). Tracks never played are simply absent (treated as

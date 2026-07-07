@@ -113,11 +113,14 @@ public final class PlaybackEngine: ObservableObject {
     /// shuffle on and picks a random-feeling first track, so behavior is
     /// identical everywhere.
     ///
-    /// `recencyScores` (optional, track id → 0…1) biases recently-played tracks
-    /// toward the end so large shuffles (whole library / all albums) feel fresh.
-    public func playShuffled(_ tracks: [Track], recencyScores: [String: Double]? = nil) {
+    /// `recencyScores` (track id → 0…1) biases recently-played tracks toward the
+    /// end so large shuffles feel fresh. `tasteScores` (track id → 0…1) biases
+    /// higher-affinity tracks toward the front ("Smart Shuffle").
+    public func playShuffled(_ tracks: [Track],
+                             recencyScores: [String: Double]? = nil,
+                             tasteScores: [String: Double]? = nil) {
         logTerminal(.skipped, position: snapshot.elapsed)
-        queue.setItemsShuffled(tracks, recencyScores: recencyScores)
+        queue.setItemsShuffled(tracks, recencyScores: recencyScores, tasteScores: tasteScores)
         try? session.activate()
         reload(autoplay: true)
     }
