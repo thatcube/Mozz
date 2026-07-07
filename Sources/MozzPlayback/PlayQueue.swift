@@ -297,13 +297,14 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         refreshWrapCache()
     }
 
-    /// A balanced (artist-spread) permutation of all base indices. When `pinned`
-    /// is non-nil that track is forced to the front so it keeps playing when
-    /// shuffle turns on mid-track; the remainder stays spread.
+    /// A balanced permutation of all base indices, spreading by artist (primary)
+    /// then album (secondary) so same-artist and, within that, same-album tracks
+    /// don't clump. When `pinned` is non-nil that track is forced to the front so
+    /// it keeps playing when shuffle turns on mid-track; the remainder stays spread.
     private func balancedOrder(pinning pinned: Int?) -> [Int] {
         var result = BalancedShuffle.order(
             of: Array(tracks.indices),
-            key: { Self.shuffleKey(tracks[$0]) }
+            keys: [{ Self.artistKey(tracks[$0]) }, { Self.albumKey(tracks[$0]) }]
         )
         if let pinned {
             result.removeAll { $0 == pinned }
@@ -312,10 +313,47 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         return result
     }
 
-    /// The grouping key balanced shuffle spreads on: the normalized artist, so
-    /// same-artist tracks are distributed instead of clumping.
-    private static func shuffleKey(_ track: Track) -> String {
+    /// Primary grouping key: the normalized artist, so same-artist tracks spread.
+    private static func artistKey(_ track: Track) -> String {
         track.artistName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Secondary grouping key: album identity. Prefers the stable album id, then
+    /// title+album-artist; an unknown album falls back to the track id so those
+    /// tracks stay unique and spread freely rather than clumping under "".
+    private static func albumKey(_ track: Track) -> String {
+        if let id = track.albumID, !id.isEmpty { return "id:" + id }
+        let title = track.albumTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty {
+            let artist = (track.albumArtistName ?? track.artistName).lowercased()
+            return "t:" + title.lowercased() + "|" + artist
+        }
+        return "u:" + track.id
+    }
+
+    private func sameArtist(_ a: Int, _ b: Int) -> Bool {
+        Self.artistKey(tracks[a]) == Self.artistKey(tracks[b])
+    }
+
+    /// A fresh balanced order for the next loop that avoids a jarring seam: its
+    /// first track won't be the same track — or, when possible, the same artist —
+    /// as `outgoing` (the track currently finishing the loop). Falls back
+    /// gracefully when the library is a single artist.
+    private func wrapOrder(avoiding outgoing: Int) -> [Int] {
+        var fresh = balancedOrder(pinning: nil)
+        guard fresh.count > 1 else { return fresh }
+        guard let first = fresh.first, first == outgoing || sameArtist(first, outgoing) else {
+            return fresh
+        }
+        // Prefer promoting a different-artist track; otherwise at least a
+        // different track than the one just played.
+        let pick = fresh.firstIndex { !sameArtist($0, outgoing) }
+            ?? fresh.firstIndex { $0 != outgoing }
+        if let pick {
+            let element = fresh.remove(at: pick)
+            fresh.insert(element, at: 0)
+        }
+        return fresh
     }
 
     /// Install the next loop's order when wrapping a shuffled repeat-all queue.
@@ -333,7 +371,8 @@ public struct PlayQueue: Sendable, Equatable, Codable {
     /// Keep ``nextLoopOrder`` populated exactly while the queue is parked on its
     /// last slot with shuffle + repeat-all. That lets ``peekNext`` pre-roll the
     /// reshuffled first track of the next loop and ``advance()`` play that same
-    /// track, so the loop boundary stays gapless. Cleared whenever those
+    /// track, so the loop boundary stays gapless. The cached order also avoids a
+    /// same-artist/same-track seam with the outgoing track. Cleared whenever the
     /// conditions don't hold; never overwritten while they do (so a pre-rolled
     /// choice can't drift before it's consumed).
     private mutating func refreshWrapCache() {
@@ -343,7 +382,7 @@ public struct PlayQueue: Sendable, Equatable, Codable {
             return
         }
         if nextLoopOrder == nil {
-            nextLoopOrder = balancedOrder(pinning: nil)
+            nextLoopOrder = wrapOrder(avoiding: order[position])
         }
     }
 }

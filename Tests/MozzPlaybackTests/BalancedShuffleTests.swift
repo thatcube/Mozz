@@ -92,4 +92,44 @@ final class BalancedShuffleTests: XCTestCase {
         XCTAssertEqual(BalancedShuffle.order(of: [], key: { _ in "x" }, using: &rng), [])
         XCTAssertEqual(BalancedShuffle.order(of: [9], key: { _ in "x" }, using: &rng), [9])
     }
+
+    // MARK: Multi-key (hierarchical) spreading
+
+    func testSecondaryKeySpreadsWithinASinglePrimaryGroup() {
+        // One artist, two albums (X/Y, 5 each): the primary key has a single
+        // group, so it defers to the album key — equal album groups must not adjoin.
+        let artist: (Int) -> String = { _ in "A" }
+        let album: (Int) -> String = { $0 < 5 ? "X" : "Y" }
+        for seed in UInt64(0)..<20 {
+            var rng = SeededGenerator(seed: seed)
+            let result = BalancedShuffle.order(of: Array(0..<10), keys: [artist, album], using: &rng)
+            XCTAssertEqual(Set(result), Set(0..<10))
+            XCTAssertEqual(adjacentCollisions(result, key: album), 0,
+                           "albums must spread within a single artist (seed \(seed))")
+        }
+    }
+
+    func testPrimaryKeyStillSpreadsWithASecondaryKeyPresent() {
+        // 2 equal artists (6 each) with albums underneath: primary artist spread
+        // must still be perfect regardless of the secondary key.
+        let artist: (Int) -> String = { $0 < 6 ? "A" : "B" }
+        let album: (Int) -> String = { "alb\($0 % 3)" }
+        for seed in UInt64(0)..<20 {
+            var rng = SeededGenerator(seed: seed)
+            let result = BalancedShuffle.order(of: Array(0..<12), keys: [artist, album], using: &rng)
+            XCTAssertEqual(Set(result), Set(0..<12))
+            XCTAssertEqual(adjacentCollisions(result, key: artist), 0,
+                           "artist spread must survive a secondary key (seed \(seed))")
+        }
+    }
+
+    func testMultiKeyDeterministicForAGivenSeed() {
+        let artist: (Int) -> String = { "a\($0 % 4)" }
+        let album: (Int) -> String = { "al\($0 % 7)" }
+        var a = SeededGenerator(seed: 555)
+        var b = SeededGenerator(seed: 555)
+        let first = BalancedShuffle.order(of: Array(0..<40), keys: [artist, album], using: &a)
+        let second = BalancedShuffle.order(of: Array(0..<40), keys: [artist, album], using: &b)
+        XCTAssertEqual(first, second)
+    }
 }

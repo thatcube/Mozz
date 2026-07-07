@@ -14,31 +14,39 @@ import Foundation
 /// deterministic for tests.
 public enum BalancedShuffle {
 
-    /// A balanced permutation of `indices`, grouping by `key`.
+/// A balanced permutation of `indices`, spreading by an ordered list of keys.
+    ///
+    /// Keys are applied hierarchically: items are grouped by the first key and
+    /// those groups are laid on evenly-spaced combs (primary spread); within each
+    /// group the members are themselves balanced by the remaining keys (secondary
+    /// spread), before being placed on the comb. So `[artist, album]` spreads
+    /// artists first and, wherever an artist's tracks land near each other, keeps
+    /// same-album tracks apart too. An empty key list is a plain uniform shuffle.
     ///
     /// - Parameters:
-    ///   - indices: the elements to order (opaque to this type — usually indices
-    ///     into a track array).
-    ///   - key: extracts the grouping key (e.g. the normalized artist name).
+    ///   - indices: the elements to order (usually indices into a track array).
+    ///   - keyFns: ordered grouping keys, most significant first.
     ///   - generator: the randomness source, injected so callers/tests control it.
-    /// - Returns: a permutation of `indices` with same-key items spread apart.
     public static func order<G: RandomNumberGenerator>(
         of indices: [Int],
-        key: (Int) -> String,
+        keys keyFns: [(Int) -> String],
         using generator: inout G
     ) -> [Int] {
         guard indices.count > 1 else { return indices }
+        guard let firstKey = keyFns.first else {
+            var shuffled = indices
+            shuffled.shuffle(using: &generator)
+            return shuffled
+        }
+        let rest = Array(keyFns.dropFirst())
 
         var groups: [String: [Int]] = [:]
         for index in indices {
-            groups[key(index), default: []].append(index)
+            groups[firstKey(index), default: []].append(index)
         }
-
-        // Nothing to spread against → a plain uniform shuffle.
+        // Nothing to spread against at this level → defer to the remaining keys.
         if groups.count == 1 {
-            var only = indices
-            only.shuffle(using: &generator)
-            return only
+            return order(of: indices, keys: rest, using: &generator)
         }
 
         // Iterate groups in a stable (sorted-key) order so RNG consumption is
@@ -47,11 +55,12 @@ public enum BalancedShuffle {
         var positioned: [(position: Double, index: Int)] = []
         positioned.reserveCapacity(indices.count)
         for groupKey in groups.keys.sorted() {
-            var members = groups[groupKey] ?? []
-            members.shuffle(using: &generator)          // random order within the group
-            let spacing = 1.0 / Double(members.count)
+            let members = groups[groupKey] ?? []
+            // Balance the members by the remaining keys (secondary spread).
+            let suborder = order(of: members, keys: rest, using: &generator)
+            let spacing = 1.0 / Double(suborder.count)
             let phase = Double.random(in: 0..<spacing, using: &generator)  // random comb rotation
-            for (offset, index) in members.enumerated() {
+            for (offset, index) in suborder.enumerated() {
                 positioned.append((phase + Double(offset) * spacing, index))
             }
         }
@@ -61,9 +70,24 @@ public enum BalancedShuffle {
             .map(\.index)
     }
 
+    /// Single-key convenience (equivalent to `keys: [key]`).
+    public static func order<G: RandomNumberGenerator>(
+        of indices: [Int],
+        key: @escaping (Int) -> String,
+        using generator: inout G
+    ) -> [Int] {
+        order(of: indices, keys: [key], using: &generator)
+    }
+
     /// Convenience overload using the system randomness source.
-    public static func order(of indices: [Int], key: (Int) -> String) -> [Int] {
+    public static func order(of indices: [Int], keys keyFns: [(Int) -> String]) -> [Int] {
         var generator = SystemRandomNumberGenerator()
-        return order(of: indices, key: key, using: &generator)
+        return order(of: indices, keys: keyFns, using: &generator)
+    }
+
+    /// Convenience overload using the system randomness source.
+    public static func order(of indices: [Int], key: @escaping (Int) -> String) -> [Int] {
+        var generator = SystemRandomNumberGenerator()
+        return order(of: indices, keys: [key], using: &generator)
     }
 }

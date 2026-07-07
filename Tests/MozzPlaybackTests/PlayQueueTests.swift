@@ -14,6 +14,11 @@ private func multiArtistTracks() -> [Track] {
     (0..<12).map { Track(id: "t\($0)", title: "T\($0)", artistName: ["A", "B", "C"][$0 % 3]) }
 }
 
+/// One artist, two albums (X/Y, 5 each) — exercises the secondary (album) key.
+private func albumTracks() -> [Track] {
+    (0..<10).map { Track(id: "t\($0)", title: "T\($0)", albumTitle: $0 < 5 ? "X" : "Y", artistName: "A") }
+}
+
 final class PlayQueueTests: XCTestCase {
     func testSetItemsStartsAtIndex() {
         var q = PlayQueue()
@@ -218,6 +223,31 @@ final class PlayQueueTests: XCTestCase {
         let artists = ordered.map(\.artistName)
         let collisions = zip(artists, artists.dropFirst()).filter { $0 == $1 }.count
         XCTAssertEqual(collisions, 0, "balanced shuffle must spread artists end-to-end")
+    }
+
+    func testSetItemsShuffledSpreadsAlbumsWithinArtist() {
+        var q = PlayQueue()
+        q.setItemsShuffled(albumTracks())
+        let ordered = [q.current!] + q.upNext
+        XCTAssertEqual(Set(ordered.map(\.id)).count, 10)
+        let albums = ordered.map { $0.albumTitle ?? "" }
+        let collisions = zip(albums, albums.dropFirst()).filter { $0 == $1 }.count
+        XCTAssertEqual(collisions, 0, "same-album tracks must spread within a single artist")
+    }
+
+    func testWrapSeamAvoidsRepeatingTheOutgoingArtist() {
+        var q = PlayQueue()
+        q.setItemsShuffled(multiArtistTracks())   // 3 artists A/B/C
+        q.setRepeatMode(.all)
+        while q.position < q.order.count - 1 { q.advance() }   // park on the last slot
+
+        let outgoingArtist = q.current?.artistName
+        let predicted = q.peekNext
+        XCTAssertNotEqual(predicted?.artistName, outgoingArtist,
+                          "the next loop must not open on the outgoing artist")
+        XCTAssertNotEqual(predicted?.id, q.current?.id, "and not the outgoing track")
+        // Gapless invariant still holds across the seam-adjusted wrap.
+        XCTAssertEqual(q.trackDidFinish()?.id, predicted?.id)
     }
 
     // MARK: Restore rebuilds the reshuffle-on-wrap cache
