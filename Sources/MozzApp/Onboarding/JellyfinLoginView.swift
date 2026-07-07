@@ -8,7 +8,13 @@ import MozzJellyfin
 struct JellyfinLoginView: View {
     @EnvironmentObject private var env: AppEnvironment
 
-    @State private var serverURL = ""
+    /// A server the user picked from the discovered list. Kept separate from the
+    /// manual field so discovery is clearly an *offer* (a highlighted row), not a
+    /// value silently typed into a text box the user expected to fill themselves.
+    @State private var selectedServer: DiscoveredServer?
+    /// What the user typed by hand. Empty unless they actively enter an address.
+    @State private var manualURL = ""
+
     @State private var username = ""
     @State private var password = ""
     @State private var quickConnectCode: String?
@@ -23,15 +29,26 @@ struct JellyfinLoginView: View {
         Form {
             discoverySection
 
-            Section("Server") {
-                TextField("http://192.168.1.10:8096", text: $serverURL)
+            Section {
+                TextField("http://192.168.1.10:8096", text: $manualURL)
                     .urlFieldStyle()
+                    .onChange(of: manualURL) { _, new in
+                        // Typing a URL means the user is going manual — drop any
+                        // discovered selection so the two never fight.
+                        if !new.isEmpty { selectedServer = nil }
+                    }
+            } header: {
+                Text("Enter address manually")
+            } footer: {
+                if let baseURL, selectedServer == nil {
+                    Text("Will connect to \(baseURL.absoluteString)")
+                }
             }
 
             Section("Quick Connect") {
                 if let code = quickConnectCode {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Enter this code in Jellyfin ▸ Quick Connect:")
+                        Text("Enter this code in Jellyfin \u{25B8} Quick Connect:")
                             .font(.footnote).foregroundStyle(.secondary)
                         Text(code).font(.system(.title, design: .monospaced).bold())
                     }
@@ -62,53 +79,57 @@ struct JellyfinLoginView: View {
     // MARK: Discovery UI
 
     @ViewBuilder private var discoverySection: some View {
-        Section {
-            if discovered.isEmpty {
-                HStack(spacing: 8) {
-                    if isDiscovering {
+        if isDiscovering || !discovered.isEmpty {
+            Section {
+                if discovered.isEmpty {
+                    HStack(spacing: 10) {
                         ProgressView()
-                        Text("Searching your network…").foregroundStyle(.secondary)
-                    } else {
-                        Text("No servers found on this network.").foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Search again") { Task { await runDiscovery() } }
+                        Text("Searching your network\u{2026}").foregroundStyle(.secondary)
                     }
-                }
-                .font(.footnote)
-            } else {
-                ForEach(discovered) { server in
-                    Button { select(server) } label: {
-                        HStack {
-                            Image(systemName: "server.rack").foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(server.name).foregroundStyle(.primary)
-                                Text(server.baseURL.absoluteString)
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if serverURL == server.baseURL.absoluteString {
-                                Image(systemName: "checkmark").foregroundStyle(.tint)
+                    .font(.footnote)
+                } else {
+                    ForEach(discovered) { server in
+                        Button { toggle(server) } label: {
+                            HStack {
+                                Image(systemName: "server.rack").foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(server.name).foregroundStyle(.primary)
+                                    Text(server.baseURL.absoluteString)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if selectedServer?.id == server.id {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                                }
                             }
                         }
                     }
                 }
-            }
-        } header: {
-            HStack {
-                Text("Found on your network")
-                if isDiscovering && !discovered.isEmpty {
-                    Spacer(); ProgressView().controlSize(.small)
+            } header: {
+                HStack {
+                    Text("Found on your network")
+                    if isDiscovering && !discovered.isEmpty {
+                        Spacer(); ProgressView().controlSize(.small)
+                    }
                 }
+            } footer: {
+                Text("Tap a server to select it, or enter an address manually below.")
             }
         }
     }
 
-    private func select(_ server: DiscoveredServer) {
-        serverURL = server.baseURL.absoluteString
-        // Switching servers invalidates any in-flight Quick Connect code.
-        quickConnectTask?.cancel()
-        quickConnectCode = nil
-        status = nil
+    /// Toggle selection of a discovered server. Selecting one clears any manually
+    /// typed URL (and stale Quick Connect code) so there's a single source of truth.
+    private func toggle(_ server: DiscoveredServer) {
+        if selectedServer?.id == server.id {
+            selectedServer = nil
+        } else {
+            selectedServer = server
+            manualURL = ""
+            quickConnectTask?.cancel()
+            quickConnectCode = nil
+            status = nil
+        }
     }
 
     private func runDiscovery() async {
@@ -122,14 +143,20 @@ struct JellyfinLoginView: View {
             } else {
                 discovered.append(server)
             }
-            // Prefill the field with the first server found, if the user hasn't
-            // typed or picked anything yet, so a one-server LAN is one tap away.
-            if serverURL.isEmpty { serverURL = server.baseURL.absoluteString }
+        }
+        // If the network turned up exactly one server and the user hasn't typed
+        // or picked anything, pre-select it \u2014 but visibly, as a checked row,
+        // not by stuffing the manual field.
+        if discovered.count == 1, selectedServer == nil, manualURL.isEmpty {
+            selectedServer = discovered[0]
         }
     }
 
+    /// The base URL sign-in will use: a discovered selection wins, else whatever
+    /// was typed manually (normalized: a bare host becomes http://host:8096).
     private var baseURL: URL? {
-        JellyfinURLNormalizer.normalize(serverURL)
+        if let selectedServer { return selectedServer.baseURL }
+        return JellyfinURLNormalizer.normalize(manualURL)
     }
 
     private func authenticator() -> JellyfinAuthenticator? {
@@ -142,12 +169,12 @@ struct JellyfinLoginView: View {
     private func startQuickConnect() {
         guard let auth = authenticator() else { return }
         isBusy = true
-        status = "Requesting code…"
+        status = "Requesting code\u{2026}"
         quickConnectTask = Task {
             do {
                 let session = try await auth.initiateQuickConnect()
                 quickConnectCode = session.code
-                status = "Waiting for approval…"
+                status = "Waiting for approval\u{2026}"
                 let result = try await auth.awaitQuickConnect(session, timeout: 300)
                 env.activate(session: result)
             } catch is CancellationError {
@@ -162,7 +189,7 @@ struct JellyfinLoginView: View {
     private func signInWithPassword() {
         guard let auth = authenticator() else { return }
         isBusy = true
-        status = "Signing in…"
+        status = "Signing in\u{2026}"
         Task {
             do {
                 let result = try await auth.authenticate(username: username, password: password)
