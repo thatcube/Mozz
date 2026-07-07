@@ -36,6 +36,8 @@ public final class PlaybackEngine: ObservableObject {
     @Published public private(set) var snapshot = PlaybackSnapshot()
     @Published public private(set) var currentTrack: Track?
     @Published public private(set) var upNext: [Track] = []
+    /// Tracks played before the current one (oldest first) — the queue's history.
+    @Published public private(set) var history: [Track] = []
 
     /// The track a user "next" / "previous" would land on, without mutating —
     /// used by the island's swipe to decide whether a title/artist line will
@@ -245,6 +247,22 @@ public final class PlaybackEngine: ObservableObject {
         logTerminal(.skipped, position: snapshot.elapsed)
         _ = queue.previous()
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
+    }
+
+    /// Jump to a specific row in the queue (an index into the play order, as the
+    /// history / up-next lists present it) and play it. Mirrors ``next()``: the
+    /// outgoing track counts as a skip, then we reload from the new position.
+    public func jump(toOrderPosition orderPosition: Int) {
+        logTerminal(.skipped, position: snapshot.elapsed)
+        _ = queue.jump(toOrderPosition: orderPosition)
+        reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
+        maybeExtendQueue()
+    }
+
+    /// Drop the queue's played history, keeping the current track + up-next.
+    public func clearHistory() {
+        queue.clearHistory()
+        publish()
     }
 
     public func seek(to seconds: TimeInterval) {
@@ -552,6 +570,7 @@ public final class PlaybackEngine: ObservableObject {
 
     private func publish(status: PlaybackStatus? = nil) {
         upNext = queue.upNext
+        history = queue.history
         var snap = snapshot
         if let status { snap.status = status }
         snap.currentTrackID = queue.current?.id

@@ -55,6 +55,9 @@ struct NowPlayingMorphContainer: View {
     @State private var playerRating: Double?
     /// Whether the sticky tap picker (hosted at the morph root) is open.
     @State private var ratingPickerOpen = false
+    /// Whether the queue panel (Continue Playing + History) is showing in place of
+    /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
+    @State private var queueOpen = false
 
     @AppStorage(PlayerBackgroundStyle.storageKey) private var bgStyleRaw = PlayerBackgroundStyle.default.rawValue
     @Environment(\.colorScheme) private var systemColorScheme
@@ -193,7 +196,10 @@ struct NowPlayingMorphContainer: View {
                     ratingPickerOpen = false
                 }
                 .onChange(of: ui.isFullPresented) { _, open in
-                    if !open { ratingPickerOpen = false }
+                    if !open {
+                        ratingPickerOpen = false
+                        queueOpen = false
+                    }
                 }
                 .onAppear { playerRating = playback.currentTrack?.rating }
                 // Derive the adaptive backdrop palette from the artwork; resolve
@@ -319,6 +325,7 @@ struct NowPlayingMorphContainer: View {
             .shadow(color: .black.opacity(0.35 * m.bodyOpacity),
                     radius: 18 * m.p, y: 10 * m.p)
             .position(x: m.artCenterX, y: m.artCenterY)
+            .opacity(queueOpen ? 0 : 1)
             .allowsHitTesting(false)
     }
 
@@ -326,19 +333,31 @@ struct NowPlayingMorphContainer: View {
 
     private func drawerBody(_ m: Morph) -> some View {
         VStack(spacing: 0) {
-            header(m)
+            // Top region: the now-playing hero and the queue occupy the same
+            // space and cross-fade. The hero stays in the layout (opacity only)
+            // so its height is constant and the controls below never shift.
+            ZStack(alignment: .top) {
+                header(m)
+                    .opacity(queueOpen ? 0 : 1)
+                    .allowsHitTesting(!queueOpen)
+                if queueOpen {
+                    queueTop(m)
+                        .transition(.opacity)
+                }
+            }
 
             scrubber
                 .padding(.horizontal, 32)
                 .padding(.top, 22)
             transport
                 .padding(.top, 14)
-            secondaryControls
-                .padding(.top, 20)
             if let track = playback.currentTrack {
-                formatBadge(track: track).padding(.top, 12)
+                formatBadge(track: track).padding(.top, 10)
             }
-            upNext.padding(.top, 18)
+            Spacer(minLength: 8)
+            bottomButtonRow
+                .padding(.horizontal, 48)
+                .padding(.bottom, m.safeBottom + 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -357,21 +376,85 @@ struct NowPlayingMorphContainer: View {
                 .frame(width: m.expArtSide, height: m.expArtSide)
                 .padding(.top, 26)
 
-            VStack(spacing: 5) {
-                Text(playback.currentTrack?.title ?? "").font(.title2.bold())
-                    .multilineTextAlignment(.center).lineLimit(2)
-                Text(playback.currentTrack?.artistName ?? "").font(.title3)
-                    .foregroundStyle(.secondary).lineLimit(1)
-                if let album = playback.currentTrack?.albumTitle {
-                    Text(album).font(.subheadline).foregroundStyle(.tertiary).lineLimit(1)
-                }
-            }
-            .padding(.top, 26)
-            .padding(.horizontal, 32)
+            titleRow
+                .padding(.top, 22)
+                .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .gesture(dragGesture)
+    }
+
+    /// Left-aligned title/artist with the rating star and a (dummy) overflow menu
+    /// on the right — the Apple-Music now-playing header.
+    private var titleRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(playback.currentTrack?.title ?? "")
+                    .font(.title2.bold()).lineLimit(1)
+                Text(playback.currentTrack?.artistName ?? "")
+                    .font(.title3).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let track = playback.currentTrack {
+                if env.usesRatings {
+                    FluidRatingControl(
+                        rating: $playerRating,
+                        onSet: { setPlayerRating($0, track: track) },
+                        onRequestPicker: {
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
+                        }
+                    )
+                } else {
+                    PlayerLikeControl(track: track)
+                }
+            }
+            // Dummy overflow — the per-track context menu isn't built yet.
+            Button { } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(true)
+        }
+        .font(.title3)
+    }
+
+    /// The queue view shown in place of the hero when `queueOpen`: a compact
+    /// now-playing header (drag to dismiss) over the scrollable History /
+    /// Continue-Playing list.
+    private func queueTop(_ m: Morph) -> some View {
+        VStack(spacing: 0) {
+            Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
+                .padding(.top, m.safeTop + 8)
+
+            queueCompactHeader
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 10)
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+
+            PlayerQueuePanel(
+                playback: playback,
+                onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
+                onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } }
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Compact now-playing row at the top of the queue: thumbnail + title/artist.
+    private var queueCompactHeader: some View {
+        HStack(spacing: 12) {
+            MorphArtwork(track: playback.currentTrack, side: 52, cornerRadius: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playback.currentTrack?.title ?? "")
+                    .font(.headline).lineLimit(1)
+                Text(playback.currentTrack?.artistName ?? "")
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: Gestures / animation
@@ -442,78 +525,45 @@ struct NowPlayingMorphContainer: View {
         .tint(.primary)
     }
 
-    private var secondaryControls: some View {
-        HStack(spacing: 0) {
-            Button { playback.toggleShuffle() } label: {
-                Image(systemName: "shuffle")
-                    .foregroundStyle(playback.snapshot.isShuffled ? Color.accentColor : .secondary)
-            }
-            Spacer()
-            if let track = playback.currentTrack {
-                if env.usesRatings {
-                    FluidRatingControl(
-                        rating: $playerRating,
-                        onSet: { setPlayerRating($0, track: track) },
-                        onRequestPicker: {
-                            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
-                        }
-                    )
-                } else {
-                    PlayerLikeControl(track: track)
-                }
-            }
-            Spacer()
-            Button { playback.cycleRepeatMode() } label: {
-                Image(systemName: repeatIcon(playback.snapshot.repeatMode))
-                    .foregroundStyle(playback.snapshot.repeatMode == .off ? .secondary : Color.accentColor)
-            }
-        }
-        .font(.title3)
-        .padding(.horizontal, 56)
-    }
-
     private func formatBadge(track: Track) -> some View {
         let parts = [track.format.codec?.uppercased(), track.format.sampleRateHz.map { "\($0 / 1000) kHz" }]
             .compactMap { $0 }
         return Text(parts.joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary)
     }
 
-    @ViewBuilder private var upNext: some View {
-        if !playback.upNext.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Up Next").font(.headline)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(Array(playback.upNext.prefix(100).enumerated()), id: \.offset) { _, track in
-                            HStack(spacing: 10) {
-                                ArtworkView(artwork: track.artwork,
-                                            seed: track.albumTitle ?? track.title,
-                                            size: 40, cornerRadius: 6)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(track.title).lineLimit(1)
-                                    Text(track.artistName).font(.caption)
-                                        .foregroundStyle(.secondary).lineLimit(1)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .font(.subheadline)
-                        }
-                    }
-                }
+    /// The bottom control row: a (dummy) lyrics button, the real AirPlay output
+    /// picker, and the queue toggle. Lyrics + a per-track context menu aren't
+    /// built yet, so lyrics is a disabled placeholder.
+    private var bottomButtonRow: some View {
+        HStack {
+            Button { } label: { Image(systemName: "quote.bubble") }
+                .disabled(true)
+                .foregroundStyle(.secondary)
+            Spacer()
+            #if canImport(UIKit)
+            AirPlayRoutePicker(tint: controlUIColor)
+                .frame(width: 32, height: 32)
+            #endif
+            Spacer()
+            Button {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { queueOpen.toggle() }
+            } label: {
+                Image(systemName: "list.bullet")
+                    .foregroundStyle(queueOpen ? Color.primary : Color.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 32)
-        } else {
-            Spacer(minLength: 0)
         }
+        .font(.title3)
+        .tint(.primary)
     }
 
-    private func repeatIcon(_ mode: MozzPlayback.RepeatMode) -> String {
-        switch mode {
-        case .off, .all: return "repeat"
-        case .one: return "repeat.1"
-        }
+    #if canImport(UIKit)
+    /// Tint for the AirPlay picker (a UIKit view that doesn't inherit SwiftUI's
+    /// forced dark scheme): white over the dark adaptive/OLED backdrop, otherwise
+    /// the system label color for the theme background.
+    private var controlUIColor: UIColor {
+        bgStyle == .theme ? .label : .white
     }
+    #endif
 }
 
 // MARK: - Island content (self-contained: swipe + title/artist slide)
