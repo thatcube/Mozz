@@ -57,10 +57,13 @@ struct SearchView: View {
                         searchFieldBar
                     }
                 }
+                // Scope the header collapse animation to the content only, so it
+                // doesn't compound with the keyboard's safe-area animation on the
+                // outer ScrollView (that pairing could thrash the pinned layout).
+                .animation(.snappy(duration: 0.3), value: isActive)
             }
             .overlay { emptyState }
             .safeAreaInset(edge: .bottom) { latencyLabel }
-            .animation(.snappy(duration: 0.3), value: isActive)
             .tracksScrolled($scrolled)
             .minimizesBottomBarOnScroll()
             .scrollsToTopOnSignal()
@@ -121,7 +124,19 @@ struct SearchView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: fieldHeight)
-        .searchFieldSurface(glass: scrolled || isActive)
+        // Keep the Liquid Glass ALWAYS applied (stable view identity) and
+        // cross-fade an opaque gray capsule over it by opacity — at rest the gray
+        // hides the glass; scrolled/focused it fades out to reveal the glass. This
+        // mirrors NowPlayingMorph's island. Crucially it avoids swapping the
+        // field's view identity (a `_ConditionalContent` branch), which would
+        // tear down and rebuild the TextField at the instant it becomes first
+        // responder on focus — that rebuild was freezing the app.
+        .background {
+            Capsule().fill(Color.searchFieldRest)
+                .opacity(fieldShowsGlass ? 0 : 1)
+                .animation(.easeInOut(duration: 0.2), value: fieldShowsGlass)
+        }
+        .glassCapsule()
         // The visible pill is 44pt tall, but a bare custom TextField only takes
         // focus when the glyphs themselves are tapped — the icon, padding and
         // capsule margins are dead zones (unlike the system search bar, which
@@ -130,6 +145,10 @@ struct SearchView: View {
         .contentShape(Capsule())
         .onTapGesture { focused = true }
     }
+
+    /// The field shows Liquid Glass once the page has scrolled off the top or the
+    /// field is focused; at rest at the top it's the gray fill.
+    private var fieldShowsGlass: Bool { scrolled || isActive }
 
     @ViewBuilder private var resultsContent: some View {
         if trimmedQuery.isEmpty {
@@ -395,10 +414,11 @@ private struct ScrolledTracker: ViewModifier {
             content.onScrollGeometryChange(for: CGFloat.self) { geo in
                 geo.contentOffset.y + geo.contentInsets.top
             } action: { _, y in
+                // Set plainly (no withAnimation): the field animates its own
+                // gray→glass opacity locally. Animating from here during the
+                // keyboard's geometry changes risks a relayout feedback loop.
                 let isScrolled = y > 6
-                if isScrolled != scrolled {
-                    withAnimation(.easeInOut(duration: 0.2)) { scrolled = isScrolled }
-                }
+                if isScrolled != scrolled { scrolled = isScrolled }
             }
         } else {
             content

@@ -77,22 +77,6 @@ extension View {
         #endif
     }
 
-    /// The custom search field's surface: a theme-aware gray capsule at rest,
-    /// swapping to real Liquid Glass while scrolling (or focused) so content shows
-    /// through it as it pins — like the system search bar. Reuses `glassCapsule()`
-    /// (and its iOS 17–25 / macOS material fallback) for the glass state.
-    @ViewBuilder func searchFieldSurface(glass: Bool) -> some View {
-        if glass {
-            self.glassCapsule()
-        } else {
-            #if canImport(UIKit)
-            self.background(Color(uiColor: .systemGray6), in: Capsule())
-            #else
-            self.background(Color.gray.opacity(0.18), in: Capsule())
-            #endif
-        }
-    }
-
     /// A circular Liquid Glass background (iOS 26+) — sized by the caller's frame
     /// so the search-cancel ✕ can exactly match the field height. Falls back to a
     /// material circle on iOS 17–25 and the macOS test host.
@@ -125,6 +109,19 @@ extension Color {
     /// The near-black content background for the (always-dark, Apple-Music-style)
     /// media detail page, below the colored hero.
     static var mozzDetailBackground: Color { Color(white: 0.07) }
+
+    /// Theme-aware gray fill for the search field at rest (before it turns to
+    /// Liquid Glass on scroll) — light: near-white gray, dark: dark gray, like
+    /// the system search bar.
+    static var searchFieldRest: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemGray6)
+        #elseif canImport(AppKit)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color.gray.opacity(0.18)
+        #endif
+    }
 }
 
 #if os(iOS)
