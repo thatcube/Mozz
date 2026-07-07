@@ -17,6 +17,7 @@ enum Schema {
         registerV9(&migrator)
         registerV10(&migrator)
         registerV11(&migrator)
+        registerV12(&migrator)
         return migrator
     }
 
@@ -472,6 +473,47 @@ enum Schema {
                           columns: ["mbid"])
             try db.create(index: "idx_track_features_artist_mbid", on: "track_features",
                           columns: ["artist_mbid"])
+        }
+    }
+
+    /// v12 — ListenBrainz similarity (ADR-0007, phase B2).
+    ///
+    /// ListenBrainz keys similarity on CANONICAL recording MBIDs, but the MBIDs
+    /// resolved in B1 are per-release/tag. So we canonicalize (via
+    /// `/recording-mbid-lookup`) and store `canonical_mbid`; both the similarity
+    /// fetch and the reverse-map join key on it. `canonical_lookup_at` /
+    /// `similar_lookup_at` are TTL negative caches (mirroring v11's mbid one).
+    ///
+    /// `similar_recording` holds the crowd-similarity graph keyed on canonical
+    /// MBIDs; `algorithm` is part of the identity so switching algorithms doesn't
+    /// silently mix similarity spaces. The reverse-map join
+    /// (`similar_mbid = track_features.canonical_mbid`) turns "similar MBIDs" back
+    /// into owned tracks. `idx_track_ref` makes that join (and every existing
+    /// `serverId || ':' || remoteId` join) index-driven.
+    private static func registerV12(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v12.listenBrainzSimilarity") { db in
+            try db.alter(table: "track_features") { t in
+                t.add(column: "canonical_mbid", .text)
+                t.add(column: "canonical_lookup_at", .double)
+                t.add(column: "similar_lookup_at", .double)
+            }
+            try db.create(index: "idx_track_features_canonical_mbid", on: "track_features",
+                          columns: ["canonical_mbid"])
+
+            try db.create(table: "similar_recording") { t in
+                t.column("source_mbid", .text).notNull()
+                t.column("similar_mbid", .text).notNull()
+                t.column("score", .double).notNull()
+                t.column("algorithm", .text).notNull()
+                t.primaryKey(["source_mbid", "similar_mbid", "algorithm"])
+            }
+            // Reverse-map join path: similar_mbid (+ algorithm) -> owned tracks.
+            try db.create(index: "idx_similar_recording_similar", on: "similar_recording",
+                          columns: ["similar_mbid", "algorithm"])
+
+            // Make the opaque track_ref expression sargable for the reverse-map
+            // join and every other `serverId || ':' || remoteId` join in the app.
+            try db.execute(sql: "CREATE INDEX idx_track_ref ON track(serverId || ':' || remoteId)")
         }
     }
 }

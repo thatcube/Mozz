@@ -37,14 +37,18 @@ final class EnrichmentServiceTests: XCTestCase {
                              enabled: @escaping @Sendable () -> Bool = { true })
         -> (EnrichmentService, ServiceCannedTransport) {
         let transport = ServiceCannedTransport(json: json)
-        let client = MusicBrainzClient.make(
-            config: EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )"),
-            limiter: AsyncRateLimiter(minInterval: 0),
-            baseTransport: transport)
+        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )")
+        let mb = MusicBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
+        // ListenBrainz stages get a benign transport (empty array): canonical
+        // lookup decode-fails -> nil (stamped), similarity is empty. B1-focused
+        // tests only assert stage-1 resolution.
+        let lb = ListenBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0),
+            baseTransport: ServiceCannedTransport(json: "[]"))
         let service = EnrichmentService(
-            store: store, musicBrainz: client,
-            config: EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )"),
-            isEnabled: enabled)
+            store: store, musicBrainz: mb, listenBrainz: lb,
+            config: config, isEnabled: enabled)
         return (service, transport)
     }
 
@@ -56,7 +60,7 @@ final class EnrichmentServiceTests: XCTestCase {
     func testResolvePendingWritesFoundMBID() async throws {
         let (_, store) = try await makeDB()
         let (service, _) = makeService(store: store, json: hitJSON)
-        await service.resolvePending(serverId: "srv1")
+        await service.enrich(serverId: "srv1")
         await service.waitForBackgroundPass()
         let state = try await store.mbidState(trackRef: "srv1:t1")
         XCTAssertEqual(state?.mbid, recA)
@@ -67,7 +71,7 @@ final class EnrichmentServiceTests: XCTestCase {
     func testResolvePendingRecordsMiss() async throws {
         let (_, store) = try await makeDB()
         let (service, _) = makeService(store: store, json: "{\"recordings\":[]}")
-        await service.resolvePending(serverId: "srv1")
+        await service.enrich(serverId: "srv1")
         await service.waitForBackgroundPass()
         let state = try await store.mbidState(trackRef: "srv1:t1")
         XCTAssertNil(state?.mbid)
@@ -77,7 +81,7 @@ final class EnrichmentServiceTests: XCTestCase {
     func testDisabledIsNoOp() async throws {
         let (_, store) = try await makeDB()
         let (service, transport) = makeService(store: store, json: hitJSON, enabled: { false })
-        await service.resolvePending(serverId: "srv1")
+        await service.enrich(serverId: "srv1")
         await service.waitForBackgroundPass()
         let state = try await store.mbidState(trackRef: "srv1:t1")
         XCTAssertNil(state) // nothing written
@@ -112,16 +116,17 @@ final class EnrichmentServiceTests: XCTestCase {
     func testSingleFlightPreventsOverlappingPasses() async throws {
         let (_, store) = try await makeDB()
         let transport = GatedTransport(json: hitJSON)
-        let client = MusicBrainzClient.make(
-            config: EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )"),
-            limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
+        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )")
+        let mb = MusicBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
+        let lb = ListenBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0),
+            baseTransport: ServiceCannedTransport(json: "[]"))
         let service = EnrichmentService(
-            store: store, musicBrainz: client,
-            config: EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )"),
-            isEnabled: { true })
-        await service.resolvePending(serverId: "srv1") // pass 1 starts, blocks in transport
+            store: store, musicBrainz: mb, listenBrainz: lb, config: config, isEnabled: { true })
+        await service.enrich(serverId: "srv1") // pass 1 starts, blocks in transport
         try await Task.sleep(nanoseconds: 60_000_000)   // let pass 1 reach the request
-        await service.resolvePending(serverId: "srv1") // must be a no-op (single-flight)
+        await service.enrich(serverId: "srv1") // must be a no-op (single-flight)
         transport.open()
         await service.waitForBackgroundPass()
         XCTAssertEqual(transport.sendCount, 1) // exactly one pass ran

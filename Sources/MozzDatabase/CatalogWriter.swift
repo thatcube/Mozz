@@ -279,7 +279,10 @@ public struct CatalogWriter: Sendable {
         artist_mbid = COALESCE(excluded.artist_mbid, track_features.artist_mbid),
         mbid_lookup_status = 'embedded',
         mbid_lookup_at = excluded.mbid_lookup_at,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        canonical_mbid = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.canonical_mbid END,
+        canonical_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.canonical_lookup_at END,
+        similar_lookup_at = CASE WHEN track_features.mbid IS NOT excluded.mbid THEN NULL ELSE track_features.similar_lookup_at END
     WHERE track_features.mbid IS NOT excluded.mbid
        OR (excluded.artist_mbid IS NOT NULL AND excluded.artist_mbid IS NOT track_features.artist_mbid)
     """

@@ -140,12 +140,15 @@ public final class AppEnvironment: ObservableObject {
         let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
         let enrichmentConfig = EnrichmentConfig(
             userAgent: "Mozz/\(appVersion) ( https://github.com/thatcube/Mozz )")
-        // One shared limiter/client so every MusicBrainz call across the app
-        // (background pass + on-demand seed resolution) honors one 1 req/s budget.
+        // One shared limiter/client per service so every call across the app
+        // honors one budget. MusicBrainz and ListenBrainz get SEPARATE limiters
+        // (different hosts/policies).
         let mbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.minRequestInterval)
+        let lbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.listenBrainzMinInterval)
         self.enrichment = EnrichmentService(
             store: EnrichmentStore(database),
             musicBrainz: MusicBrainzClient.make(config: enrichmentConfig, limiter: mbLimiter),
+            listenBrainz: ListenBrainzClient.make(config: enrichmentConfig, limiter: lbLimiter),
             config: enrichmentConfig,
             isEnabled: {
                 UserDefaults.standard.object(forKey: AppEnvironment.enrichmentEnabledKey) as? Bool ?? true
@@ -439,9 +442,10 @@ public final class AppEnvironment: ObservableObject {
         await regenerateHomeMixes()
         // Flush any likes/ratings that were made offline.
         await flushFavoriteOutbox()
-        // Fill in missing MusicBrainz IDs off-main, rate-limited. Fire-and-forget
-        // and single-flight inside the actor, so it never delays this sync.
-        await enrichment.resolvePending(serverId: active.connection.id)
+        // Fill in MBIDs, canonicalize, then fetch ListenBrainz similarity off-main,
+        // rate-limited. Fire-and-forget and single-flight inside the actor, so it
+        // never delays this sync.
+        await enrichment.enrich(serverId: active.connection.id)
         return summary
     }
 

@@ -21,6 +21,15 @@ public struct EnrichmentConfig: Sendable {
     /// milliseconds — rejects high-score wrong hits (live/remix/cover) when both
     /// durations are known. Skipped when either duration is unavailable.
     public var durationToleranceMs: Double
+    /// ListenBrainz similar-recordings algorithm (enum value from the labs API).
+    public var listenBrainzAlgorithm: String
+    /// Minimum spacing between outbound ListenBrainz requests (its own limiter;
+    /// the labs host is more lenient than MusicBrainz but we stay polite).
+    public var listenBrainzMinInterval: TimeInterval
+    /// Max canonicalizations per background pass.
+    public var canonicalPerRunBudget: Int
+    /// Max similarity fetches per background pass.
+    public var similarityPerRunBudget: Int
 
     public init(
         userAgent: String,
@@ -28,7 +37,11 @@ public struct EnrichmentConfig: Sendable {
         lookupTTL: TimeInterval = 30 * 24 * 3600,
         perRunBudget: Int = 200,
         minScore: Int = 90,
-        durationToleranceMs: Double = 10_000
+        durationToleranceMs: Double = 10_000,
+        listenBrainzAlgorithm: String = "session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30",
+        listenBrainzMinInterval: TimeInterval = 0.5,
+        canonicalPerRunBudget: Int = 200,
+        similarityPerRunBudget: Int = 150
     ) {
         self.userAgent = userAgent
         self.minRequestInterval = minRequestInterval
@@ -36,5 +49,9 @@ public struct EnrichmentConfig: Sendable {
         self.perRunBudget = perRunBudget
         self.minScore = minScore
         self.durationToleranceMs = durationToleranceMs
+        self.listenBrainzAlgorithm = listenBrainzAlgorithm
+        self.listenBrainzMinInterval = listenBrainzMinInterval
+        self.canonicalPerRunBudget = canonicalPerRunBudget
+        self.similarityPerRunBudget = similarityPerRunBudget
     }
 }

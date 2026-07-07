@@ -2,18 +2,21 @@ import Foundation
 import MozzCore
 import MozzDatabase
 
-/// Orchestrates open metadata enrichment (ADR-0007): fills in MusicBrainz IDs the
-/// backend didn't already embed, via rate-limited MusicBrainz name-search, and
-/// records hits + misses in the DB. Network + policy only — persistence lives in
-/// `EnrichmentStore`, so `MozzRecommend` reads results without a network path.
+/// Orchestrates open metadata enrichment (ADR-0007). A single background pass
+/// runs three stages in order, so each depends on the previous:
+///   1. resolve MusicBrainz recording MBIDs the backend didn't embed (B1);
+///   2. canonicalize those MBIDs via ListenBrainz (similarity is canonical-keyed);
+///   3. fetch ListenBrainz similar-recordings for the canonical MBIDs (B2).
 ///
-/// Gated by `isEnabled` (re-checked before every outbound call, so turning the
-/// feature off promptly halts an in-flight crawl). The background pass is
-/// single-flight and cancellable (server switch / sign-out); on-demand seed
-/// resolution shares the same rate limiter via the injected client.
+/// Network + policy only — persistence lives in `EnrichmentStore`, so
+/// `MozzRecommend` reads results without any network path. Gated by `isEnabled`
+/// (re-checked before every outbound call). The pass is single-flight and
+/// cancellable as a unit (server switch / sign-out). MusicBrainz and ListenBrainz
+/// use SEPARATE rate limiters (different hosts/policies).
 public actor EnrichmentService {
     private let store: EnrichmentStore
     private let musicBrainz: MusicBrainzClient
+    private let listenBrainz: ListenBrainzClient
     private let config: EnrichmentConfig
     private let isEnabled: @Sendable () -> Bool
     private let now: @Sendable () -> Date
@@ -26,44 +29,43 @@ public actor EnrichmentService {
 
     public init(store: EnrichmentStore,
                 musicBrainz: MusicBrainzClient,
+                listenBrainz: ListenBrainzClient,
                 config: EnrichmentConfig,
                 isEnabled: @escaping @Sendable () -> Bool,
                 now: @escaping @Sendable () -> Date = { Date() },
                 log: @escaping @Sendable (String) -> Void = { _ in }) {
         self.store = store
         self.musicBrainz = musicBrainz
+        self.listenBrainz = listenBrainz
         self.config = config
         self.isEnabled = isEnabled
         self.now = now
         self.log = log
     }
 
-    // MARK: - Background resolution (fire-and-forget, single-flight)
+    // MARK: - Background pass (fire-and-forget, single-flight, 3 stages)
 
-    /// Kick a bounded background pass that resolves MBIDs for tracks that lack
-    /// them, prioritized by the store (recently played / favorites first). No-op
-    /// when disabled or when a pass is already running. Never awaited by the
+    /// Kick a bounded background enrichment pass (resolve -> canonicalize ->
+    /// similarity). No-op when disabled or already running. Never awaited by the
     /// caller (a sync must not appear to hang for minutes).
-    public func resolvePending(serverId: ServerID) {
+    public func enrich(serverId: ServerID) {
         guard isEnabled() else { return }
         guard backgroundPass == nil else { return }
         generation += 1
         let gen = generation
         backgroundPass = Task { [weak self] in
-            await self?.runResolvePending(serverId: serverId)
+            await self?.runPipeline(serverId: serverId)
             await self?.finishBackgroundPass(gen)
         }
     }
 
-    /// Cancel any in-flight background pass (server switch / sign-out).
+    /// Cancel the whole in-flight pass (server switch / sign-out).
     public func cancel() {
         generation += 1 // invalidate the running task's cleanup
         backgroundPass?.cancel()
         backgroundPass = nil
     }
 
-    /// Clear the handle only if this task is still the current pass — a stale
-    /// (cancelled/superseded) task must not clear a newer pass's registration.
     private func finishBackgroundPass(_ gen: Int) {
         guard gen == generation else { return }
         backgroundPass = nil
@@ -72,49 +74,121 @@ public actor EnrichmentService {
     /// Test hook: await the in-flight background pass, if any.
     func waitForBackgroundPass() async { await backgroundPass?.value }
 
-    private func runResolvePending(serverId: ServerID) async {
-        let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
-        let candidates: [MBIDResolutionCandidate]
+    private func runPipeline(serverId: ServerID) async {
         do {
-            candidates = try await store.tracksNeedingResolution(
-                serverId: serverId, notLookedUpSince: cutoff, limit: config.perRunBudget)
-        } catch {
-            log("enrichment: fetching candidates failed: \(error)")
+            try await resolveStage(serverId: serverId)
+            try await canonicalizeStage(serverId: serverId)
+            try await similarityStage(serverId: serverId)
+        } catch is CancellationError {
             return
+        } catch let error as MozzError where error == .cancelled {
+            return
+        } catch {
+            log("enrichment: pipeline stopped: \(error)")
         }
+    }
 
+    /// Returns whether enrichment is still enabled; throws `CancellationError` to
+    /// unwind the pipeline when the task was cancelled.
+    private func checkpoint() throws -> Bool {
+        if Task.isCancelled { throw CancellationError() }
+        return isEnabled()
+    }
+
+    // Stage 1 - resolve recording MBIDs (MusicBrainz name-search).
+    private func resolveStage(serverId: ServerID) async throws {
+        let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
+        let candidates = try await store.tracksNeedingResolution(
+            serverId: serverId, notLookedUpSince: cutoff, limit: config.perRunBudget)
         for candidate in candidates {
-            if Task.isCancelled { return }
-            // Re-check on every iteration: disabling enrichment mid-crawl must stop
-            // further outbound requests (privacy-sensitive).
-            guard isEnabled() else { return }
+            guard try checkpoint() else { return }
             do {
                 let match = try await musicBrainz.bestRecording(
                     artist: candidate.artistName, title: candidate.title,
                     durationMs: candidate.durationMs, artistMBID: candidate.existingArtistMbid)
                 try await store.recordTrackResolution(
-                    trackRef: candidate.trackRef,
-                    mbid: match?.recordingMBID,
-                    artistMbid: match?.artistMBID,
-                    at: now().timeIntervalSince1970)
-            } catch is CancellationError {
-                return // Never swallow cancellation.
-            } catch let error as MozzError where error == .cancelled {
-                return // URLSession maps a cancelled request to MozzError.cancelled.
-            } catch {
-                // A transient failure (network/decoding) shouldn't poison the
-                // negative cache — leave the track for a future pass.
-                log("enrichment: resolving \(candidate.trackRef) failed: \(error)")
-            }
+                    trackRef: candidate.trackRef, mbid: match?.recordingMBID,
+                    artistMbid: match?.artistMBID, at: now().timeIntervalSince1970)
+            } catch is CancellationError { throw CancellationError() }
+            catch let e as MozzError where e == .cancelled { throw CancellationError() }
+            catch { log("enrichment: resolve \(candidate.trackRef) failed: \(error)") }
         }
     }
 
-    // MARK: - On-demand seed resolution (used by radio, B3)
+    // Stage 2 - canonicalize resolved MBIDs (ListenBrainz recording-mbid-lookup).
+    private func canonicalizeStage(serverId: ServerID) async throws {
+        let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
+        let mbids = try await store.canonicalNeedingLookup(
+            serverId: serverId, notLookedUpSince: cutoff, limit: config.canonicalPerRunBudget)
+        for mbid in mbids {
+            guard try checkpoint() else { return }
+            let canonical = await listenBrainz.canonicalRecording(forMbid: mbid)
+            do {
+                try await store.setCanonical(mbid: mbid, canonical: canonical,
+                                             at: now().timeIntervalSince1970)
+            } catch { log("enrichment: setCanonical \(mbid) failed: \(error)") }
+        }
+    }
+
+    // Stage 3 - fetch similar recordings for canonical MBIDs (ListenBrainz).
+    private func similarityStage(serverId: ServerID) async throws {
+        let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
+        let canonicals = try await store.recordingsNeedingSimilarity(
+            serverId: serverId, notFetchedSince: cutoff, limit: config.similarityPerRunBudget)
+        for canonical in canonicals {
+            guard try checkpoint() else { return }
+            do {
+                let similar = try await listenBrainz.similarRecordings(forCanonicalMbid: canonical)
+                try await store.replaceSimilarRecordings(
+                    sourceMbid: canonical, algorithm: config.listenBrainzAlgorithm,
+                    pairs: similar.map { ($0.recordingMBID, $0.score) },
+                    at: now().timeIntervalSince1970)
+            } catch is CancellationError { throw CancellationError() }
+            catch let e as MozzError where e == .cancelled { throw CancellationError() }
+            catch { log("enrichment: similar \(canonical) failed: \(error)") }
+        }
+    }
+
+    // MARK: - On-demand seed preparation (used by radio, B3)
+
+    /// Ensure a seed track is resolved -> canonicalized -> its similar recordings
+    /// fetched, and return its canonical recording MBID (for
+    /// `EnrichmentStore.similarOwnedTracks`). `nil` when disabled or unresolvable.
+    /// Shares the rate limiters with the background pass.
+    public func prepareSeedSimilarity(trackRef: String, artistName: String, title: String,
+                                      durationMs: Double?, artistMBID: String?) async -> String? {
+        guard isEnabled() else { return nil }
+        var recordingMbid: String?
+        var canonical: String?
+        if let state = try? await store.seedMbid(forTrackRef: trackRef) {
+            recordingMbid = state.mbid
+            canonical = state.canonical
+        }
+        if recordingMbid == nil {
+            recordingMbid = await resolveSeed(trackRef: trackRef, artistName: artistName,
+                                              title: title, durationMs: durationMs, artistMBID: artistMBID)
+        }
+        guard let mbid = recordingMbid else { return nil }
+        if canonical == nil {
+            let resolved = await listenBrainz.canonicalRecording(forMbid: mbid)
+            try? await store.setCanonical(mbid: mbid, canonical: resolved,
+                                          at: now().timeIntervalSince1970)
+            canonical = resolved
+        }
+        guard let canonicalMbid = canonical else { return nil }
+        do {
+            let similar = try await listenBrainz.similarRecordings(forCanonicalMbid: canonicalMbid)
+            try await store.replaceSimilarRecordings(
+                sourceMbid: canonicalMbid, algorithm: config.listenBrainzAlgorithm,
+                pairs: similar.map { ($0.recordingMBID, $0.score) },
+                at: now().timeIntervalSince1970)
+        } catch {
+            log("enrichment: seed similar \(canonicalMbid) failed: \(error)")
+        }
+        return canonicalMbid
+    }
 
     /// Resolve (and cache) the recording MBID for a single seed track on demand.
-    /// Returns an already-stored MBID immediately; otherwise name-searches once.
-    /// Shares the rate limiter with the background pass. `nil` when disabled or
-    /// unresolved.
     @discardableResult
     public func resolveSeed(trackRef: String, artistName: String, title: String,
                             durationMs: Double?, artistMBID: String?) async -> String? {

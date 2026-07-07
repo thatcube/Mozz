@@ -154,4 +154,183 @@ public struct EnrichmentStore: Sendable {
             }
         }
     }
+
+    // MARK: - B2: canonicalization + similarity
+
+    /// Distinct raw MBIDs of owned tracks that have an `mbid` but no
+    /// `canonical_mbid` yet (or whose canonical lookup is stale). Prioritized like
+    /// resolution (recently played / favorites first).
+    public func canonicalNeedingLookup(serverId: ServerID, notLookedUpSince: Double,
+                                       limit: Int) async throws -> [String] {
+        try await database.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT tf.mbid
+                FROM track
+                JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                LEFT JOIN (SELECT track_ref, MAX(created_at) AS lastPlayed
+                           FROM play_event GROUP BY track_ref) lp
+                       ON lp.track_ref = \(Self.refExpr)
+                WHERE track.serverId = ?
+                  AND tf.mbid IS NOT NULL AND tf.mbid <> ''
+                  AND tf.canonical_mbid IS NULL
+                  AND (tf.canonical_lookup_at IS NULL OR tf.canonical_lookup_at < ?)
+                GROUP BY tf.mbid
+                ORDER BY MAX(lp.lastPlayed) DESC, MAX(track.isFavorite) DESC
+                LIMIT ?
+                """, arguments: [serverId, notLookedUpSince, limit])
+        }
+    }
+
+    /// Store a canonical MBID for every track carrying `mbid`, stamping the
+    /// canonical-lookup time. Pass `canonical == nil` for a transient
+    /// failure/no-mapping: only the timestamp is stamped (TTL negative cache), so
+    /// it's retried later rather than every pass. `canonical` may equal `mbid`
+    /// (the lookup returned the same id) — still valid.
+    public func setCanonical(mbid: String, canonical: String?, at: Double) async throws {
+        try await database.write { db in
+            if let canonical {
+                try db.execute(sql: """
+                    UPDATE track_features
+                    SET canonical_mbid = ?, canonical_lookup_at = ?, updated_at = ?
+                    WHERE mbid = ?
+                    """, arguments: [canonical, at, at, mbid])
+            } else {
+                try db.execute(sql: """
+                    UPDATE track_features SET canonical_lookup_at = ?, updated_at = ?
+                    WHERE mbid = ?
+                    """, arguments: [at, at, mbid])
+            }
+        }
+    }
+
+    /// Distinct canonical MBIDs of owned tracks whose similarity hasn't been
+    /// fetched (or is stale). Prioritized recently played / favorites first.
+    public func recordingsNeedingSimilarity(serverId: ServerID, notFetchedSince: Double,
+                                            limit: Int) async throws -> [String] {
+        try await database.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT tf.canonical_mbid
+                FROM track
+                JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                LEFT JOIN (SELECT track_ref, MAX(created_at) AS lastPlayed
+                           FROM play_event GROUP BY track_ref) lp
+                       ON lp.track_ref = \(Self.refExpr)
+                WHERE track.serverId = ?
+                  AND tf.canonical_mbid IS NOT NULL AND tf.canonical_mbid <> ''
+                  AND (tf.similar_lookup_at IS NULL OR tf.similar_lookup_at < ?)
+                GROUP BY tf.canonical_mbid
+                ORDER BY MAX(lp.lastPlayed) DESC, MAX(track.isFavorite) DESC
+                LIMIT ?
+                """, arguments: [serverId, notFetchedSince, limit])
+        }
+    }
+
+    /// Replace the similarity rows for a source canonical MBID + algorithm, and
+    /// stamp `similar_lookup_at` for every track sharing that canonical MBID —
+    /// including when `pairs` is empty (a valid "no similar data" negative cache).
+    public func replaceSimilarRecordings(sourceMbid: String, algorithm: String,
+                                         pairs: [(similarMbid: String, score: Double)],
+                                         at: Double) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM similar_recording WHERE source_mbid = ? AND algorithm = ?",
+                           arguments: [sourceMbid, algorithm])
+            let stmt = try db.makeStatement(sql: """
+                INSERT OR REPLACE INTO similar_recording (source_mbid, similar_mbid, score, algorithm)
+                VALUES (?, ?, ?, ?)
+                """)
+            for pair in pairs {
+                guard let similar = MusicBrainzID.normalized(pair.similarMbid), similar != sourceMbid
+                else { continue }
+                try stmt.execute(arguments: [sourceMbid, similar, pair.score, algorithm])
+            }
+            try db.execute(sql: """
+                UPDATE track_features SET similar_lookup_at = ?, updated_at = ?
+                WHERE canonical_mbid = ?
+                """, arguments: [at, at, sourceMbid])
+        }
+    }
+
+    /// The reverse map: owned tracks similar to any of `seedCanonicalMbids`, ranked
+    /// by similarity. Joins similarity → `track_features.canonical_mbid` → owned
+    /// `track` on this server, de-duped per track with `MAX(score)` (closest seed).
+    /// Excludes already-queued remote ids. Drives `FROM track WHERE serverId=?` so
+    /// the ref-join is index-backed. Seed/exclusion lists are bounded to stay under
+    /// SQLite's host-parameter limit.
+    public func similarOwnedTracks(seedCanonicalMbids: [String], algorithm: String,
+                                   serverId: ServerID, excludingRemoteIds: Set<String> = [],
+                                   limit: Int) async throws -> [ScoredOwnedTrack] {
+        let seeds = Array(Set(seedCanonicalMbids)).prefix(Self.maxSeeds)
+        guard !seeds.isEmpty else { return [] }
+        let excludeList = Array(excludingRemoteIds.prefix(Self.maxExclusions))
+        return try await database.read { db in
+            var excludeClause = ""
+            if !excludeList.isEmpty {
+                excludeClause = "AND track.remoteId NOT IN (\(placeholders(excludeList.count)))"
+            }
+            let sql = """
+                SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
+                       track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
+                       track.albumRemoteId AS albumRemoteId, track.genres AS genres,
+                       track.addedAt AS addedAt, MAX(sr.score) AS score
+                FROM track
+                JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                JOIN similar_recording sr ON sr.similar_mbid = tf.canonical_mbid AND sr.algorithm = ?
+                WHERE track.serverId = ?
+                  AND sr.source_mbid IN (\(placeholders(seeds.count)))
+                  \(excludeClause)
+                GROUP BY track.remoteId
+                ORDER BY score DESC, track.remoteId ASC
+                LIMIT ?
+                """
+            // Arg order matches placeholder order: algorithm, serverId, seeds…,
+            // [excludes…], limit.
+            var ordered: [DatabaseValueConvertible] = [algorithm, serverId]
+            ordered.append(contentsOf: seeds.map { $0 as DatabaseValueConvertible })
+            ordered.append(contentsOf: excludeList.map { $0 as DatabaseValueConvertible })
+            ordered.append(limit)
+            return try Row.fetchAll(db, sql: sql, arguments: StatementArguments(ordered)).map {
+                ScoredOwnedTrack(
+                    candidate: TrackCandidate(
+                        trackRef: $0["track_ref"], remoteId: $0["remoteId"], title: $0["title"],
+                        artistName: $0["artistName"], artistRemoteId: $0["artistRemoteId"],
+                        albumRemoteId: $0["albumRemoteId"], genres: decodeGenreArray($0["genres"]),
+                        addedAt: $0["addedAt"]),
+                    score: $0["score"] ?? 0)
+            }
+        }
+    }
+
+    /// The canonical (falling back to raw) recording MBID of a seed track, for
+    /// on-demand similarity (B3). Nil if the track has no resolved MBID.
+    public func seedMbid(forTrackRef ref: String) async throws -> (mbid: String?, canonical: String?)? {
+        try await database.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT mbid, canonical_mbid FROM track_features WHERE track_ref = ?
+                """, arguments: [ref]) else { return nil }
+            return (row["mbid"], row["canonical_mbid"])
+        }
+    }
+
+    private static let maxSeeds = 400
+    private static let maxExclusions = 400
+}
+
+/// An owned library track surfaced by similarity, with its aggregate score.
+public struct ScoredOwnedTrack: Sendable, Hashable {
+    public let candidate: TrackCandidate
+    public let score: Double
+    public init(candidate: TrackCandidate, score: Double) {
+        self.candidate = candidate
+        self.score = score
+    }
+}
+
+private func placeholders(_ count: Int) -> String {
+    Array(repeating: "?", count: count).joined(separator: ", ")
+}
+
+private func decodeGenreArray(_ json: String?) -> [String] {
+    guard let json, let data = json.data(using: .utf8),
+          let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+    return arr
 }
