@@ -617,7 +617,11 @@ public final class AppEnvironment: ObservableObject {
         // JellyfinBackend.pageQuery for the query-cost tuning. The full sync uses
         // a large page (1000) to minimize round trips; the quick start uses a
         // small page (plan.pageSize) so its single request returns fast.
-        let backend = makeBulkSyncBackend() ?? active.backend
+        //
+        // The full sync needs server totals (progress % + prune completeness); the
+        // quick start doesn't prune or show a %, so it skips the expensive first-page
+        // COUNT(*) — which alone was ~15s of its time on a large library.
+        let backend = makeBulkSyncBackend(requestTotals: plan.prune) ?? active.backend
         let pageSize = plan.pageSize ?? 1000
         let diagLog = SyncDiagnosticsLog()
         diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=\(pageSize) plan=\(plan.prune ? "full" : "quick")")
@@ -1024,7 +1028,7 @@ public final class AppEnvironment: ObservableObject {
     /// Rebuild the active backend with a bulk-timeout transport for catalog
     /// sync. Returns `nil` for the demo (or if the session can't be loaded), so
     /// the caller falls back to the interactive backend.
-    private func makeBulkSyncBackend() -> (any MusicBackend)? {
+    private func makeBulkSyncBackend(requestTotals: Bool = true) -> (any MusicBackend)? {
         guard let active,
               let stored = SessionPersistence.load(credentials),
               !stored.isDemo else { return nil }
@@ -1032,7 +1036,8 @@ public final class AppEnvironment: ObservableObject {
         switch active.connection.kind {
         case .jellyfin:
             return JellyfinBackend(connection: active.connection, token: stored.token,
-                                   clientInfo: clientInfo, transport: bulk)
+                                   clientInfo: clientInfo, transport: bulk,
+                                   includeTotalCount: requestTotals)
         case .plex:
             // Span whatever set of music libraries the active backend resolved
             // (see ensurePlexMusicSection, which runs first in syncNow).

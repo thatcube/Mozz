@@ -12,6 +12,12 @@ public struct JellyfinBackend: MusicBackend {
     private let token: String
     private let clientInfo: ClientInfo
     private let client: HTTPClient
+    /// Whether the first page of each catalog phase requests the server's total
+    /// record count. That count is a full COUNT(*) over the whole table (~15s on a
+    /// large library), needed by the full sync for the progress bar + prune
+    /// completeness — but pointless for the bounded quick start, which sets this
+    /// false so its single page returns fast.
+    private let includeTotalCount: Bool
 
     /// Audio containers we advertise as directly playable, so `universal` serves
     /// the original file when the codec is AVFoundation-friendly.
@@ -22,11 +28,13 @@ public struct JellyfinBackend: MusicBackend {
         token: String,
         clientInfo: ClientInfo,
         transport: any HTTPTransport = URLSessionTransport(),
+        includeTotalCount: Bool = true,
         logger: any NetworkLogger = NoopNetworkLogger()
     ) {
         self.connection = connection
         self.token = token
         self.clientInfo = clientInfo
+        self.includeTotalCount = includeTotalCount
         let auth = JellyfinAuth.authorizationHeader(
             clientInfo: clientInfo,
             deviceID: connection.clientIdentifier,
@@ -258,7 +266,7 @@ public struct JellyfinBackend: MusicBackend {
             // false takes Jellyfin's single-query fast path. We need the total once
             // (progress bar + the prune-completeness guard), so page 0 pays it and
             // every later page skips it.
-            URLQueryItem(name: "EnableTotalRecordCount", value: offset == 0 ? "true" : "false"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: (includeTotalCount && offset == 0) ? "true" : "false"),
         ]
     }
 
