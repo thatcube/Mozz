@@ -130,6 +130,10 @@ struct MainTabsView: View {
                     .zIndex(100)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SyncStatusBar()
+                .animation(.spring(response: 0.4, dampingFraction: 0.9), value: env.isSyncing)
+        }
         .onChange(of: selectedTab) { _, tab in
             loadedTabs.insert(tab)
             if tab != .search {

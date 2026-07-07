@@ -7,6 +7,7 @@ import MozzDatabase
 public struct SyncProgress: Sendable, Hashable {
     public enum Phase: String, Sendable {
         case capabilities
+        case syncing        // concurrent bulk pull of artists/albums/tracks/playlists
         case artists
         case albums
         case tracks
@@ -73,6 +74,15 @@ public struct LibrarySyncEngine: Sendable {
     }
 
     /// Run a full catalog sync. Emits progress and returns a summary.
+    ///
+    /// The independent entity phases (artists, albums, tracks, playlists) run
+    /// **concurrently**: the catalog schema is denormalized (a track/album stores
+    /// its artist/album *ids as plain columns* — there are no foreign keys
+    /// between entity types), so any write order is safe, and GRDB serializes the
+    /// writer connection. Running them together overlaps four network streams and
+    /// — crucially — lets albums and tracks start landing in the first second or
+    /// two instead of waiting for the entire artist listing to enumerate, so a
+    /// huge library becomes browsable almost immediately.
     @discardableResult
     public func sync(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
         let started = Date()
@@ -82,28 +92,42 @@ public struct LibrarySyncEngine: Sendable {
         let capabilities = try await backend.detectCapabilities()
         try await writer.saveCapabilities(capabilities, serverId: serverId)
 
-        let artistIDs = try await syncPages(
+        // A single combined progress stream across the concurrent phases, so the
+        // UI shows one honest "Syncing — N of M items" instead of four racing bars.
+        let aggregator = progress.map {
+            ProgressAggregator(phases: [.artists, .albums, .tracks, .playlists], emit: $0)
+        }
+        let report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void = { phase, seen, total in
+            await aggregator?.report(phase: phase, seen: seen, total: total)
+        }
+
+        async let artistsTask = syncPages(
             phase: .artists,
             fetch: { try await backend.fetchArtists(offset: $0, limit: $1) },
             write: { try await writer.upsertArtists($0, serverId: serverId) },
             id: \.id,
-            progress: progress
+            report: report
         )
-        let albumIDs = try await syncPages(
+        async let albumsTask = syncPages(
             phase: .albums,
             fetch: { try await backend.fetchAlbums(offset: $0, limit: $1) },
             write: { try await writer.upsertAlbums($0, serverId: serverId) },
             id: \.id,
-            progress: progress
+            report: report
         )
-        let trackIDs = try await syncPages(
+        async let tracksTask = syncPages(
             phase: .tracks,
             fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
             write: { try await writer.upsertTracks($0, serverId: serverId) },
             id: \.id,
-            progress: progress
+            report: report
         )
-        let playlistIDs = try await syncPlaylists(progress: progress)
+        async let playlistsTask = syncPlaylists(report: report)
+
+        let artistIDs = try await artistsTask
+        let albumIDs = try await albumsTask
+        let trackIDs = try await tracksTask
+        let playlistIDs = try await playlistsTask
 
         // Some album-artists (DJs, producers, combined credits) are referenced by
         // albums but never returned by the artist listing, leaving their albums
@@ -181,7 +205,7 @@ public struct LibrarySyncEngine: Sendable {
         fetch: @Sendable (Int, Int) async throws -> CatalogPage<Item>,
         write: @Sendable ([Item]) async throws -> Void,
         id: @Sendable (Item) -> String,
-        progress: (@Sendable (SyncProgress) -> Void)?
+        report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
     ) async throws -> PagedEnumeration {
         var offset = 0
         var seen: [String] = []
@@ -193,14 +217,14 @@ public struct LibrarySyncEngine: Sendable {
             if page.items.isEmpty { break }
             try await write(page.items)
             seen.append(contentsOf: page.items.map(id))
-            progress?(SyncProgress(phase: phase, itemsSynced: seen.count, totalCount: reportedTotal))
+            await report(phase, seen.count, reportedTotal)
             offset += page.items.count
         }
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal)
     }
 
     /// Playlists need a second pass to sync their ordered items.
-    private func syncPlaylists(progress: (@Sendable (SyncProgress) -> Void)?) async throws -> PagedEnumeration {
+    private func syncPlaylists(report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void) async throws -> PagedEnumeration {
         var offset = 0
         var playlists: [Playlist] = []
         var reportedTotal: Int?
@@ -211,7 +235,7 @@ public struct LibrarySyncEngine: Sendable {
             if page.items.isEmpty { break }
             try await writer.upsertPlaylists(page.items, serverId: serverId)
             playlists.append(contentsOf: page.items)
-            progress?(SyncProgress(phase: .playlists, itemsSynced: playlists.count, totalCount: reportedTotal))
+            await report(.playlists, playlists.count, reportedTotal)
             offset += page.items.count
         }
 
@@ -236,5 +260,30 @@ public struct LibrarySyncEngine: Sendable {
             offset += page.items.count
         }
         return ids
+    }
+}
+
+/// Merges progress from the concurrently-running entity phases into one combined
+/// `SyncProgress` (phase `.syncing`): the sum of items seen across phases, and a
+/// determinate total only once every phase has reported its server total (so the
+/// bar shows a spinner + live count first, then a smooth determinate bar — never
+/// a total that lurches as each phase's count arrives).
+private actor ProgressAggregator {
+    private let phases: Set<SyncProgress.Phase>
+    private let emit: @Sendable (SyncProgress) -> Void
+    private var seen: [SyncProgress.Phase: Int] = [:]
+    private var totals: [SyncProgress.Phase: Int] = [:]
+
+    init(phases: Set<SyncProgress.Phase>, emit: @escaping @Sendable (SyncProgress) -> Void) {
+        self.phases = phases
+        self.emit = emit
+    }
+
+    func report(phase: SyncProgress.Phase, seen count: Int, total: Int?) {
+        seen[phase] = count
+        if let total { totals[phase] = max(totals[phase] ?? 0, total) }
+        let combinedSeen = seen.values.reduce(0, +)
+        let combinedTotal = totals.count == phases.count ? totals.values.reduce(0, +) : nil
+        emit(SyncProgress(phase: .syncing, itemsSynced: combinedSeen, totalCount: combinedTotal))
     }
 }

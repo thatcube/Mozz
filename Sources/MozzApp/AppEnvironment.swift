@@ -120,7 +120,24 @@ public final class AppEnvironment: ObservableObject {
     public var syncStatusText: String? {
         guard isSyncing else { return nil }
         guard let p = syncProgress else { return "Starting…" }
-        return "\(p.phase.rawValue): \(p.itemsSynced)"
+        let n = p.itemsSynced
+        switch p.phase {
+        case .capabilities: return "Connecting…"
+        case .syncing, .artists, .albums, .tracks, .playlists:
+            if let total = p.totalCount, total > 0 {
+                return "Syncing your library — \(n) of \(total)"
+            }
+            return n > 0 ? "Syncing your library — \(n) items" : "Syncing your library…"
+        case .pruning: return "Finishing up…"
+        case .done: return "Up to date"
+        }
+    }
+
+    /// Determinate sync fraction in 0…1 when a total is known, else `nil` (show an
+    /// indeterminate bar). Drives the persistent in-app sync bar.
+    public var syncFraction: Double? {
+        guard isSyncing, let p = syncProgress, let total = p.totalCount, total > 0 else { return nil }
+        return min(1, Double(p.itemsSynced) / Double(total))
     }
 
     /// Single-flight guard for the favorite/rating outbox flush (see
@@ -253,9 +270,15 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
-    /// If this server has no catalog yet, start the first sync and keep the setup
-    /// screen up until enough content exists (or the sync finishes, or the user
-    /// asked to enter early via `enterAppNow`).
+    /// Start the first catalog sync and drop the user into the app as soon as
+    /// there's anything to browse — the sync then continues in the background
+    /// with a persistent progress bar. On a huge Jellyfin library the old
+    /// behaviour blocked here until 20 *tracks* existed, but tracks used to be
+    /// enumerated only after every artist and album, so the setup screen could
+    /// hang for minutes. Now: `canEnterEarly` is true the moment the sync is
+    /// running (so "Browse now" is always available), the phases run
+    /// concurrently (so albums/tracks land within a second or two regardless of
+    /// size), and we auto-enter as soon as the first content of any kind appears.
     private func gateInitialSync() async {
         guard let serverId = active?.connection.id else { return }
         let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
@@ -268,12 +291,18 @@ public final class AppEnvironment: ObservableObject {
             while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
         startSync()
-        let enoughToBrowse = 20
+        // The sync is running — let the user leave the setup screen whenever they
+        // like; the persistent sync bar keeps them informed in-app.
+        canEnterEarly = true
+        // Auto-enter as soon as ANY browsable content exists (albums or tracks),
+        // or the sync finishes. Concurrent phases make this happen fast even for
+        // very large libraries, so most users never see a blocking wait at all.
         while isSettingUp {
-            let count = (try? await repository.trackCount(serverId: serverId)) ?? 0
-            if count > 0 { canEnterEarly = true }
-            if count >= enoughToBrowse || !isSyncing { break }
-            try? await Task.sleep(nanoseconds: 400_000_000)
+            async let albums = repository.albumCount(serverId: serverId)
+            async let tracks = repository.trackCount(serverId: serverId)
+            let content = ((try? await albums) ?? 0) + ((try? await tracks) ?? 0)
+            if content > 0 || !isSyncing { break }
+            try? await Task.sleep(nanoseconds: 300_000_000)
         }
     }
 
@@ -480,13 +509,15 @@ public final class AppEnvironment: ObservableObject {
         // a re-login — and surfaces a clear error if the server has no music.
         try await ensurePlexMusicSection()
         guard let active else { throw MozzError.unsupported("No active server") }
-        // Catalog sync uses a bulk-timeout backend: a single page of a few
+        // Catalog sync uses a bulk-timeout backend: a single page of several
         // hundred items can take tens of seconds to generate on a large/slow
         // self-hosted server, which would blow the 12s interactive timeout and
-        // abort the sync (leaving albums/tracks unsynced). A smaller page size
-        // keeps each request well within the bulk timeout and bounds memory.
+        // abort the sync — hence the 90s bulk transport. A 500-item page keeps
+        // each request comfortably inside that window while halving the round
+        // trips vs. the old 200, and the engine runs the entity phases
+        // concurrently (peak memory is a handful of pages, not the library).
         let backend = makeBulkSyncBackend() ?? active.backend
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 200)
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 500)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         // New catalog + listening → refresh the mixes off-main. Non-fatal.

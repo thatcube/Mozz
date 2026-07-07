@@ -19,6 +19,10 @@ struct HomeView: View {
     @State private var playlists: [PlaylistRecord] = []
     @State private var likedCount = 0
     @State private var loaded = false
+    /// Throttles progressive refreshes during the first concurrent sync (whose
+    /// phase stays `.syncing`, so the phase-change trigger below never fires):
+    /// reload Home at most every ~1.5s as the item count climbs.
+    @State private var lastSyncReload = Date.distantPast
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -59,6 +63,13 @@ struct HomeView: View {
             .onChange(of: env.syncProgress?.phase) { _, _ in Task { await load() } }
             .onChange(of: env.isSyncing) { _, syncing in
                 if !syncing { Task { await load() } }
+            }
+            // During the first sync the phase is a constant `.syncing`, so drive
+            // progressive fill off the climbing item count (throttled to ~1.5s).
+            .onChange(of: env.syncProgress?.itemsSynced) { _, _ in
+                guard Date.now.timeIntervalSince(lastSyncReload) > 1.5 else { return }
+                lastSyncReload = .now
+                Task { await load() }
             }
         }
     }

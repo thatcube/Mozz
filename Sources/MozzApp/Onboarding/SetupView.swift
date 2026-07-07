@@ -84,6 +84,7 @@ struct SetupView: View {
         let name: String
         switch p.phase {
         case .capabilities: name = "Checking server"
+        case .syncing:      name = "Syncing your library"
         case .artists:      name = "Artists"
         case .albums:       name = "Albums"
         case .tracks:       name = "Songs"

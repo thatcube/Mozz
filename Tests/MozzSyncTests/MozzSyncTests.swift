@@ -125,10 +125,19 @@ final class LibrarySyncEngineTests: XCTestCase {
         let engine = LibrarySyncEngine(backend: backend, database: database)
         _ = try await engine.sync { collector.record($0.phase) }
 
+        // Setup still brackets the run with capabilities → … → pruning → done.
         XCTAssertEqual(collector.phases.first, .capabilities)
         XCTAssertEqual(collector.phases.last, .done)
-        XCTAssertTrue(collector.phases.contains(.tracks))
         XCTAssertTrue(collector.phases.contains(.pruning))
+        // The entity phases now run concurrently and report a single combined
+        // `.syncing` phase (not per-type artists/albums/tracks progress).
+        XCTAssertTrue(collector.phases.contains(.syncing))
+        // capabilities must come before any bulk syncing, and pruning after it.
+        let firstSyncing = collector.phases.firstIndex(of: .syncing)
+        let capabilitiesIdx = collector.phases.firstIndex(of: .capabilities)
+        let pruningIdx = collector.phases.firstIndex(of: .pruning)
+        if let firstSyncing, let capabilitiesIdx { XCTAssertLessThan(capabilitiesIdx, firstSyncing) }
+        if let firstSyncing, let pruningIdx { XCTAssertLessThan(firstSyncing, pruningIdx) }
     }
 
     func testResyncPrunesDeletedItems() async throws {
