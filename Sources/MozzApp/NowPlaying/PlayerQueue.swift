@@ -11,7 +11,8 @@ import UIKit
 #if canImport(UIKit)
 /// A SwiftUI wrapper around `AVRoutePickerView` — the real system AirPlay /
 /// output-route picker. Tapping it presents the OS route sheet (headphones,
-/// AirPlay speakers, etc.). Tinted to match the player's monochrome controls.
+/// AirPlay speakers, etc.). Tinted to match the player's monochrome controls;
+/// pass a clear tint to hide its built-in glyph and overlay a custom device icon.
 struct AirPlayRoutePicker: UIViewRepresentable {
     var tint: UIColor = .label
 
@@ -29,6 +30,68 @@ struct AirPlayRoutePicker: UIViewRepresentable {
     func updateUIView(_ view: AVRoutePickerView, context: Context) {
         view.tintColor = tint
         view.activeTintColor = tint
+    }
+}
+
+/// Observes the current audio output route (`AVAudioSession`) so the player can
+/// show the *actual* output device — its name ("Brandon's Room") and a matching
+/// icon — like Apple Music. Updates live on route changes (plugging headphones,
+/// picking an AirPlay speaker, etc.).
+@MainActor
+final class AudioRouteMonitor: ObservableObject {
+    struct Output: Equatable {
+        var name: String
+        var icon: String
+        var isExternal: Bool
+    }
+
+    @Published private(set) var output: Output
+
+    private var observer: NSObjectProtocol?
+
+    init() {
+        output = Self.current()
+        observer = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.output = Self.current() }
+        }
+    }
+
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    private static func current() -> Output {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        guard let out = route.outputs.first else {
+            return Output(name: UIDevice.current.model, icon: "iphone", isExternal: false)
+        }
+        return Output(name: out.portName,
+                      icon: icon(for: out.portType),
+                      isExternal: isExternal(out.portType))
+    }
+
+    /// SF Symbol best matching an output port type. AirPlay can't distinguish a
+    /// HomePod from an Apple TV via public API, so it uses the generic AirPlay glyph.
+    private static func icon(for port: AVAudioSession.Port) -> String {
+        switch port {
+        case .builtInSpeaker, .builtInReceiver: return "iphone"
+        case .headphones, .headsetMic: return "headphones"
+        case .bluetoothA2DP, .bluetoothLE, .usbAudio: return "hifispeaker.fill"
+        case .bluetoothHFP: return "headphones"
+        case .airPlay: return "airplayaudio"
+        case .carAudio: return "car.fill"
+        case .HDMI, .displayPort: return "tv.fill"
+        default: return "airplayaudio"
+        }
+    }
+
+    private static func isExternal(_ port: AVAudioSession.Port) -> Bool {
+        switch port {
+        case .builtInSpeaker, .builtInReceiver: return false
+        default: return true
+        }
     }
 }
 #endif

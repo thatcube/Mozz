@@ -58,6 +58,10 @@ struct NowPlayingMorphContainer: View {
     /// Whether the queue panel (Continue Playing + History) is showing in place of
     /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
     @State private var queueOpen = false
+    #if canImport(UIKit)
+    /// Live current-output-route (device name + icon) for the AirPlay control.
+    @StateObject private var routeMonitor = AudioRouteMonitor()
+    #endif
 
     @AppStorage(PlayerBackgroundStyle.storageKey) private var bgStyleRaw = PlayerBackgroundStyle.default.rawValue
     @Environment(\.colorScheme) private var systemColorScheme
@@ -355,12 +359,17 @@ struct NowPlayingMorphContainer: View {
                 formatBadge(track: track).padding(.top, 10)
             }
             Spacer(minLength: 8)
-            bottomButtonRow
-                .padding(.horizontal, 48)
-                // The surface overhangs the screen by `bottomOverhang`; lift the
-                // row out of that off-screen region so it sits at the safe-area
-                // bottom rather than 120pt below it.
-                .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
+            VStack(spacing: 10) {
+                bottomButtonRow
+                    .padding(.horizontal, 48)
+                #if canImport(UIKit)
+                routeLabel
+                #endif
+            }
+            // The surface overhangs the screen by `bottomOverhang`; lift the
+            // row out of that off-screen region so it sits at the safe-area
+            // bottom rather than 120pt below it.
+            .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -534,9 +543,10 @@ struct NowPlayingMorphContainer: View {
         return Text(parts.joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary)
     }
 
-    /// The bottom control row: a (dummy) lyrics button, the real AirPlay output
-    /// picker, and the queue toggle. Lyrics + a per-track context menu aren't
-    /// built yet, so lyrics is a disabled placeholder.
+    /// The bottom control row: a (dummy) lyrics button, the current-output-route
+    /// control (shows the real device icon; tap to open the AirPlay picker), and
+    /// the queue toggle. Lyrics + a per-track context menu aren't built yet, so
+    /// lyrics is a disabled placeholder.
     private var bottomButtonRow: some View {
         HStack {
             Button { } label: { Image(systemName: "quote.bubble") }
@@ -544,8 +554,7 @@ struct NowPlayingMorphContainer: View {
                 .foregroundStyle(.secondary)
             Spacer()
             #if canImport(UIKit)
-            AirPlayRoutePicker(tint: controlUIColor)
-                .frame(width: 32, height: 32)
+            routeControl
             #endif
             Spacer()
             Button {
@@ -560,11 +569,32 @@ struct NowPlayingMorphContainer: View {
     }
 
     #if canImport(UIKit)
-    /// Tint for the AirPlay picker (a UIKit view that doesn't inherit SwiftUI's
-    /// forced dark scheme): white over the dark adaptive/OLED backdrop, otherwise
-    /// the system label color for the theme background.
-    private var controlUIColor: UIColor {
-        bgStyle == .theme ? .label : .white
+    /// The output-route control: the real device icon (AirPlay/speaker/headphones/
+    /// etc.) drawn over an invisible `AVRoutePickerView` so a tap presents the
+    /// system route picker. Tinted to signal when audio is routed off-device.
+    private var routeControl: some View {
+        ZStack {
+            AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
+            Image(systemName: routeMonitor.output.icon)
+                .foregroundStyle(routeMonitor.output.isExternal ? Color.accentColor : Color.primary)
+                .allowsHitTesting(false)
+        }
+        .frame(width: 40, height: 32)
+    }
+
+    /// "iPhone → Device Name" route line, shown only when audio is playing to an
+    /// external device (AirPlay speaker, headphones, car…), like Apple Music.
+    @ViewBuilder private var routeLabel: some View {
+        if routeMonitor.output.isExternal {
+            HStack(spacing: 5) {
+                Text(UIDevice.current.model)
+                Image(systemName: "arrow.forward").font(.caption2)
+                Text(routeMonitor.output.name).foregroundStyle(.primary)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
     }
     #endif
 }
