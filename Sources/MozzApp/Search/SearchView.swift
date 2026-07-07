@@ -75,8 +75,10 @@ struct SearchView: View {
     }
 
     /// The pinned top bar: the search field (+ Cancel while active). Its
-    /// background is left clear so, once pinned, the scrolling content shows
-    /// around/through the Liquid Glass pill — like the native search bar.
+    /// background is left visually clear so, once pinned, the scrolling content
+    /// shows around/through the Liquid Glass pill — like the native search bar —
+    /// but it still absorbs touches (`contentShape`) so you can't tap a result
+    /// that has scrolled underneath it.
     private var searchFieldBar: some View {
         HStack(spacing: 12) {
             searchField
@@ -87,6 +89,11 @@ struct SearchView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: fieldHeight, height: fieldHeight)
                         .glassCircle()
+                        // Make the whole 44pt circle tappable. Without this the
+                        // button's hit area is just the small "✕" glyph, so taps
+                        // on the glass ring fall through to the content pinned
+                        // behind the bar.
+                        .contentShape(Circle())
                         .accessibilityLabel("Cancel search")
                 }
                 .buttonStyle(.plain)
@@ -96,6 +103,10 @@ struct SearchView: View {
         .padding(.horizontal, 20)
         .padding(.top, isActive ? 8 : 12)
         .padding(.bottom, 10)
+        // Absorb taps across the whole bar so content scrolled under the pinned
+        // header isn't interactable through the bar's clear regions.
+        .contentShape(Rectangle())
+        .onTapGesture { }
     }
 
     /// A custom search field. We can't use the system `.searchable` here because
