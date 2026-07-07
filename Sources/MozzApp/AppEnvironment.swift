@@ -529,22 +529,63 @@ public final class AppEnvironment: ObservableObject {
             let emitProgress: @Sendable (SyncProgress) -> Void = { progress in
                 Task { @MainActor in self.syncProgress = progress }
             }
-            do {
-                var isEmpty = false
-                if let serverId = active?.connection.id {
-                    isEmpty = ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0
+            // Retry transient failures (e.g. the network not being ready at cold
+            // launch, or a brief server hiccup) with backoff, instead of giving up
+            // on the first blip and stranding the user on an empty library. Only
+            // network-ish errors are retried; a genuine "no music" / auth error
+            // still surfaces. The isEmpty re-check means a retry after a successful
+            // quick start skips straight to the full sync.
+            let maxAttempts = 4
+            var attempt = 0
+            while !Task.isCancelled {
+                attempt += 1
+                do {
+                    var isEmpty = false
+                    if let serverId = active?.connection.id {
+                        isEmpty = ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0
+                    }
+                    // Tier 1 (empty catalog only): make the app playable in ~10s.
+                    if isEmpty {
+                        _ = try await runSync(plan: .quickStart(tracks: 300), progress: emitProgress)
+                    }
+                    // Tier 2 (always): the full library + housekeeping + prune.
+                    _ = try await syncNow(progress: emitProgress)
+                    break   // success
+                } catch is CancellationError {
+                    break   // user cancelled — leave the partial catalog
+                } catch {
+                    lastSyncSummary = "Sync failed: \(error.localizedDescription)"
+                    guard attempt < maxAttempts, Self.isTransient(error) else { break }
+                    // Backoff 2s, 4s, 6s — enough to ride out cold-launch network
+                    // warmup or a brief server blip. isSyncing stays true across
+                    // retries, so the setup screen keeps waiting rather than
+                    // dumping the user onto an empty Home.
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
                 }
-                // Tier 1 (empty catalog only): make the app playable in ~10s.
-                if isEmpty {
-                    _ = try await runSync(plan: .quickStart(tracks: 300), progress: emitProgress)
-                }
-                // Tier 2 (always): the full library + post-sync housekeeping + prune.
-                _ = try await syncNow(progress: emitProgress)
-            } catch is CancellationError {
-                // User cancelled — leave the partial catalog; next sync resumes.
-            } catch {
-                lastSyncSummary = "Sync failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    /// Whether a sync error looks transient (worth retrying) vs. terminal.
+    private static func isTransient(_ error: Error) -> Bool {
+        switch error {
+        case MozzError.serverUnreachable, MozzError.transport:
+            return true
+        case MozzError.badStatus(let code):
+            // 5xx / 429 are transient; 4xx are terminal.
+            return code >= 500 || code == 429
+        case let urlError as URLError:
+            // Connectivity/timeout class — not a 4xx or a decode problem.
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                 .dataNotAllowed, .internationalRoamingOff:
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
         }
     }
 
