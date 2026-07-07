@@ -33,6 +33,11 @@ struct SearchView: View {
     /// Shared height for the search field and the cancel ✕ so they line up.
     private let fieldHeight: CGFloat = 44
 
+    /// Crossfade for the field's gray↔glass surface. Kept deliberately slow so
+    /// the material change reads as a smooth, refined transition rather than a
+    /// snap as you cross the scroll threshold.
+    private let fieldSurfaceAnimation: Animation = .easeInOut(duration: 0.5)
+
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
     /// Drives the collapse of the title header and the Cancel button.
@@ -149,7 +154,7 @@ struct SearchView: View {
                     GlassCapsuleFill().transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: fieldShowsGlass)
+            .animation(fieldSurfaceAnimation, value: fieldShowsGlass)
         }
         // The visible pill is 44pt tall, but a bare custom TextField only takes
         // focus when the glyphs themselves are tapped — the icon, padding and
