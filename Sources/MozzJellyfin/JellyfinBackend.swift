@@ -74,8 +74,14 @@ public struct JellyfinBackend: MusicBackend {
     }
 
     public func fetchAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album> {
+        // NOTE: no `ChildCount`. It forces Jellyfin to run a per-album track-count
+        // subquery, which measured ~5x slower than the artist listing on a large
+        // library (albums 6/s vs artists 30/s, ~100% network wait). The only
+        // consumer of album.trackCount is the Artist-detail albums/singles split,
+        // so the sync derives it locally from the synced tracks instead (see
+        // CatalogWriter.deriveAlbumTrackCounts) — free, and off the network path.
         let response = try await client.send(
-            Endpoint(path: "Items", query: itemsQuery(type: "MusicAlbum", offset: offset, limit: limit, fields: "Genres,DateCreated,ChildCount")),
+            Endpoint(path: "Items", query: itemsQuery(type: "MusicAlbum", offset: offset, limit: limit, fields: "Genres,DateCreated")),
             as: JFItemsResponse.self
         )
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.album), totalCount: response.TotalRecordCount)

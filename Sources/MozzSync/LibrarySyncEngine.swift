@@ -198,6 +198,10 @@ public struct LibrarySyncEngine: Sendable {
         // syncs without needing to thread their ids through the keep-set here.
         _ = try await writer.synthesizeMissingAlbumArtists(serverId: serverId)
 
+        // Derive album track counts locally (the album fetch no longer asks the
+        // server for the expensive per-album ChildCount). Cheap local pass.
+        try await writer.deriveAlbumTrackCounts(serverId: serverId)
+
         // Prune rows the server no longer has — but ONLY when EVERY phase
         // enumerated completely (all-or-nothing). A truncated/flaky sync (fewer
         // items seen than the server's reported total, or an empty result) must
