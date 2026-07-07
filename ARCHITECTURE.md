@@ -244,7 +244,12 @@ advances the queue and refills the window.
 
 - **`PlayQueue`** owns order, `RepeatMode` (off/one/all) and shuffle (`isShuffled`, with a
   stable original order preserved so un-shuffle restores it), plus `hasNext`/`hasPrevious`/
-  `peekNext`. It is a pure value type — fully unit-tested without AVFoundation.
+  `peekNext`. Shuffle is **balanced** (artist-spread, via `BalancedShuffle`) rather than
+  uniform, so same-artist tracks don't clump; every "Shuffle" button routes through the single
+  `PlaybackEngine.playShuffled` entry point. Under repeat-all a shuffled queue **reshuffles on
+  each wrap**, and the next-loop order is pre-computed so `peekNext` still matches the track that
+  plays across the loop boundary (keeping the pre-roll gapless). It is a pure value type — fully
+  unit-tested without AVFoundation.
 - **Now Playing / remote**: `NowPlayingCenter` publishes `MPNowPlayingInfoCenter` metadata and
   wires `MPRemoteCommandCenter` (play/pause/next/previous/seek) for lock-screen and Control
   Center. `AudioSessionController` configures the `.playback` category (background audio) and

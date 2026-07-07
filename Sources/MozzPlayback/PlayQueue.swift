@@ -2,7 +2,7 @@ import Foundation
 import MozzCore
 
 /// How the queue behaves when it reaches the end of a track / the queue.
-public enum RepeatMode: String, Sendable, Hashable, CaseIterable {
+public enum RepeatMode: String, Sendable, Hashable, CaseIterable, Codable {
     /// Advance to the next track; stop at the end of the queue.
     case off
     /// Repeat the current track indefinitely.
@@ -34,12 +34,23 @@ public enum RepeatMode: String, Sendable, Hashable, CaseIterable {
 /// The distinction between ``advance()`` (user pressed *next*) and
 /// ``trackDidFinish()`` (a track played to its end) matters for repeat-one:
 /// finishing repeats the track, but pressing next always skips forward.
-public struct PlayQueue: Sendable, Equatable {
+public struct PlayQueue: Sendable, Equatable, Codable {
     public private(set) var tracks: [Track]
     public private(set) var order: [Int]
     public private(set) var position: Int
-    public var repeatMode: RepeatMode
+    public private(set) var repeatMode: RepeatMode
     public private(set) var isShuffled: Bool
+
+    /// Transient, gapless-critical cache: the freshly reshuffled order to install
+    /// when a shuffled repeat-all queue wraps. Populated while the queue is
+    /// parked on its last slot so ``peekNext`` can pre-roll the next loop's first
+    /// track and ``advance()`` then plays that exact track. Excluded from
+    /// `Codable`/`Equatable` (see ``CodingKeys``) — it's rebuilt on demand.
+    private var nextLoopOrder: [Int]?
+
+    private enum CodingKeys: String, CodingKey {
+        case tracks, order, position, repeatMode, isShuffled
+    }
 
     public init() {
         self.tracks = []
@@ -47,6 +58,17 @@ public struct PlayQueue: Sendable, Equatable {
         self.position = -1
         self.repeatMode = .off
         self.isShuffled = false
+        self.nextLoopOrder = nil
+    }
+
+    /// Transient shuffle bookkeeping is deliberately excluded so equality (and
+    /// the persisted snapshot) stays purely semantic.
+    public static func == (lhs: PlayQueue, rhs: PlayQueue) -> Bool {
+        lhs.tracks == rhs.tracks
+            && lhs.order == rhs.order
+            && lhs.position == rhs.position
+            && lhs.repeatMode == rhs.repeatMode
+            && lhs.isShuffled == rhs.isShuffled
     }
 
     // MARK: Derived state
@@ -93,8 +115,13 @@ public struct PlayQueue: Sendable, Equatable {
             return order.indices.contains(n) ? tracks[order[n]] : nil
         case .all:
             let n = position + 1
-            let idx = n < order.count ? n : 0
-            return order.indices.contains(idx) ? tracks[order[idx]] : nil
+            if n < order.count {
+                return tracks[order[n]]
+            }
+            // Wrapping: when shuffled, the next loop uses the reshuffled order
+            // cached while parked on the last slot; otherwise it replays `order`.
+            let wrapped = nextLoopOrder ?? order
+            return wrapped.first.map { tracks[$0] }
         }
     }
 
@@ -124,6 +151,7 @@ public struct PlayQueue: Sendable, Equatable {
     /// index into `newTracks`). Preserves the current shuffle setting.
     public mutating func setItems(_ newTracks: [Track], startingAt startIndex: Int = 0) {
         tracks = newTracks
+        nextLoopOrder = nil
         guard !newTracks.isEmpty else {
             order = []
             position = -1
@@ -131,12 +159,39 @@ public struct PlayQueue: Sendable, Equatable {
         }
         let clampedStart = min(max(startIndex, 0), newTracks.count - 1)
         if isShuffled {
-            order = shuffledOrder(pinning: clampedStart)
+            order = balancedOrder(pinning: clampedStart)
             position = 0
         } else {
             order = Array(newTracks.indices)
             position = clampedStart
         }
+        refreshWrapCache()
+    }
+
+    /// Replace the queue with `newTracks` and start playing a freshly balanced
+    /// shuffle (no pinned start, so the first track feels random). Forces shuffle
+    /// on — the single entry point every "Shuffle" button in the app uses.
+    ///
+    /// `recencyScores` (optional, keyed by track id, 0…1 where 1 == just played)
+    /// biases recently-played tracks toward the end so a big shuffle feels fresh
+    /// across sessions. `tasteScores` (optional, 0…1 where 1 == best match)
+    /// biases higher-affinity tracks toward the front ("Smart Shuffle"). Both are
+    /// applied on top of the balanced spread; only the initial order is biased,
+    /// wrap reshuffles are plain balanced.
+    public mutating func setItemsShuffled(_ newTracks: [Track],
+                                          recencyScores: [String: Double]? = nil,
+                                          tasteScores: [String: Double]? = nil) {
+        tracks = newTracks
+        isShuffled = true
+        nextLoopOrder = nil
+        guard !newTracks.isEmpty else {
+            order = []
+            position = -1
+            return
+        }
+        order = balancedOrder(pinning: nil, recencyScores: recencyScores, tasteScores: tasteScores)
+        position = 0
+        refreshWrapCache()
     }
 
     /// Append tracks to the end of the base list and the play order.
@@ -146,6 +201,7 @@ public struct PlayQueue: Sendable, Equatable {
         tracks.append(contentsOf: newTracks)
         order.append(contentsOf: (firstNew..<tracks.count))
         if position < 0 { position = 0 }
+        refreshWrapCache()
     }
 
     /// Insert tracks so they play immediately after the current track.
@@ -157,6 +213,7 @@ public struct PlayQueue: Sendable, Equatable {
         let insertAt = position < 0 ? order.count : position + 1
         order.insert(contentsOf: newOrderEntries, at: insertAt)
         if position < 0 { position = 0 }
+        refreshWrapCache()
     }
 
     // MARK: Navigation
@@ -179,10 +236,11 @@ public struct PlayQueue: Sendable, Equatable {
         if position + 1 < order.count {
             position += 1
         } else if repeatMode == .all {
-            position = 0
+            wrapToStart()
         } else {
             return nil
         }
+        refreshWrapCache()
         return current
     }
 
@@ -197,6 +255,7 @@ public struct PlayQueue: Sendable, Equatable {
         } else {
             return current
         }
+        refreshWrapCache()
         return current
     }
 
@@ -205,7 +264,18 @@ public struct PlayQueue: Sendable, Equatable {
     public mutating func jump(toBaseIndex baseIndex: Int) -> Track? {
         guard let p = order.firstIndex(of: baseIndex) else { return current }
         position = p
+        refreshWrapCache()
         return current
+    }
+
+    // MARK: Repeat
+
+    /// Set the repeat mode. Routed through a method (rather than a settable
+    /// property) so the gapless reshuffle-on-wrap cache is refreshed when the
+    /// mode changes while parked on the last track.
+    public mutating func setRepeatMode(_ mode: RepeatMode) {
+        repeatMode = mode
+        refreshWrapCache()
     }
 
     // MARK: Shuffle
@@ -213,25 +283,141 @@ public struct PlayQueue: Sendable, Equatable {
     public mutating func setShuffle(_ enabled: Bool) {
         guard enabled != isShuffled else { return }
         isShuffled = enabled
+        nextLoopOrder = nil
         guard !isEmpty else { return }
         let currentBase = order.indices.contains(position) ? order[position] : 0
         if enabled {
-            order = shuffledOrder(pinning: currentBase)
+            order = balancedOrder(pinning: currentBase)
             position = 0
         } else {
             order = Array(tracks.indices)
             position = currentBase
         }
+        refreshWrapCache()
     }
 
     public mutating func toggleShuffle() { setShuffle(!isShuffled) }
 
-    /// A random permutation of all base indices with `pinned` forced to the
-    /// front, so the current track keeps playing when shuffle turns on.
-    private func shuffledOrder(pinning pinned: Int) -> [Int] {
-        var rest = Array(tracks.indices)
-        rest.removeAll { $0 == pinned }
-        rest.shuffle()
-        return [pinned] + rest
+    /// Rebuild transient, non-persisted bookkeeping after a queue is assigned
+    /// wholesale (e.g. decoded from a saved session). `nextLoopOrder` is excluded
+    /// from `Codable`, so this re-primes the reshuffle-on-wrap cache for the
+    /// current position; call it after restoring a persisted queue.
+    public mutating func rebuildTransientState() {
+        refreshWrapCache()
+    }
+
+    /// A balanced permutation of all base indices, spreading by artist (primary)
+    /// then album (secondary) so same-artist and, within that, same-album tracks
+    /// don't clump. When `pinned` is non-nil that track is forced to the front so
+    /// it keeps playing when shuffle turns on mid-track; the remainder stays spread.
+    ///
+    /// `recencyScores` (track id → 0…1) biases recently-played tracks later;
+    /// `tasteScores` (track id → 0…1) biases higher-affinity tracks earlier. The
+    /// two combine into a single per-track position bias for `BalancedShuffle`.
+    private func balancedOrder(pinning pinned: Int?,
+                               recencyScores: [String: Double]? = nil,
+                               tasteScores: [String: Double]? = nil) -> [Int] {
+        let bias: (Int) -> Double
+        if recencyScores != nil || tasteScores != nil {
+            bias = { idx in
+                let id = tracks[idx].id
+                let recent = recencyScores?[id] ?? 0
+                let taste = tasteScores?[id] ?? 0
+                return Self.recencyBiasStrength * recent - Self.tasteBiasStrength * taste
+            }
+        } else {
+            bias = { _ in 0 }
+        }
+        var result = BalancedShuffle.order(
+            of: Array(tracks.indices),
+            keys: [{ Self.artistKey(tracks[$0]) }, { Self.albumKey(tracks[$0]) }],
+            bias: bias
+        )
+        if let pinned {
+            result.removeAll { $0 == pinned }
+            result.insert(pinned, at: 0)
+        }
+        return result
+    }
+
+    /// How hard recency de-weighting pushes recently-played tracks back, and how
+    /// hard taste affinity pulls preferred tracks forward. Balanced positions
+    /// live in `[0, 1)`, so a strength of 1 shifts a track about a full "lap" —
+    /// a soft, continuous bias rather than a hard partition.
+    private static let recencyBiasStrength = 1.0
+    private static let tasteBiasStrength = 1.0
+
+    /// Primary grouping key: the normalized artist, so same-artist tracks spread.
+    private static func artistKey(_ track: Track) -> String {
+        track.artistName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Secondary grouping key: album identity. Prefers the stable album id, then
+    /// title+album-artist; an unknown album falls back to the track id so those
+    /// tracks stay unique and spread freely rather than clumping under "".
+    private static func albumKey(_ track: Track) -> String {
+        if let id = track.albumID, !id.isEmpty { return "id:" + id }
+        let title = track.albumTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty {
+            let artist = (track.albumArtistName ?? track.artistName).lowercased()
+            return "t:" + title.lowercased() + "|" + artist
+        }
+        return "u:" + track.id
+    }
+
+    private func sameArtist(_ a: Int, _ b: Int) -> Bool {
+        Self.artistKey(tracks[a]) == Self.artistKey(tracks[b])
+    }
+
+    /// A fresh balanced order for the next loop that avoids a jarring seam: its
+    /// first track won't be the same track — or, when possible, the same artist —
+    /// as `outgoing` (the track currently finishing the loop). It **rotates** the
+    /// balanced order to a non-colliding head rather than splicing an element to
+    /// the front: rotation preserves the internal spread (only the wrap-around
+    /// join changes), and for equal-sized artist groups the balanced order is a
+    /// clean cycle whose ends differ, so no new same-artist adjacency appears.
+    /// Falls back gracefully when the library is a single artist.
+    private func wrapOrder(avoiding outgoing: Int) -> [Int] {
+        let fresh = balancedOrder(pinning: nil)
+        guard fresh.count > 1, let head = fresh.first,
+              head == outgoing || sameArtist(head, outgoing) else {
+            return fresh   // head already opens on a different artist and track
+        }
+        // Prefer rotating to a different artist; otherwise at least a different
+        // track than the one just played.
+        let pivot = fresh.firstIndex { !sameArtist($0, outgoing) }
+            ?? fresh.firstIndex { $0 != outgoing }
+        guard let pivot, pivot != 0 else { return fresh }
+        return Array(fresh[pivot...] + fresh[..<pivot])
+    }
+
+    /// Install the next loop's order when wrapping a shuffled repeat-all queue.
+    /// Consumes the cache populated by ``refreshWrapCache()`` so the track that
+    /// actually plays matches the one ``peekNext`` pre-rolled for gapless
+    /// playback; falls back to replaying `order` when no reshuffle is cached.
+    private mutating func wrapToStart() {
+        if isShuffled, let next = nextLoopOrder {
+            order = next
+            nextLoopOrder = nil
+        }
+        position = 0
+    }
+
+    /// Keep ``nextLoopOrder`` populated exactly while the queue is parked on its
+    /// last slot with shuffle + repeat-all. That lets ``peekNext`` pre-roll the
+    /// reshuffled first track of the next loop and ``advance()`` play that same
+    /// track, so the loop boundary stays gapless. The cached order also avoids a
+    /// same-artist/same-track seam with the outgoing track. Cleared whenever the
+    /// conditions don't hold; never overwritten while they do (so a pre-rolled
+    /// choice can't drift before it's consumed).
+    private mutating func refreshWrapCache() {
+        let parkedOnLast = !isEmpty && position == order.count - 1
+        guard isShuffled, repeatMode == .all, parkedOnLast else {
+            nextLoopOrder = nil
+            return
+        }
+        if nextLoopOrder == nil {
+            nextLoopOrder = wrapOrder(avoiding: order[position])
+        }
     }
 }

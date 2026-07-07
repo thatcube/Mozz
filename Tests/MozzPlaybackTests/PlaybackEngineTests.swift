@@ -50,6 +50,128 @@ final class PlaybackEngineTests: XCTestCase {
         XCTAssertNil(engine.currentTrack)
         XCTAssertEqual(engine.snapshot.status, .idle)
     }
+
+    /// Regression: a mutation that changes the upcoming track without a full
+    /// reload (here, switching to repeat-one) must evict the already pre-rolled
+    /// lookahead, or AVQueuePlayer would gaplessly play the stale track at the
+    /// boundary while the queue reports a different one.
+    func testStaleLookaheadEvictedWhenNextTrackChanges() async {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        await engine.awaitPendingLoadsForTesting()
+        // Repeat off, on t0 → the pre-rolled next is t1.
+        XCTAssertEqual(engine.lookaheadTrackIDsForTesting, ["t0", "t1"])
+
+        engine.setRepeatMode(.one)   // peekNext now == current (t0)
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(engine.lookaheadTrackIDsForTesting, ["t0", "t0"],
+                       "stale t1 pre-roll must be replaced with the repeat-one track")
+    }
+
+    /// A station tops the queue up as it nears the end, so playback never runs dry.
+    func testStationAutoExtendsQueue() async {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let box = ExtendCounter()
+        engine.startStation((0..<4).map { Track(id: "s\($0)", title: "S", artistName: "A") }) {
+            let n = box.bump()
+            return (0..<5).map { Track(id: "x\(n)_\($0)", title: "X", artistName: "A") }
+        }
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertGreaterThanOrEqual(box.count, 1, "station fetched a batch as the queue neared its end")
+        XCTAssertTrue(engine.upNext.contains { $0.id.hasPrefix("x") }, "fetched tracks were appended")
+    }
+
+    /// A station extend fetch that resolves AFTER the user started different
+    /// playback must not append its stale batch into the replaced queue.
+    func testStaleStationExtendDoesNotAppendAfterReplacement() async {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let gate = ExtendGate()
+        engine.startStation([Track(id: "s0", title: "S", artistName: "A")]) {
+            await gate.wait()
+            return [Track(id: "x0", title: "X", artistName: "A")]
+        }
+        await engine.awaitPendingLoadsForTesting()   // near-end fires; extend Task now awaiting the gate
+        engine.play(tracks: (0..<3).map { Track(id: "p\($0)", title: "P", artistName: "B") })
+        await gate.open()                             // let the stale station batch resolve
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(engine.currentTrack?.id, "p0")
+        XCTAssertFalse(engine.upNext.contains { $0.id.hasPrefix("x") },
+                       "a stale station batch must not append into the replaced queue")
+    }
+
+    /// The public transport epoch — which the app captures to detect that the
+    /// user changed playback while a radio fetch was in flight — bumps on every
+    /// content-replacing transport action.
+    func testTransportEpochBumpsOnContentChange() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let songs = (0..<2).map { Track(id: "t\($0)", title: "T", artistName: "A") }
+        let e0 = engine.transportEpoch
+        engine.play(tracks: songs)
+        let e1 = engine.transportEpoch
+        engine.playShuffled(songs)
+        let e2 = engine.transportEpoch
+        engine.startStation(songs) { [] }
+        let e3 = engine.transportEpoch
+        engine.stop()
+        let e4 = engine.transportEpoch
+        XCTAssertTrue(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4,
+                      "each content-replacing action must advance the transport epoch")
+    }
+
+    /// The transport epoch must NOT advance on in-session actions (skip, pause,
+    /// toggle) — the radio auto-extend guard relies on those NOT ending a station.
+    func testTransportEpochStableAcrossInSessionActions() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        let base = engine.transportEpoch
+        engine.next()
+        engine.previous()
+        engine.pause()
+        engine.resume()
+        engine.setShuffle(true)
+        engine.setRepeatMode(.all)
+        engine.seek(to: 1)
+        XCTAssertEqual(engine.transportEpoch, base,
+                       "skip/pause/resume/shuffle/repeat/seek must not advance the epoch")
+    }
+
+    /// Starting fresh playback from an empty queue via playNext/append must
+    /// advance the epoch, so a slow radio fetch in flight can't hijack it.
+    func testPlayNextFromEmptyAdvancesEpoch() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let e0 = engine.transportEpoch
+        engine.playNext([Track(id: "a", title: "A", artistName: "X")])
+        XCTAssertGreaterThan(engine.transportEpoch, e0)
+        // Adding to the now-non-empty queue must NOT advance it (that would end
+        // a live station on a mere "Add to Queue").
+        let e1 = engine.transportEpoch
+        engine.append([Track(id: "b", title: "B", artistName: "X")])
+        XCTAssertEqual(engine.transportEpoch, e1)
+    }
+}
+
+/// Thread-safe counter for the station auto-extend test's `@Sendable` closure.
+private final class ExtendCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func bump() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+}
+
+/// A one-shot async gate so a test can hold a station's extend fetch open while
+/// it replaces playback, then release it.
+private actor ExtendGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func open() {
+        opened = true
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 /// Verifies the listening-history emission (B1): every track start is paired

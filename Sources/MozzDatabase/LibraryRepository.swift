@@ -122,6 +122,24 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// Domain tracks for a set of remote ids on a server, returned in the SAME
+    /// order as `remoteIds` (used to realize a computed order — e.g. a radio
+    /// batch — into playable tracks). Ids not found are skipped. Fetch + mapping
+    /// run off the main thread.
+    public func tracksForPlayback(remoteIds: [String], serverId: ServerID) async throws -> [Track] {
+        guard !remoteIds.isEmpty else { return [] }
+        return try await database.read { db in
+            let placeholders = Array(repeating: "?", count: remoteIds.count).joined(separator: ", ")
+            var args: [DatabaseValueConvertible?] = [serverId]
+            args.append(contentsOf: remoteIds)
+            let byId = try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track WHERE serverId = ? AND remoteId IN (\(placeholders))
+                """, arguments: StatementArguments(args))
+                .reduce(into: [String: Track]()) { $0[$1.remoteId] = $1.toDomain() }
+            return remoteIds.compactMap { byId[$0] }
+        }
+    }
+
     /// Every track as a domain model, alphabetical (matching ``tracksPage``), for
     /// a "Play/Shuffle all songs" action. The fetch AND the record→domain mapping
     /// run inside the database read (off the main thread), so tapping Play never

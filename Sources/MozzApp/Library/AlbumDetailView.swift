@@ -78,8 +78,7 @@ struct AlbumDetailView: View {
     }
 
     private func shuffle() {
-        env.playback.setShuffle(true)
-        env.playback.play(tracks: tracks.map { $0.toDomain() }, startAt: 0)
+        env.playback.playShuffled(tracks.map { $0.toDomain() })
     }
 
     private func load() async {

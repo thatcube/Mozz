@@ -46,7 +46,7 @@ struct LikedSongsView: View {
     }
 
     private func shuffle() {
-        env.playback.play(tracks: tracks.map { $0.toDomain() }.shuffled(), startAt: 0)
+        env.playback.playShuffled(tracks.map { $0.toDomain() })
     }
 
     private func load() async {

@@ -8,11 +8,24 @@ import SwiftUI
 struct LibraryPlayShuffleBar: View {
     let play: () -> Void
     let shuffle: () -> Void
+    /// Optional "Smart Shuffle" (taste-ranked) action. When provided, it's
+    /// offered via a long-press context menu on the Shuffle button so a plain
+    /// tap still shuffles immediately.
+    var smartShuffle: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
             button("Play", systemImage: "play.fill", action: play)
             button("Shuffle", systemImage: "shuffle", action: shuffle)
+                .contextMenu { smartShuffleMenu }
+        }
+    }
+
+    @ViewBuilder private var smartShuffleMenu: some View {
+        if let smartShuffle {
+            Button(action: smartShuffle) {
+                Label("Smart Shuffle", systemImage: "wand.and.stars")
+            }
         }
     }
 

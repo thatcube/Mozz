@@ -16,7 +16,7 @@ struct SongsView: View {
     var body: some View {
         List {
             if !list.items.isEmpty {
-                LibraryPlayShuffleBar(play: playAll, shuffle: shuffleAll)
+                LibraryPlayShuffleBar(play: playAll, shuffle: shuffleAll, smartShuffle: smartShuffleAll)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
             }
@@ -56,14 +56,36 @@ struct SongsView: View {
         }
     }
 
-    /// Shuffle the whole song catalog, starting on a random track so it doesn't
-    /// always open on the alphabetically-first song.
+    /// Shuffle the whole song catalog with a balanced (artist-spread) order,
+    /// biased away from recently-played tracks so it feels fresh each session.
     private func shuffleAll() {
         Task {
-            let all = (try? await env.repository.allTracksForPlayback(serverId: env.active?.connection.id)) ?? []
+            let serverId = env.active?.connection.id
+            let all = (try? await env.repository.allTracksForPlayback(serverId: serverId)) ?? []
             guard !all.isEmpty else { return }
-            env.playback.setShuffle(true)
-            env.playback.play(tracks: all, startAt: Int.random(in: 0..<all.count))
+            var recency: [String: Double]?
+            if let serverId {
+                recency = try? await env.recommendations.recencyScores(serverId: serverId)
+            }
+            env.playback.playShuffled(all, recencyScores: recency)
+        }
+    }
+
+    /// "Smart Shuffle": the whole catalog shuffled with your-taste tracks pulled
+    /// earlier (and recently-played pushed later), while keeping artist/album
+    /// spread. Falls back to a plain fresh shuffle when history is too thin.
+    private func smartShuffleAll() {
+        Task {
+            let serverId = env.active?.connection.id
+            let all = (try? await env.repository.allTracksForPlayback(serverId: serverId)) ?? []
+            guard !all.isEmpty else { return }
+            var recency: [String: Double]?
+            var taste: [String: Double]?
+            if let serverId {
+                recency = try? await env.recommendations.recencyScores(serverId: serverId)
+                taste = try? await env.recommendations.tasteScores(serverId: serverId, tracks: all)
+            }
+            env.playback.playShuffled(all, recencyScores: recency, tasteScores: taste)
         }
     }
 

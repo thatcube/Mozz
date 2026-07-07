@@ -14,6 +14,10 @@ Package.resolved
 Mozz.xcodeproj/
 # Info.plist is generated from project.yml's `info:` block by XcodeGen
 App/Mozz/Info.plist
+# Entitlements are generated from project.yml's `entitlements:` block by XcodeGen
+App/Mozz/Mozz.entitlements
+App/MozzWidget/MozzWidget.entitlements
+App/MozzWidget/Info.plist
 
 # SwiftPM local config
 .swiftpm/
