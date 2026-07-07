@@ -141,7 +141,8 @@ struct SearchView: View {
             Section("Artists") {
                 ForEach(results.artists) { artist in
                     NavigationLink(value: AppRoute.artist(artist)) {
-                        Label(artist.name, systemImage: "music.mic")
+                        SearchResultRow(artworkKey: artist.artworkKey, seed: artist.name,
+                                        title: artist.name, circular: true)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
@@ -153,10 +154,8 @@ struct SearchView: View {
             Section("Albums") {
                 ForEach(results.albums) { album in
                     NavigationLink(value: AppRoute.album(album)) {
-                        VStack(alignment: .leading) {
-                            Text(album.title)
-                            Text(album.artistName).font(.caption).foregroundStyle(.secondary)
-                        }
+                        SearchResultRow(artworkKey: album.artworkKey, seed: album.title,
+                                        title: album.title, subtitle: album.artistName)
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         record(.album, serverId: album.serverId, remoteId: album.remoteId)
@@ -182,16 +181,16 @@ struct SearchView: View {
         switch resolved {
         case .artist(let a):
             NavigationLink(value: AppRoute.artist(a)) {
-                RecentRowLabel(artworkKey: a.artworkKey, seed: a.name,
-                               title: a.name, subtitle: "Artist", circular: true)
+                SearchResultRow(artworkKey: a.artworkKey, seed: a.name,
+                                title: a.name, subtitle: "Artist", circular: true)
             }
             .simultaneousGesture(TapGesture().onEnded {
                 record(.artist, serverId: a.serverId, remoteId: a.remoteId)
             })
         case .album(let a):
             NavigationLink(value: AppRoute.album(a)) {
-                RecentRowLabel(artworkKey: a.artworkKey, seed: a.title,
-                               title: a.title, subtitle: "Album · \(a.artistName)")
+                SearchResultRow(artworkKey: a.artworkKey, seed: a.title,
+                                title: a.title, subtitle: "Album · \(a.artistName)")
             }
             .simultaneousGesture(TapGesture().onEnded {
                 record(.album, serverId: a.serverId, remoteId: a.remoteId)
@@ -201,8 +200,8 @@ struct SearchView: View {
                 record(.track, serverId: t.serverId, remoteId: t.remoteId)
                 env.playback.play(tracks: [t.toDomain()])
             } label: {
-                RecentRowLabel(artworkKey: t.artworkKey, seed: t.albumTitle ?? t.title,
-                               title: t.title, subtitle: "Song · \(t.artistName)")
+                SearchResultRow(artworkKey: t.artworkKey, seed: t.albumTitle ?? t.title,
+                                title: t.title, subtitle: "Song · \(t.artistName)")
             }
             .buttonStyle(.plain)
         }
@@ -281,12 +280,17 @@ enum RecentResolved: Identifiable {
     }
 }
 
-/// A single "Recently Searched" row: artwork + title + kind/subtitle.
-private struct RecentRowLabel: View {
+/// A single search row — artwork + title + optional subtitle. Shared by the
+/// "Recently Searched" list and the live result sections so every row gets the
+/// same 44pt album/artist artwork and a full-width, comfortably tall touch
+/// target. Artists render with circular artwork; albums and songs use a rounded
+/// square. When `subtitle` is nil (e.g. artist results, where the section header
+/// already says "Artists") the title sits vertically centered on its own.
+private struct SearchResultRow: View {
     let artworkKey: String?
     let seed: String
     let title: String
-    let subtitle: String
+    var subtitle: String?
     var circular = false
 
     var body: some View {
@@ -295,7 +299,9 @@ private struct RecentRowLabel: View {
                         seed: seed, size: 44, cornerRadius: circular ? 22 : 6)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer()
         }
