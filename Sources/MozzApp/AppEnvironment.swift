@@ -621,10 +621,12 @@ public final class AppEnvironment: ObservableObject {
         // The full sync needs server totals (progress % + prune completeness); the
         // quick start doesn't prune or show a %, so it skips the expensive first-page
         // COUNT(*) — which alone was ~15s of its time on a large library.
-        let backend = makeBulkSyncBackend(requestTotals: plan.prune) ?? active.backend
+        let musicLibraryId = await resolvedMusicLibraryId()
+        let backend = makeBulkSyncBackend(requestTotals: plan.prune,
+                                          musicLibraryId: musicLibraryId) ?? active.backend
         let pageSize = plan.pageSize ?? 1000
         let diagLog = SyncDiagnosticsLog()
-        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=\(pageSize) plan=\(plan.prune ? "full" : "quick")")
+        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=\(pageSize) plan=\(plan.prune ? "full" : "quick") parentId=\(musicLibraryId ?? "none")")
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: pageSize, diag: diagLog.sink)
         let summary: SyncSummary
         do {
@@ -1028,7 +1030,25 @@ public final class AppEnvironment: ObservableObject {
     /// Rebuild the active backend with a bulk-timeout transport for catalog
     /// sync. Returns `nil` for the demo (or if the session can't be loaded), so
     /// the caller falls back to the interactive backend.
-    private func makeBulkSyncBackend(requestTotals: Bool = true) -> (any MusicBackend)? {
+    /// The resolved Jellyfin music-library id, cached per server so we resolve it
+    /// once (the quick-start and full-sync passes both need it). See
+    /// `JellyfinBackend.musicLibraryId` for why ParentId scoping matters.
+    private var cachedMusicLibraryId: (serverId: String, id: String?)?
+
+    /// Resolve (and cache) the music library id used to scope Jellyfin catalog
+    /// queries via ParentId. Returns nil for Plex (uses section ids instead) and
+    /// on any resolution failure — the sync then falls back to unscoped queries.
+    private func resolvedMusicLibraryId() async -> String? {
+        guard let active, active.connection.kind == .jellyfin else { return nil }
+        if let cached = cachedMusicLibraryId, cached.serverId == active.connection.id {
+            return cached.id
+        }
+        let id = await (active.backend as? JellyfinBackend)?.resolveMusicLibraryId()
+        cachedMusicLibraryId = (active.connection.id, id)
+        return id
+    }
+
+    private func makeBulkSyncBackend(requestTotals: Bool = true, musicLibraryId: String? = nil) -> (any MusicBackend)? {
         guard let active,
               let stored = SessionPersistence.load(credentials),
               !stored.isDemo else { return nil }
@@ -1037,7 +1057,8 @@ public final class AppEnvironment: ObservableObject {
         case .jellyfin:
             return JellyfinBackend(connection: active.connection, token: stored.token,
                                    clientInfo: clientInfo, transport: bulk,
-                                   includeTotalCount: requestTotals)
+                                   includeTotalCount: requestTotals,
+                                   musicLibraryId: musicLibraryId)
         case .plex:
             // Span whatever set of music libraries the active backend resolved
             // (see ensurePlexMusicSection, which runs first in syncNow).

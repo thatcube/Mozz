@@ -18,6 +18,13 @@ public struct JellyfinBackend: MusicBackend {
     /// completeness — but pointless for the bounded quick start, which sets this
     /// false so its single page returns fast.
     private let includeTotalCount: Bool
+    /// The music library's item id, used as `ParentId` to scope catalog queries.
+    /// Without it, `Recursive=true&IncludeItemTypes=Audio` makes the server scan
+    /// EVERY item across ALL libraries (movies, TV, …) to filter audio — on a
+    /// large multi-library server that's a full-table scan per page (measured
+    /// ~30s/page). With it, the server applies a cheap indexed `TopParentId`
+    /// filter. Resolved once per sync via `resolveMusicLibraryId()`.
+    private let musicLibraryId: String?
 
     /// Audio containers we advertise as directly playable, so `universal` serves
     /// the original file when the codec is AVFoundation-friendly.
@@ -29,12 +36,14 @@ public struct JellyfinBackend: MusicBackend {
         clientInfo: ClientInfo,
         transport: any HTTPTransport = URLSessionTransport(),
         includeTotalCount: Bool = true,
+        musicLibraryId: String? = nil,
         logger: any NetworkLogger = NoopNetworkLogger()
     ) {
         self.connection = connection
         self.token = token
         self.clientInfo = clientInfo
         self.includeTotalCount = includeTotalCount
+        self.musicLibraryId = musicLibraryId
         let auth = JellyfinAuth.authorizationHeader(
             clientInfo: clientInfo,
             deviceID: connection.clientIdentifier,
@@ -69,6 +78,34 @@ public struct JellyfinBackend: MusicBackend {
     }
 
     // MARK: Catalog enumeration
+
+    /// Find the music library's item id so catalog queries can scope to it via
+    /// `ParentId` (see `musicLibraryId`). Reads the user's top-level library
+    /// folders and returns the first one whose `CollectionType` is "music".
+    /// Cheap (one small request, a handful of folders) and best-effort: on any
+    /// failure or a server with no tagged music library we return nil and the
+    /// caller falls back to unscoped (whole-server) queries.
+    public func resolveMusicLibraryId() async -> String? {
+        do {
+            let response = try await client.send(
+                Endpoint(path: "Users/\(userID)/Views"),
+                as: JFItemsResponse.self
+            )
+            let folders = response.Items ?? []
+            if let music = folders.first(where: { $0.CollectionType?.lowercased() == "music" }) {
+                return music.Id
+            }
+            // Some servers don't tag the collection type on Views; fall back to
+            // the media-folders endpoint which reports it more reliably.
+            let media = try await client.send(
+                Endpoint(path: "Library/MediaFolders"),
+                as: JFItemsResponse.self
+            )
+            return (media.Items ?? []).first(where: { $0.CollectionType?.lowercased() == "music" })?.Id
+        } catch {
+            return nil
+        }
+    }
 
     public func fetchArtists(offset: Int, limit: Int) async throws -> CatalogPage<Artist> {
         let response = try await client.send(
@@ -247,7 +284,7 @@ public struct JellyfinBackend: MusicBackend {
     // MARK: Helpers
 
     private func pageQuery(offset: Int, limit: Int) -> [URLQueryItem] {
-        [
+        var query: [URLQueryItem] = [
             URLQueryItem(name: "userId", value: userID),
             URLQueryItem(name: "StartIndex", value: "\(offset)"),
             URLQueryItem(name: "Limit", value: "\(limit)"),
@@ -268,6 +305,16 @@ public struct JellyfinBackend: MusicBackend {
             // every later page skips it.
             URLQueryItem(name: "EnableTotalRecordCount", value: (includeTotalCount && offset == 0) ? "true" : "false"),
         ]
+        // Scope every catalog query to the music library. Without ParentId the
+        // server treats `Recursive=true` as "search the whole server" and scans
+        // every item across every library (movies, TV, photos, …) to filter for
+        // the requested type — a full-table scan per page on a large multi-library
+        // box (measured ~30s/page). ParentId turns it into an indexed TopParentId
+        // filter over just the music items.
+        if let musicLibraryId {
+            query.append(URLQueryItem(name: "ParentId", value: musicLibraryId))
+        }
+        return query
     }
 
     private func itemsQuery(type: String, offset: Int, limit: Int, fields: String) -> [URLQueryItem] {
