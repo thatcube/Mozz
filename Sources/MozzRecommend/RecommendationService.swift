@@ -108,7 +108,11 @@ public actor RecommendationService {
         let pool = try await store.candidateTracks(
             serverId: serverId, genres: seed.genres, artistIds: seed.artistIds,
             notPlayedSince: now().timeIntervalSince1970, limit: 500)
-        guard !pool.isEmpty else { return [] }
+        // Drop already-surfaced tracks BEFORE scoring/limiting, so each batch is
+        // filled with `limit` unseen tracks rather than shrinking to empty once
+        // the top-ranked picks have all been seen.
+        let fresh = pool.filter { !excluding.contains($0.remoteId) }
+        guard !fresh.isEmpty else { return [] }
 
         // Score by similarity to the SEED (treat the seed's genres/artists as a
         // synthetic taste), so the station stays close to what it was seeded on.
@@ -116,16 +120,22 @@ public actor RecommendationService {
             genreAffinity: Dictionary(seed.genres.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             artistAffinity: Dictionary(seed.artistIds.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             positiveSignal: TasteProfile.coldStartThreshold + 1)
-        let scored = content.score(candidates: pool, taste: seedTaste)
+        let scored = content.score(candidates: fresh, taste: seedTaste)
         // Fall back to the raw pool when nothing scored (e.g. artist-only seed
         // whose tracks carry no genres): still a valid same-artist station.
         let sources = scored.isEmpty
-            ? [pool.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
+            ? [fresh.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
             : [scored]
 
+        // Relax the variety caps for radio: an artist-only seed would otherwise
+        // be throttled to `maxPerArtist` (3) tracks per batch and stall.
+        let config = Blender.Config(
+            limit: limit,
+            maxPerArtist: seed.genres.isEmpty ? limit : 6,
+            maxPerAlbum: max(2, limit / 4))
         var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
-        let ranked = blender.blend(sources: sources, config: Blender.Config(limit: limit), using: &rng)
-        return ranked.map { $0.candidate.remoteId }.filter { !excluding.contains($0) }
+        let ranked = blender.blend(sources: sources, config: config, using: &rng)
+        return ranked.map { $0.candidate.remoteId }
     }
 
     /// (Re)generate "Mozz Weekly" for a server and persist it. Pass a `seed` for

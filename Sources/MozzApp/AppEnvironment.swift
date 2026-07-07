@@ -976,11 +976,15 @@ public final class AppEnvironment: ObservableObject {
     /// Track ids already surfaced by the current station, so successive batches
     /// don't immediately repeat.
     private var radioSeenIDs: Set<String> = []
+    /// Bumped per `startRadio` so a batch fetch that resolves after the station
+    /// was replaced discards its result instead of appending / polluting state.
+    private var radioGeneration = 0
 
     /// Start an endless station seeded from a track (its genres + artist).
     public func startRadio(fromTrack track: Track) {
         startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
-                                   artistIds: [track.artistID].compactMap { $0 }))
+                                   artistIds: [track.artistID].compactMap { $0 }),
+                   initialExcluding: [track.id])
     }
 
     /// Start an endless station seeded from an artist.
@@ -989,26 +993,33 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Load an initial station batch and keep the queue topped up as it plays.
-    public func startRadio(seed: RadioSeed) {
+    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = []) {
         guard let serverId = active?.connection.id else { return }
+        radioGeneration += 1
+        let generation = radioGeneration
         Task { @MainActor in
-            let ids = (try? await recommendations.radioBatch(seed: seed, serverId: serverId, limit: 30)) ?? []
+            let ids = (try? await recommendations.radioBatch(
+                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding)) ?? []
             let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
-            guard !tracks.isEmpty else { return }
+            // Superseded by a newer startRadio while we were fetching.
+            guard generation == radioGeneration, !tracks.isEmpty else { return }
             activeRadioSeed = seed
-            radioSeenIDs = Set(tracks.map(\.id))
+            radioSeenIDs = initialExcluding.union(tracks.map(\.id))
             playback.startStation(tracks) { [weak self] in
-                await self?.nextRadioBatch() ?? []
+                await self?.nextRadioBatch(generation: generation) ?? []
             }
         }
     }
 
-    /// Fetch the next station batch, excluding tracks already surfaced this session.
-    private func nextRadioBatch() async -> [Track] {
-        guard let seed = activeRadioSeed, let serverId = active?.connection.id else { return [] }
+    /// Fetch the next station batch, excluding tracks already surfaced this
+    /// session. Bails (without mutating state) if the station was replaced.
+    private func nextRadioBatch(generation: Int) async -> [Track] {
+        guard generation == radioGeneration, let seed = activeRadioSeed,
+              let serverId = active?.connection.id else { return [] }
         let ids = (try? await recommendations.radioBatch(
             seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs)) ?? []
         let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+        guard generation == radioGeneration else { return [] }
         radioSeenIDs.formUnion(tracks.map(\.id))
         return tracks
     }

@@ -62,6 +62,10 @@ public final class PlaybackEngine: ObservableObject {
     public var onQueueNearEnd: (@Sendable () async -> [Track])?
     /// Guards against firing overlapping extend requests.
     private var isExtendingQueue = false
+    /// Bumped whenever the station context changes (start/stop/replace), so an
+    /// in-flight extend fetch that resolves late can tell it's stale and discard
+    /// its result instead of appending into a queue the user has since replaced.
+    private var stationGeneration = 0
     /// Extend the queue once this few tracks remain after the current one.
     private static let radioRefillThreshold = 3
 
@@ -111,7 +115,7 @@ public final class PlaybackEngine: ObservableObject {
 
     /// Load a set of tracks and start playing at `startIndex`.
     public func play(tracks: [Track], startAt startIndex: Int = 0) {
-        onQueueNearEnd = nil   // a fresh explicit play ends any active station
+        invalidateStation()   // a fresh explicit play ends any active station
         logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
@@ -119,11 +123,15 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     /// Start an endless "station": load an initial batch and keep it topped up
-    /// via `onNearEnd` as it plays down. Repeat is irrelevant (the queue extends
-    /// rather than loops); a normal `play`/`playShuffled` ends the station.
+    /// via `onNearEnd` as it plays down. Forces shuffle + repeat off (the queue
+    /// extends rather than loops, and the batch is already ranked); a normal
+    /// `play`/`playShuffled` ends the station.
     public func startStation(_ tracks: [Track],
                              onNearEnd: @escaping @Sendable () async -> [Track]) {
+        invalidateStation()
         logTerminal(.skipped, position: snapshot.elapsed)
+        queue.setShuffle(false)
+        queue.setRepeatMode(.off)
         queue.setItems(tracks, startingAt: 0)
         onQueueNearEnd = onNearEnd
         try? session.activate()
@@ -142,7 +150,7 @@ public final class PlaybackEngine: ObservableObject {
     public func playShuffled(_ tracks: [Track],
                              recencyScores: [String: Double]? = nil,
                              tasteScores: [String: Double]? = nil) {
-        onQueueNearEnd = nil   // a fresh explicit shuffle ends any active station
+        invalidateStation()   // a fresh explicit shuffle ends any active station
         logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItemsShuffled(tracks, recencyScores: recencyScores, tasteScores: tasteScores)
         try? session.activate()
@@ -281,7 +289,7 @@ public final class PlaybackEngine: ObservableObject {
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
-        onQueueNearEnd = nil   // stopping ends any active station
+        invalidateStation()   // stopping ends any active station
         report(.stopped)
         currentTrack = nil
         upNext = []
@@ -350,17 +358,29 @@ public final class PlaybackEngine: ObservableObject {
 
     /// If a radio station is active and the queue is running low, fetch and
     /// append the next batch so playback never runs dry. Guarded so overlapping
-    /// low-water marks don't fire duplicate fetches.
+    /// low-water marks don't fire duplicate fetches, and stamped with the current
+    /// station generation so a fetch that resolves after the station was
+    /// replaced/stopped discards its result instead of appending into the wrong
+    /// queue.
     private func maybeExtendQueue() {
         guard let onQueueNearEnd, !isExtendingQueue else { return }
         guard queue.upNext.count <= Self.radioRefillThreshold else { return }
         isExtendingQueue = true
+        let generation = stationGeneration
         Task { [weak self] in
             let more = await onQueueNearEnd()
-            guard let self else { return }
+            guard let self, generation == self.stationGeneration else { return }
             if !more.isEmpty { self.append(more) }
             self.isExtendingQueue = false
         }
+    }
+
+    /// End any active station: clear the hook, release the extend guard, and bump
+    /// the generation so an in-flight extend fetch discards its (now stale) result.
+    private func invalidateStation() {
+        onQueueNearEnd = nil
+        isExtendingQueue = false
+        stationGeneration += 1
     }
 
     private func refillLookaheadAsync(generation: Int) async {

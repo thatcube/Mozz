@@ -80,6 +80,24 @@ final class PlaybackEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(box.count, 1, "station fetched a batch as the queue neared its end")
         XCTAssertTrue(engine.upNext.contains { $0.id.hasPrefix("x") }, "fetched tracks were appended")
     }
+
+    /// A station extend fetch that resolves AFTER the user started different
+    /// playback must not append its stale batch into the replaced queue.
+    func testStaleStationExtendDoesNotAppendAfterReplacement() async {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let gate = ExtendGate()
+        engine.startStation([Track(id: "s0", title: "S", artistName: "A")]) {
+            await gate.wait()
+            return [Track(id: "x0", title: "X", artistName: "A")]
+        }
+        await engine.awaitPendingLoadsForTesting()   // near-end fires; extend Task now awaiting the gate
+        engine.play(tracks: (0..<3).map { Track(id: "p\($0)", title: "P", artistName: "B") })
+        await gate.open()                             // let the stale station batch resolve
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(engine.currentTrack?.id, "p0")
+        XCTAssertFalse(engine.upNext.contains { $0.id.hasPrefix("x") },
+                       "a stale station batch must not append into the replaced queue")
+    }
 }
 
 /// Thread-safe counter for the station auto-extend test's `@Sendable` closure.
@@ -88,6 +106,22 @@ private final class ExtendCounter: @unchecked Sendable {
     private var n = 0
     func bump() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
     var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+}
+
+/// A one-shot async gate so a test can hold a station's extend fetch open while
+/// it replaces playback, then release it.
+private actor ExtendGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var opened = false
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func open() {
+        opened = true
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 /// Verifies the listening-history emission (B1): every track start is paired
