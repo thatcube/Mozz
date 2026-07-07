@@ -3,10 +3,12 @@ import MozzCore
 import MozzDatabase
 
 /// Orchestrates open metadata enrichment (ADR-0007). A single background pass
-/// runs three stages in order, so each depends on the previous:
+/// runs four stages in order, so each depends on the previous:
 ///   1. resolve MusicBrainz recording MBIDs the backend didn't embed (B1);
 ///   2. canonicalize those MBIDs via ListenBrainz (similarity is canonical-keyed);
-///   3. fetch ListenBrainz similar-recordings for the canonical MBIDs (B2).
+///   3. fetch ListenBrainz similar-recordings for the canonical MBIDs (B2);
+///   4. capture MusicBrainz artist-genre tags into `mb_tags` (B4 data capture —
+///      stored but not yet wired into the genre engine; that's B4.5).
 ///
 /// Network + policy only — persistence lives in `EnrichmentStore`, so
 /// `MozzRecommend` reads results without any network path. Gated by `isEnabled`
@@ -46,8 +48,8 @@ public actor EnrichmentService {
     // MARK: - Background pass (fire-and-forget, single-flight, 3 stages)
 
     /// Kick a bounded background enrichment pass (resolve -> canonicalize ->
-    /// similarity). No-op when disabled or already running. Never awaited by the
-    /// caller (a sync must not appear to hang for minutes).
+    /// similarity -> tags). No-op when disabled or already running. Never awaited
+    /// by the caller (a sync must not appear to hang for minutes).
     public func enrich(serverId: ServerID) {
         guard isEnabled() else { return }
         guard backgroundPass == nil else { return }
@@ -79,6 +81,7 @@ public actor EnrichmentService {
             try await resolveStage(serverId: serverId)
             try await canonicalizeStage(serverId: serverId)
             try await similarityStage(serverId: serverId)
+            try await tagStage(serverId: serverId)
         } catch is CancellationError {
             return
         } catch let error as MozzError where error == .cancelled {
@@ -151,6 +154,29 @@ public actor EnrichmentService {
             } catch is CancellationError { throw CancellationError() }
             catch let e as MozzError where e == .cancelled { throw CancellationError() }
             catch { log("enrichment: similar \(canonical) failed: \(error)") }
+        }
+    }
+
+    // Stage 4 - capture MusicBrainz artist-genre tags (B4 data capture).
+    // Enriches by artist_mbid (dense; recording genres are ~empty), one call per
+    // distinct artist. Writes to the DISTINCT `mb_tags` column — NOT yet consumed
+    // by the genre engine (deferred to B4.5), so it can never regress radio today.
+    private func tagStage(serverId: ServerID) async throws {
+        let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
+        let artistMbids = try await store.artistsNeedingTags(
+            serverId: serverId, notLookedUpSince: cutoff, limit: config.tagPerRunBudget)
+        for artistMbid in artistMbids {
+            guard try checkpoint() else { return }
+            do {
+                // A throw is a transport/decode/cancel failure — skip stamping so we
+                // retry later. An empty array is a valid "artist has no genres" result
+                // and IS stamped (TTL negative cache).
+                let tags = try await musicBrainz.artistGenres(forArtistMbid: artistMbid)
+                try await store.setArtistTags(artistMbid: artistMbid, tags: tags,
+                                              at: now().timeIntervalSince1970)
+            } catch is CancellationError { throw CancellationError() }
+            catch let e as MozzError where e == .cancelled { throw CancellationError() }
+            catch { log("enrichment: tags \(artistMbid) failed: \(error)") }
         }
     }
 

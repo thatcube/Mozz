@@ -30,6 +30,13 @@ public struct EnrichmentConfig: Sendable {
     public var canonicalPerRunBudget: Int
     /// Max similarity fetches per background pass.
     public var similarityPerRunBudget: Int
+    /// Max artist-genre (tag) fetches per background pass (B4 data capture).
+    public var tagPerRunBudget: Int
+    /// Minimum community vote count for a MusicBrainz genre to be kept — drops
+    /// noisy 1-vote tags.
+    public var minTagVotes: Int
+    /// Max genres stored per artist (highest-count first).
+    public var maxTags: Int
 
     public init(
         userAgent: String,
@@ -41,7 +48,10 @@ public struct EnrichmentConfig: Sendable {
         listenBrainzAlgorithm: String = "session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30",
         listenBrainzMinInterval: TimeInterval = 0.5,
         canonicalPerRunBudget: Int = 200,
-        similarityPerRunBudget: Int = 150
+        similarityPerRunBudget: Int = 150,
+        tagPerRunBudget: Int = 200,
+        minTagVotes: Int = 2,
+        maxTags: Int = 6
     ) {
         self.userAgent = userAgent
         self.minRequestInterval = minRequestInterval
@@ -53,5 +63,8 @@ public struct EnrichmentConfig: Sendable {
         self.listenBrainzMinInterval = listenBrainzMinInterval
         self.canonicalPerRunBudget = canonicalPerRunBudget
         self.similarityPerRunBudget = similarityPerRunBudget
+        self.tagPerRunBudget = tagPerRunBudget
+        self.minTagVotes = minTagVotes
+        self.maxTags = maxTags
     }
 }

@@ -111,6 +111,52 @@ final class MusicBrainzClientRequestTests: XCTestCase {
         XCTAssertNil(match)
     }
 
+    func testArtistGenresParsesFiltersSortsAndLowercases() async throws {
+        // count 1 dropped (< minTagVotes=2); sorted by count desc; lowercased;
+        // capped at maxTags; deduped.
+        let transport = CannedTransport(json: """
+            {"genres":[
+              {"name":"Alternative Rock","count":41},
+              {"name":"Noise","count":1},
+              {"name":"Electronic","count":12},
+              {"name":"electronic","count":3},
+              {"name":"Trip Hop","count":7}]}
+            """)
+        let genres = try await makeClient(transport).artistGenres(forArtistMbid: artistA)
+        XCTAssertEqual(genres, ["alternative rock", "electronic", "trip hop"])
+        let url = try XCTUnwrap(transport.lastRequest?.url)
+        XCTAssertEqual(url.path, "/ws/2/artist/\(artistA)")
+        let inc = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "inc" }?.value
+        XCTAssertEqual(inc, "genres")
+    }
+
+    func testArtistGenresRespectsMaxTagsCap() async throws {
+        let transport = CannedTransport(json: """
+            {"genres":[
+              {"name":"a","count":9},{"name":"b","count":8},{"name":"c","count":7},
+              {"name":"d","count":6},{"name":"e","count":5},{"name":"f","count":4},
+              {"name":"g","count":3},{"name":"h","count":2}]}
+            """)
+        let genres = try await makeClient(transport).artistGenres(forArtistMbid: artistA)
+        XCTAssertEqual(genres.count, 6)          // default maxTags
+        XCTAssertEqual(genres, ["a", "b", "c", "d", "e", "f"])
+    }
+
+    func testArtistGenresEmptyWhenNoneOrAllBelowThreshold() async throws {
+        let none = CannedTransport(json: "{\"genres\":[]}")
+        let g1 = try await makeClient(none).artistGenres(forArtistMbid: artistA)
+        XCTAssertTrue(g1.isEmpty)
+
+        let lowVotes = CannedTransport(json: "{\"genres\":[{\"name\":\"x\",\"count\":1}]}")
+        let g2 = try await makeClient(lowVotes).artistGenres(forArtistMbid: artistA)
+        XCTAssertTrue(g2.isEmpty)
+
+        let missing = CannedTransport(json: "{}")
+        let g3 = try await makeClient(missing).artistGenres(forArtistMbid: artistA)
+        XCTAssertTrue(g3.isEmpty)
+    }
+
     func testAridFallbackWhenConstrainedSearchEmpty() async throws {
         // Empty for the arid-constrained query; a match for the unconstrained one.
         let transport = QueryVaryingTransport(

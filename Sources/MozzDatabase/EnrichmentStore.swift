@@ -334,6 +334,60 @@ public struct EnrichmentStore: Sendable {
         }
     }
 
+    // MARK: - B4: MusicBrainz artist-genre tags (data capture)
+
+    /// Distinct artist MBIDs of owned tracks that still need genre tags fetched
+    /// (or whose tag lookup is stale). One row per artist so an N-track artist
+    /// costs a single MusicBrainz call. Prioritized recently played / favorites
+    /// first, matching the resolution/similarity passes. Uses
+    /// `idx_track_features_artist_mbid`.
+    public func artistsNeedingTags(serverId: ServerID, notLookedUpSince: Double,
+                                   limit: Int) async throws -> [String] {
+        try await database.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT tf.artist_mbid
+                FROM track
+                JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                LEFT JOIN (SELECT track_ref, MAX(created_at) AS lastPlayed
+                           FROM play_event GROUP BY track_ref) lp
+                       ON lp.track_ref = \(Self.refExpr)
+                WHERE track.serverId = ?
+                  AND tf.artist_mbid IS NOT NULL AND tf.artist_mbid <> ''
+                  AND (tf.mb_tags_lookup_at IS NULL OR tf.mb_tags_lookup_at < ?)
+                GROUP BY tf.artist_mbid
+                ORDER BY MAX(lp.lastPlayed) DESC, MAX(track.isFavorite) DESC
+                LIMIT ?
+                """, arguments: [serverId, notLookedUpSince, limit])
+        }
+    }
+
+    /// Store genre tags for every track by `artistMbid`, stamping the tag-lookup
+    /// time. `tags` is serialized as a lowercased JSON array. An EMPTY `tags` list
+    /// still stamps the timestamp (TTL negative cache) and clears any stale value,
+    /// so a genre-less artist isn't re-fetched every pass. Stored in the DISTINCT
+    /// `mb_tags` column — never the reserved `tags` column.
+    public func setArtistTags(artistMbid: String, tags: [String], at: Double) async throws {
+        let json = Self.encodeTagArray(tags)
+        try await database.write { db in
+            try db.execute(sql: """
+                UPDATE track_features
+                SET mb_tags = ?, mb_tags_lookup_at = ?, updated_at = ?
+                WHERE artist_mbid = ?
+                """, arguments: [json, at, at, artistMbid])
+        }
+    }
+
+    /// Encode tags as a compact lowercased JSON array (nil for empty, so the column
+    /// reads NULL rather than "[]"). Lowercasing here keeps the stored form
+    /// case-consistent for the future B4.5 genre-engine merge.
+    static func encodeTagArray(_ tags: [String]) -> String? {
+        guard !tags.isEmpty else { return nil }
+        let normalized = tags.map { $0.lowercased() }
+        guard let data = try? JSONEncoder().encode(normalized),
+              let string = String(data: data, encoding: .utf8) else { return nil }
+        return string
+    }
+
     private static let maxSeeds = 400
     private static let maxExclusions = 400
 }

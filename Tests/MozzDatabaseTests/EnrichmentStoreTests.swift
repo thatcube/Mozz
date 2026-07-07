@@ -174,4 +174,85 @@ final class EnrichmentStoreTests: XCTestCase {
         XCTAssertEqual(state?.mbid, mbidA)
         XCTAssertEqual(state?.artistMbid, artistMbid)
     }
+
+    // MARK: - B4 artist-genre tags (data capture)
+
+    func testArtistsNeedingTagsDedupesAndSetArtistTagsFansOut() async throws {
+        let (db, writer, store) = try await setup()
+        // Two tracks share one artist_mbid; a third track has none.
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+            Track(id: "t2", title: "B", artistName: "Artist", mbid: mbidB, artistMbid: artistMbid),
+            Track(id: "t3", title: "C", artistName: "Other", mbid: nil, artistMbid: nil),
+        ], serverId: "srv1")
+
+        // Distinct artist_mbid returned exactly once.
+        var needing = try await store.artistsNeedingTags(
+            serverId: "srv1", notLookedUpSince: 1_000, limit: 100)
+        XCTAssertEqual(needing, [artistMbid])
+
+        // Setting tags fans out to every track by that artist, lowercased JSON.
+        try await store.setArtistTags(
+            artistMbid: artistMbid, tags: ["Alternative Rock", "Electronic"], at: 500)
+        let rows = try await db.read { try Row.fetchAll($0, sql: """
+            SELECT mb_tags, mb_tags_lookup_at FROM track_features
+            WHERE artist_mbid = ? ORDER BY track_ref
+            """, arguments: [artistMbid]) }
+        XCTAssertEqual(rows.count, 2)
+        for row in rows {
+            let tags: String? = row["mb_tags"]
+            let at: Double? = row["mb_tags_lookup_at"]
+            XCTAssertEqual(tags, "[\"alternative rock\",\"electronic\"]")
+            XCTAssertEqual(at, 500)
+        }
+
+        // No longer due within TTL; due again once the cutoff passes the stamp.
+        needing = try await store.artistsNeedingTags(
+            serverId: "srv1", notLookedUpSince: 400, limit: 100)
+        XCTAssertTrue(needing.isEmpty)
+        needing = try await store.artistsNeedingTags(
+            serverId: "srv1", notLookedUpSince: 600, limit: 100)
+        XCTAssertEqual(needing, [artistMbid])
+    }
+
+    func testSetArtistTagsEmptyNegativeCachesWithoutWritingEmptyArray() async throws {
+        let (db, writer, store) = try await setup()
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        try await store.setArtistTags(artistMbid: artistMbid, tags: [], at: 500)
+        let row = try await db.read { try Row.fetchOne($0, sql: """
+            SELECT mb_tags, mb_tags_lookup_at FROM track_features WHERE artist_mbid = ?
+            """, arguments: [artistMbid]) }
+        let tags: String? = row?["mb_tags"]
+        let at: Double? = row?["mb_tags_lookup_at"]
+        XCTAssertNil(tags)          // empty → NULL, never the string "[]"
+        XCTAssertEqual(at, 500)     // still stamped (TTL negative cache)
+        let needing = try await store.artistsNeedingTags(
+            serverId: "srv1", notLookedUpSince: 400, limit: 100)
+        XCTAssertTrue(needing.isEmpty) // not re-fetched within TTL
+    }
+
+    func testNewTrackByAlreadyTaggedArtistReTriggersLookup() async throws {
+        let (_, writer, store) = try await setup()
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        try await store.setArtistTags(artistMbid: artistMbid, tags: ["rock"], at: 500)
+        // A later sync brings a NEW track by the same artist (mb_tags still NULL).
+        try await writer.upsertTracks([
+            Track(id: "t2", title: "B", artistName: "Artist", mbid: mbidB, artistMbid: artistMbid),
+        ], serverId: "srv1")
+        // The artist is due again so a single re-fetch heals the new track — even
+        // though the old track was stamped inside the TTL.
+        let needing = try await store.artistsNeedingTags(
+            serverId: "srv1", notLookedUpSince: 400, limit: 100)
+        XCTAssertEqual(needing, [artistMbid])
+    }
+
+    func testEncodeTagArrayLowercasesAndNilsEmpty() {
+        XCTAssertNil(EnrichmentStore.encodeTagArray([]))
+        XCTAssertEqual(EnrichmentStore.encodeTagArray(["Rock", "Trip Hop"]),
+                       "[\"rock\",\"trip hop\"]")
+    }
 }

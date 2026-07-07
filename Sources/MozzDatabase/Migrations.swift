@@ -18,6 +18,7 @@ enum Schema {
         registerV10(&migrator)
         registerV11(&migrator)
         registerV12(&migrator)
+        registerV13(&migrator)
         return migrator
     }
 
@@ -512,6 +513,26 @@ enum Schema {
             // Reverse-map join path: similar_mbid (+ algorithm) -> owned tracks.
             try db.create(index: "idx_similar_recording_similar", on: "similar_recording",
                           columns: ["similar_mbid", "algorithm"])
+        }
+    }
+
+    /// v13 — MusicBrainz artist-genre tags (ADR-0007, phase B4 data capture).
+    ///
+    /// Stored in a DISTINCT `mb_tags` column, NOT the reserved `tags` (which is
+    /// owned by the future on-device sonic/mood analysis and is wholesale-written
+    /// by `RecommendationStore.upsertTrackFeatures`). `mb_tags_lookup_at` is the
+    /// per-artist TTL negative cache. Keyed by `artist_mbid` (dense; recording
+    /// genres are ~empty), applied to all of an artist's tracks.
+    ///
+    /// NOTE: this column is captured now but NOT yet wired into the genre engine
+    /// (that's B4.5 — it requires symmetric + case-folded merging on both the
+    /// candidate AND seed/taste sides to avoid regressing the tuned radio floor).
+    private static func registerV13(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v13.musicBrainzTags") { db in
+            try db.alter(table: "track_features") { t in
+                t.add(column: "mb_tags", .text)             // JSON array, lowercased
+                t.add(column: "mb_tags_lookup_at", .double) // TTL negative cache
+            }
         }
     }
 }

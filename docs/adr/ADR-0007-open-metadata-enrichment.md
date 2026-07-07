@@ -124,8 +124,16 @@ recommendations fall back to the genre engine immediately.
   add of an endpoint + `similar_artist` table + reverse map. Split out of B3
   because it needs the same infrastructure B2 built for recordings; recording
   similarity + genre fallback delivers the core quality win first.
-- **B4** (optional) — MusicBrainz genre/tag enrichment into `track_features.tags`,
-  feeding the existing genre engine so Smart Shuffle and Mozz Weekly improve too.
+- **B4** (data capture) — fetch MusicBrainz **artist** genres (dense; recording
+  genres are ~empty) and store them in a DISTINCT `track_features.mb_tags` column,
+  keyed by `artist_mbid`, negative-cached per artist. This is a zero-regression
+  data layer: the column is captured but NOT yet read by the genre engine.
+- **B4.5** — wire `mb_tags` into the genre engine so Smart Shuffle and Mozz Weekly
+  improve too. Deferred deliberately: enriching only radio *candidates* would
+  numerically regress the tuned genre floor (a perfect seed match's similarity
+  drops below the cutoff and gets excluded), so the wiring must be **symmetric** —
+  merged into the seed/taste side as well — and **case-folded** (Plex Title-Case
+  vs MusicBrainz lowercase) with populated regression tests, before it can ship.
 
 ## Future: Discovery + acquisition (Phase C, separate)
 

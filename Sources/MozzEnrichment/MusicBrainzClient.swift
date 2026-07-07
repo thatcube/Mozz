@@ -29,11 +29,16 @@ public struct MusicBrainzClient: Sendable {
     private let client: HTTPClient
     private let minScore: Int
     private let durationToleranceMs: Double
+    private let minTagVotes: Int
+    private let maxTags: Int
 
-    public init(client: HTTPClient, minScore: Int, durationToleranceMs: Double) {
+    public init(client: HTTPClient, minScore: Int, durationToleranceMs: Double,
+                minTagVotes: Int = 2, maxTags: Int = 6) {
         self.client = client
         self.minScore = minScore
         self.durationToleranceMs = durationToleranceMs
+        self.minTagVotes = minTagVotes
+        self.maxTags = maxTags
     }
 
     /// Build a client against `https://musicbrainz.org`, wrapping `transport` in a
@@ -50,7 +55,28 @@ public struct MusicBrainzClient: Sendable {
             transport: RateLimitingTransport(wrapping: baseTransport, limiter: limiter),
             defaultHeaders: ["User-Agent": config.userAgent, "Accept": "application/json"])
         return MusicBrainzClient(client: http, minScore: config.minScore,
-                                 durationToleranceMs: config.durationToleranceMs)
+                                 durationToleranceMs: config.durationToleranceMs,
+                                 minTagVotes: config.minTagVotes, maxTags: config.maxTags)
+    }
+
+    /// The community genre tags for an artist, lowercased — vote-thresholded (drops
+    /// noisy 1-vote tags), highest-count first, capped at `maxTags`. Empty when the
+    /// artist has no genres. Uses artist genres (dense) rather than recording tags
+    /// (almost always empty). Throws on transport/decode/cancel (caller decides).
+    public func artistGenres(forArtistMbid mbid: String) async throws -> [String] {
+        let endpoint = Endpoint(path: "ws/2/artist/\(mbid)", query: [
+            URLQueryItem(name: "inc", value: "genres"),
+            URLQueryItem(name: "fmt", value: "json"),
+        ])
+        let response = try await client.send(endpoint, as: MBArtistGenresResponse.self)
+        let genres = (response.genres ?? [])
+            .filter { ($0.count ?? 0) >= minTagVotes }
+            .sorted { ($0.count ?? 0) > ($1.count ?? 0) }
+            .prefix(maxTags)
+            .compactMap { $0.name?.lowercased() }
+        // De-dupe preserving order.
+        var seen = Set<String>()
+        return genres.filter { seen.insert($0).inserted }
     }
 
     /// The best recording match for a track, or `nil` if none clears the score
@@ -157,4 +183,15 @@ struct MBArtistCredit: Decodable {
 struct MBArtist: Decodable {
     let id: String?
     let name: String?
+}
+
+// MARK: - Decodable mirrors of the MusicBrainz artist genres JSON
+
+struct MBArtistGenresResponse: Decodable {
+    let genres: [MBGenre]?
+}
+
+struct MBGenre: Decodable {
+    let name: String?
+    let count: Int?
 }
