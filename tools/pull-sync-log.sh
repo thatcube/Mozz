@@ -13,17 +13,25 @@ DEVICE="${MOZZ_DEVICE:-CACB5C41-FBA6-5DE8-9868-98BBDF897991}"
 BUNDLE="${MOZZ_BUNDLE:-com.thatcube.Mozz}"
 DEST="$(mktemp -d)"
 
+# Pull the Documents directory (pulling a single nested file path is unreliable
+# with devicectl; the directory pull works), then read the log out of it.
 xcrun devicectl device copy from \
   --device "$DEVICE" \
   --domain-type appDataContainer \
   --domain-identifier "$BUNDLE" \
-  --source "Documents/sync-diagnostics.log" \
+  --source "Documents" \
   --destination "$DEST" >/dev/null 2>&1 || {
-    echo "No sync-diagnostics.log yet (run a sync first), or device unavailable." >&2
+    echo "Device unavailable, or the app isn't installed." >&2
     exit 1
   }
 
-LOG="$DEST/sync-diagnostics.log"
+LOG="$DEST/Documents/sync-diagnostics.log"
+[[ -f "$LOG" ]] || LOG="$DEST/sync-diagnostics.log"
+if [[ ! -f "$LOG" ]]; then
+  echo "No sync-diagnostics.log yet — run a sync first." >&2
+  exit 1
+fi
+
 if [[ "${1:-}" == "--tail" && -n "${2:-}" ]]; then
   tail -n "$2" "$LOG"
 else
