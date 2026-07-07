@@ -328,7 +328,14 @@ public final class PlaybackEngine: ObservableObject {
         // Don't double-load the same track object unless repeat-one intends it.
         do {
             let resolved = try await resolver.resolve(nextTrack)
-            guard generation == loadGeneration, loaded.count == 1 else { return }
+            // Re-validate after the await: another mutation (or a second refill)
+            // may have changed the next track while we were resolving. Only
+            // insert if this resolve still matches the queue's next track and
+            // nothing else pre-rolled meanwhile — otherwise a slow/older resolve
+            // could win the race and pre-roll a stale track.
+            guard generation == loadGeneration,
+                  loaded.count == 1,
+                  queue.peekNext?.id == nextTrack.id else { return }
             let item = AVPlayerItem(url: resolved.url)
             applyNormalization(to: item, gainDB: nextTrack.normalizationGainDB)
             if player.canInsert(item, after: loaded.last?.item) {
@@ -346,9 +353,16 @@ public final class PlaybackEngine: ObservableObject {
     /// full `reload` — `setShuffle`/`setRepeatMode`/`append`/`insertNext`/
     /// `playNext`. The normal advance path (where the pre-roll matches) is a
     /// no-op, so gapless playback is preserved.
+    ///
+    /// Only acts when `loaded` is aligned with the player (its head is the
+    /// currently playing item), so it can never remove the item the player has
+    /// already auto-advanced into during the brief boundary window before
+    /// `handleNaturalFinish` trims `loaded`.
     @discardableResult
     private func evictStaleLookahead() -> Bool {
-        guard loaded.count == 2, loaded[1].track.id != queue.peekNext?.id else { return false }
+        guard loaded.count == 2,
+              loaded.first?.item === player.currentItem,
+              loaded[1].track.id != queue.peekNext?.id else { return false }
         player.remove(loaded[1].item)
         loaded.removeLast()
         return true

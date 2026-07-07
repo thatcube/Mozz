@@ -250,6 +250,25 @@ final class PlayQueueTests: XCTestCase {
         XCTAssertEqual(q.trackDidFinish()?.id, predicted?.id)
     }
 
+    func testWrapSeamIntroducesNoNewAdjacencyForTwoArtists() {
+        // The case that broke the naive splice fix: 2 equal artists alternate
+        // perfectly, so promoting an element to the front would relocate the
+        // clump one slot inward. Rotation must keep the perfect alternation.
+        var q = PlayQueue()
+        let two = (0..<12).map { Track(id: "t\($0)", title: "T", artistName: $0 < 6 ? "A" : "B") }
+        q.setItemsShuffled(two)
+        q.setRepeatMode(.all)
+        while q.position < q.order.count - 1 { q.advance() }
+
+        let outgoing = q.current?.artistName
+        let played = q.trackDidFinish()   // wrap to the reshuffled next loop
+        XCTAssertNotEqual(played?.artistName, outgoing, "loop must not open on the outgoing artist")
+
+        let artists = ([q.current!] + q.upNext).map(\.artistName)
+        let collisions = zip(artists, artists.dropFirst()).filter { $0 == $1 }.count
+        XCTAssertEqual(collisions, 0, "seam fix must not introduce a same-artist adjacency")
+    }
+
     // MARK: Restore rebuilds the reshuffle-on-wrap cache
 
     func testRestoreRebuildsWrapCacheSoFirstWrapReshuffles() throws {

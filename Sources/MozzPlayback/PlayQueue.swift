@@ -337,23 +337,24 @@ public struct PlayQueue: Sendable, Equatable, Codable {
 
     /// A fresh balanced order for the next loop that avoids a jarring seam: its
     /// first track won't be the same track — or, when possible, the same artist —
-    /// as `outgoing` (the track currently finishing the loop). Falls back
-    /// gracefully when the library is a single artist.
+    /// as `outgoing` (the track currently finishing the loop). It **rotates** the
+    /// balanced order to a non-colliding head rather than splicing an element to
+    /// the front: rotation preserves the internal spread (only the wrap-around
+    /// join changes), and for equal-sized artist groups the balanced order is a
+    /// clean cycle whose ends differ, so no new same-artist adjacency appears.
+    /// Falls back gracefully when the library is a single artist.
     private func wrapOrder(avoiding outgoing: Int) -> [Int] {
-        var fresh = balancedOrder(pinning: nil)
-        guard fresh.count > 1 else { return fresh }
-        guard let first = fresh.first, first == outgoing || sameArtist(first, outgoing) else {
-            return fresh
+        let fresh = balancedOrder(pinning: nil)
+        guard fresh.count > 1, let head = fresh.first,
+              head == outgoing || sameArtist(head, outgoing) else {
+            return fresh   // head already opens on a different artist and track
         }
-        // Prefer promoting a different-artist track; otherwise at least a
-        // different track than the one just played.
-        let pick = fresh.firstIndex { !sameArtist($0, outgoing) }
+        // Prefer rotating to a different artist; otherwise at least a different
+        // track than the one just played.
+        let pivot = fresh.firstIndex { !sameArtist($0, outgoing) }
             ?? fresh.firstIndex { $0 != outgoing }
-        if let pick {
-            let element = fresh.remove(at: pick)
-            fresh.insert(element, at: 0)
-        }
-        return fresh
+        guard let pivot, pivot != 0 else { return fresh }
+        return Array(fresh[pivot...] + fresh[..<pivot])
     }
 
     /// Install the next loop's order when wrapping a shuffled repeat-all queue.
