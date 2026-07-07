@@ -288,7 +288,14 @@ public final class AppEnvironment: ObservableObject {
     private func gateInitialSync() async {
         guard let serverId = active?.connection.id else { return }
         let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
-        if existing > 0 { return }   // re-login with a catalog already present
+        if existing > 0 {
+            // Re-login to a server we already have a catalog for: don't block —
+            // enter instantly on the cached library, but kick off a background
+            // refresh so changes made on the server since last time show up. The
+            // persistent sync bar keeps the user informed; it never gates entry.
+            startSync()
+            return
+        }
         // A sync left running from a previous server/sign-out would make the
         // single-flight `startSync()` a no-op; cancel and wait for it to clear
         // so this server actually gets its own fresh sync.

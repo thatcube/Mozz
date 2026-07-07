@@ -259,27 +259,46 @@ public struct LibrarySyncEngine: Sendable {
     /// servers legitimately return short pages mid-enumeration, and assuming
     /// "short == done" would truncate the sync and then prune everything the
     /// truncated run never saw.
+    ///
+    /// The next page is prefetched WHILE the current one is being written, so a
+    /// slow page fetch overlaps the DB write instead of alternating with it. This
+    /// matters most for the long-pole tracks phase, which runs alone (a serial
+    /// fetch→write loop) once the smaller phases finish — on a slow server the
+    /// fetch dominates, so overlapping it with the write ~doubles the tail's
+    /// throughput. Only one page is buffered ahead, so peak memory is bounded.
     private func syncPages<Item: Sendable>(
         phase: SyncProgress.Phase,
-        fetch: @Sendable (Int, Int) async throws -> CatalogPage<Item>,
+        fetch: @Sendable @escaping (Int, Int) async throws -> CatalogPage<Item>,
         write: @Sendable ([Item]) async throws -> Void,
         id: @Sendable (Item) -> String,
         report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
     ) async throws -> PagedEnumeration {
         let started = Date()
+        let pageSize = self.pageSize
         var offset = 0
         var seen: [String] = []
         var reportedTotal: Int?
-        while true {
-            try Task.checkCancellation()
-            let page = try await fetch(offset, pageSize)
-            if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
-            if page.items.isEmpty { break }
-            try await write(page.items)
-            seen.append(contentsOf: page.items.map(id))
-            await report(phase, seen.count, reportedTotal)
-            offset += page.items.count
+        // Kick off the first fetch; each iteration prefetches the *next* page
+        // before writing the current one so the two overlap.
+        var pending = Task { try await fetch(0, pageSize) }
+        do {
+            while true {
+                try Task.checkCancellation()
+                let page = try await pending.value
+                if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
+                if page.items.isEmpty { break }
+                let nextOffset = offset + page.items.count
+                pending = Task { try await fetch(nextOffset, pageSize) }
+                try await write(page.items)
+                seen.append(contentsOf: page.items.map(id))
+                await report(phase, seen.count, reportedTotal)
+                offset = nextOffset
+            }
+        } catch {
+            pending.cancel()
+            throw error
         }
+        pending.cancel()
         let elapsed = Date().timeIntervalSince(started)
         let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
         syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
