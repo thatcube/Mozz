@@ -280,18 +280,9 @@ struct RatingBubbleContent: View {
                 .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: 0.13)))
             }
         }
-        .animation(clearLayoutAnimation, value: showClear)
         .padding(.horizontal, 24)
         .padding(.top, 24)
         .padding(.bottom, showClear ? 14 : 24)
-    }
-
-    /// Asymmetric height animation: a slow, smooth (bounce-free) grow on reveal;
-    /// a quick collapse on hide (the Clear text fades faster still, so hiding
-    /// reads as a fade, not a slide).
-    private var clearLayoutAnimation: Animation? {
-        guard !reduceMotion else { return nil }
-        return showClear ? .smooth(duration: 0.55) : .easeOut(duration: 0.16)
     }
 
     // Live drag: update the stars only. Never change the popover height while the
@@ -312,7 +303,7 @@ struct RatingBubbleContent: View {
     private func scheduleClear(to target: Bool) {
         clearWork?.cancel()
         guard target != showClear else { return }
-        let work = DispatchWorkItem { showClear = target }
+        let work = DispatchWorkItem { applyShowClear(target) }
         clearWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + RatingTuning.clearRevealDelay, execute: work)
     }
@@ -321,7 +312,22 @@ struct RatingBubbleContent: View {
     /// VoiceOver adjust action.
     private func setClear(_ on: Bool) {
         clearWork?.cancel()
-        showClear = on
+        applyShowClear(on)
+    }
+
+    /// Toggle `showClear` inside a `withAnimation` transaction so the height
+    /// change propagates OUT to the host (the morph overlay repositions the whole
+    /// bubble), not just within this view. Asymmetric: slow smooth grow on reveal,
+    /// quick collapse on hide.
+    private func applyShowClear(_ target: Bool) {
+        guard target != showClear else { return }
+        if reduceMotion {
+            showClear = target
+        } else {
+            withAnimation(target ? .smooth(duration: 0.55) : .easeOut(duration: 0.18)) {
+                showClear = target
+            }
+        }
     }
 
     private func adjust(_ direction: AccessibilityAdjustmentDirection) {
