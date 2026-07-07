@@ -103,14 +103,13 @@ final class AudioRouteMonitor: ObservableObject {
         }
     }
 
-    /// AirPods / Beats / HomePod get their real glyph via a name heuristic (the
-    /// port type alone can't distinguish them); other Bluetooth defaults to headphones.
+    /// AirPods get their model-specific glyph via a name heuristic (the port type
+    /// alone can't distinguish them); everything else on Bluetooth just shows a
+    /// headphones icon (we can't reliably tell a BT speaker from headphones, and
+    /// headphones is the common personal-audio case).
     private static func bluetoothIcon(name: String) -> String {
         let n = name.lowercased()
         if n.contains("airpod") { return airPodsIcon(name: n) }
-        if n.contains("beats") { return firstAvailableSymbol(["beats.headphones", "headphones"]) }
-        if n.contains("homepod") { return "homepod.fill" }
-        if n.contains("speaker") { return "hifispeaker.fill" }
         return "headphones"
     }
 
