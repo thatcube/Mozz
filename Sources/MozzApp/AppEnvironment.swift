@@ -500,7 +500,19 @@ public final class AppEnvironment: ObservableObject {
         isSyncing = true
         syncProgress = nil
         syncTask = Task { [self] in
-            defer { isSyncing = false; syncProgress = nil }
+            // Keep the catalog sync alive if the user backgrounds the app: iOS
+            // suspends an app ~30s after it leaves the foreground, which would
+            // otherwise freeze a long first sync mid-way. This assertion asks for
+            // extra background running time; it's ended in the defer no matter how
+            // the sync exits. (Not infinite — iOS grants minutes, not hours — but
+            // enough to make real progress; the sync resumes on next launch from
+            // where the catalog left off.)
+            let bgTask = await BackgroundTaskAssertion(name: "catalog-sync")
+            defer {
+                isSyncing = false
+                syncProgress = nil
+                Task { @MainActor in bgTask.end() }
+            }
             do {
                 _ = try await syncNow { progress in
                     Task { @MainActor in self.syncProgress = progress }
@@ -534,10 +546,18 @@ public final class AppEnvironment: ObservableObject {
         // the better trade: each page returns ~2x sooner, so the progress UI
         // updates roughly twice as often in half-as-big steps (much less
         // "stuck at a number" feel) while memory stays a handful of pages.
+        // Page size: the live diagnostics showed the sync is network/server-bound
+        // with a large FIXED per-request cost (artists — tiny records, trivial
+        // sort — still took ~8s/page, ~100% fetch-wait). When per-request latency
+        // dominates, total time ≈ pages × latency, so FEWER, BIGGER pages is the
+        // biggest lever. 1000 quarters the round trips vs. 250 and stays inside
+        // the 90s bulk timeout (track pages are light now — MediaSources is
+        // backfilled separately). The concurrent phases + per-phase breakdown keep
+        // progress feeling alive despite the larger step.
         let backend = makeBulkSyncBackend() ?? active.backend
         let diagLog = SyncDiagnosticsLog()
-        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=250")
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 250, diag: diagLog.sink)
+        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=1000")
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 1000, diag: diagLog.sink)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         lastSyncReport = Self.formatSyncReport(summary)
