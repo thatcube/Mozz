@@ -85,14 +85,25 @@ struct SearchView: View {
                 .plainTextFieldStyle()
             if !query.isEmpty {
                 Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: fieldHeight, alignment: .trailing)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear text")
             }
         }
         .padding(.horizontal, 14)
         .frame(height: fieldHeight)
         .glassCapsule()
+        // The visible pill is 44pt tall, but a bare custom TextField only takes
+        // focus when the glyphs themselves are tapped — the icon, padding and
+        // glass margins are dead zones (unlike the system search bar, which
+        // forwards a tap anywhere in the pill). Make the whole capsule the tap
+        // target so focusing matches native's larger hit area.
+        .contentShape(Capsule())
+        .onTapGesture { focused = true }
     }
 
     private var resultsList: some View {
