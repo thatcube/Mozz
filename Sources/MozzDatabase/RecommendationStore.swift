@@ -492,8 +492,8 @@ public struct RecommendationStore: Sendable {
     public func mbTags(forTrackRefs refs: [String]) async throws -> [String: [String]] {
         guard !refs.isEmpty else { return [:] }
         let unique = Array(Set(refs))
-        var out: [String: [String]] = [:]
-        try await database.read { db in
+        return try await database.read { db in
+            var out: [String: [String]] = [:]
             for chunk in stride(from: 0, to: unique.count, by: Self.maxSQLExclusions).map({
                 Array(unique[$0..<min($0 + Self.maxSQLExclusions, unique.count)])
             }) {
@@ -508,8 +508,8 @@ public struct RecommendationStore: Sendable {
                     }
                 }
             }
+            return out
         }
-        return out
     }
 
     // MARK: - mapping helpers
