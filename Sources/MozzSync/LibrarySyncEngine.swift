@@ -33,20 +33,24 @@ public struct SyncProgress: Sendable, Hashable {
         }
     }
 
-    /// Progress for one concurrently-running entity phase, so the UI can show a
-    /// live per-type breakdown (Songs 3.7k/20k · Albums 1.2k/2.5k · …) instead of
-    /// one opaque total that appears to jump and stall.
+    /// Progress for one entity phase, so the UI can show a live per-type
+    /// breakdown (Songs 3.7k/20k · Albums 1.2k/2.5k · …) — with every phase
+    /// listed from the start (queued → syncing → done) rather than appearing only
+    /// once it begins.
     public struct PhaseDetail: Sendable, Hashable, Identifiable {
+        public enum State: Sendable { case pending, syncing, done }
         public let phase: Phase
         public let synced: Int
         public let total: Int?
+        public let state: State
         public var id: Phase { phase }
-        public var isComplete: Bool { total.map { synced >= $0 } ?? false }
+        public var isComplete: Bool { state == .done }
 
-        public init(phase: Phase, synced: Int, total: Int?) {
+        public init(phase: Phase, synced: Int, total: Int?, state: State) {
             self.phase = phase
             self.synced = synced
             self.total = total
+            self.state = state
         }
     }
 
@@ -161,6 +165,11 @@ public struct LibrarySyncEngine: Sendable {
         let report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void = { phase, seen, total in
             await aggregator?.report(phase: phase, seen: seen, total: total)
         }
+        // Mark a phase done (drives the breakdown's queued→syncing→done state;
+        // called even for 0-item phases so they don't look stuck "queued").
+        let complete: @Sendable (PagedEnumeration) async -> Void = { e in
+            await aggregator?.complete(phase: e.phase, finalCount: e.seen.count)
+        }
 
         // Artists (light, dedicated endpoint) and playlists (few) run
         // concurrently, but the two HEAVY /Items phases — albums and tracks —
@@ -190,6 +199,7 @@ public struct LibrarySyncEngine: Sendable {
                 id: \.id,
                 report: report
             )
+            await complete(albumIDs)
             trackIDs = try await syncPages(
                 phase: .tracks,
                 fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
@@ -197,8 +207,11 @@ public struct LibrarySyncEngine: Sendable {
                 id: \.id,
                 report: report
             )
+            await complete(trackIDs)
             artistIDs = try await artistsTask
+            await complete(artistIDs)
             playlistIDs = try await playlistsTask
+            await complete(playlistIDs)
         } catch {
             diag?("SYNC ERROR: \(error)")
             throw error
@@ -410,12 +423,12 @@ public struct LibrarySyncEngine: Sendable {
     }
 }
 
-/// Merges progress from the concurrently-running entity phases into one combined
-/// `SyncProgress` (phase `.syncing`): the sum of items seen across phases, a live
-/// per-phase breakdown, and a determinate total as soon as the three main phases
-/// (artists/albums/tracks) have reported their server totals — so the bar shows a
-/// spinner + live counts first, then a smooth determinate bar, and never a total
-/// that lurches as each phase's count arrives.
+/// Merges progress from the entity phases into one combined `SyncProgress`
+/// (phase `.syncing`): the sum of items seen, a determinate overall total once
+/// the three main phases (artists/albums/tracks) report their server totals, and
+/// a per-phase breakdown that lists EVERY phase from the start — queued →
+/// syncing → done — so the user always sees Artists/Albums/Songs/Playlists
+/// rather than a phase only appearing once it begins.
 private actor ProgressAggregator {
     /// Fixed display order for the breakdown.
     private let order: [SyncProgress.Phase]
@@ -423,6 +436,7 @@ private actor ProgressAggregator {
     private let emit: @Sendable (SyncProgress) -> Void
     private var seen: [SyncProgress.Phase: Int] = [:]
     private var totals: [SyncProgress.Phase: Int] = [:]
+    private var completed: Set<SyncProgress.Phase> = []
 
     init(phases: [SyncProgress.Phase], emit: @escaping @Sendable (SyncProgress) -> Void) {
         self.order = phases
@@ -435,16 +449,28 @@ private actor ProgressAggregator {
     func report(phase: SyncProgress.Phase, seen count: Int, total: Int?) {
         seen[phase] = count
         if let total { totals[phase] = max(totals[phase] ?? 0, total) }
+        publish()
+    }
 
-        let details = order.compactMap { p -> SyncProgress.PhaseDetail? in
-            // Only surface a phase once it has started (reported a count or total).
-            guard seen[p] != nil || totals[p] != nil else { return nil }
-            return SyncProgress.PhaseDetail(phase: p, synced: seen[p] ?? 0, total: totals[p])
+    /// A phase finished (call even for a 0-item phase so it shows as done, not
+    /// stuck "queued").
+    func complete(phase: SyncProgress.Phase, finalCount: Int) {
+        seen[phase] = finalCount
+        completed.insert(phase)
+        publish()
+    }
+
+    private func publish() {
+        let details = order.map { p -> SyncProgress.PhaseDetail in
+            let state: SyncProgress.PhaseDetail.State =
+                completed.contains(p) ? .done
+                : (seen[p] != nil || totals[p] != nil) ? .syncing
+                : .pending
+            return SyncProgress.PhaseDetail(phase: p, synced: seen[p] ?? 0, total: totals[p], state: state)
         }
         let combinedSeen = seen.values.reduce(0, +)
-        // Show a determinate total once the main phases have theirs (playlists can
-        // lag); include any other known totals so the number is as complete as
-        // possible without waiting on a slow tail.
+        // Determinate total once the main phases have theirs (playlists can lag);
+        // include any other known totals so the number is as complete as possible.
         let mainKnown = mainPhases.isSubset(of: Set(totals.keys))
         let combinedTotal = mainKnown ? totals.values.reduce(0, +) : nil
         emit(SyncProgress(phase: .syncing, itemsSynced: combinedSeen, totalCount: combinedTotal, details: details))

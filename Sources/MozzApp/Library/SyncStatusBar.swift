@@ -75,25 +75,43 @@ struct SyncStatusBar: View {
         HStack(spacing: 10) {
             ForEach(details) { d in
                 HStack(spacing: 4) {
-                    if d.isComplete {
+                    switch d.state {
+                    case .done:
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 9))
                             .foregroundStyle(.green)
+                    case .syncing:
+                        // small active dot
+                        Circle().fill(.tint).frame(width: 5, height: 5)
+                    case .pending:
+                        Image(systemName: "circle")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
                     }
                     Text(d.phase.label)
                         .foregroundStyle(.secondary)
-                    Text(count(d))
-                        .foregroundStyle(d.isComplete ? .secondary : .primary)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
+                    if d.state != .pending {
+                        Text(count(d))
+                            .foregroundStyle(d.state == .done ? .secondary : .primary)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                    }
                 }
                 .font(.caption2)
-                .opacity(d.isComplete ? 0.6 : 1)
+                .opacity(opacity(for: d.state))
             }
             Spacer(minLength: 0)
         }
         .lineLimit(1)
-        .minimumScaleFactor(0.7)
+        .minimumScaleFactor(0.65)
+    }
+
+    private func opacity(for state: SyncProgress.PhaseDetail.State) -> Double {
+        switch state {
+        case .done: return 0.6
+        case .syncing: return 1
+        case .pending: return 0.45
+        }
     }
 
     private func count(_ d: SyncProgress.PhaseDetail) -> String {

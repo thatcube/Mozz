@@ -97,18 +97,12 @@ public struct JellyfinBackend: MusicBackend {
         // background media backfill). `NormalizationGain` is a cheap top-level
         // field, so loudness normalization keeps working immediately.
         //
-        // `enableImages=false` for the tracks phase specifically: confirmed
-        // against the Jellyfin server source, an Audio item's `AlbumPrimaryImageTag`
-        // is populated OUTSIDE the EnableImages gate, so it survives — and our
-        // track-artwork mapper already falls back from the track's own image to
-        // the album's (`artwork(track) ?? artwork(albumId, AlbumPrimaryImageTag)`).
-        // Music tracks essentially always use album art anyway, so disabling the
-        // per-track image work costs us nothing visible while trimming the heaviest
-        // phase. (Albums/artists KEEP images — their `ImageTags` would be stripped.)
+        // (We tried `enableImages=false` here — safe, since an Audio item's
+        // AlbumPrimaryImageTag survives it — but measured ZERO speedup on a real
+        // server: per-item image work is cheap in-memory, not the bottleneck. So
+        // we keep images on to preserve any track's own distinct artwork.)
         let response = try await client.send(
-            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain") + [
-                URLQueryItem(name: "enableImages", value: "false"),
-            ]),
+            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain")),
             as: JFItemsResponse.self
         )
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
