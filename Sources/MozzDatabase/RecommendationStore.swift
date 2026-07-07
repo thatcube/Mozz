@@ -202,14 +202,71 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// Most-recent play epoch (seconds) per track `remoteId` on a server — the
+    /// basis for recency-biased shuffle. A track counts as played on `started`
+    /// or `completed` (a pure skip doesn't). Off the main thread.
+    public func lastPlayedByRemoteID(serverId: ServerID) async throws -> [String: Double] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT track.remoteId AS remoteId, MAX(pe.created_at) AS last_played
+                FROM play_event pe
+                JOIN track ON \(Self.refExpr) = pe.track_ref
+                WHERE track.serverId = ? AND pe.kind IN ('started', 'completed')
+                GROUP BY track.remoteId
+                """, arguments: [serverId])
+            var map: [String: Double] = [:]
+            map.reserveCapacity(rows.count)
+            for row in rows {
+                if let id: String = row["remoteId"], let ts: Double = row["last_played"] {
+                    map[id] = ts
+                }
+            }
+            return map
+        }
+    }
+
+    /// Library-wide genre document frequencies on a server: how many tracks carry
+    /// each genre, plus the total track count. Feeds TF-IDF genre similarity (rare
+    /// genres are discriminative, ubiquitous ones like "Rock" are not). Computed
+    /// off the main thread with a single grouped scan over `json_each`.
+    public func genreFrequencies(serverId: ServerID) async throws -> (total: Int, counts: [String: Int]) {
+        try await database.read { db in
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?",
+                                         arguments: [serverId]) ?? 0
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT je.value AS genre, COUNT(DISTINCT track.remoteId) AS df
+                FROM track, json_each(track.genres) je
+                WHERE track.serverId = ?
+                GROUP BY je.value
+                """, arguments: [serverId])
+            var counts: [String: Int] = [:]
+            counts.reserveCapacity(rows.count)
+            for row in rows {
+                if let genre: String = row["genre"], !genre.isEmpty {
+                    counts[genre] = row["df"]
+                }
+            }
+            return (total, counts)
+        }
+    }
+
     /// Library tracks eligible for in-library rediscovery: on this server, NOT
     /// played since `notPlayedSince`, and matching at least one taste genre or
     /// artist. Capped to a pool `limit`; the pool is sampled randomly so a huge
     /// library doesn't always surface the same slice. Returns [] when no taste
     /// filters are given (caller should use the cold-start pool instead).
+    ///
+    /// `excludingRemoteIds` (e.g. tracks a radio station has already surfaced) is
+    /// applied in SQL *before* the random sample + limit, so the sample is drawn
+    /// from unseen tracks — otherwise a random slice near the tail of a large
+    /// catalog can miss the remaining unseen tracks and the station stalls early.
+    /// Bounded to keep well under SQLite's bound-parameter limit; anything beyond
+    /// the bound is left to the caller's in-memory filter.
     public func candidateTracks(serverId: ServerID, genres: [String], artistIds: [String],
-                                notPlayedSince: Double, limit: Int = 2000) async throws -> [TrackCandidate] {
+                                notPlayedSince: Double, excludingRemoteIds: Set<String> = [],
+                                limit: Int = 2000) async throws -> [TrackCandidate] {
         guard !genres.isEmpty || !artistIds.isEmpty else { return [] }
+        let excludeList = Array(excludingRemoteIds.prefix(Self.maxSQLExclusions))
         return try await database.read { db in
             var args: [DatabaseValueConvertible?] = [serverId, notPlayedSince]
             var matchClauses: [String] = []
@@ -223,6 +280,11 @@ public struct RecommendationStore: Sendable {
                 matchClauses.append("EXISTS (SELECT 1 FROM json_each(track.genres) je WHERE je.value IN (\(ph)))")
                 args.append(contentsOf: genres)
             }
+            var excludeClause = ""
+            if !excludeList.isEmpty {
+                excludeClause = "AND track.remoteId NOT IN (\(databasePlaceholders(excludeList.count)))"
+                args.append(contentsOf: excludeList)
+            }
             args.append(limit)
             let sql = """
                 SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
@@ -234,11 +296,16 @@ public struct RecommendationStore: Sendable {
                                   WHERE pe.track_ref = \(Self.refExpr)
                                     AND pe.created_at >= ? AND pe.kind IN ('started','completed'))
                   AND (\(matchClauses.joined(separator: " OR ")))
+                  \(excludeClause)
                 ORDER BY RANDOM() LIMIT ?
                 """
             return try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args)).map(Self.candidate)
         }
     }
+
+    /// Upper bound on ids passed to a SQL `NOT IN` (SQLite's default host-param
+    /// limit is 999; stay comfortably under it alongside the other bindings).
+    private static let maxSQLExclusions = 800
 
     /// Cold-start pool for a thin/empty history: most-recently-added tracks not
     /// played since `notPlayedSince`. (Popularity would also feed cold start, but

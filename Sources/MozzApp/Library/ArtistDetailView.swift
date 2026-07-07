@@ -37,7 +37,7 @@ struct ArtistDetailView: View {
             title: artist.name,
             meta: metaLine,
             contentHorizontalPadding: 0,
-            actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle) },
+            actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle, startRadio: startRadio) },
             content: {
                 VStack(alignment: .leading, spacing: 30) {
                     if !topSongs.isEmpty { topSongsSection }
@@ -86,8 +86,14 @@ struct ArtistDetailView: View {
     }
 
     private func shuffle() {
-        env.playback.setShuffle(true)
-        env.playback.play(tracks: songs.map { $0.toDomain() }.shuffled(), startAt: 0)
+        env.playback.playShuffled(songs.map { $0.toDomain() })
+    }
+
+    /// An endless station seeded from this artist: the artist plus same-genre
+    /// neighbours (genres unioned from the artist's tracks).
+    private func startRadio() {
+        let genres = Array(Set(songs.flatMap { $0.genres })).prefix(8)
+        env.startRadio(artistRemoteId: artist.remoteId, name: artist.name, genres: Array(genres))
     }
 
     private func load() async {

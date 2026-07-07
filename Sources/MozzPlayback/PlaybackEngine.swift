@@ -3,6 +3,19 @@ import AVFoundation
 import Combine
 import MozzCore
 
+/// A serializable snapshot of what's playing — the queue (order/shuffle/repeat/
+/// position) plus the elapsed position — so the app can restore the session on a
+/// later cold launch (loaded and paused, ready to resume).
+public struct PlaybackPersistentState: Codable, Sendable {
+    public var queue: PlayQueue
+    public var elapsed: TimeInterval
+
+    public init(queue: PlayQueue, elapsed: TimeInterval) {
+        self.queue = queue
+        self.elapsed = elapsed
+    }
+}
+
 /// The playback engine. Wraps an `AVQueuePlayer` to get **gapless** playback
 /// (the player pre-rolls the next item so there is no silence at track
 /// boundaries), while a pure ``PlayQueue`` owns ordering / shuffle / repeat.
@@ -43,6 +56,20 @@ public final class PlaybackEngine: ObservableObject {
     /// Called when artwork should be fetched for the lock screen.
     public var onNeedsArtwork: ((Track) -> Void)?
 
+    /// Radio hook: when set, the engine calls this as the queue nears its end to
+    /// fetch more tracks (an endless "station"), then appends them. Return an
+    /// empty array to stop extending. Cleared to end radio mode.
+    public var onQueueNearEnd: (@Sendable () async -> [Track])?
+    /// Guards against firing overlapping extend requests.
+    private var isExtendingQueue = false
+    /// Bumped whenever loaded content is replaced (play / playShuffled /
+    /// startStation / stop). Doubles as the station-staleness guard AND a public
+    /// "transport epoch" the app captures to detect that the user changed what's
+    /// playing while an async radio fetch was in flight.
+    public private(set) var transportEpoch = 0
+    /// Extend the queue once this few tracks remain after the current one.
+    private static let radioRefillThreshold = 3
+
     /// Whether per-track loudness normalization (ReplayGain / Sound Check) is
     /// applied. When on, a track's `normalizationGainDB` is turned into an audio
     /// mix so tracks play at a consistent level. Default on.
@@ -62,6 +89,9 @@ public final class PlaybackEngine: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var wasPlayingBeforeInterruption = false
+    /// A position to seek to once the (paused) current item finishes loading —
+    /// used to restore a saved session at the right spot.
+    private var pendingSeek: TimeInterval?
     /// The id of the track we've emitted `.started` for and not yet terminated,
     /// so every start is paired with exactly one `completed`/`skipped`.
     private var loggedTrackID: String?
@@ -86,15 +116,76 @@ public final class PlaybackEngine: ObservableObject {
 
     /// Load a set of tracks and start playing at `startIndex`.
     public func play(tracks: [Track], startAt startIndex: Int = 0) {
+        invalidateStation()   // a fresh explicit play ends any active station
         logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
         reload(autoplay: true)
     }
 
+    /// Start an endless "station": load an initial batch and keep it topped up
+    /// via `onNearEnd` as it plays down. Forces shuffle + repeat off (the queue
+    /// extends rather than loops, and the batch is already ranked); a normal
+    /// `play`/`playShuffled` ends the station.
+    public func startStation(_ tracks: [Track],
+                             onNearEnd: @escaping @Sendable () async -> [Track]) {
+        invalidateStation()
+        logTerminal(.skipped, position: snapshot.elapsed)
+        queue.setShuffle(false)
+        queue.setRepeatMode(.off)
+        queue.setItems(tracks, startingAt: 0)
+        onQueueNearEnd = onNearEnd
+        try? session.activate()
+        reload(autoplay: true)
+        maybeExtendQueue()
+    }
+
+    /// Load a set of tracks and start playing a freshly balanced shuffle. The
+    /// single "Shuffle" entry point for every browse/detail surface: it turns
+    /// shuffle on and picks a random-feeling first track, so behavior is
+    /// identical everywhere.
+    ///
+    /// `recencyScores` (track id → 0…1) biases recently-played tracks toward the
+    /// end so large shuffles feel fresh. `tasteScores` (track id → 0…1) biases
+    /// higher-affinity tracks toward the front ("Smart Shuffle").
+    public func playShuffled(_ tracks: [Track],
+                             recencyScores: [String: Double]? = nil,
+                             tasteScores: [String: Double]? = nil) {
+        invalidateStation()   // a fresh explicit shuffle ends any active station
+        logTerminal(.skipped, position: snapshot.elapsed)
+        queue.setItemsShuffled(tracks, recencyScores: recencyScores, tasteScores: tasteScores)
+        try? session.activate()
+        reload(autoplay: true)
+    }
+
+    /// A serializable snapshot of the current session (queue + position), or
+    /// `nil` when nothing is loaded. The app persists this to resume on relaunch.
+    public var persistentState: PlaybackPersistentState? {
+        guard !queue.isEmpty, currentTrack != nil else { return nil }
+        return PlaybackPersistentState(queue: queue, elapsed: snapshot.elapsed)
+    }
+
+    /// Restore a saved session WITHOUT autoplaying: loads the current track
+    /// paused and seeks to the saved position, so the user (or a remote command /
+    /// widget button) can pick up where they left off. No-op for an empty queue.
+    public func restore(_ state: PlaybackPersistentState) {
+        guard !state.queue.isEmpty, currentTrack == nil, queue.isEmpty else { return }
+        queue = state.queue
+        // The decoded queue has no transient reshuffle-on-wrap cache (it's
+        // excluded from Codable); rebuild it so the first post-restore wrap still
+        // reshuffles when parked on the last slot with shuffle + repeat-all.
+        queue.rebuildTransientState()
+        pendingSeek = state.elapsed > 1 ? state.elapsed : nil
+        reload(autoplay: false)
+    }
+
     /// Enqueue tracks to play after the current track.
     public func playNext(_ tracks: [Track]) {
         let wasEmpty = queue.isEmpty
+        // Starting fresh playback from an empty queue is a new session — end any
+        // pending/active station so a slow radio fetch can't hijack it. (Adding
+        // to a non-empty queue, incl. a live station's own extend, must not.)
+        if wasEmpty { invalidateStation() }
         queue.insertNext(tracks)
         if wasEmpty { reload(autoplay: true) } else { refillLookahead() }
         publish()
@@ -103,6 +194,7 @@ public final class PlaybackEngine: ObservableObject {
     /// Append tracks to the end of the queue.
     public func append(_ tracks: [Track]) {
         let wasEmpty = queue.isEmpty
+        if wasEmpty { invalidateStation() }
         queue.append(tracks)
         if wasEmpty { reload(autoplay: true) } else { refillLookahead() }
         publish()
@@ -141,6 +233,7 @@ public final class PlaybackEngine: ObservableObject {
             return
         }
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
+        maybeExtendQueue()
     }
 
     public func previous() {
@@ -165,7 +258,7 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     public func setRepeatMode(_ mode: RepeatMode) {
-        queue.repeatMode = mode
+        queue.setRepeatMode(mode)
         refillLookahead()
         publish()
     }
@@ -180,6 +273,20 @@ public final class PlaybackEngine: ObservableObject {
 
     public func toggleShuffle() { setShuffle(!queue.isShuffled) }
 
+    #if DEBUG
+    /// Test-only: the track ids currently pre-rolled into the player, aligned
+    /// with `player.items()`. Lets tests assert the gapless lookahead matches the
+    /// queue after mutations.
+    var lookaheadTrackIDsForTesting: [String] { loaded.map(\.track.id) }
+
+    /// Test-only: drain the fire-and-forget reload/refill Tasks so `loaded`
+    /// reflects the current queue. The stub resolver resolves without real I/O,
+    /// so yielding a handful of times is sufficient.
+    func awaitPendingLoadsForTesting() async {
+        for _ in 0..<50 { await Task.yield() }
+    }
+    #endif
+
     public func stop() {
         // A user-initiated stop mid-track is a skip. (When called at the natural
         // end of the queue, `handleNaturalFinish` has already logged `.completed`
@@ -188,6 +295,7 @@ public final class PlaybackEngine: ObservableObject {
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
+        invalidateStation()   // stopping ends any active station
         report(.stopped)
         currentTrack = nil
         upNext = []
@@ -228,6 +336,11 @@ public final class PlaybackEngine: ObservableObject {
                 self.applyNormalization(to: item, gainDB: track.normalizationGainDB)
                 self.player.insert(item, after: nil)
                 self.loaded = [(item, track, resolved.sessionID)]
+                if let seek = self.pendingSeek {
+                    self.pendingSeek = nil
+                    self.player.seek(to: CMTime(seconds: seek, preferredTimescale: 600),
+                                     completionHandler: { _ in })
+                }
                 if autoplay {
                     self.player.play()
                     self.publish(status: .playing)
@@ -249,13 +362,54 @@ public final class PlaybackEngine: ObservableObject {
         Task { [weak self] in await self?.refillLookaheadAsync(generation: generation) }
     }
 
+    /// If a radio station is active and the queue is running low, fetch and
+    /// append the next batch so playback never runs dry. Guarded so overlapping
+    /// low-water marks don't fire duplicate fetches, and stamped with the current
+    /// station generation so a fetch that resolves after the station was
+    /// replaced/stopped discards its result instead of appending into the wrong
+    /// queue.
+    private func maybeExtendQueue() {
+        guard let onQueueNearEnd, !isExtendingQueue else { return }
+        guard queue.upNext.count <= Self.radioRefillThreshold else { return }
+        isExtendingQueue = true
+        let epoch = transportEpoch
+        Task { [weak self] in
+            let more = await onQueueNearEnd()
+            guard let self, epoch == self.transportEpoch else { return }
+            if !more.isEmpty { self.append(more) }
+            self.isExtendingQueue = false
+        }
+    }
+
+    /// End any active station: clear the hook, release the extend guard, and bump
+    /// the transport epoch so an in-flight extend fetch discards its (now stale)
+    /// result. Called whenever loaded content is replaced.
+    private func invalidateStation() {
+        onQueueNearEnd = nil
+        isExtendingQueue = false
+        transportEpoch += 1
+    }
+
     private func refillLookaheadAsync(generation: Int) async {
         guard generation == loadGeneration else { return }
+        // If a next item was already pre-rolled but the queue's next track has
+        // since changed (shuffle/repeat toggled, or a queue edit, while parked on
+        // the last track), evict the now-stale item. AVQueuePlayer auto-advances
+        // to the pre-rolled item at the boundary, so without this it would
+        // gaplessly play the wrong track while the queue reports a different one.
+        evictStaleLookahead()
         guard loaded.count == 1, let nextTrack = queue.peekNext else { return }
         // Don't double-load the same track object unless repeat-one intends it.
         do {
             let resolved = try await resolver.resolve(nextTrack)
-            guard generation == loadGeneration, loaded.count == 1 else { return }
+            // Re-validate after the await: another mutation (or a second refill)
+            // may have changed the next track while we were resolving. Only
+            // insert if this resolve still matches the queue's next track and
+            // nothing else pre-rolled meanwhile — otherwise a slow/older resolve
+            // could win the race and pre-roll a stale track.
+            guard generation == loadGeneration,
+                  loaded.count == 1,
+                  queue.peekNext?.id == nextTrack.id else { return }
             let item = AVPlayerItem(url: resolved.url)
             applyNormalization(to: item, gainDB: nextTrack.normalizationGainDB)
             if player.canInsert(item, after: loaded.last?.item) {
@@ -265,6 +419,27 @@ public final class PlaybackEngine: ObservableObject {
         } catch {
             // Leave the lookahead empty; we'll rebuild on the boundary instead.
         }
+    }
+
+    /// Remove an already pre-rolled next item when it no longer matches the
+    /// queue's current `peekNext` (returns whether it evicted). Keeps the gapless
+    /// pre-roll honest after mutations that change the upcoming track without a
+    /// full `reload` — `setShuffle`/`setRepeatMode`/`append`/`insertNext`/
+    /// `playNext`. The normal advance path (where the pre-roll matches) is a
+    /// no-op, so gapless playback is preserved.
+    ///
+    /// Only acts when `loaded` is aligned with the player (its head is the
+    /// currently playing item), so it can never remove the item the player has
+    /// already auto-advanced into during the brief boundary window before
+    /// `handleNaturalFinish` trims `loaded`.
+    @discardableResult
+    private func evictStaleLookahead() -> Bool {
+        guard loaded.count == 2,
+              loaded.first?.item === player.currentItem,
+              loaded[1].track.id != queue.peekNext?.id else { return false }
+        player.remove(loaded[1].item)
+        loaded.removeLast()
+        return true
     }
 
     /// Attach an audio mix that applies the track's loudness-normalization gain
@@ -356,6 +531,7 @@ public final class PlaybackEngine: ObservableObject {
         publish(status: .playing)
         report(.playing)
         refillLookahead()
+        maybeExtendQueue()
     }
 
     private func tick() {

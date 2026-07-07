@@ -9,7 +9,7 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "2026.7.6.1"
+    MARKETING_VERSION: "2026.7.6.2"
     CURRENT_PROJECT_VERSION: "1"
     # Language mode 5 (toolchain is newer). Candidate B favours pragmatic,
     # high-performance code with opt-in Sendable/actors rather than repo-wide
@@ -34,6 +34,12 @@ targets:
     dependencies:
       - package: MozzKit
         product: MozzApp
+      - target: MozzWidget
+    entitlements:
+      path: App/Mozz/Mozz.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.thatcube.Mozz
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Mozz
@@ -83,12 +89,29 @@ targets:
           - com.thatcube.mozz.genre
           - com.thatcube.mozz.library
 
-  # NOTE: The MozzWidget app-extension target is intentionally NOT wired in here
-  # yet. Its code lives in App/MozzWidget/ and the data pipeline (snapshots in
-  # MozzCore + AppEnvironment) is in place, but WidgetKit needs an App Group
-  # (group.com.thatcube.Mozz) shared by both targets, and that capability cannot
-  # be provisioned from a headless `xcodebuild` (it fails with "doesn't include
-  # the App Groups capability"). To enable widgets: in Xcode, add the App Groups
-  # capability (group.com.thatcube.Mozz) to the Mozz target once, then re-add the
-  # `MozzWidget` target block + the app's `- target: MozzWidget` dependency and
-  # `entitlements` app-group. See AGENTS.local.md → "Enabling widgets".
+  MozzWidget:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App/MozzWidget
+    dependencies:
+      - package: MozzKit
+        product: MozzCore
+    entitlements:
+      path: App/MozzWidget/MozzWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.thatcube.Mozz
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Mozz.widget
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: App/MozzWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Mozz
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

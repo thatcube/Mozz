@@ -117,6 +117,10 @@ public final class AppEnvironment: ObservableObject {
     /// sync with playback.
     private var widgetCancellables = Set<AnyCancellable>()
 
+    /// Muted background colour ("#RRGGBB") derived from each track's artwork, for
+    /// the widgets. Keyed by track id; bounded by the widget artwork pruning.
+    private var widgetTintByTrack: [String: String] = [:]
+
     public init(database: MusicDatabase, credentials: any CredentialStore, fileStore: DownloadFileStore) {
         self.database = database
         self.credentials = credentials
@@ -170,6 +174,7 @@ public final class AppEnvironment: ObservableObject {
         guard let saved = SessionPersistence.load(credentials) else { return }
         do {
             try await activate(saved)
+            restoreLastPlaybackSession()
         } catch {
             SessionPersistence.clear(credentials)
         }
@@ -243,11 +248,17 @@ public final class AppEnvironment: ObservableObject {
             fallback: StreamingTrackURLResolver(backend: backend)
         )
         resolver.setDelegate(offline)
+        // End any station only on an actual server SWITCH — not on same-server
+        // rebuilds (Sync Now / library-selection changes also route through here),
+        // which must not kill a live station's auto-extend. `active` still holds
+        // the previous server at this point.
+        if connection.id != active?.connection.id { invalidateRadio() }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
     }
 
     public func signOut() {
         playback.stop()
+        invalidateRadio()
         SessionPersistence.clear(credentials)
         active = nil
     }
@@ -808,11 +819,14 @@ public final class AppEnvironment: ObservableObject {
         guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
         playback.provideArtwork(data, for: track.id)
         // Also stash it for the widgets and refresh their snapshots with the art.
-        if track.id == playback.currentTrack?.id {
-            WidgetSnapshotStore.writeArtwork(data, name: Self.widgetArtworkName(track.id))
-            updateNowPlayingWidget()
-            patchRecentArtwork(trackID: track.id)
-        }
+        guard track.id == playback.currentTrack?.id else { return }
+        WidgetSnapshotStore.writeArtwork(data, name: Self.widgetArtworkName(track.id))
+        // Derive the muted tint off the main thread (CoreImage decode + render).
+        let hex = await Task.detached(priority: .utility) { WidgetTint.mutedHex(from: data) }.value
+        guard track.id == playback.currentTrack?.id else { return }
+        if let hex { widgetTintByTrack[track.id] = hex }
+        updateNowPlayingWidget()
+        patchRecentArtwork(trackID: track.id)
     }
 
     // MARK: Widgets (Home / Lock Screen snapshots)
@@ -828,11 +842,19 @@ public final class AppEnvironment: ObservableObject {
     /// just the status to avoid rewriting the file (and reloading the widget) on
     /// every progress tick.
     private func wireNowPlayingWidget() {
+        // Let widget / Control-Center AudioPlaybackIntents drive the engine (they
+        // run in this app process). Safe to call the engine directly on the main
+        // actor; a no-op if there's nothing loaded.
+        PlaybackRemoteControl.togglePlayPause = { [weak self] in self?.playback.togglePlayPause() }
+        PlaybackRemoteControl.next = { [weak self] in self?.playback.next() }
+        PlaybackRemoteControl.previous = { [weak self] in self?.playback.previous() }
+
         playback.$currentTrack
             .removeDuplicates { $0?.id == $1?.id }
             .receive(on: RunLoop.main)
             .sink { [weak self] track in
                 self?.updateNowPlayingWidget()
+                self?.persistPlaybackState()
                 if let track { self?.recordRecentlyPlayed(track) }
             }
             .store(in: &widgetCancellables)
@@ -841,8 +863,38 @@ public final class AppEnvironment: ObservableObject {
             .map(\.status)
             .removeDuplicates()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateNowPlayingWidget() }
+            .sink { [weak self] _ in
+                self?.updateNowPlayingWidget()
+                self?.persistPlaybackState()
+            }
             .store(in: &widgetCancellables)
+
+        // Keep the persisted elapsed position reasonably fresh while playing,
+        // without hammering the disk on every 0.5s tick.
+        playback.$snapshot
+            .throttle(for: .seconds(10), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] _ in self?.persistPlaybackState() }
+            .store(in: &widgetCancellables)
+    }
+
+    /// Save (or clear) the on-disk playback session so it can be resumed after a
+    /// cold launch.
+    private func persistPlaybackState() {
+        if let state = playback.persistentState {
+            PlaybackStatePersistence.save(state)
+        } else {
+            PlaybackStatePersistence.clear()
+        }
+    }
+
+    /// Reload the last session into the engine (paused, seeked to where it left
+    /// off) so the user or the widget's play button can resume it. Skipped when
+    /// something is already playing or launch automation will start playback.
+    private func restoreLastPlaybackSession() {
+        guard playback.currentTrack == nil,
+              ProcessInfo.processInfo.environment["MOZZ_AUTOPLAY"] != "1",
+              let state = PlaybackStatePersistence.load() else { return }
+        playback.restore(state)
     }
 
     private func updateNowPlayingWidget() {
@@ -858,6 +910,7 @@ public final class AppEnvironment: ObservableObject {
             artist: track.artistName,
             isPlaying: playback.snapshot.status == .playing,
             artworkFile: artworkFile,
+            tintHex: widgetTintByTrack[track.id],
             deepLink: "mozz://tab/library")
         WidgetSnapshotStore.writeNowPlaying(snapshot)
         reloadWidget(MozzWidget.nowPlayingKind)
@@ -870,7 +923,8 @@ public final class AppEnvironment: ObservableObject {
         let artworkFile = WidgetSnapshotStore.artworkURL(name) != nil ? name : nil
         items.insert(RecentlyPlayedItem(
             id: track.id, title: track.title, subtitle: track.artistName,
-            artworkFile: artworkFile, deepLink: "mozz://tab/library"), at: 0)
+            artworkFile: artworkFile, tintHex: widgetTintByTrack[track.id],
+            deepLink: "mozz://tab/library"), at: 0)
         let capped = Array(items.prefix(12))
         WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: capped))
         pruneWidgetArtwork(referencedBy: capped)
@@ -886,6 +940,9 @@ public final class AppEnvironment: ObservableObject {
             keep.insert(Self.widgetArtworkName(track.id))
         }
         WidgetSnapshotStore.pruneArtwork(keeping: keep)
+        // Keep the in-memory tint cache bounded to the tracks still referenced.
+        let keepIDs = Set(recents.map(\.id) + [playback.currentTrack?.id].compactMap { $0 })
+        widgetTintByTrack = widgetTintByTrack.filter { keepIDs.contains($0.key) }
     }
 
     /// Once artwork lands, fill it into the most-recent entry that referenced this
@@ -894,6 +951,7 @@ public final class AppEnvironment: ObservableObject {
         guard var items = WidgetSnapshotStore.readRecentlyPlayed()?.items,
               let idx = items.firstIndex(where: { $0.id == trackID && $0.artworkFile == nil }) else { return }
         items[idx].artworkFile = Self.widgetArtworkName(trackID)
+        items[idx].tintHex = widgetTintByTrack[trackID]
         WidgetSnapshotStore.writeRecentlyPlayed(RecentlyPlayedWidgetSnapshot(items: items))
         reloadWidget(MozzWidget.recentlyPlayedKind)
     }
@@ -914,6 +972,87 @@ public final class AppEnvironment: ObservableObject {
                 try? await self.playEvents.append(event, serverId: serverId, device: Self.deviceKind)
             }
         }
+    }
+
+    // MARK: Radio / Instant Mix
+
+    /// The seed of the currently-playing station, if any. Drives the endless
+    /// queue-extension hook.
+    private var activeRadioSeed: RadioSeed?
+    /// Track ids already surfaced by the current station, so successive batches
+    /// don't immediately repeat.
+    private var radioSeenIDs: Set<String> = []
+    /// Bumped on every `startRadio` *intent*, so a newer start supersedes an
+    /// older still-fetching one (last tap wins).
+    private var radioIntent = 0
+    /// Bumped only when a station is actually installed. The engine's extend
+    /// closure captures this, so a superseded/failed `startRadio` (which never
+    /// installs) can't strand a running station, and an in-flight extend can't
+    /// pollute a newer station's state.
+    private var activeStationID = 0
+
+    /// Start an endless station seeded from a track (its genres + artist).
+    public func startRadio(fromTrack track: Track) {
+        startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
+                                   artistIds: [track.artistID].compactMap { $0 }),
+                   initialExcluding: [track.id])
+    }
+
+    /// Start an endless station seeded from an artist.
+    public func startRadio(artistRemoteId: String, name: String, genres: [String]) {
+        startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
+    }
+
+    /// Load an initial station batch and keep the queue topped up as it plays.
+    /// Bails if superseded by a newer start, if the user changed playback (via a
+    /// direct play/shuffle/stop) while the batch was fetching, or if the server
+    /// changed — so a slow fetch can never hijack newer playback.
+    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = []) {
+        guard let serverId = active?.connection.id else { return }
+        radioIntent += 1
+        let intent = radioIntent
+        let epoch = playback.transportEpoch
+        Task { [weak self] in
+            guard let self else { return }
+            let ids = (try? await self.recommendations.radioBatch(
+                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding)) ?? []
+            let tracks = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+            // Superseded, playback changed under us, server switched, or empty.
+            guard intent == self.radioIntent,
+                  epoch == self.playback.transportEpoch,
+                  serverId == self.active?.connection.id,
+                  !tracks.isEmpty else { return }
+            self.activeStationID += 1
+            let station = self.activeStationID
+            self.activeRadioSeed = seed
+            self.radioSeenIDs = initialExcluding.union(tracks.map(\.id))
+            self.playback.startStation(tracks) { [weak self] in
+                await self?.nextRadioBatch(station: station) ?? []
+            }
+        }
+    }
+
+    /// Fetch the next station batch, excluding tracks already surfaced this
+    /// session. Bails (without mutating state) if this station is no longer the
+    /// active one.
+    private func nextRadioBatch(station: Int) async -> [Track] {
+        guard station == activeStationID, let seed = activeRadioSeed,
+              let serverId = active?.connection.id else { return [] }
+        let ids = (try? await recommendations.radioBatch(
+            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs)) ?? []
+        let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+        guard station == activeStationID else { return [] }
+        radioSeenIDs.formUnion(tracks.map(\.id))
+        return tracks
+    }
+
+    /// Forget any active radio session (e.g. on sign-out). The engine's own
+    /// `stop()`/`play()` already bumps its transport epoch; this clears the app
+    /// seed/seen so a late fetch can't resurrect a signed-out account's station.
+    private func invalidateRadio() {
+        activeStationID += 1
+        activeRadioSeed = nil
+        radioSeenIDs = []
     }
 
     private static let deviceKind: String = {

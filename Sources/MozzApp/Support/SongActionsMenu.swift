@@ -43,6 +43,11 @@ struct SongActionsMenu: View {
             } label: {
                 Label("Add to Queue", systemImage: "text.append")
             }
+            Button {
+                env.startRadio(fromTrack: track.toDomain())
+            } label: {
+                Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
+            }
             if downloadState != .downloaded {
                 Divider()
                 Button {

@@ -14,6 +14,19 @@ private func deepLinkURL(_ string: String) -> URL {
     URL(string: string) ?? URL(string: "mozz://tab/home")!
 }
 
+extension Color {
+    /// Parse a "#RRGGBB" hex string (from the app's WidgetTint), or `nil`.
+    init?(hex: String?) {
+        guard var hex, !hex.isEmpty else { return nil }
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        guard hex.count == 6, let value = UInt32(hex, radix: 16) else { return nil }
+        self.init(.sRGB,
+                  red: Double((value >> 16) & 0xFF) / 255,
+                  green: Double((value >> 8) & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255)
+    }
+}
+
 // MARK: - Now Playing widget
 
 struct NowPlayingEntry: TimelineEntry {
@@ -41,54 +54,155 @@ struct NowPlayingProvider: TimelineProvider {
 }
 
 struct NowPlayingWidgetView: View {
+    @Environment(\.widgetFamily) private var family
     var entry: NowPlayingEntry
 
     var body: some View {
-        if let snapshot = entry.snapshot {
-            content(snapshot)
-                .widgetURL(deepLinkURL(snapshot.deepLink))
-        } else {
-            emptyState
+        Group {
+            if let snapshot = entry.snapshot {
+                content(snapshot).widgetURL(deepLinkURL(snapshot.deepLink))
+            } else {
+                emptyState
+            }
         }
     }
 
-    private func content(_ snapshot: NowPlayingWidgetSnapshot) -> some View {
-        HStack(spacing: 12) {
-            artwork(snapshot)
-                .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(snapshot.title).font(.headline).lineLimit(2)
-                Text(snapshot.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                Label(snapshot.isPlaying ? "Playing" : "Paused",
-                      systemImage: snapshot.isPlaying ? "play.fill" : "pause.fill")
-                    .font(.caption2).foregroundStyle(.tertiary).labelStyle(.titleAndIcon)
-                    .padding(.top, 2)
+    @ViewBuilder private func content(_ s: NowPlayingWidgetSnapshot) -> some View {
+        if family == .systemSmall {
+            smallLayout(s)
+        } else {
+            mediumLayout(s)
+        }
+    }
+
+    // MARK: Layouts
+
+    private func smallLayout(_ s: NowPlayingWidgetSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                crispArtwork(s).frame(width: 64, height: 64)
+                Spacer(minLength: 0)
+                playPauseButton(s, compact: true)
             }
+            Spacer(minLength: 8)
+            Text(s.title).font(.subheadline).fontWeight(.semibold)
+                .lineLimit(2).minimumScaleFactor(0.8)
+            Text(s.artist).font(.caption).lineLimit(1).opacity(0.8)
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .containerBackground(for: .widget) { background(s) }
+    }
+
+    private func mediumLayout(_ s: NowPlayingWidgetSnapshot) -> some View {
+        HStack(spacing: 16) {
+            // Big square cover that fills the widget height, like Apple Music.
+            crispArtwork(s)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(s.isPlaying ? "NOW PLAYING" : "PAUSED")
+                    .font(.caption2).fontWeight(.semibold)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .tracking(0.5)
+                Text(s.title).font(.headline).fontWeight(.semibold)
+                    .lineLimit(2).minimumScaleFactor(0.8)
+                Text(s.artist).font(.subheadline).lineLimit(1).opacity(0.85)
+                Spacer(minLength: 6)
+                playPauseButton(s, compact: false)
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
             Spacer(minLength: 0)
         }
+        .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .containerBackground(.fill.tertiary, for: .widget)
+        .containerBackground(for: .widget) { background(s) }
     }
 
-    @ViewBuilder private func artwork(_ snapshot: NowPlayingWidgetSnapshot) -> some View {
-        if let image = widgetArtwork(snapshot.artworkFile) {
-            image.resizable().aspectRatio(contentMode: .fill)
-        } else {
-            ZStack {
-                Rectangle().fill(.quaternary)
-                Image(systemName: "music.note").foregroundStyle(.secondary)
+    // MARK: Pieces
+
+    /// Functional play/pause. On iOS 17+ it's a real interactive `Button(intent:)`
+    /// that toggles playback in the app process without opening the app; on older
+    /// systems it degrades to a static indicator.
+    @ViewBuilder private func playPauseButton(_ s: NowPlayingWidgetSnapshot, compact: Bool) -> some View {
+        if #available(iOS 17.0, *) {
+            Button(intent: TogglePlayPauseIntent()) {
+                playPauseLabel(s, compact: compact)
             }
+            .buttonStyle(.plain)
+        } else {
+            playPauseLabel(s, compact: compact)
+        }
+    }
+
+    @ViewBuilder private func playPauseLabel(_ s: NowPlayingWidgetSnapshot, compact: Bool) -> some View {
+        let icon = s.isPlaying ? "pause.fill" : "play.fill"
+        if compact {
+            Image(systemName: icon)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(.white.opacity(0.22), in: Circle())
+        } else {
+            Label(s.isPlaying ? "Pause" : "Play", systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 7)
+                .background(.white.opacity(0.22), in: Capsule())
+        }
+    }
+
+    /// Sharp, rounded cover thumbnail with a subtle edge + lift.
+    @ViewBuilder private func crispArtwork(_ s: NowPlayingWidgetSnapshot) -> some View {
+        Group {
+            if let image = widgetArtwork(s.artworkFile) {
+                image.resizable().aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Rectangle().fill(.white.opacity(0.18))
+                    Image(systemName: "music.note").foregroundStyle(.white.opacity(0.7))
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.15)))
+        .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+    }
+
+    /// Blurred cover art as a rich full-bleed background with a legibility scrim;
+    /// a warm gradient fallback when there's no artwork yet.
+    @ViewBuilder private func background(_ s: NowPlayingWidgetSnapshot) -> some View {
+        if let tint = Color(hex: s.tintHex) {
+            // Apple-Music style: a muted shade of the cover as a solid tint, with
+            // a subtle top-down gradient for depth.
+            LinearGradient(colors: [tint.opacity(0.92), tint],
+                           startPoint: .top, endPoint: .bottom)
+        } else if let image = widgetArtwork(s.artworkFile) {
+            ZStack {
+                image.resizable().aspectRatio(contentMode: .fill)
+                    .blur(radius: 30).scaleEffect(1.4)
+                LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.6)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+        } else {
+            LinearGradient(colors: [Color(red: 0.36, green: 0.20, blue: 0.52),
+                                    Color(red: 0.15, green: 0.11, blue: 0.28)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 
     private var emptyState: some View {
         VStack(spacing: 6) {
-            Image(systemName: "music.note").font(.title2).foregroundStyle(.secondary)
-            Text("Nothing Playing").font(.caption).foregroundStyle(.secondary)
+            Image(systemName: "music.note").font(.title2)
+            Text("Nothing Playing").font(.caption)
         }
+        .foregroundStyle(.white.opacity(0.9))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .containerBackground(.fill.tertiary, for: .widget)
+        .containerBackground(for: .widget) {
+            LinearGradient(colors: [Color(red: 0.22, green: 0.24, blue: 0.30),
+                                    Color(red: 0.11, green: 0.12, blue: 0.16)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 }
 
