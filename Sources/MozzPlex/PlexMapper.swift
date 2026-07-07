@@ -38,7 +38,8 @@ enum PlexMapper {
             isFavorite: false,
             rating: meta.userRating.map { $0 / 2 },   // Plex stores 0–10; domain is 0–5
             normalizationGainDB: nil,
-            addedAt: date(meta.addedAt)
+            addedAt: date(meta.addedAt),
+            mbid: mbid(meta.Guid)
         )
     }
 
@@ -93,6 +94,17 @@ enum PlexMapper {
 
     static func tags(_ genres: [PlexTag]?) -> [String] {
         (genres ?? []).compactMap { $0.tag }
+    }
+
+    /// The first MusicBrainz recording MBID among a track's `Guid` entries, if the
+    /// server exposed any (requires `includeGuids=1`). Non-MusicBrainz GUIDs
+    /// (e.g. `plex://track/…`) are ignored by the parser.
+    static func mbid(_ guids: [PlexGuid]?) -> String? {
+        guard let guids else { return nil }
+        for guid in guids {
+            if let mbid = MusicBrainzID.extract(fromGUID: guid.id) { return mbid }
+        }
+        return nil
     }
 
     static func date(_ epoch: Double?) -> Date? {

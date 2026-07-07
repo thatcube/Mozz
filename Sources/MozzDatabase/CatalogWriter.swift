@@ -90,6 +90,25 @@ public struct CatalogWriter: Sendable {
                     track.addedAt?.timeIntervalSince1970, Self.jsonText(track.genres),
                 ])
             }
+            // Tier-1 enrichment (ADR-0007/B1): capture MBIDs the backend already
+            // embedded (Plex Guid / Jellyfin ProviderIds), in the SAME transaction
+            // so every upsertTracks call site is covered with no extra network and
+            // no extra WAL churn. Only non-nil MBIDs are written (no null clobber);
+            // `artist_mbid` is COALESCEd so a Plex track (no artist MBID) can't wipe
+            // one a prior name-search resolved. `tags`/`embedding`/`bpm`/
+            // `feature_source` are untouched.
+            let embedded = tracks.compactMap { track -> (String, String, String?)? in
+                guard let mbid = MusicBrainzID.normalized(track.mbid) else { return nil }
+                return (PlayEventStore.trackRef(serverId: serverId, remoteId: track.id),
+                        mbid, MusicBrainzID.normalized(track.artistMbid))
+            }
+            if !embedded.isEmpty {
+                let now = Date().timeIntervalSince1970
+                let mbidStmt = try db.makeStatement(sql: Self.embeddedMBIDUpsertSQL)
+                for (ref, mbid, artistMbid) in embedded {
+                    try mbidStmt.execute(arguments: [ref, mbid, artistMbid, now, now])
+                }
+            }
         }
     }
 
@@ -229,6 +248,22 @@ public struct CatalogWriter: Sendable {
     private static let playlistUpsertSQL = upsertSQL(table: "playlist", columns: [
         "title", "trackCount", "durationSeconds", "artworkKey", "isSmart",
     ])
+
+    /// Partial UPSERT of a backend-embedded MBID into `track_features`, keyed on
+    /// the durable `track_ref`. Writes ONLY the MBID columns + lookup provenance;
+    /// never touches `tags`/`embedding`/`bpm`/`feature_source`. `artist_mbid` is
+    /// COALESCEd so a null (Plex) can't overwrite a previously resolved value.
+    /// Arguments: (track_ref, mbid, artist_mbid, lookup_at, updated_at).
+    private static let embeddedMBIDUpsertSQL = """
+    INSERT INTO track_features (track_ref, mbid, artist_mbid, mbid_lookup_status, mbid_lookup_at, updated_at)
+    VALUES (?, ?, ?, 'embedded', ?, ?)
+    ON CONFLICT(track_ref) DO UPDATE SET
+        mbid = excluded.mbid,
+        artist_mbid = COALESCE(excluded.artist_mbid, track_features.artist_mbid),
+        mbid_lookup_status = 'embedded',
+        mbid_lookup_at = excluded.mbid_lookup_at,
+        updated_at = excluded.updated_at
+    """
 
     private static let genresEncoder = JSONEncoder()
 

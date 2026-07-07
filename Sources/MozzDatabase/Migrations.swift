@@ -16,6 +16,7 @@ enum Schema {
         registerV8(&migrator)
         registerV9(&migrator)
         registerV10(&migrator)
+        registerV11(&migrator)
         return migrator
     }
 
@@ -448,6 +449,29 @@ enum Schema {
                       AND artworkKey IS NOT NULL AND artworkKey NOT LIKE '%|%'
                     """)
             }
+        }
+    }
+
+    /// v11 — open metadata enrichment (ADR-0007, phase B1). The `mbid` /
+    /// `artist_mbid` columns already exist (v6); this adds a negative cache so a
+    /// name-search miss isn't re-attempted every sync, plus the indexes the radio
+    /// similarity joins (B3) will need.
+    ///
+    /// `mbid_lookup_status` (`embedded`|`found`|`notfound`) records provenance and
+    /// distinguishes "never looked up" (NULL) from "looked up, no match"
+    /// (`notfound`). `mbid_lookup_at` gates re-tries by TTL. Deliberately NOT
+    /// stored in `feature_source`, which is reserved for the sonic-embedding
+    /// source (`ondevice|audiomuse|plex`).
+    private static func registerV11(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v11.mbidResolution") { db in
+            try db.alter(table: "track_features") { t in
+                t.add(column: "mbid_lookup_status", .text)
+                t.add(column: "mbid_lookup_at", .double)
+            }
+            try db.create(index: "idx_track_features_mbid", on: "track_features",
+                          columns: ["mbid"])
+            try db.create(index: "idx_track_features_artist_mbid", on: "track_features",
+                          columns: ["artist_mbid"])
         }
     }
 }

@@ -33,6 +33,13 @@ struct PlexTag: Decodable {
     let tag: String?
 }
 
+/// External-identifier entry Plex attaches to items when `includeGuids=1` is
+/// requested, e.g. `{"id": "mbid://<uuid>"}` (MusicBrainz agent) or the legacy
+/// `com.plexapp.agents.musicbrainz://<uuid>?lang=en`.
+struct PlexGuid: Decodable {
+    let id: String?
+}
+
 struct PlexPart: Decodable {
     let key: String?
     let file: String?
@@ -71,6 +78,7 @@ struct PlexMetadata: Decodable {
     let userRating: Double?
     let Media: [PlexMedia]?
     let Genre: [PlexTag]?
+    let Guid: [PlexGuid]?
 }
 
 // MARK: - plex.tv v2 auth/discovery

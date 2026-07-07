@@ -64,13 +64,16 @@ struct JFBaseItem: Decodable {
     let MediaSources: [JFMediaSource]?
     let NormalizationGain: Double?
     let DateCreated: String?
+    /// External ids Jellyfin exposes when `Fields=ProviderIds` is requested, e.g.
+    /// `MusicBrainzTrack` (recording), `MusicBrainzArtist`, `MusicBrainzAlbum`.
+    let ProviderIds: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case itemType = "Type"
         case Id, Name, SortName, AlbumArtist, AlbumArtists, ArtistItems, Artists
         case Album, AlbumId, ProductionYear, IndexNumber, ParentIndexNumber
         case RunTimeTicks, Genres, ImageTags, AlbumPrimaryImageTag, ChildCount
-        case UserData, MediaSources, NormalizationGain, DateCreated
+        case UserData, MediaSources, NormalizationGain, DateCreated, ProviderIds
     }
 }
 

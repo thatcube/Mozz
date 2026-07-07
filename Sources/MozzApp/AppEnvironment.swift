@@ -6,6 +6,7 @@ import MozzDownloads
 import MozzPlayback
 import MozzNetworking
 import MozzRecommend
+import MozzEnrichment
 import MozzSync
 import MozzPlex
 import MozzJellyfin
@@ -74,6 +75,12 @@ public final class AppEnvironment: ObservableObject {
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
     public let recommendations: RecommendationService
+    /// Open metadata enrichment (MusicBrainz IDs → later ListenBrainz similarity).
+    /// On by default with a Settings off-switch; resolves MBIDs off-main and
+    /// rate-limited, never blocking sync or the UI (ADR-0007).
+    public let enrichment: EnrichmentService
+    /// UserDefaults key for the enrichment on/off switch (default on when unset).
+    public static let enrichmentEnabledKey = "mozz.enrichmentEnabled"
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -130,6 +137,19 @@ public final class AppEnvironment: ObservableObject {
         self.playback = PlaybackEngine(resolver: resolver)
         self.playEvents = PlayEventStore(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
+        let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
+        let enrichmentConfig = EnrichmentConfig(
+            userAgent: "Mozz/\(appVersion) ( https://github.com/thatcube/Mozz )")
+        // One shared limiter/client so every MusicBrainz call across the app
+        // (background pass + on-demand seed resolution) honors one 1 req/s budget.
+        let mbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.minRequestInterval)
+        self.enrichment = EnrichmentService(
+            store: EnrichmentStore(database),
+            musicBrainz: MusicBrainzClient.make(config: enrichmentConfig, limiter: mbLimiter),
+            config: enrichmentConfig,
+            isEnabled: {
+                UserDefaults.standard.object(forKey: AppEnvironment.enrichmentEnabledKey) as? Bool ?? true
+            })
         self.favorites = FavoritesStore(database)
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
         self.clientInfo = ClientInfo(
@@ -252,13 +272,21 @@ public final class AppEnvironment: ObservableObject {
         // rebuilds (Sync Now / library-selection changes also route through here),
         // which must not kill a live station's auto-extend. `active` still holds
         // the previous server at this point.
-        if connection.id != active?.connection.id { invalidateRadio() }
+        if connection.id != active?.connection.id {
+            invalidateRadio()
+            // A different server has a different catalog — abandon any in-flight
+            // enrichment crawl scoped to the previous server.
+            let enrichment = self.enrichment
+            Task { await enrichment.cancel() }
+        }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
     }
 
     public func signOut() {
         playback.stop()
         invalidateRadio()
+        let enrichment = self.enrichment
+        Task { await enrichment.cancel() }
         SessionPersistence.clear(credentials)
         active = nil
     }
@@ -411,6 +439,9 @@ public final class AppEnvironment: ObservableObject {
         await regenerateHomeMixes()
         // Flush any likes/ratings that were made offline.
         await flushFavoriteOutbox()
+        // Fill in missing MusicBrainz IDs off-main, rate-limited. Fire-and-forget
+        // and single-flight inside the actor, so it never delays this sync.
+        await enrichment.resolvePending(serverId: active.connection.id)
         return summary
     }
 

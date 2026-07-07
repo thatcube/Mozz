@@ -83,7 +83,7 @@ public struct JellyfinBackend: MusicBackend {
 
     public func fetchTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track> {
         let response = try await client.send(
-            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,MediaSources,NormalizationGain")),
+            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,MediaSources,NormalizationGain,ProviderIds")),
             as: JFItemsResponse.self
         )
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
@@ -103,7 +103,7 @@ public struct JellyfinBackend: MusicBackend {
                 URLQueryItem(name: "userId", value: userID),
                 URLQueryItem(name: "StartIndex", value: "\(offset)"),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Genres,MediaSources,NormalizationGain"),
+                URLQueryItem(name: "Fields", value: "Genres,MediaSources,NormalizationGain,ProviderIds"),
                 URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
             ]),
             as: JFItemsResponse.self

@@ -8,6 +8,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     /// Persisted across launches; mirrors `PlaybackEngine.normalizationEnabled`.
     @AppStorage("mozz.normalizationEnabled") private var normalizationEnabled = true
+    /// Open metadata enrichment on/off (default on). Read live by
+    /// `AppEnvironment.enrichment`, so no wiring is needed beyond this store.
+    @AppStorage("mozz.enrichmentEnabled") private var enrichmentEnabled = true
 
     var body: some View {
         NavigationStack {
@@ -45,6 +48,16 @@ struct SettingsView: View {
                         }
                         Text("Plays tracks at a consistent loudness using each track's normalization gain, when available.")
                             .font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    Section {
+                        Toggle(isOn: $enrichmentEnabled) {
+                            Label("Improve Recommendations", systemImage: "sparkles")
+                        }
+                        Text("Looks up open music data from MusicBrainz to make radio and mixes more accurate. Only song and artist names are sent, no account or personal data. Turn this off to keep the app fully offline.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } header: {
+                        Text("Recommendations")
                     }
 
                     Section {

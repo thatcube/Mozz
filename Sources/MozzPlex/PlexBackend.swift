@@ -293,6 +293,11 @@ public struct PlexBackend: MusicBackend {
         [
             URLQueryItem(name: "X-Plex-Container-Start", value: "\(offset)"),
             URLQueryItem(name: "X-Plex-Container-Size", value: "\(limit)"),
+            // Ask Plex to inline each item's external ids (MusicBrainz `Guid`s) so
+            // enrichment can capture embedded MBIDs during the normal sync with no
+            // extra per-item requests (ADR-0007/B1). Harmless on servers/agents
+            // that don't provide them — the array simply stays absent.
+            URLQueryItem(name: "includeGuids", value: "1"),
         ]
     }
 

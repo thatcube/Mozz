@@ -17,6 +17,11 @@
       "NormalizationGain": -6.5,
       "DateCreated": "2021-05-01T12:00:00.0000000Z",
       "ImageTags": { "Primary": "ttrk1" },
+      "ProviderIds": {
+        "MusicBrainzTrack": "d3b8e2a1-1111-4222-8333-444455556666",
+        "MusicBrainzArtist": "f22942a1-6f70-4f48-866e-238cb2308fbd",
+        "MusicBrainzReleaseTrack": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      },
       "MediaSources": [
         {
           "Container": "flac",
