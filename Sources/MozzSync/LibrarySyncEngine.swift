@@ -66,20 +66,35 @@ public struct SyncProgress: Sendable, Hashable {
 
 /// What a completed sync wrote.
 public struct SyncSummary: Sendable, Hashable {
+    /// Timing for one phase, for the Diagnostics "last sync" report.
+    public struct PhaseTiming: Sendable, Hashable {
+        public let phase: SyncProgress.Phase
+        public let items: Int
+        public let seconds: TimeInterval
+        public var rate: Double { seconds > 0 ? Double(items) / seconds : 0 }
+        public init(phase: SyncProgress.Phase, items: Int, seconds: TimeInterval) {
+            self.phase = phase
+            self.items = items
+            self.seconds = seconds
+        }
+    }
+
     public var artists: Int
     public var albums: Int
     public var tracks: Int
     public var playlists: Int
     public var deleted: Int
     public var duration: TimeInterval
+    public var phaseTimings: [PhaseTiming]
 
-    public init(artists: Int = 0, albums: Int = 0, tracks: Int = 0, playlists: Int = 0, deleted: Int = 0, duration: TimeInterval = 0) {
+    public init(artists: Int = 0, albums: Int = 0, tracks: Int = 0, playlists: Int = 0, deleted: Int = 0, duration: TimeInterval = 0, phaseTimings: [PhaseTiming] = []) {
         self.artists = artists
         self.albums = albums
         self.tracks = tracks
         self.playlists = playlists
         self.deleted = deleted
         self.duration = duration
+        self.phaseTimings = phaseTimings
     }
 }
 
@@ -196,13 +211,17 @@ public struct LibrarySyncEngine: Sendable {
         // count stays consistent across syncs — synthesized artists persist in
         // the DB but aren't in this run's server-"seen" set.
         let artistTotal = try await writer.artistCount(serverId: serverId)
+        let timings = [artistIDs, albumIDs, trackIDs, playlistIDs].map {
+            SyncSummary.PhaseTiming(phase: $0.phase, items: $0.seen.count, seconds: $0.elapsed)
+        }
         let summary = SyncSummary(
             artists: artistTotal,
             albums: albumIDs.seen.count,
             tracks: trackIDs.seen.count,
             playlists: playlistIDs.seen.count,
             deleted: deleted,
-            duration: Date().timeIntervalSince(started)
+            duration: Date().timeIntervalSince(started),
+            phaseTimings: timings
         )
         progress?(SyncProgress(phase: .done, itemsSynced: summary.tracks, totalCount: summary.tracks))
         syncLog.notice("sync complete: \(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists, \(summary.playlists) playlists, \(summary.deleted) pruned in \(String(format: "%.1f", summary.duration))s")
@@ -230,6 +249,8 @@ public struct LibrarySyncEngine: Sendable {
     private struct PagedEnumeration {
         var seen: [String]
         var reportedTotal: Int?
+        var phase: SyncProgress.Phase = .syncing
+        var elapsed: TimeInterval = 0
     }
 
     /// Page one entity type to exhaustion, writing each batch and collecting the
@@ -262,11 +283,12 @@ public struct LibrarySyncEngine: Sendable {
         let elapsed = Date().timeIntervalSince(started)
         let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
         syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
-        return PagedEnumeration(seen: seen, reportedTotal: reportedTotal)
+        return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: phase, elapsed: elapsed)
     }
 
     /// Playlists need a second pass to sync their ordered items.
     private func syncPlaylists(report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void) async throws -> PagedEnumeration {
+        let started = Date()
         var offset = 0
         var playlists: [Playlist] = []
         var reportedTotal: Int?
@@ -286,7 +308,9 @@ public struct LibrarySyncEngine: Sendable {
             let itemIDs = try await fetchPlaylistItemIDs(playlistID: playlist.id)
             try await writer.replacePlaylistItems(playlistRemoteId: playlist.id, trackRemoteIds: itemIDs, serverId: serverId)
         }
-        return PagedEnumeration(seen: playlists.map(\.id), reportedTotal: reportedTotal)
+        let elapsed = Date().timeIntervalSince(started)
+        syncLog.notice("phase playlists: \(playlists.count) items in \(String(format: "%.1f", elapsed))s")
+        return PagedEnumeration(seen: playlists.map(\.id), reportedTotal: reportedTotal, phase: .playlists, elapsed: elapsed)
     }
 
     private func fetchPlaylistItemIDs(playlistID: String) async throws -> [String] {

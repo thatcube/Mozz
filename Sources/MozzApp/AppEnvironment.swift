@@ -87,6 +87,9 @@ public final class AppEnvironment: ObservableObject {
     /// Whether we're still restoring a saved session at launch.
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
+    /// A detailed per-phase timing report of the most recent sync, for the
+    /// Diagnostics screen (real throughput numbers to spot bottlenecks).
+    @Published public private(set) var lastSyncReport: String?
 
     /// Post-authentication setup (finding the server, capabilities, first sync)
     /// is in progress. Owned here (not by the sign-in view) so navigating away
@@ -528,6 +531,7 @@ public final class AppEnvironment: ObservableObject {
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 250)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
+        lastSyncReport = Self.formatSyncReport(summary)
         // New catalog + listening → refresh the mixes off-main. Non-fatal.
         await regenerateMozzWeekly()
         await regenerateHomeMixes()
@@ -536,6 +540,22 @@ public final class AppEnvironment: ObservableObject {
         // Quietly fill in the audio format/size the light track sync skipped.
         startMediaBackfillIfNeeded()
         return summary
+    }
+
+    /// Human-readable per-phase timing report for the Diagnostics screen, e.g.
+    /// "Total 2m 14s\nSongs: 20,000 in 128s (156/s)\nAlbums: 2,500 in 41s (61/s)…".
+    private static func formatSyncReport(_ s: SyncSummary) -> String {
+        func time(_ t: TimeInterval) -> String {
+            let sec = Int(t.rounded())
+            return sec >= 60 ? "\(sec / 60)m \(sec % 60)s" : "\(sec)s"
+        }
+        var lines = ["Total: \(time(s.duration))"]
+        // Slowest phase first — that's the bottleneck to look at.
+        for t in s.phaseTimings.sorted(by: { $0.seconds > $1.seconds }) where t.items > 0 {
+            lines.append("\(t.phase.label): \(t.items) in \(time(t.seconds)) (\(Int(t.rate.rounded()))/s)")
+        }
+        if s.deleted > 0 { lines.append("Pruned: \(s.deleted)") }
+        return lines.joined(separator: "\n")
     }
 
     /// Backfill the audio format + file size that the light catalog sync omits
