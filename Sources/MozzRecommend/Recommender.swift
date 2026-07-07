@@ -56,6 +56,13 @@ public struct ContentRecommender: Recommender {
         self.genreSpace = genreSpace
     }
 
+    /// A copy scored against `space`, preserving this recommender's configured
+    /// genre/artist weights (so an injected non-default weighting isn't lost when
+    /// the service attaches a per-server genre space).
+    public func withGenreSpace(_ space: GenreSimilarity?) -> ContentRecommender {
+        ContentRecommender(genreWeight: genreWeight, artistWeight: artistWeight, genreSpace: space)
+    }
+
     public func score(candidates: [TrackCandidate], taste: TasteProfile) -> [ScoredCandidate] {
         guard let genreSpace else { return scoreByAffinitySum(candidates, taste: taste) }
         return scoreByCosine(candidates, taste: taste, space: genreSpace)

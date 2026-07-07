@@ -234,7 +234,7 @@ public struct RecommendationStore: Sendable {
             let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?",
                                          arguments: [serverId]) ?? 0
             let rows = try Row.fetchAll(db, sql: """
-                SELECT je.value AS genre, COUNT(*) AS df
+                SELECT je.value AS genre, COUNT(DISTINCT track.remoteId) AS df
                 FROM track, json_each(track.genres) je
                 WHERE track.serverId = ?
                 GROUP BY je.value

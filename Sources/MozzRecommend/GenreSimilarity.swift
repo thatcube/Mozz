@@ -69,6 +69,28 @@ public struct GenreSimilarity: Sendable, Equatable {
         return dot
     }
 
+    /// IDF-weighted Jaccard (Tanimoto) similarity of two genre sets: the IDF mass
+    /// of the shared genres over the IDF mass of their union. Result in `[0, 1]`.
+    ///
+    /// Unlike cosine, this is robust for **sparsely-tagged** candidates: a track
+    /// carrying only a broad genre ("rock") that it shares with a richer seed
+    /// scores low because the seed's other (rare) genres inflate the union it
+    /// fails to match — whereas cosine of a single-genre vector collapses to the
+    /// seed's own weight on that axis and can clear a magnitude threshold. This
+    /// is the metric the radio genre floor uses to exclude outliers.
+    public func weightedJaccard(_ a: [String], _ b: [String]) -> Double {
+        let setA = Set(a), setB = Set(b)
+        guard !setA.isEmpty, !setB.isEmpty else { return 0 }
+        var intersectionMass = 0.0
+        var unionMass = 0.0
+        for genre in setA.union(setB) {
+            let w = weight(for: genre)
+            unionMass += w
+            if setA.contains(genre) && setB.contains(genre) { intersectionMass += w }
+        }
+        return unionMass > 0 ? intersectionMass / unionMass : 0
+    }
+
     private static func l2Normalized(_ v: [String: Double]) -> [String: Double] {
         let norm = (v.values.reduce(0) { $0 + $1 * $1 }).squareRoot()
         guard norm > 0 else { return [:] }

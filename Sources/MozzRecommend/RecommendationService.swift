@@ -42,10 +42,11 @@ public actor RecommendationService {
     /// Stable id of the weekly rediscovery set.
     public static let mozzWeeklyId = "mozz-weekly"
 
-    /// Minimum TF-IDF genre cosine similarity for a (non-same-artist) track to
-    /// join a radio station. Below this, a candidate shares only broad/ubiquitous
-    /// tags with the seed and is a genre outlier. Tunable; kept conservative so
-    /// the station stays populated. Same-artist tracks bypass this floor.
+    /// Minimum IDF-weighted Jaccard genre similarity for a (non-same-artist)
+    /// track to join a radio station. Below this, a candidate shares only
+    /// broad/ubiquitous tags with the seed and is a genre outlier. Robust for
+    /// single-genre candidates (unlike a raw cosine magnitude). Same-artist tracks
+    /// bypass this floor. Tunable; conservative enough to keep the station full.
     private static let minRadioSimilarity = 0.15
 
     public init(store: RecommendationStore,
@@ -76,11 +77,12 @@ public actor RecommendationService {
         return space
     }
 
-    /// A cosine-similarity `ContentRecommender` for a server, or the default
-    /// affinity-sum scorer when no genre corpus is available.
+    /// A cosine-similarity `ContentRecommender` for a server (preserving the
+    /// service's configured weights), or the default affinity-sum scorer when no
+    /// genre corpus is available.
     private func contentScorer(for serverId: ServerID) async -> ContentRecommender {
         guard let space = await genreSpace(for: serverId) else { return content }
-        return ContentRecommender(genreSpace: space)
+        return content.withGenreSpace(space)
     }
 
     /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →
@@ -158,26 +160,28 @@ public actor RecommendationService {
         guard !fresh.isEmpty else { return [] }
 
         // Drop genre outliers up front: keep the seed's own artist(s) always, but
-        // require a genre-tagged candidate to clear a minimum TF-IDF cosine
-        // similarity to the seed. This is what excludes a hard-rock track that
-        // merely shares a broad "Rock" tag with a dream-pop seed — IDF makes that
-        // shared broad tag nearly weightless, so its cosine falls below the floor.
-        // A genre-less (artist-only) seed keeps its same-artist pool as-is.
+        // require a genre-tagged candidate to clear a minimum IDF-weighted Jaccard
+        // similarity to the seed. Weighted Jaccard (shared IDF mass / union IDF
+        // mass) is robust even for single-genre candidates — a track carrying only
+        // a broad "Rock" tag it shares with a dream-pop seed scores low because the
+        // seed's rare genres inflate the union it can't match. A genre-less
+        // (artist-only) seed keeps its same-artist pool as-is.
         let space = await genreSpace(for: serverId)
         let seedArtists = Set(seed.artistIds)
         let relevant: [TrackCandidate]
-        if let space, !seed.genres.isEmpty {
-            let seedVector = space.vector(for: seed.genres)
+        if space != nil, !seed.genres.isEmpty {
             relevant = fresh.filter { candidate in
                 if let artist = candidate.artistRemoteId, seedArtists.contains(artist) { return true }
-                return space.cosine(seedVector, space.vector(for: candidate.genres)) >= Self.minRadioSimilarity
+                return space!.weightedJaccard(seed.genres, candidate.genres) >= Self.minRadioSimilarity
             }
         } else {
             relevant = fresh
         }
-        // If the floor rejected everything (e.g. sparse/absent genre tags), fall
-        // back to the unfiltered pool so the station still plays rather than stalls.
-        let candidates = relevant.isEmpty ? fresh : relevant
+        // If nothing is genre-appropriate, wind the station down gracefully (the
+        // caller treats an empty batch as "nothing to add") rather than flooding
+        // it with the cross-genre outliers the floor just excluded.
+        guard !relevant.isEmpty else { return [] }
+        let candidates = relevant
 
         // Score by similarity to the SEED (treat the seed's genres/artists as a
         // synthetic taste), so the station stays close to what it was seeded on.
@@ -185,7 +189,7 @@ public actor RecommendationService {
             genreAffinity: Dictionary(seed.genres.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             artistAffinity: Dictionary(seed.artistIds.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             positiveSignal: TasteProfile.coldStartThreshold + 1)
-        let scorer = space.map { ContentRecommender(genreSpace: $0) } ?? content
+        let scorer = content.withGenreSpace(space)
         let scored = scorer.score(candidates: candidates, taste: seedTaste)
         // Fall back to the pool when nothing scored (e.g. artist-only seed whose
         // tracks carry no genres): still a valid same-artist station.

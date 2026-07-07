@@ -71,6 +71,37 @@ final class GenreSimilarityTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(unknown, s.weight(for: "dream pop"))
         XCTAssertGreaterThan(unknown, s.weight(for: "rock"))
     }
+
+    // MARK: Weighted Jaccard (the robust radio floor metric)
+
+    /// The case plain cosine missed: a candidate tagged with ONLY the broad
+    /// shared genre must fall below the 0.15 radio floor. Cosine gives ~0.17
+    /// here (leaks); weighted Jaccard penalizes via the union and excludes it.
+    func testWeightedJaccardExcludesSingleBroadTagCandidate() {
+        let s = space()
+        let seed = ["pop", "dream pop", "indie pop", "rock"]
+        let singleBroad = s.weightedJaccard(seed, ["rock"])
+        XCTAssertLessThan(singleBroad, 0.15, "a single shared broad tag must fall below the floor")
+        // Contrast: the same seed vs a genuine pop match clears the floor easily.
+        let genuine = s.weightedJaccard(seed, ["pop", "dream pop"])
+        XCTAssertGreaterThan(genuine, 0.15)
+        XCTAssertGreaterThan(genuine, singleBroad)
+    }
+
+    func testWeightedJaccardIdentityAndDisjoint() {
+        let s = space()
+        XCTAssertEqual(s.weightedJaccard(["pop", "rock"], ["pop", "rock"]), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(s.weightedJaccard(["pop"], ["rock"]), 0.0, accuracy: 1e-9)
+        XCTAssertEqual(s.weightedJaccard([], ["rock"]), 0.0)
+        XCTAssertEqual(s.weightedJaccard(["rock"], []), 0.0)
+    }
+
+    /// A sparse seed that itself only has the broad tag legitimately matches
+    /// other broad-tagged tracks (best we can do) — not falsely excluded.
+    func testWeightedJaccardBroadSeedMatchesBroadCandidate() {
+        let s = space()
+        XCTAssertEqual(s.weightedJaccard(["rock"], ["rock"]), 1.0, accuracy: 1e-9)
+    }
 }
 
 final class ContentRecommenderCosineTests: XCTestCase {
