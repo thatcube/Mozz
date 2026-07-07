@@ -569,30 +569,35 @@ struct NowPlayingMorphContainer: View {
     }
 
     #if canImport(UIKit)
-    /// The output-route control: the real device icon (AirPlay/speaker/headphones/
-    /// etc.) drawn over an invisible `AVRoutePickerView` so a tap presents the
-    /// system route picker. Tinted to signal when audio is routed off-device.
+    /// The output-route control: the real device icon (AirPods / headphones /
+    /// AirPlay / car / TV / speaker) drawn over an invisible `AVRoutePickerView`
+    /// (so a tap still opens the system picker). Tinted to signal when audio is
+    /// routed off the phone speaker.
     private var routeControl: some View {
         ZStack {
             AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
             Image(systemName: routeMonitor.output.icon)
-                .foregroundStyle(routeMonitor.output.isExternal ? Color.accentColor : Color.primary)
+                .foregroundStyle(routeMonitor.output.showsLabel ? Color.accentColor : Color.primary)
                 .allowsHitTesting(false)
         }
         .frame(width: 40, height: 32)
     }
 
-    /// "iPhone → Device Name" route line, shown only when audio is playing to an
-    /// external device (AirPlay speaker, headphones, car…), like Apple Music.
+    /// The route line under the controls. For external speakers/rooms (AirPlay,
+    /// CarPlay, TV) it reads "iPhone → Name"; for personal audio (AirPods,
+    /// headphones) just the device name; nothing on the built-in speaker — like
+    /// Apple Music.
     @ViewBuilder private var routeLabel: some View {
-        if routeMonitor.output.isExternal {
+        let out = routeMonitor.output
+        if out.showsLabel {
             HStack(spacing: 5) {
-                Text(UIDevice.current.model)
-                Image(systemName: "arrow.forward").font(.caption2)
-                Text(routeMonitor.output.name).foregroundStyle(.primary)
+                if out.showsSourcePrefix {
+                    Text("iPhone").foregroundStyle(.secondary)
+                    Image(systemName: "arrow.forward").font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(out.name).foregroundStyle(.primary)
             }
             .font(.footnote)
-            .foregroundStyle(.secondary)
             .lineLimit(1)
         }
     }

@@ -42,7 +42,11 @@ final class AudioRouteMonitor: ObservableObject {
     struct Output: Equatable {
         var name: String
         var icon: String
-        var isExternal: Bool
+        /// Show a route label at all (false only for the built-in speaker).
+        var showsLabel: Bool
+        /// Prepend "iPhone →" — Apple does this only for external speakers /
+        /// rooms (AirPlay, CarPlay, TV), NOT personal audio (AirPods/headphones).
+        var showsSourcePrefix: Bool
     }
 
     @Published private(set) var output: Output
@@ -65,33 +69,60 @@ final class AudioRouteMonitor: ObservableObject {
     private static func current() -> Output {
         let route = AVAudioSession.sharedInstance().currentRoute
         guard let out = route.outputs.first else {
-            return Output(name: UIDevice.current.model, icon: "iphone", isExternal: false)
+            return Output(name: "iPhone", icon: "iphone", showsLabel: false, showsSourcePrefix: false)
         }
-        return Output(name: out.portName,
-                      icon: icon(for: out.portType),
-                      isExternal: isExternal(out.portType))
+        return classify(port: out.portType, name: out.portName)
     }
 
-    /// SF Symbol best matching an output port type. AirPlay can't distinguish a
-    /// HomePod from an Apple TV via public API, so it uses the generic AirPlay glyph.
-    private static func icon(for port: AVAudioSession.Port) -> String {
+    private static func classify(port: AVAudioSession.Port, name: String) -> Output {
         switch port {
-        case .builtInSpeaker, .builtInReceiver: return "iphone"
-        case .headphones, .headsetMic: return "headphones"
-        case .bluetoothA2DP, .bluetoothLE, .usbAudio: return "hifispeaker.fill"
-        case .bluetoothHFP: return "headphones"
-        case .airPlay: return "airplayaudio"
-        case .carAudio: return "car.fill"
-        case .HDMI, .displayPort: return "tv.fill"
-        default: return "airplayaudio"
+        case .builtInSpeaker, .builtInReceiver:
+            return Output(name: "iPhone", icon: "iphone", showsLabel: false, showsSourcePrefix: false)
+        case .headphones, .headsetMic:
+            return Output(name: name, icon: "headphones", showsLabel: true, showsSourcePrefix: false)
+        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
+            // Personal Bluetooth audio (AirPods / Beats / headphones): show the
+            // device icon + its name, no "iPhone →" prefix (matches Apple).
+            return Output(name: name, icon: bluetoothIcon(name: name),
+                          showsLabel: true, showsSourcePrefix: false)
+        case .usbAudio:
+            return Output(name: name, icon: "headphones", showsLabel: true, showsSourcePrefix: false)
+        case .airPlay:
+            // External room/speaker: "iPhone → Name". Public API can't tell a
+            // HomePod from an Apple TV (and often reports a generic "AirPlay"
+            // name), so fall back to the AirPlay glyph unless the name hints at
+            // a specific device.
+            return Output(name: name, icon: airPlayIcon(name: name),
+                          showsLabel: true, showsSourcePrefix: true)
+        case .carAudio:
+            return Output(name: name, icon: "car.fill", showsLabel: true, showsSourcePrefix: true)
+        case .HDMI, .displayPort:
+            return Output(name: name, icon: "tv.fill", showsLabel: true, showsSourcePrefix: true)
+        default:
+            return Output(name: name, icon: "airplayaudio", showsLabel: true, showsSourcePrefix: true)
         }
     }
 
-    private static func isExternal(_ port: AVAudioSession.Port) -> Bool {
-        switch port {
-        case .builtInSpeaker, .builtInReceiver: return false
-        default: return true
-        }
+    /// AirPods / Beats get their real glyph via a name heuristic (the port type
+    /// alone can't distinguish them); other Bluetooth audio defaults to headphones.
+    private static func bluetoothIcon(name: String) -> String {
+        let n = name.lowercased()
+        if n.contains("airpods max") { return "airpodsmax" }
+        if n.contains("airpods pro") { return "airpodspro" }
+        if n.contains("airpod") { return "airpods" }
+        if n.contains("beats") { return "beats.headphones" }
+        if n.contains("homepod") { return "homepod.fill" }
+        if n.contains("speaker") { return "hifispeaker.fill" }
+        return "headphones"
+    }
+
+    /// Best glyph for an AirPlay endpoint from its (often generic) name.
+    private static func airPlayIcon(name: String) -> String {
+        let n = name.lowercased()
+        if n.contains("homepod") { return "homepod.fill" }
+        if n.contains("apple tv") || n.contains("appletv") { return "appletv.fill" }
+        if n.contains("tv") { return "tv.fill" }
+        return "airplayaudio"
     }
 }
 #endif
