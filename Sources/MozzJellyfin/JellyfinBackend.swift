@@ -156,7 +156,77 @@ public struct JellyfinBackend: MusicBackend {
         out.append(await run("album size=200 sort=SortName", q(type: "MusicAlbum", limit: 200, sort: "SortName", fields: "Genres,DateCreated", images: true, count: false, parent: true)))
         out.append(await run("album size=200 fields=none", q(type: "MusicAlbum", limit: 200, sort: "DateCreated", fields: "", images: true, count: false, parent: true)))
         out.append(await run("album size=200 images=off", q(type: "MusicAlbum", limit: 200, sort: "DateCreated", fields: "Genres,DateCreated", images: false, count: false, parent: true)))
-        // (4) THE big lever: can the server serve parallel /Items requests? Cost
+        // (4) CRITICAL: split SERVER+network time from on-device JSON DECODE
+        //     time. The other probes time send→decoded; if decoding Jellyfin's
+        //     fat BaseItemDto on the phone is the real cost, the fix is client-
+        //     side. Fetch raw Data (no decode) and time it, then decode that same
+        //     in-memory Data N times and time that. Also report payload bytes so
+        //     rows/s can be normalized against Plex/Artists by size.
+        out.append("--- split fetch-vs-decode (200 Audio) ---")
+        let splitQuery = q(type: "Audio", limit: 200, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)
+        do {
+            let rawStart = Date()
+            let data = try await client.send(Endpoint(path: "Items", query: splitQuery))
+            let rawDt = Date().timeIntervalSince(rawStart)
+            let bytes = data.count
+            // Decode the already-fetched bytes 3x to get a stable per-decode cost.
+            let decStart = Date()
+            var decoded = 0
+            for _ in 0..<3 {
+                let r = try JSONDecoder().decode(JFItemsResponse.self, from: data)
+                decoded = r.Items?.count ?? 0
+            }
+            let decDt = Date().timeIntervalSince(decStart) / 3
+            out.append(String(format: "raw fetch 200: %.2fs  |  decode 200: %.3fs  |  bytes=%d (%.0f B/row)  rows=%d",
+                              rawDt, decDt, bytes, decoded > 0 ? Double(bytes) / Double(decoded) : 0, decoded))
+            out.append(String(format: "→ fetch=%.0f%% decode=%.0f%% of end-to-end",
+                              rawDt / (rawDt + decDt) * 100, decDt / (rawDt + decDt) * 100))
+        } catch {
+            out.append("split probe ERROR: \(String(describing: error))")
+        }
+        // Server think-time: Limit=1 isolates fixed per-request overhead (TTFB for
+        // a single row) from per-row cost. If ~0, there's no fixed cost and time
+        // is purely per-row (confirms the linear-through-origin finding).
+        do {
+            let oneStart = Date()
+            _ = try await client.send(Endpoint(path: "Items", query: q(type: "Audio", limit: 1, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)))
+            out.append(String(format: "raw fetch 1 (fixed overhead): %.3fs", Date().timeIntervalSince(oneStart)))
+        } catch {
+            out.append("limit=1 probe ERROR: \(String(describing: error))")
+        }
+        // (5) NEW LEVER from source research: /Users/{id}/Items/Latest has a
+        //     purpose-built query path. Our quick-start IS "newest N tracks", so
+        //     test it head-to-head vs /Items for 150 rows. (Latest returns a bare
+        //     JSON array of items, groups by album by default → GroupItems=false
+        //     for individual tracks.) If it deserializes the same fat data blob
+        //     per row it won't beat /Items; measure rather than assume.
+        out.append("--- /Items/Latest vs /Items (150 newest Audio) ---")
+        do {
+            let itemsStart = Date()
+            let a = try await client.send(Endpoint(path: "Items", query: q(type: "Audio", limit: 150, sort: "DateCreated", fields: trackFields, images: true, count: false, parent: true)), as: JFItemsResponse.self)
+            let itemsDt = Date().timeIntervalSince(itemsStart)
+            var latestQuery: [URLQueryItem] = [
+                URLQueryItem(name: "userId", value: userID),
+                URLQueryItem(name: "Limit", value: "150"),
+                URLQueryItem(name: "IncludeItemTypes", value: "Audio"),
+                URLQueryItem(name: "GroupItems", value: "false"),
+                URLQueryItem(name: "Fields", value: trackFields),
+                URLQueryItem(name: "EnableImageTypes", value: "Primary"),
+                URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            ]
+            if let musicLibraryId { latestQuery.append(URLQueryItem(name: "ParentId", value: musicLibraryId)) }
+            let latestStart = Date()
+            // Latest returns a bare [BaseItemDto] array, not the {Items:[]} wrapper.
+            let raw = try await client.send(Endpoint(path: "Users/\(userID)/Items/Latest", query: latestQuery))
+            let latestItems = try JSONDecoder().decode([JFBaseItem].self, from: raw)
+            let latestDt = Date().timeIntervalSince(latestStart)
+            out.append(String(format: "/Items 150: %.2fs (%.0f/s, %d rows)  |  /Items/Latest 150: %.2fs (%.0f/s, %d rows)",
+                              itemsDt, itemsDt > 0 ? Double(a.Items?.count ?? 0) / itemsDt : 0, a.Items?.count ?? 0,
+                              latestDt, latestDt > 0 ? Double(latestItems.count) / latestDt : 0, latestItems.count))
+        } catch {
+            out.append("latest probe ERROR: \(String(describing: error))")
+        }
+        // (6) THE big lever: can the server serve parallel /Items requests? Cost
         //     is purely per-item with an idle CPU, so if N concurrent requests
         //     overlap we get an ~Nx speedup. Compare 4x200-item track pages
         //     fetched sequentially vs concurrently (distinct StartIndex windows).
