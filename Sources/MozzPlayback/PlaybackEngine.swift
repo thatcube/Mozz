@@ -62,10 +62,11 @@ public final class PlaybackEngine: ObservableObject {
     public var onQueueNearEnd: (@Sendable () async -> [Track])?
     /// Guards against firing overlapping extend requests.
     private var isExtendingQueue = false
-    /// Bumped whenever the station context changes (start/stop/replace), so an
-    /// in-flight extend fetch that resolves late can tell it's stale and discard
-    /// its result instead of appending into a queue the user has since replaced.
-    private var stationGeneration = 0
+    /// Bumped whenever loaded content is replaced (play / playShuffled /
+    /// startStation / stop). Doubles as the station-staleness guard AND a public
+    /// "transport epoch" the app captures to detect that the user changed what's
+    /// playing while an async radio fetch was in flight.
+    public private(set) var transportEpoch = 0
     /// Extend the queue once this few tracks remain after the current one.
     private static let radioRefillThreshold = 3
 
@@ -366,21 +367,22 @@ public final class PlaybackEngine: ObservableObject {
         guard let onQueueNearEnd, !isExtendingQueue else { return }
         guard queue.upNext.count <= Self.radioRefillThreshold else { return }
         isExtendingQueue = true
-        let generation = stationGeneration
+        let epoch = transportEpoch
         Task { [weak self] in
             let more = await onQueueNearEnd()
-            guard let self, generation == self.stationGeneration else { return }
+            guard let self, epoch == self.transportEpoch else { return }
             if !more.isEmpty { self.append(more) }
             self.isExtendingQueue = false
         }
     }
 
     /// End any active station: clear the hook, release the extend guard, and bump
-    /// the generation so an in-flight extend fetch discards its (now stale) result.
+    /// the transport epoch so an in-flight extend fetch discards its (now stale)
+    /// result. Called whenever loaded content is replaced.
     private func invalidateStation() {
         onQueueNearEnd = nil
         isExtendingQueue = false
-        stationGeneration += 1
+        transportEpoch += 1
     }
 
     private func refillLookaheadAsync(generation: Int) async {

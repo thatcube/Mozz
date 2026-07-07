@@ -230,9 +230,18 @@ public struct RecommendationStore: Sendable {
     /// artist. Capped to a pool `limit`; the pool is sampled randomly so a huge
     /// library doesn't always surface the same slice. Returns [] when no taste
     /// filters are given (caller should use the cold-start pool instead).
+    ///
+    /// `excludingRemoteIds` (e.g. tracks a radio station has already surfaced) is
+    /// applied in SQL *before* the random sample + limit, so the sample is drawn
+    /// from unseen tracks — otherwise a random slice near the tail of a large
+    /// catalog can miss the remaining unseen tracks and the station stalls early.
+    /// Bounded to keep well under SQLite's bound-parameter limit; anything beyond
+    /// the bound is left to the caller's in-memory filter.
     public func candidateTracks(serverId: ServerID, genres: [String], artistIds: [String],
-                                notPlayedSince: Double, limit: Int = 2000) async throws -> [TrackCandidate] {
+                                notPlayedSince: Double, excludingRemoteIds: Set<String> = [],
+                                limit: Int = 2000) async throws -> [TrackCandidate] {
         guard !genres.isEmpty || !artistIds.isEmpty else { return [] }
+        let excludeList = Array(excludingRemoteIds.prefix(Self.maxSQLExclusions))
         return try await database.read { db in
             var args: [DatabaseValueConvertible?] = [serverId, notPlayedSince]
             var matchClauses: [String] = []
@@ -246,6 +255,11 @@ public struct RecommendationStore: Sendable {
                 matchClauses.append("EXISTS (SELECT 1 FROM json_each(track.genres) je WHERE je.value IN (\(ph)))")
                 args.append(contentsOf: genres)
             }
+            var excludeClause = ""
+            if !excludeList.isEmpty {
+                excludeClause = "AND track.remoteId NOT IN (\(databasePlaceholders(excludeList.count)))"
+                args.append(contentsOf: excludeList)
+            }
             args.append(limit)
             let sql = """
                 SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
@@ -257,11 +271,16 @@ public struct RecommendationStore: Sendable {
                                   WHERE pe.track_ref = \(Self.refExpr)
                                     AND pe.created_at >= ? AND pe.kind IN ('started','completed'))
                   AND (\(matchClauses.joined(separator: " OR ")))
+                  \(excludeClause)
                 ORDER BY RANDOM() LIMIT ?
                 """
             return try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args)).map(Self.candidate)
         }
     }
+
+    /// Upper bound on ids passed to a SQL `NOT IN` (SQLite's default host-param
+    /// limit is 999; stay comfortably under it alongside the other bindings).
+    private static let maxSQLExclusions = 800
 
     /// Cold-start pool for a thin/empty history: most-recently-added tracks not
     /// played since `notPlayedSince`. (Popularity would also feed cold start, but

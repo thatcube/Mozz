@@ -98,6 +98,25 @@ final class PlaybackEngineTests: XCTestCase {
         XCTAssertFalse(engine.upNext.contains { $0.id.hasPrefix("x") },
                        "a stale station batch must not append into the replaced queue")
     }
+
+    /// The public transport epoch — which the app captures to detect that the
+    /// user changed playback while a radio fetch was in flight — bumps on every
+    /// content-replacing transport action.
+    func testTransportEpochBumpsOnContentChange() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let songs = (0..<2).map { Track(id: "t\($0)", title: "T", artistName: "A") }
+        let e0 = engine.transportEpoch
+        engine.play(tracks: songs)
+        let e1 = engine.transportEpoch
+        engine.playShuffled(songs)
+        let e2 = engine.transportEpoch
+        engine.startStation(songs) { [] }
+        let e3 = engine.transportEpoch
+        engine.stop()
+        let e4 = engine.transportEpoch
+        XCTAssertTrue(e0 < e1 && e1 < e2 && e2 < e3 && e3 < e4,
+                      "each content-replacing action must advance the transport epoch")
+    }
 }
 
 /// Thread-safe counter for the station auto-extend test's `@Sendable` closure.

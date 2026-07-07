@@ -104,13 +104,14 @@ public actor RecommendationService {
                            limit: Int = 20, excluding: Set<String> = []) async throws -> [String] {
         guard !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
         // Include the whole matching catalog (notPlayedSince = now excludes ~none);
-        // radio may revisit tracks. Pull a generous pool to blend from.
+        // radio may revisit tracks. Pull a generous pool to blend from, excluding
+        // already-surfaced tracks in SQL so the random sample is drawn from unseen
+        // tracks (avoids stalling near the tail of a large catalog).
         let pool = try await store.candidateTracks(
             serverId: serverId, genres: seed.genres, artistIds: seed.artistIds,
-            notPlayedSince: now().timeIntervalSince1970, limit: 500)
-        // Drop already-surfaced tracks BEFORE scoring/limiting, so each batch is
-        // filled with `limit` unseen tracks rather than shrinking to empty once
-        // the top-ranked picks have all been seen.
+            notPlayedSince: now().timeIntervalSince1970, excludingRemoteIds: excluding, limit: 500)
+        // Backstop: drop any seen tracks that slipped past the (bounded) SQL
+        // exclusion, before scoring/limiting.
         let fresh = pool.filter { !excluding.contains($0.remoteId) }
         guard !fresh.isEmpty else { return [] }
 

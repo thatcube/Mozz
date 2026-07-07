@@ -253,6 +253,7 @@ public final class AppEnvironment: ObservableObject {
 
     public func signOut() {
         playback.stop()
+        invalidateRadio()
         SessionPersistence.clear(credentials)
         active = nil
     }
@@ -976,9 +977,14 @@ public final class AppEnvironment: ObservableObject {
     /// Track ids already surfaced by the current station, so successive batches
     /// don't immediately repeat.
     private var radioSeenIDs: Set<String> = []
-    /// Bumped per `startRadio` so a batch fetch that resolves after the station
-    /// was replaced discards its result instead of appending / polluting state.
-    private var radioGeneration = 0
+    /// Bumped on every `startRadio` *intent*, so a newer start supersedes an
+    /// older still-fetching one (last tap wins).
+    private var radioIntent = 0
+    /// Bumped only when a station is actually installed. The engine's extend
+    /// closure captures this, so a superseded/failed `startRadio` (which never
+    /// installs) can't strand a running station, and an in-flight extend can't
+    /// pollute a newer station's state.
+    private var activeStationID = 0
 
     /// Start an endless station seeded from a track (its genres + artist).
     public func startRadio(fromTrack track: Track) {
@@ -993,35 +999,55 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Load an initial station batch and keep the queue topped up as it plays.
+    /// Bails if superseded by a newer start, if the user changed playback (via a
+    /// direct play/shuffle/stop) while the batch was fetching, or if the server
+    /// changed — so a slow fetch can never hijack newer playback.
     public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = []) {
         guard let serverId = active?.connection.id else { return }
-        radioGeneration += 1
-        let generation = radioGeneration
-        Task { @MainActor in
-            let ids = (try? await recommendations.radioBatch(
+        radioIntent += 1
+        let intent = radioIntent
+        let epoch = playback.transportEpoch
+        Task { [weak self] in
+            guard let self else { return }
+            let ids = (try? await self.recommendations.radioBatch(
                 seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding)) ?? []
-            let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
-            // Superseded by a newer startRadio while we were fetching.
-            guard generation == radioGeneration, !tracks.isEmpty else { return }
-            activeRadioSeed = seed
-            radioSeenIDs = initialExcluding.union(tracks.map(\.id))
-            playback.startStation(tracks) { [weak self] in
-                await self?.nextRadioBatch(generation: generation) ?? []
+            let tracks = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+            // Superseded, playback changed under us, server switched, or empty.
+            guard intent == self.radioIntent,
+                  epoch == self.playback.transportEpoch,
+                  serverId == self.active?.connection.id,
+                  !tracks.isEmpty else { return }
+            self.activeStationID += 1
+            let station = self.activeStationID
+            self.activeRadioSeed = seed
+            self.radioSeenIDs = initialExcluding.union(tracks.map(\.id))
+            self.playback.startStation(tracks) { [weak self] in
+                await self?.nextRadioBatch(station: station) ?? []
             }
         }
     }
 
     /// Fetch the next station batch, excluding tracks already surfaced this
-    /// session. Bails (without mutating state) if the station was replaced.
-    private func nextRadioBatch(generation: Int) async -> [Track] {
-        guard generation == radioGeneration, let seed = activeRadioSeed,
+    /// session. Bails (without mutating state) if this station is no longer the
+    /// active one.
+    private func nextRadioBatch(station: Int) async -> [Track] {
+        guard station == activeStationID, let seed = activeRadioSeed,
               let serverId = active?.connection.id else { return [] }
         let ids = (try? await recommendations.radioBatch(
             seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs)) ?? []
         let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
-        guard generation == radioGeneration else { return [] }
+        guard station == activeStationID else { return [] }
         radioSeenIDs.formUnion(tracks.map(\.id))
         return tracks
+    }
+
+    /// Forget any active radio session (e.g. on sign-out). The engine's own
+    /// `stop()`/`play()` already bumps its transport epoch; this clears the app
+    /// seed/seen so a late fetch can't resurrect a signed-out account's station.
+    private func invalidateRadio() {
+        activeStationID += 1
+        activeRadioSeed = nil
+        radioSeenIDs = []
     }
 
     private static let deviceKind: String = {
