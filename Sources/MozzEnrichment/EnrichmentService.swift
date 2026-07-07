@@ -111,15 +111,21 @@ public actor EnrichmentService {
     // let the next launch/foreground resume, rather than spinning on failures.
     private func resolveStage(serverId: ServerID) async throws {
         let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
-        var processed = 0
-        while processed < config.maxResolvePerPass {
+        // Track refs attempted this pass so a persistently-failing (thrown, thus
+        // unstamped) high-priority track can't be re-fetched every iteration and
+        // burn the whole budget on the same few tracks. Bounds unique attempts.
+        var attempted = Set<String>()
+        while attempted.count < config.maxResolvePerPass {
             guard try checkpoint() else { return }
-            let batchLimit = min(config.perRunBudget, config.maxResolvePerPass - processed)
             let candidates = try await store.tracksNeedingResolution(
-                serverId: serverId, notLookedUpSince: cutoff, limit: batchLimit)
-            if candidates.isEmpty { return }   // backlog drained
+                serverId: serverId, notLookedUpSince: cutoff, limit: config.perRunBudget)
+            // Only tracks not already tried this pass. `insert` both dedupes and
+            // records the attempt. Empty ⇒ backlog drained (or only repeat-failures
+            // remain), so we're done.
+            let fresh = candidates.filter { attempted.insert($0.trackRef).inserted }
+            if fresh.isEmpty { return }
             var stamped = 0
-            for candidate in candidates {
+            for candidate in fresh {
                 guard try checkpoint() else { return }
                 do {
                     let match = try await musicBrainz.bestRecording(
@@ -133,8 +139,7 @@ public actor EnrichmentService {
                 catch let e as MozzError where e == .cancelled { throw CancellationError() }
                 catch { log("enrichment: resolve \(candidate.trackRef) failed: \(error)") }
             }
-            processed += candidates.count
-            if stamped == 0 { return }   // whole batch errored — stop; resume next launch
+            if stamped == 0 { return }   // whole fresh batch errored — stop; resume next launch
         }
     }
 

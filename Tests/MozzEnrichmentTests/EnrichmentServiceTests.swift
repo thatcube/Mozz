@@ -195,6 +195,42 @@ final class EnrichmentServiceTests: XCTestCase {
         XCTAssertEqual(transport.artistRequestCount, 1) // one call per distinct artist
     }
 
+    /// A track that always fails resolution must be attempted at most ONCE per
+    /// pass — even while other tracks keep succeeding (which keeps the drain
+    /// looping). Guards against re-fetching the same high-priority failure every
+    /// iteration and burning the pass budget.
+    func testResolveDoesNotRefetchFailingTrackWithinPass() async throws {
+        let (db, store) = try await makeDB()   // t1 "Xtal" (resolves)
+        let writer = CatalogWriter(db)
+        try await writer.upsertTracks([
+            Track(id: "t2", title: "Works Two", artistName: "Artist", duration: 200),
+            Track(id: "t3", title: "Works Three", artistName: "Artist", duration: 200),
+            Track(id: "tfail", title: "FailTitleXYZ", artistName: "Artist", duration: 200),
+        ], serverId: "srv1")
+        let transport = PartialFailTransport(hitJSON: hitJSON, failMarker: "FailTitleXYZ")
+        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )",
+                                      perRunBudget: 2, maxResolvePerPass: 5000)
+        let mb = MusicBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
+        let lb = ListenBrainzClient.make(
+            config: config, limiter: AsyncRateLimiter(minInterval: 0),
+            baseTransport: ServiceCannedTransport(json: "[]"))
+        let service = EnrichmentService(
+            store: store, musicBrainz: mb, listenBrainz: lb, config: config, isEnabled: { true })
+        await service.enrich(serverId: "srv1")
+        await service.waitForBackgroundPass()
+        // The three working tracks resolve; the failing one stays unresolved but
+        // was tried exactly once (the attempted-set filters it out thereafter).
+        for id in ["t1", "t2", "t3"] {
+            let state = try await store.mbidState(trackRef: "srv1:\(id)")
+            XCTAssertEqual(state?.mbid, recA)
+        }
+        let failState = try await store.mbidState(trackRef: "srv1:tfail")
+        XCTAssertNil(failState?.mbid)
+        XCTAssertEqual(transport.attemptsForFailing, 1,
+                       "a persistently-failing track must be attempted at most once per pass")
+    }
+
     func testSingleFlightPreventsOverlappingPasses() async throws {
         let (_, store) = try await makeDB()
         let transport = GatedTransport(json: hitJSON)
@@ -264,6 +300,30 @@ private final class PathRoutingTransport: HTTPTransport, @unchecked Sendable {
             json = recordingJSON
         }
         return (Data(json.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+/// Throws for any request whose (decoded) URL contains `failMarker` (routing by
+/// the track title in the Lucene query), and returns `hitJSON` otherwise — so a
+/// pass can have some tracks succeed and one persistently fail. Counts how many
+/// times the failing track was hit, to prove it isn't re-fetched every iteration.
+private final class PartialFailTransport: HTTPTransport, @unchecked Sendable {
+    let hitJSON: String
+    let failMarker: String
+    private let lock = NSLock()
+    private(set) var attemptsForFailing = 0
+    init(hitJSON: String, failMarker: String) {
+        self.hitJSON = hitJSON
+        self.failMarker = failMarker
+    }
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let url = request.url?.absoluteString.removingPercentEncoding ?? ""
+        if url.contains(failMarker) {
+            lock.lock(); attemptsForFailing += 1; lock.unlock()
+            throw URLError(.timedOut)
+        }
+        return (Data(hitJSON.utf8),
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }

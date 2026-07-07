@@ -416,22 +416,25 @@ public final class AppEnvironment: ObservableObject {
         // rebuilds (Sync Now / library-selection changes also route through here),
         // which must not kill a live station's auto-extend. `active` still holds
         // the previous server at this point.
-        if connection.id != active?.connection.id {
+        let switchingServer = connection.id != active?.connection.id
+        if switchingServer {
             invalidateRadio()
-            // A different server has a different catalog — abandon any in-flight
-            // enrichment crawl scoped to the previous server.
-            let enrichment = self.enrichment
-            Task { await enrichment.cancel() }
         }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
-        // Resume the background enrichment crawl for the (possibly already-synced)
-        // library so coverage keeps climbing without a manual sync. Single-flight
-        // and toggle-gated inside the service, so this is a safe no-op when it's
-        // disabled or already running.
-        resumeEnrichmentIfNeeded()
+        // On a server SWITCH, abandon the previous library's enrichment crawl THEN
+        // start the new one — serialized in a single task so cancel always precedes
+        // resume (two separate tasks race on the actor and can lose or self-cancel
+        // the new pass). On a same-server rebuild, just resume (single-flight makes
+        // it a no-op if already crawling). Toggle-gated inside the service.
+        let enrichment = self.enrichment
+        let serverId = connection.id
+        Task {
+            if switchingServer { await enrichment.cancel() }
+            await enrichment.enrich(serverId: serverId)
+        }
     }
 
     /// Kick the background enrichment crawl for the active server if one isn't
