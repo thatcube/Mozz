@@ -129,6 +129,19 @@ extension Color {
     /// The Mozz brand color (#F50031) — a vivid crimson used for brand accents
     /// such as the star rating fill.
     static var mozzBrand: Color { Color(red: 245.0 / 255.0, green: 0.0, blue: 49.0 / 255.0) }
+
+    /// A subtle, theme-aware neutral fill for artwork placeholders — a quiet gray
+    /// box (never a colorful tile) shown while real artwork loads or is missing.
+    /// Adapts to light/dark so it reads as a calm empty frame in both.
+    static var mozzArtworkPlaceholder: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .secondarySystemFill)
+        #elseif canImport(AppKit)
+        Color(nsColor: .quaternaryLabelColor)
+        #else
+        Color.gray.opacity(0.2)
+        #endif
+    }
 }
 
 #if os(iOS)

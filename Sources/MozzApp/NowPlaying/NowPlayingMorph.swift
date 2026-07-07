@@ -68,6 +68,12 @@ struct NowPlayingMorphContainer: View {
     private var artworkToken: String {
         (playback.currentTrack?.artwork?.key) ?? (playback.currentTrack?.id ?? "none")
     }
+    /// Identity for artwork prefetching: changes when the current track or the
+    /// next few up-next tracks change, so we warm their covers ahead of a skip.
+    private var prefetchToken: String {
+        ([playback.currentTrack?.id] + playback.upNext.prefix(3).map { $0.id })
+            .compactMap { $0 }.joined(separator: "|")
+    }
 
     /// How much the docked island grows while touched.
     private static let pressScale: CGFloat = 1.04
@@ -202,8 +208,26 @@ struct NowPlayingMorphContainer: View {
                         withAnimation(.easeInOut(duration: 0.5)) { artGrid = g }
                     }
                 }
+                // Warm the current + upcoming covers at the player's pixel size so
+                // skipping finds the artwork already cached — no placeholder flash.
+                .onChange(of: prefetchToken, initial: true) { _, _ in
+                    prefetchNearbyArtwork()
+                }
             }
             .ignoresSafeArea()
+        }
+    }
+
+    /// Prefetch the current + next few covers at the player's pixel size (matching
+    /// `MorphArtwork`: base 340 × 2 = 680) so a skip finds the art already cached
+    /// and renders it on the first frame instead of flashing a placeholder.
+    private func prefetchNearbyArtwork() {
+        guard let backend = env.active?.backend else { return }
+        let tracks = [playback.currentTrack].compactMap { $0 } + playback.upNext.prefix(3)
+        for track in tracks {
+            if let artwork = track.artwork, let url = backend.artworkURL(for: artwork, size: 680) {
+                ArtworkImageLoader.shared.prefetch(url)
+            }
         }
     }
 
@@ -1368,7 +1392,9 @@ struct TouchDownReader: UIViewRepresentable {
 
 /// One traveling artwork. Its display size animates, but the pixel size used to
 /// resolve the backend URL is fixed, so scaling never triggers a reload and the
-/// image never flashes its placeholder mid-flight.
+/// image never flashes its placeholder mid-flight. On a track change it keeps
+/// showing the previous cover until the new one is ready (`retainWhileLoading`),
+/// so — combined with up-next prefetching — skipping never reveals a placeholder.
 private struct MorphArtwork: View {
     let track: Track?
     let side: CGFloat
@@ -1380,7 +1406,7 @@ private struct MorphArtwork: View {
     var body: some View {
         Group {
             if let url = resolvedURL {
-                CachedArtworkImage(url: url) { placeholder }
+                CachedArtworkImage(url: url, retainWhileLoading: true) { placeholder }
             } else {
                 placeholder
             }
@@ -1394,21 +1420,5 @@ private struct MorphArtwork: View {
         return backend.artworkURL(for: artwork, size: Int(base * 2))
     }
 
-    private var placeholder: some View {
-        let seed = track?.albumTitle ?? track?.title ?? ""
-        let hash = abs(seed.hashValue)
-        let hue = Double(hash % 360) / 360.0
-        return LinearGradient(
-            colors: [Color(hue: hue, saturation: 0.5, brightness: 0.7),
-                     Color(hue: (hue + 0.1).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.45)],
-            startPoint: .topLeading, endPoint: .bottomTrailing
-        )
-        .overlay(
-            Image(systemName: "music.note")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: side * 0.4, height: side * 0.4)
-                .foregroundStyle(.white.opacity(0.85))
-        )
-    }
+    private var placeholder: some View { ArtworkPlaceholder() }
 }

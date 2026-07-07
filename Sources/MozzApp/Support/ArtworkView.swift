@@ -1,11 +1,35 @@
 import SwiftUI
 import MozzCore
 
+/// A subtle, theme-aware artwork placeholder: a quiet neutral gray box with a
+/// faint music-note glyph, sized to whatever frame it's given. Shared by every
+/// artwork surface (rows, grids, the player) so a missing/loading cover always
+/// reads as a calm empty frame — never a colorful tile that flashes during
+/// scrolling or track changes. The caller clips it to the artwork's shape.
+struct ArtworkPlaceholder: View {
+    /// Music-note glyph size as a fraction of the box's shorter side.
+    var iconScale: CGFloat = 0.32
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            Color.mozzArtworkPlaceholder
+                .overlay(
+                    Image(systemName: "music.note")
+                        .font(.system(size: side * iconScale, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .opacity(0.35)
+                )
+                .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+}
+
 /// Renders artwork for a catalog item. Resolves a tokenized URL from the active
 /// backend at the requested pixel size (the catalog stores only a reference, so
-/// URLs stay valid across token rotation). Falls back to a deterministic
-/// gradient tile keyed on the title, which is what shows in the offline demo
-/// (no server = no artwork).
+/// URLs stay valid across token rotation). Falls back to a subtle neutral
+/// placeholder (matching the artwork's shape) while loading or when there's no
+/// artwork — e.g. the offline demo, or a server that returns none.
 struct ArtworkView: View {
     let artwork: ArtworkRef?
     let seed: String
@@ -31,22 +55,5 @@ struct ArtworkView: View {
         return backend.artworkURL(for: artwork, size: Int(size * 2))
     }
 
-    private var placeholder: some View {
-        let hash = abs(seed.hashValue)
-        let hue = Double(hash % 360) / 360.0
-        return LinearGradient(
-            colors: [
-                Color(hue: hue, saturation: 0.5, brightness: 0.7),
-                Color(hue: (hue + 0.1).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.45),
-            ],
-            startPoint: .topLeading, endPoint: .bottomTrailing
-        )
-        .overlay(
-            Image(systemName: "music.note")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: size * 0.4, height: size * 0.4)
-                .foregroundStyle(.white.opacity(0.85))
-        )
-    }
+    private var placeholder: some View { ArtworkPlaceholder() }
 }
