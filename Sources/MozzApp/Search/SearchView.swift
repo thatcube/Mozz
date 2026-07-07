@@ -37,7 +37,7 @@ struct SearchView: View {
     /// the page scrolls: the header collapse / field slide-up AND the field's
     /// gray↔glass crossfade. Using a single curve+duration keeps them in lockstep
     /// (they previously ran at different timings, which felt disjointed).
-    private let fieldTransition: Animation = .easeInOut(duration: 0.5)
+    private let fieldTransition: Animation = .easeInOut(duration: 0.25)
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
