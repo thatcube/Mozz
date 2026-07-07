@@ -103,17 +103,44 @@ final class AudioRouteMonitor: ObservableObject {
         }
     }
 
-    /// AirPods / Beats get their real glyph via a name heuristic (the port type
-    /// alone can't distinguish them); other Bluetooth audio defaults to headphones.
+    /// AirPods / Beats / HomePod get their real glyph via a name heuristic (the
+    /// port type alone can't distinguish them); other Bluetooth defaults to headphones.
     private static func bluetoothIcon(name: String) -> String {
         let n = name.lowercased()
-        if n.contains("airpods max") { return "airpodsmax" }
-        if n.contains("airpods pro") { return "airpodspro" }
-        if n.contains("airpod") { return "airpods" }
-        if n.contains("beats") { return "beats.headphones" }
+        if n.contains("airpod") { return airPodsIcon(name: n) }
+        if n.contains("beats") { return firstAvailableSymbol(["beats.headphones", "headphones"]) }
         if n.contains("homepod") { return "homepod.fill" }
         if n.contains("speaker") { return "hifispeaker.fill" }
         return "headphones"
+    }
+
+    /// Pick the model-specific AirPods glyph. There's no public API for the model,
+    /// but iOS's default naming (and user names) include it — "AirPods Pro",
+    /// "AirPods (4th generation)", "…Gen 4 AirPods" — so we parse the name. Each
+    /// choice validates against the runtime so an unknown/too-new symbol falls
+    /// back to a known-good AirPods glyph rather than rendering blank. `name` is
+    /// already lowercased.
+    private static func airPodsIcon(name n: String) -> String {
+        if n.contains("max") {
+            return firstAvailableSymbol(["airpodsmax", "airpods"])
+        }
+        if n.contains("pro") {
+            return firstAvailableSymbol(["airpodspro", "airpods"])
+        }
+        if n.contains("gen 4") || n.contains("gen4") || n.contains("4th gen") || n.contains("generation 4") {
+            return firstAvailableSymbol(["airpods.gen4", "airpods.gen3", "airpods"])
+        }
+        if n.contains("gen 3") || n.contains("gen3") || n.contains("3rd gen") || n.contains("generation 3") {
+            return firstAvailableSymbol(["airpods.gen3", "airpods"])
+        }
+        return "airpods"
+    }
+
+    /// The first SF Symbol name in `candidates` that actually exists on this OS
+    /// (guards against too-new symbol names), else the last as a final fallback.
+    private static func firstAvailableSymbol(_ candidates: [String]) -> String {
+        for name in candidates where UIImage(systemName: name) != nil { return name }
+        return candidates.last ?? "airpods"
     }
 
     /// Best glyph for an AirPlay endpoint from its (often generic) name.
