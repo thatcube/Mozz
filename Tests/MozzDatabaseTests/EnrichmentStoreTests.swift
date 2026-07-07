@@ -177,6 +177,38 @@ final class EnrichmentStoreTests: XCTestCase {
 
     // MARK: - B4 artist-genre tags (data capture)
 
+    func testEnrichmentCoverageCountsMatchedAndGenreTagged() async throws {
+        let (_, writer, store) = try await setup()
+        // 4 tracks: t1 has embedded recording MBID; t2 embedded artist-only; t3/t4
+        // plain. Then tag t2's artist. Coverage: total 4, matched 1 (t1), and
+        // genreTagged 1 (t2, once its artist tags land).
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "A", artistName: "Artist", mbid: mbidA, artistMbid: artistMbid),
+            Track(id: "t2", title: "B", artistName: "Other", mbid: nil, artistMbid: mbidB),
+            Track(id: "t3", title: "C", artistName: "None"),
+            Track(id: "t4", title: "D", artistName: "None"),
+        ], serverId: "srv1")
+
+        var cov = try await store.enrichmentCoverage(serverId: "srv1")
+        XCTAssertEqual(cov.total, 4)
+        XCTAssertEqual(cov.matched, 1)       // only t1 carries a recording MBID
+        XCTAssertEqual(cov.genreTagged, 0)   // no artist genres yet
+
+        try await store.setArtistTags(artistMbid: mbidB, tags: ["rock"], at: 500)
+        cov = try await store.enrichmentCoverage(serverId: "srv1")
+        XCTAssertEqual(cov.total, 4)
+        XCTAssertEqual(cov.matched, 1)
+        XCTAssertEqual(cov.genreTagged, 1)   // t2 now has artist genres
+    }
+
+    func testEnrichmentCoverageEmptyServerIsZero() async throws {
+        let (_, _, store) = try await setup()
+        let cov = try await store.enrichmentCoverage(serverId: "srv1")
+        XCTAssertEqual(cov.total, 0)
+        XCTAssertEqual(cov.matched, 0)
+        XCTAssertEqual(cov.genreTagged, 0)
+    }
+
     func testArtistsNeedingTagsDedupesAndSetArtistTagsFansOut() async throws {
         let (db, writer, store) = try await setup()
         // Two tracks share one artist_mbid; a third track has none.

@@ -802,6 +802,16 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Recommendations
 
+    /// Enrichment coverage for the active server, for the Settings status line:
+    /// `total` tracks, `matched` (identified in MusicBrainz — unlocks similarity),
+    /// and `genreTagged` (artist genres fetched — feeds the genre engine). Grows as
+    /// the background pass runs. Nil when signed out; a read hiccup returns nil so
+    /// the UI just hides the line.
+    public func enrichmentCoverage() async -> (total: Int, matched: Int, genreTagged: Int)? {
+        guard let serverId = active?.connection.id else { return nil }
+        return try? await enrichmentStore.enrichmentCoverage(serverId: serverId)
+    }
+
     /// Force-regenerate the "Mozz Weekly" set for the active server (e.g. after a
     /// sync). Off-main via the recommendation actor; failures are swallowed so a
     /// recommendation hiccup never breaks sync/browse.

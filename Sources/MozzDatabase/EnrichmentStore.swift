@@ -63,6 +63,30 @@ public struct EnrichmentStore: Sendable {
 
     // MARK: - Reads
 
+    /// Coverage of open-metadata enrichment for a server, for a status readout.
+    /// `total` = tracks on the server; `matched` = tracks matched to a MusicBrainz
+    /// recording (embedded or resolved — the foundation that unlocks ListenBrainz
+    /// similarity); `genreTagged` = tracks whose artist genres have been fetched
+    /// (`mb_tags`, what the genre engine uses). Both grow across background passes.
+    /// One grouped scan; cheap enough for an on-demand Settings read.
+    public func enrichmentCoverage(serverId: ServerID) async throws
+        -> (total: Int, matched: Int, genreTagged: Int) {
+        try await database.read { db in
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?",
+                                         arguments: [serverId]) ?? 0
+            guard total > 0 else { return (0, 0, 0) }
+            let row = try Row.fetchOne(db, sql: """
+                SELECT
+                    COUNT(CASE WHEN tf.mbid IS NOT NULL AND tf.mbid <> '' THEN 1 END) AS matched,
+                    COUNT(CASE WHEN tf.mb_tags IS NOT NULL AND tf.mb_tags <> '' THEN 1 END) AS genreTagged
+                FROM track
+                JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                WHERE track.serverId = ?
+                """, arguments: [serverId])
+            return (total, row?["matched"] ?? 0, row?["genreTagged"] ?? 0)
+        }
+    }
+
     /// Library tracks that still lack an MBID and are due for a (re)lookup:
     /// `track_features.mbid` is null AND we've never looked up, or the last
     /// lookup was before `notLookedUpSince` (now − TTL). Prioritized so a bounded
