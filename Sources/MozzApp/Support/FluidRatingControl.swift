@@ -258,32 +258,40 @@ struct RatingBubbleContent: View {
                 adjust(direction)
             }
 
-            // The Clear link's ROW HEIGHT animates from 0, so the popover grows/
-            // shrinks continuously (the container tracks the changing ideal size)
-            // instead of the button just popping in behind a fading opacity.
-            Button {
-                setClear(false)
-                current = nil
-                onSet(nil)
-            } label: {
-                Text("Clear")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 24)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: RatingTuning.clearRowHeight)
-                    .contentShape(Rectangle())
+            // On reveal the bubble grows downward (slow, smooth) and Clear fades
+            // in. On hide, Clear fades out FAST (its own quick opacity transition)
+            // so it reads as a fade rather than a slide, while the container
+            // collapses quickly behind it.
+            if showClear {
+                Button {
+                    setClear(false)
+                    current = nil
+                    onSet(nil)
+                } label: {
+                    Text("Clear")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 24)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: RatingTuning.clearRowHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: 0.13)))
             }
-            .buttonStyle(.plain)
-            .frame(height: showClear ? RatingTuning.clearRowHeight : 0)
-            .opacity(showClear ? 1 : 0)
-            .clipped()
-            .allowsHitTesting(showClear)
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.4), value: showClear)
+        .animation(clearLayoutAnimation, value: showClear)
         .padding(.horizontal, 24)
         .padding(.top, 24)
         .padding(.bottom, showClear ? 14 : 24)
+    }
+
+    /// Asymmetric height animation: a slow, smooth (bounce-free) grow on reveal;
+    /// a quick collapse on hide (the Clear text fades faster still, so hiding
+    /// reads as a fade, not a slide).
+    private var clearLayoutAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return showClear ? .smooth(duration: 0.55) : .easeOut(duration: 0.16)
     }
 
     // Live drag: update the stars only. Never change the popover height while the
