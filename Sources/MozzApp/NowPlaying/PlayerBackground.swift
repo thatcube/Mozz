@@ -38,32 +38,41 @@ struct ArtworkColorGrid: Equatable {
 enum ArtworkPalette {
     /// How the sampled grid is shaped into a backdrop.
     enum Tuning {
-        /// Resolution the artwork is downsampled to before extraction. Higher =
-        /// small vivid regions survive averaging. Divisible by the 3×3 grid so
-        /// regional aggregation is even.
-        static let sampleDim = 12
-        /// Edge-preserving smoothing: how strongly each cell blends with a
-        /// SIMILAR neighbor. This dissolves soft banding / the center "lane"
-        /// between near-identical regions, while leaving genuine color
-        /// boundaries (blue sky vs gold sun) crisp — so we never average
-        /// clashing hues into mud (the old blue+red→purple / blue+gold→green
-        /// bug). 0 = raw regions; ~0.5 = smooth but faithful.
-        static let smoothing: CGFloat = 0.5
-        /// Color distance (0…~1.7 in RGB) beyond which two neighbors are treated
-        /// as a real edge and NOT blended. Small = preserve more edges.
-        static let smoothingEdge: CGFloat = 0.42
-        /// Extra saturation on the final cells so real colors read vividly.
-        static let saturationBoost: CGFloat = 1.28
-        static let minBrightness: CGFloat = 0.12
-        static let maxBrightness: CGFloat = 0.55
-        /// Below this ORIGINAL brightness a region is treated as near-black and
-        /// its saturation is damped toward neutral — so a black cover stays
-        /// black (not brown) instead of amplifying tiny channel noise into color.
-        static let neutralDarkFloor: CGFloat = 0.10
-        static let neutralDarkRamp: CGFloat = 0.14
-        /// Mesh point drift amplitude (fraction of the frame). A touch of travel
-        /// so the color field drifts around the page (Apple-style) unnoticeably.
-        static let driftAmplitude: Float = 0.06
+        // --- Extraction (prominence + vibrancy, à la Plozz) ---
+        /// Resolution the artwork is drawn to before histogramming. 48×48 ≈ 2.3k
+        /// pixels — plenty to characterise a cover, cheap to run off-main.
+        static let sampleDim = 48
+        /// Most prominent colors to pull out; padded up to the 9 mesh slots.
+        static let maxColors = 5
+        /// Minimum RGB distance between chosen colors, so the palette spans the
+        /// art (blue AND red) instead of five shades of one hue.
+        static let minSeparation: Double = 0.22
+        /// Vibrancy reward: score multiplier = base + saturation × gain. Higher
+        /// gain = saturated colors dominate flat/greys more.
+        static let vibrancyBase: Double = 0.35
+        static let vibrancyGain: Double = 1.4
+        /// Coverage weight is `count^exp` (sublinear) so a big flat area can't
+        /// completely bury a smaller vivid one.
+        static let coverageExponent: Double = 0.65
+        /// How hard pure black / pure white are pushed down (their hue barely
+        /// registers). Higher = stronger rejection of the luminance extremes.
+        static let luminanceFalloff: Double = 1.5
+        static let luminanceFloor: Double = 0.18
+
+        // --- Backdrop tone (legibility over vividness) ---
+        /// Light saturation lift on the final colors.
+        static let saturationBoost: CGFloat = 1.1
+        static let minBrightness: CGFloat = 0.14
+        /// Cap brightness so white title/artist text stays legible over the mid
+        /// of the screen (Mozz overlays text directly, unlike a TV).
+        static let maxBrightness: CGFloat = 0.58
+
+        // --- Motion ---
+        /// Mesh point drift amplitude (fraction of the frame). Large enough to be
+        /// visibly alive (Apple-Music "paint in water") without folding the mesh.
+        static let driftAmplitude: Float = 0.16
+        /// The center point roams a little further than the edges.
+        static let driftCenterBoost: Float = 1.4
     }
 
     /// Sample the artwork into a color grid, or derive a pleasant deterministic
@@ -169,20 +178,21 @@ struct PlayerBackdrop: View {
     }
 
     /// 3×3 mesh points. Corners are pinned to the frame; edge-midpoints drift only
-    /// ALONG their edge; the center drifts in both axes — so the field breathes
-    /// without ever opening a gap.
+    /// ALONG their edge; the center drifts in both axes (a little further) — so the
+    /// field churns like paint in water without ever opening a gap.
     private func meshPoints(_ t: TimeInterval) -> [SIMD2<Float>] {
         let a: Float = drift ? ArtworkPalette.Tuning.driftAmplitude : 0
+        let c = a * ArtworkPalette.Tuning.driftCenterBoost
         func s(_ speed: Double, _ phase: Double) -> Float { Float(sin(t * speed + phase)) }
         return [
             SIMD2(0, 0),
-            SIMD2(0.5 + a * s(0.23, 0.0), 0),
+            SIMD2(0.5 + a * s(0.13, 0.0), 0),
             SIMD2(1, 0),
-            SIMD2(0, 0.5 + a * s(0.19, 1.3)),
-            SIMD2(0.5 + a * s(0.21, 2.0), 0.5 + a * s(0.17, 0.5)),
-            SIMD2(1, 0.5 + a * s(0.20, 3.1)),
+            SIMD2(0, 0.5 + a * s(0.11, 1.3)),
+            SIMD2(0.5 + c * s(0.15, 2.0), 0.5 + c * s(0.09, 0.5)),
+            SIMD2(1, 0.5 + a * s(0.12, 3.1)),
             SIMD2(0, 1),
-            SIMD2(0.5 + a * s(0.18, 4.2), 1),
+            SIMD2(0.5 + a * s(0.10, 4.2), 1),
             SIMD2(1, 1),
         ]
     }
@@ -205,93 +215,104 @@ extension Color {
 
 #if canImport(UIKit)
 extension UIImage {
-    /// Sample the artwork into a `dim × dim` backdrop grid that FAITHFULLY keeps
-    /// the cover's real colors and their spatial spread (Apple-Music style),
-    /// instead of collapsing everything to one accent or a muddy average. Steps:
-    ///  1. Downsample to a higher-res `sampleDim` buffer, then average into the
-    ///     `dim × dim` regions — so each cell is the true color of that part of
-    ///     the art (top→bottom colour travel is preserved).
-    ///  2. Edge-preserving smoothing: blend each cell only with neighbours it's
-    ///     already SIMILAR to. This softens banding / the center "lane" between
-    ///     near-identical regions, but leaves real colour edges (blue vs gold)
-    ///     crisp — so clashing hues are never averaged into green/purple mud.
-    ///  3. Per-cell adjust for depth + legibility (see `mozzBackdropAdjusted`).
+    /// Extract the artwork's most *prominent, vibrant, distinct* colors and lay
+    /// them out as a 9-slot mesh (Apple-Music / Plozz style) — NOT a spatial map.
+    /// The image is histogrammed; buckets are scored by coverage × vibrancy ×
+    /// mid-luminance (so muddy greys and the black/white extremes lose), then a
+    /// greedy diverse pick spans the cover instead of clustering on one hue. The
+    /// most prominent color anchors the mesh center with the rest spread around.
     func mozzColorGrid(dim: Int) -> [Color]? {
-        guard let cg = cgImage else { return nil }
-        let sampleDim = max(dim, ArtworkPalette.Tuning.sampleDim)
-        let sCount = sampleDim * sampleDim
-        var px = [UInt8](repeating: 0, count: sCount * 4)
+        let palette = mozzProminentColors(maxColors: ArtworkPalette.Tuning.maxColors)
+        guard !palette.isEmpty else { return nil }
+
+        // Pad to 5 by cycling so the mesh always has variety to morph between.
+        var c = palette
+        var i = 0
+        while c.count < 5 { c.append(palette[i % palette.count]); i += 1 }
+
+        // Prominent color [0] in the center; others spread to the ring.
+        let arranged = [c[1], c[2], c[3],
+                        c[4], c[0], c[1],
+                        c[2], c[3], c[4]]
+        return arranged.map { Color($0.mozzBackdropAdjusted()) }
+    }
+
+    /// Histogram-based prominent-color extraction (see `mozzColorGrid`). Returns
+    /// up to `maxColors` UIColors, most prominent first, or empty if unreadable.
+    func mozzProminentColors(maxColors: Int) -> [UIColor] {
+        guard maxColors > 0, let cg = cgImage else { return [] }
+        let dim = ArtworkPalette.Tuning.sampleDim
+        let bytesPerRow = dim * 4
+        var px = [UInt8](repeating: 0, count: dim * bytesPerRow)
         let space = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
-            data: &px, width: sampleDim, height: sampleDim, bitsPerComponent: 8,
-            bytesPerRow: sampleDim * 4, space: space,
+            data: &px, width: dim, height: dim, bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow, space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        ) else { return [] }
         ctx.interpolationQuality = .medium
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: sampleDim, height: sampleDim))
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: dim, height: dim))
 
-        // 1. Regional averages — the true color of each part of the artwork.
-        typealias RGB = (r: CGFloat, g: CGFloat, b: CGFloat)
-        var cells = [RGB](repeating: (0, 0, 0), count: dim * dim)
-        for gr in 0..<dim {
-            let y0 = gr * sampleDim / dim, y1 = (gr + 1) * sampleDim / dim
-            for gc in 0..<dim {
-                let x0 = gc * sampleDim / dim, x1 = (gc + 1) * sampleDim / dim
-                var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, cnt: CGFloat = 0
-                for y in y0..<y1 {
-                    for x in x0..<x1 {
-                        let i = (y * sampleDim + x) * 4
-                        ar += CGFloat(px[i]) / 255
-                        ag += CGFloat(px[i + 1]) / 255
-                        ab += CGFloat(px[i + 2]) / 255
-                        cnt += 1
-                    }
-                }
-                cells[gr * dim + gc] = (ar / cnt, ag / cnt, ab / cnt)
+        struct Bucket { var count = 0; var r = 0.0; var g = 0.0; var b = 0.0 }
+        var buckets: [Int: Bucket] = [:]
+        buckets.reserveCapacity(512)
+
+        var idx = 0
+        let total = px.count
+        while idx < total {
+            if px[idx + 3] > 24 {   // skip transparent
+                let r = px[idx], g = px[idx + 1], b = px[idx + 2]
+                // Quantize to 5 bits/channel (32 levels) so similar colors merge.
+                let key = (Int(r) >> 3) << 10 | (Int(g) >> 3) << 5 | (Int(b) >> 3)
+                var bk = buckets[key] ?? Bucket()
+                bk.count += 1
+                bk.r += Double(r) / 255; bk.g += Double(g) / 255; bk.b += Double(b) / 255
+                buckets[key] = bk
             }
+            idx += 4
         }
+        guard !buckets.isEmpty else { return [] }
 
-        // 2. Edge-preserving smoothing (one pass): blend with SIMILAR neighbours
-        //    only, so soft bands/lanes dissolve but real colour edges survive.
-        let base = ArtworkPalette.Tuning.smoothing
-        let edge = ArtworkPalette.Tuning.smoothingEdge
-        let src = cells
-        for gr in 0..<dim {
-            for gc in 0..<dim {
-                let c = src[gr * dim + gc]
-                var ar = c.r, ag = c.g, ab = c.b, wsum: CGFloat = 1
-                for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                    let nr = gr + dr, nc = gc + dc
-                    guard nr >= 0, nr < dim, nc >= 0, nc < dim else { continue }
-                    let n = src[nr * dim + nc]
-                    let dist = abs(c.r - n.r) + abs(c.g - n.g) + abs(c.b - n.b)
-                    let sim = max(0, 1 - dist / (edge * 3))   // 1 identical → 0 at edge
-                    let w = base * sim
-                    ar += n.r * w; ag += n.g * w; ab += n.b * w; wsum += w
-                }
-                cells[gr * dim + gc] = (ar / wsum, ag / wsum, ab / wsum)
-            }
+        // Score each averaged bucket by coverage × vibrancy × mid-luminance.
+        typealias RGB = (r: Double, g: Double, b: Double)
+        let scored: [(color: RGB, score: Double)] = buckets.values.map { bk in
+            let n = Double(bk.count)
+            let color: RGB = (bk.r / n, bk.g / n, bk.b / n)
+            let maxC = max(color.r, color.g, color.b), minC = min(color.r, color.g, color.b)
+            let sat = maxC <= 0 ? 0 : (maxC - minC) / maxC
+            let lum = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b
+            let lumWeight = 1.0 - pow(abs(lum - 0.5) * 2.0, ArtworkPalette.Tuning.luminanceFalloff)
+            let vibrancy = ArtworkPalette.Tuning.vibrancyBase + sat * ArtworkPalette.Tuning.vibrancyGain
+            let coverage = pow(n, ArtworkPalette.Tuning.coverageExponent)
+            return (color, coverage * vibrancy * max(lumWeight, ArtworkPalette.Tuning.luminanceFloor))
         }
+        .sorted { $0.score > $1.score }
 
-        // 3. Adjust each cell into a rich-but-legible backdrop tone.
-        return cells.map { Color(UIColor(red: $0.r, green: $0.g, blue: $0.b, alpha: 1).mozzBackdropAdjusted()) }
+        // Greedily accept colors far enough apart to span the artwork.
+        func dist(_ a: RGB, _ b: RGB) -> Double {
+            let dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b
+            return (dr * dr + dg * dg + db * db).squareRoot()
+        }
+        var chosen: [RGB] = []
+        let minSep = ArtworkPalette.Tuning.minSeparation
+        for cand in scored where chosen.allSatisfy({ dist($0, cand.color) >= minSep }) {
+            chosen.append(cand.color)
+            if chosen.count >= maxColors { break }
+        }
+        if chosen.isEmpty { chosen = scored.prefix(maxColors).map(\.color) }
+
+        return chosen.map { UIColor(red: $0.r, green: $0.g, blue: $0.b, alpha: 1) }
     }
 }
 
 extension UIColor {
-    /// Turn a faithful regional color into a backdrop tone: keep its real hue,
-    /// clamp brightness so overlaid white text stays legible, boost saturation
-    /// for richness — but DAMP saturation on near-black regions so a dark cover
-    /// stays a dark neutral (not an amplified brown/green from channel noise).
+    /// Turn a prominent color into a backdrop tone: keep its hue, lift saturation
+    /// slightly for richness, and clamp brightness so it's neither crushed to
+    /// black nor bright enough to fight the overlaid white text.
     func mozzBackdropAdjusted() -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
-
-        let floor = ArtworkPalette.Tuning.neutralDarkFloor
-        let ramp = ArtworkPalette.Tuning.neutralDarkRamp
-        let neutralScale = min(max((b - floor) / ramp, 0), 1)   // 0 near-black → keep neutral
-
-        let ns = min(s * neutralScale * ArtworkPalette.Tuning.saturationBoost, 1)
+        let ns = min(s * ArtworkPalette.Tuning.saturationBoost, 1)
         let nb = min(max(b, ArtworkPalette.Tuning.minBrightness), ArtworkPalette.Tuning.maxBrightness)
         return UIColor(hue: h, saturation: ns, brightness: nb, alpha: 1)
     }
