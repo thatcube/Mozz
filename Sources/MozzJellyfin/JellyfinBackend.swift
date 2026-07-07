@@ -96,8 +96,19 @@ public struct JellyfinBackend: MusicBackend {
         // audio format + file size lazily via `fetchTrackDetails` (see the
         // background media backfill). `NormalizationGain` is a cheap top-level
         // field, so loudness normalization keeps working immediately.
+        //
+        // `enableImages=false` for the tracks phase specifically: confirmed
+        // against the Jellyfin server source, an Audio item's `AlbumPrimaryImageTag`
+        // is populated OUTSIDE the EnableImages gate, so it survives — and our
+        // track-artwork mapper already falls back from the track's own image to
+        // the album's (`artwork(track) ?? artwork(albumId, AlbumPrimaryImageTag)`).
+        // Music tracks essentially always use album art anyway, so disabling the
+        // per-track image work costs us nothing visible while trimming the heaviest
+        // phase. (Albums/artists KEEP images — their `ImageTags` would be stripped.)
         let response = try await client.send(
-            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain")),
+            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain") + [
+                URLQueryItem(name: "enableImages", value: "false"),
+            ]),
             as: JFItemsResponse.self
         )
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
@@ -264,6 +275,10 @@ public struct JellyfinBackend: MusicBackend {
             URLQueryItem(name: "IncludeItemTypes", value: type),
             URLQueryItem(name: "Fields", value: fields),
             URLQueryItem(name: "EnableImageTypes", value: "Primary"),
+            // We only ever use the single Primary image, so cap images per type at
+            // 1 to trim the image work the server does per item (safe — the Primary
+            // tag we need is still returned).
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
         ]
     }
 
