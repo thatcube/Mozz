@@ -82,6 +82,37 @@ final class RadioBatchTests: XCTestCase {
         XCTAssertTrue(ids.isEmpty)
     }
 
+    func testSimilarityLeadsInDescendingScoreOrder() async throws {
+        let (service, serverId) = try await makeService()
+        let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")
+        // Distinct artists + clearly-separated scores: the crowd signal, not
+        // exploration jitter, must order the lead tier.
+        let similar = [
+            scored("s1", artist: "A1", score: 0.9),
+            scored("s2", artist: "A2", score: 0.7),
+            scored("s3", artist: "A3", score: 0.5),
+            scored("s4", artist: "A4", score: 0.3),
+        ]
+        let ids = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 4, excluding: [], similar: similar)
+        XCTAssertEqual(ids, ["s1", "s2", "s3", "s4"])
+    }
+
+    func testSimilarAndGenreDoNotDuplicate() async throws {
+        let (service, serverId) = try await makeService()
+        let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")
+        // "rock1" is both a similarity pick AND in the genre pool — it must appear
+        // exactly once (tier-1 pick, excluded from the genre fill).
+        let similar = [ScoredOwnedTrack(
+            candidate: TrackCandidate(trackRef: "rsrv:rock1", remoteId: "rock1", title: "R1",
+                                      artistName: "Genre1", artistRemoteId: "g1", albumRemoteId: nil,
+                                      genres: ["Rock"], addedAt: nil), score: 0.9)]
+        let ids = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 6, excluding: [], similar: similar)
+        XCTAssertEqual(ids.first, "rock1")
+        XCTAssertEqual(ids.filter { $0 == "rock1" }.count, 1, "no duplicate across tiers")
+    }
+
     func testDropsNonPositiveSimilarityScores() async throws {
         let (service, serverId) = try await makeService()
         let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")

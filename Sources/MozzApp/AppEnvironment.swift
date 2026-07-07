@@ -1114,12 +1114,18 @@ public final class AppEnvironment: ObservableObject {
     /// — in which case radio falls back to the genre engine. Network-free DB read.
     private func similarCandidates(for seed: RadioSeed, serverId: ServerID,
                                    excluding: Set<String>, limit: Int) async -> [ScoredOwnedTrack] {
-        guard let ref = seed.seedTrackRef,
+        // Respect the on/off toggle for reads too (disabled → genre-only radio).
+        let enabled = UserDefaults.standard.object(forKey: Self.enrichmentEnabledKey) as? Bool ?? true
+        guard enabled, let ref = seed.seedTrackRef,
               let canonical = try? await enrichmentStore.seedMbid(forTrackRef: ref)?.canonical
         else { return [] }
+        // Overfetch: the tier-1 per-artist cap discards artist-heavy excess, so a
+        // pool of just `limit` can underfill and hand slots to genre. Pull a wider
+        // pool and let the blender cap it down.
+        let pool = min(max(limit * 5, 50), 250)
         return (try? await enrichmentStore.similarOwnedTracks(
             seedCanonicalMbids: [canonical], algorithm: enrichmentAlgorithm,
-            serverId: serverId, excludingRemoteIds: excluding, limit: limit)) ?? []
+            serverId: serverId, excludingRemoteIds: excluding, limit: pool)) ?? []
     }
 
     /// Forget any active radio session (e.g. on sign-out). The engine's own

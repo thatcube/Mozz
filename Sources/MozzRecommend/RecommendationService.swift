@@ -156,9 +156,13 @@ public actor RecommendationService {
             let scored = usableSimilar.map {
                 ScoredCandidate(candidate: $0.candidate, score: $0.score, source: "collaborative")
             }
-            // Tighter per-artist cap: ListenBrainz "similar" skews same-artist, and
-            // the seed's own artist isn't discovery.
-            let config = Blender.Config(limit: limit, maxPerArtist: 4, maxPerAlbum: max(2, limit / 4))
+            // Rank tier 1 by the ListenBrainz score (near-zero jitter so the crowd
+            // signal — not exploration noise — orders the lead; batch-to-batch
+            // variety comes from the growing `excluding` set). Tighter per-artist
+            // cap: ListenBrainz "similar" skews same-artist, and the seed's own
+            // artist isn't discovery.
+            let config = Blender.Config(limit: limit, explorationJitter: 0.02,
+                                        maxPerArtist: 4, maxPerAlbum: max(2, limit / 4))
             var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
             let ranked = blender.blend(sources: [scored], config: config, using: &rng)
             picked = ranked.map { $0.candidate.remoteId }
