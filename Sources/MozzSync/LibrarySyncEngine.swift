@@ -102,8 +102,45 @@ public struct SyncSummary: Sendable, Hashable {
     }
 }
 
-/// Mirrors a backend's entire music catalog into the source-of-truth database,
-/// one page at a time.
+/// Scopes a sync run. The default `.full` mirrors the entire library and prunes.
+/// A bounded plan (`.quickStart`) syncs only the first few (newest) pages of
+/// albums + tracks and skips pruning, so the app becomes browsable/playable on a
+/// recent slice within a minute or two before the full sync runs in the
+/// background — important on slow self-hosted servers where a full mirror can
+/// take many minutes.
+public struct SyncPlan: Sendable {
+    /// Max pages per phase: `nil` = all pages, `0` = skip the phase entirely.
+    public var maxArtistPages: Int?
+    public var maxAlbumPages: Int?
+    public var maxTrackPages: Int?
+    public var includePlaylists: Bool
+    /// Prune rows the server no longer has. Only safe on a full enumeration — a
+    /// bounded plan MUST NOT prune (it hasn't seen the whole library).
+    public var prune: Bool
+
+    public init(maxArtistPages: Int?, maxAlbumPages: Int?, maxTrackPages: Int?, includePlaylists: Bool, prune: Bool) {
+        self.maxArtistPages = maxArtistPages
+        self.maxAlbumPages = maxAlbumPages
+        self.maxTrackPages = maxTrackPages
+        self.includePlaylists = includePlaylists
+        self.prune = prune
+    }
+
+    public static let full = SyncPlan(
+        maxArtistPages: nil, maxAlbumPages: nil, maxTrackPages: nil,
+        includePlaylists: true, prune: true
+    )
+
+    /// A recent, immediately-usable slice: the newest `albumPages` of albums and
+    /// `trackPages` of tracks (with newest-first ordering), no artists/playlists,
+    /// no prune. Fast enough to unblock the app in ~1-2 min on a slow server.
+    public static func quickStart(albumPages: Int = 1, trackPages: Int = 2) -> SyncPlan {
+        SyncPlan(
+            maxArtistPages: 0, maxAlbumPages: albumPages, maxTrackPages: trackPages,
+            includePlaylists: false, prune: false
+        )
+    }
+}
 ///
 /// Design:
 /// - **Backend-agnostic.** It drives the ``MusicBackend`` paging API; Plex vs
@@ -149,7 +186,7 @@ public struct LibrarySyncEngine: Sendable {
     /// two instead of waiting for the entire artist listing to enumerate, so a
     /// huge library becomes browsable almost immediately.
     @discardableResult
-    public func sync(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+    public func sync(plan: SyncPlan = .full, progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
         let started = Date()
 
         try await writer.saveServer(backend.connection)
@@ -157,11 +194,13 @@ public struct LibrarySyncEngine: Sendable {
         let capabilities = try await backend.detectCapabilities()
         try await writer.saveCapabilities(capabilities, serverId: serverId)
 
-        // A single combined progress stream across the concurrent phases, so the
-        // UI shows one honest "Syncing — N of M items" instead of four racing bars.
-        let aggregator = progress.map {
-            ProgressAggregator(phases: [.artists, .albums, .tracks, .playlists], emit: $0)
-        }
+        // The progress breakdown lists exactly the phases this plan will run.
+        var plannedPhases: [SyncProgress.Phase] = []
+        if plan.maxArtistPages != 0 { plannedPhases.append(.artists) }
+        if plan.maxAlbumPages != 0 { plannedPhases.append(.albums) }
+        if plan.maxTrackPages != 0 { plannedPhases.append(.tracks) }
+        if plan.includePlaylists { plannedPhases.append(.playlists) }
+        let aggregator = progress.map { ProgressAggregator(phases: plannedPhases, emit: $0) }
         let report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void = { phase, seen, total in
             await aggregator?.report(phase: phase, seen: seen, total: total)
         }
@@ -178,14 +217,17 @@ public struct LibrarySyncEngine: Sendable {
         // tracks at once just starved the tracks request past its timeout
         // (serverUnreachable) and aborted the whole sync. One heavy stream at a
         // time keeps every request served promptly and well within the timeout.
+        // A bounded plan (quick start) may skip artists/playlists entirely.
         async let artistsTask = syncPages(
-            phase: .artists,
+            phase: .artists, maxPages: plan.maxArtistPages,
             fetch: { try await backend.fetchArtists(offset: $0, limit: $1) },
             write: { try await writer.upsertArtists($0, serverId: serverId) },
             id: \.id,
             report: report
         )
-        async let playlistsTask = syncPlaylists(report: report)
+        async let playlistsTask = plan.includePlaylists
+            ? syncPlaylists(report: report)
+            : PagedEnumeration(seen: [], reportedTotal: nil, phase: .playlists, elapsed: 0)
 
         let artistIDs: PagedEnumeration
         let albumIDs: PagedEnumeration
@@ -193,7 +235,7 @@ public struct LibrarySyncEngine: Sendable {
         let playlistIDs: PagedEnumeration
         do {
             albumIDs = try await syncPages(
-                phase: .albums,
+                phase: .albums, maxPages: plan.maxAlbumPages,
                 fetch: { try await backend.fetchAlbums(offset: $0, limit: $1) },
                 write: { try await writer.upsertAlbums($0, serverId: serverId) },
                 id: \.id,
@@ -201,7 +243,7 @@ public struct LibrarySyncEngine: Sendable {
             )
             await complete(albumIDs)
             trackIDs = try await syncPages(
-                phase: .tracks,
+                phase: .tracks, maxPages: plan.maxTrackPages,
                 fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
                 write: { try await writer.upsertTracks($0, serverId: serverId) },
                 id: \.id,
@@ -229,18 +271,16 @@ public struct LibrarySyncEngine: Sendable {
         // server for the expensive per-album ChildCount). Cheap local pass.
         try await writer.deriveAlbumTrackCounts(serverId: serverId)
 
-        // Prune rows the server no longer has — but ONLY when EVERY phase
-        // enumerated completely (all-or-nothing). A truncated/flaky sync (fewer
-        // items seen than the server's reported total, or an empty result) must
-        // never prune: the `download` row cascade-deletes from `track`, so a
-        // single bad sync could otherwise wipe the catalog AND the user's
-        // offline downloads (and orphan the files on disk). A half-enumerated
-        // sibling type must not authorize deletes for any type either — hence
-        // the whole run is gated on `allPhasesComplete`.
+        // Prune rows the server no longer has — but ONLY on a full plan where
+        // EVERY phase enumerated completely (all-or-nothing). A bounded/quick-start
+        // plan never prunes (it deliberately saw only a slice). A truncated/flaky
+        // full sync must never prune either: the `download` row cascade-deletes
+        // from `track`, so a single bad sync could otherwise wipe the catalog AND
+        // the user's offline downloads (and orphan the files on disk).
         progress?(SyncProgress(phase: .pruning, itemsSynced: 0))
         var deleted = 0
         let allPhasesComplete = [artistIDs, albumIDs, trackIDs, playlistIDs].allSatisfy(phaseCompleted)
-        if allPhasesComplete {
+        if plan.prune && allPhasesComplete {
             deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs.seen)
             deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs.seen)
             deleted += try await writer.pruneArtists(serverId: serverId, keeping: artistIDs.seen)
@@ -314,11 +354,16 @@ public struct LibrarySyncEngine: Sendable {
     /// throughput. Only one page is buffered ahead, so peak memory is bounded.
     private func syncPages<Item: Sendable>(
         phase: SyncProgress.Phase,
+        maxPages: Int? = nil,
         fetch: @Sendable @escaping (Int, Int) async throws -> CatalogPage<Item>,
         write: @Sendable ([Item]) async throws -> Void,
         id: @Sendable (Item) -> String,
         report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
     ) async throws -> PagedEnumeration {
+        // maxPages == 0 → phase skipped entirely (bounded plan).
+        if maxPages == 0 {
+            return PagedEnumeration(seen: [], reportedTotal: nil, phase: phase, elapsed: 0)
+        }
         let started = Date()
         let pageSize = self.pageSize
         var offset = 0
@@ -358,14 +403,21 @@ public struct LibrarySyncEngine: Sendable {
                 diag?("\(phase.rawValue): page \(pageNo) off=\(offset) got=\(page.items.count) total=\(reportedTotal.map(String.init) ?? "?") fetch=\(String(format: "%.1f", waited))s")
                 pageNo += 1
                 if page.items.isEmpty { break }
+                // Bounded plan (quick start): stop after `maxPages`. Don't prefetch
+                // beyond the limit. The phase is intentionally incomplete, so the
+                // prune guard (phaseCompleted) will correctly refuse to prune.
+                let reachedLimit = maxPages.map { pageNo >= $0 } ?? false
                 let nextOffset = offset + page.items.count
-                pending = Task { try await fetch(nextOffset, pageSize) }
+                if !reachedLimit {
+                    pending = Task { try await fetch(nextOffset, pageSize) }
+                }
                 let writeStart = Date()
                 try await write(page.items)
                 writeTime += Date().timeIntervalSince(writeStart)
                 seen.append(contentsOf: page.items.map(id))
                 await report(phase, seen.count, reportedTotal)
                 offset = nextOffset
+                if reachedLimit { break }
             }
         } catch {
             pending.cancel()

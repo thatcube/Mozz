@@ -259,7 +259,7 @@ public final class AppEnvironment: ObservableObject {
             // First real sign-in → run the initial sync and stay on the setup
             // screen until there's enough to browse (or the user taps "Browse
             // now"), so we don't drop them onto an empty Home.
-            await gateInitialSync()
+            try await gateInitialSync()
             guard generation == activationGeneration else { return }  // superseded
             setupError = nil
             isSettingUp = false                 // success → enter the app
@@ -276,16 +276,15 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
-    /// Start the first catalog sync and drop the user into the app as soon as
-    /// there's anything to browse — the sync then continues in the background
-    /// with a persistent progress bar. On a huge Jellyfin library the old
-    /// behaviour blocked here until 20 *tracks* existed, but tracks used to be
-    /// enumerated only after every artist and album, so the setup screen could
-    /// hang for minutes. Now: `canEnterEarly` is true the moment the sync is
-    /// running (so "Browse now" is always available), the phases run
-    /// concurrently (so albums/tracks land within a second or two regardless of
-    /// size), and we auto-enter as soon as the first content of any kind appears.
-    private func gateInitialSync() async {
+    /// First-run catalog population, two-tier so the app is usable fast even when
+    /// a full mirror takes many minutes on a slow self-hosted server:
+    ///   1. **Quick start** (blocking, ~1-2 min): sync the newest slice — a page
+    ///      of albums + a couple pages of tracks (newest-first), no prune — so the
+    ///      user drops into a browsable, PLAYABLE recent library instead of empty
+    ///      album shells. "Browse now" is available the moment it's running.
+    ///   2. **Full sync** (background): the entire catalog via `startSync()`, with
+    ///      the persistent sync bar; UPSERTs, so it just fills in the rest.
+    private func gateInitialSync() async throws {
         guard let serverId = active?.connection.id else { return }
         let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
         if existing > 0 {
@@ -297,26 +296,38 @@ public final class AppEnvironment: ObservableObject {
             return
         }
         // A sync left running from a previous server/sign-out would make the
-        // single-flight `startSync()` a no-op; cancel and wait for it to clear
-        // so this server actually gets its own fresh sync.
+        // single-flight `startSync()` a no-op; cancel and wait for it to clear.
         if isSyncing {
             cancelSync()
             while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
-        startSync()
-        // The sync is running — let the user leave the setup screen whenever they
-        // like; the persistent sync bar keeps them informed in-app.
+        // Let the user bail to the app whenever they like; the quick start just
+        // makes the *default* wait land them on real, playable content.
         canEnterEarly = true
-        // Auto-enter as soon as ANY browsable content exists (albums or tracks),
-        // or the sync finishes. Concurrent phases make this happen fast even for
-        // very large libraries, so most users never see a blocking wait at all.
-        while isSettingUp {
-            async let albums = repository.albumCount(serverId: serverId)
-            async let tracks = repository.trackCount(serverId: serverId)
-            let content = ((try? await albums) ?? 0) + ((try? await tracks) ?? 0)
-            if content > 0 || !isSyncing { break }
-            try? await Task.sleep(nanoseconds: 300_000_000)
+
+        // Tier 1: quick-start the newest slice on the setup screen (bounded, no
+        // prune). Progress flows to `syncProgress` so SetupView shows it.
+        isSyncing = true
+        syncProgress = nil
+        let quickStart = SyncPlan.quickStart(albumPages: 1, trackPages: 2)
+        do {
+            _ = try await runSync(plan: quickStart) { [weak self] p in
+                Task { @MainActor in self?.syncProgress = p }
+            }
+        } catch {
+            // Quick start failed (e.g. offline) — surface via the normal error
+            // path; don't leave the user on a blank setup screen.
+            isSyncing = false; syncProgress = nil
+            if !(error is CancellationError) { throw error }
+            return
         }
+        isSyncing = false; syncProgress = nil
+        guard isSettingUp else { return }   // user tapped "Browse now" meanwhile
+
+        // Tier 2: full catalog in the background. `isSettingUp` flips false in
+        // performActivation right after this returns, dropping the user into the
+        // app while the full sync continues under the persistent sync bar.
+        startSync()
     }
 
     /// User tapped "Browse now" on the setup screen: enter the app while the sync
@@ -513,11 +524,11 @@ public final class AppEnvironment: ObservableObject {
             // the sync exits. (Not infinite — iOS grants minutes, not hours — but
             // enough to make real progress; the sync resumes on next launch from
             // where the catalog left off.)
-            let bgTask = await BackgroundTaskAssertion(name: "catalog-sync")
+            let bgTask = BackgroundTaskAssertion(name: "catalog-sync")
             defer {
                 isSyncing = false
                 syncProgress = nil
-                Task { @MainActor in bgTask.end() }
+                bgTask.end()
             }
             do {
                 _ = try await syncNow { progress in
@@ -538,6 +549,15 @@ public final class AppEnvironment: ObservableObject {
 
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+        try await runSync(plan: .full, progress: progress)
+    }
+
+    /// The core catalog-sync routine, scoped by `plan` (full vs. a bounded
+    /// quick-start slice). Post-sync work (mixes, outbox flush, media backfill)
+    /// runs only for a full plan — the quick-start slice just populates recent
+    /// content fast, and the following full sync does the housekeeping.
+    @discardableResult
+    private func runSync(plan: SyncPlan, progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
         guard active != nil else { throw MozzError.unsupported("No active server") }
         // Plex can't browse without a music-library section id. Resolve it now if
         // activation didn't (self-healing), so a plain "Sync Now" recovers without
@@ -551,11 +571,11 @@ public final class AppEnvironment: ObservableObject {
         // minimizes round trips, which dominate on a latency-bound server.
         let backend = makeBulkSyncBackend() ?? active.backend
         let diagLog = SyncDiagnosticsLog()
-        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=1000")
+        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=1000 plan=\(plan.prune ? "full" : "quick")")
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 1000, diag: diagLog.sink)
         let summary: SyncSummary
         do {
-            summary = try await engine.sync(progress: progress)
+            summary = try await engine.sync(plan: plan, progress: progress)
         } catch is CancellationError {
             diagLog.append("SYNC CANCELLED")
             throw CancellationError()
@@ -564,15 +584,16 @@ public final class AppEnvironment: ObservableObject {
             throw error
         }
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
-        lastSyncReport = Self.formatSyncReport(summary)
         diagLog.append("SYNC DONE total=\(String(format: "%.1f", summary.duration))s tracks=\(summary.tracks) albums=\(summary.albums) artists=\(summary.artists) playlists=\(summary.playlists) pruned=\(summary.deleted)")
-        // New catalog + listening → refresh the mixes off-main. Non-fatal.
-        await regenerateMozzWeekly()
-        await regenerateHomeMixes()
-        // Flush any likes/ratings that were made offline.
-        await flushFavoriteOutbox()
-        // Quietly fill in the audio format/size the light track sync skipped.
-        startMediaBackfillIfNeeded()
+        // Full sync only: record the timing report and do post-sync housekeeping.
+        // (The quick-start slice skips these — the trailing full sync handles them.)
+        if plan.prune {
+            lastSyncReport = Self.formatSyncReport(summary)
+            await regenerateMozzWeekly()
+            await regenerateHomeMixes()
+            await flushFavoriteOutbox()
+            startMediaBackfillIfNeeded()
+        }
         return summary
     }
 

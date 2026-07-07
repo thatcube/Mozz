@@ -115,6 +115,37 @@ final class LibrarySyncEngineTests: XCTestCase {
         XCTAssertEqual(servers.count, 1)
     }
 
+    func testQuickStartPlanSyncsBoundedSliceAndDoesNotPrune() async throws {
+        let database = try MusicDatabase.inMemory()
+        let repository = LibraryRepository(database)
+
+        // Pre-seed a stale catalog (as if from a previous full sync) so we can
+        // verify the quick-start plan does NOT prune the rows it doesn't re-see.
+        var backend = MockBackend()
+        backend.artists = makeArtists(3)
+        backend.albums = makeAlbums(30)
+        backend.tracks = makeTracks(100)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+        let seededTracks = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(seededTracks, 100)
+
+        // Quick start: 1 album page + 2 track pages at pageSize 10, no artists,
+        // no playlists, no prune.
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 10)
+        let summary = try await engine.sync(plan: .quickStart(albumPages: 1, trackPages: 2))
+
+        // Only the bounded slice was enumerated this run…
+        XCTAssertEqual(summary.albums, 10)   // 1 page × 10
+        XCTAssertEqual(summary.tracks, 20)   // 2 pages × 10
+        XCTAssertEqual(summary.deleted, 0)   // MUST NOT prune on a bounded plan
+
+        // …and the pre-existing catalog is fully intact (nothing pruned).
+        let tracksAfter = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(tracksAfter, 100, "quick start must not delete previously-synced rows")
+        let albumsAfter = try await repository.albumCount(serverId: "srv")
+        XCTAssertEqual(albumsAfter, 30)
+    }
+
     func testProgressPhasesAreReportedInOrder() async throws {
         let database = try MusicDatabase.inMemory()
         var backend = MockBackend()

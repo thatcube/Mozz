@@ -243,17 +243,15 @@ public struct JellyfinBackend: MusicBackend {
             URLQueryItem(name: "userId", value: userID),
             URLQueryItem(name: "StartIndex", value: "\(offset)"),
             URLQueryItem(name: "Limit", value: "\(limit)"),
-            // Sort by DateCreated (a direct, indexed column — cheap server-side,
-            // unlike Artist/AlbumArtist/PlayCount sorts which are per-row
-            // subqueries). A stable sort is REQUIRED for correct StartIndex/Limit
-            // paging: omitting SortBy entirely gives only `ORDER BY SortName` with
-            // no tiebreaker, so items sharing a SortName can reorder between pages
-            // and be missed or duplicated. DateCreated gets an automatic SortName
-            // tiebreaker server-side, and its append-order also sets up future
-            // incremental syncs. (SortName itself is equally cheap; DateCreated is
-            // chosen for the incremental-sync affordance.)
+            // Sort by DateCreated DESCENDING — newest first. This makes the sync
+            // land the user's most recently-added music first, so the app is
+            // useful on relevant content within a minute (and the quick-start tier
+            // grabs exactly that recent slice). DateCreated is a direct, indexed
+            // column (cheap server-side, unlike Artist/PlayCount subquery sorts).
+            // A stable sort is REQUIRED for correct StartIndex/Limit paging;
+            // DateCreated also gets an automatic SortName tiebreaker server-side.
             URLQueryItem(name: "SortBy", value: "DateCreated"),
-            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "SortOrder", value: "Descending"),
             URLQueryItem(name: "Recursive", value: "true"),
             // Total record count ONLY on the first page. With EnableTotalRecordCount
             // the server runs a separate full COUNT(*) before the page SELECT;
