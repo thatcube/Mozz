@@ -159,6 +159,25 @@ final class EnrichmentPipelineTests: XCTestCase {
         try await Task.sleep(nanoseconds: 150_000_000) // let the (cancelled) task fully unwind
         XCTAssertEqual(gate.similarCalls, 0) // stage 3 never ran after cancellation
     }
+
+    func testPrepareSeedNoMappingNegativeCaches() async throws {
+        let (_, store) = try await makeDB()
+        let config = EnrichmentConfig(userAgent: "t", listenBrainzAlgorithm: algoName)
+        let mb = MusicBrainzClient.make(config: config, limiter: AsyncRateLimiter(minInterval: 0),
+                                        baseTransport: LBTransport(similarJSON: "[]"))
+        // Empty canonicalByMbid → recording-mbid-lookup returns "[]" (genuine "no mapping").
+        let lb = ListenBrainzClient.make(config: config, limiter: AsyncRateLimiter(minInterval: 0),
+                                         baseTransport: LBTransport(similarJSON: "[]"))
+        let service = EnrichmentService(store: store, musicBrainz: mb, listenBrainz: lb,
+                                        config: config, isEnabled: { true })
+        let result = await service.prepareSeedSimilarity(
+            trackRef: "srv1:t1", artistName: "Aphex Twin", title: "Xtal",
+            durationMs: 300_000, artistMBID: nil)
+        XCTAssertNil(result) // no canonical mapping
+        // A genuine no-mapping must be negative-cached, not re-queried every call.
+        let needing = try await store.canonicalNeedingLookup(serverId: "srv1", notLookedUpSince: 0, limit: 10)
+        XCTAssertFalse(needing.contains(recSeed))
+    }
 }
 
 /// Blocks the first recording-mbid-lookup request until `open()`, so cancellation

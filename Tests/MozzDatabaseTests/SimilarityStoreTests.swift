@@ -113,6 +113,26 @@ final class SimilarityStoreTests: XCTestCase {
         XCTAssertEqual(out.map { $0.candidate.remoteId }, ["tA"])
     }
 
+    func testCrossServerSubstrCollisionDoesNotLeak() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = EnrichmentStore(db)
+        try await writer.saveServer(ServerConnection(
+            id: "srv", kind: .plex, name: "A", baseURL: URL(string: "https://a")!, userID: nil, clientIdentifier: "c"))
+        try await writer.saveServer(ServerConnection(
+            id: "srv1", kind: .plex, name: "B", baseURL: URL(string: "https://b")!, userID: nil, clientIdentifier: "c"))
+        // Collision: substr("srv:1XY", length("srv1")+2) == "XY", and srv1 owns a
+        // track "XY" — so a naive join would leak srv's similarity onto srv1's XY.
+        try await writer.upsertTracks([Track(id: "1XY", title: "A", artistName: "AA", mbid: rawA)], serverId: "srv")
+        try await writer.upsertTracks([Track(id: "XY", title: "B", artistName: "BB", mbid: rawB)], serverId: "srv1")
+        try await store.setCanonical(mbid: rawA, canonical: canA, at: 100) // srv:1XY -> canA
+        try await store.replaceSimilarRecordings(sourceMbid: seed1, algorithm: algo, pairs: [(canA, 0.9)], at: 100)
+        // canA belongs to srv's track, not srv1's XY — the guard must block the leak.
+        let out = try await store.similarOwnedTracks(
+            seedCanonicalMbids: [seed1], algorithm: algo, serverId: "srv1", limit: 10)
+        XCTAssertTrue(out.isEmpty, "cross-server collision leaked: \(out.map { $0.candidate.remoteId })")
+    }
+
     func testSharedMbidDedupedAndBothStamped() async throws {
         let (_, writer, store) = try await setup()
         // Two owned tracks share ONE raw recording MBID.
@@ -124,10 +144,10 @@ final class SimilarityStoreTests: XCTestCase {
         XCTAssertEqual(needing, [rawA]) // one entry, not two
         // A single setCanonical stamps BOTH tracks' rows.
         try await store.setCanonical(mbid: rawA, canonical: canA, at: 100)
-        let mbidTA = try await store.mbidState(trackRef: "srv1:tA")?.mbid
-        let mbidTA2 = try await store.mbidState(trackRef: "srv1:tA2")?.mbid
-        XCTAssertEqual(mbidTA, rawA)
-        XCTAssertEqual(mbidTA2, rawA)
+        let canonTA = try await store.seedMbid(forTrackRef: "srv1:tA")?.canonical
+        let canonTA2 = try await store.seedMbid(forTrackRef: "srv1:tA2")?.canonical
+        XCTAssertEqual(canonTA, canA)
+        XCTAssertEqual(canonTA2, canA)
         let after = try await store.canonicalNeedingLookup(serverId: "srv1", notLookedUpSince: 1_000, limit: 10)
         XCTAssertTrue(after.isEmpty) // both canonicalized by one call
     }

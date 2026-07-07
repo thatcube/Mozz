@@ -175,13 +175,17 @@ public actor EnrichmentService {
         }
         guard let mbid = recordingMbid else { return nil }
         if canonical == nil {
-            // Throws on transient/decode failure; only proceed on a real answer.
-            guard let resolved = try? await listenBrainz.canonicalRecording(forMbid: mbid) else {
+            // Mirror the background stage: a genuine no-mapping (nil) is stamped
+            // (negative cache); a throw (transport/decode/cancel) is NOT stamped so
+            // it's retried later. `try?` would collapse both into nil.
+            do {
+                let resolved = try await listenBrainz.canonicalRecording(forMbid: mbid)
+                try? await store.setCanonical(mbid: mbid, canonical: resolved,
+                                              at: now().timeIntervalSince1970)
+                canonical = resolved
+            } catch {
                 return nil // couldn't canonicalize now; the background pass retries
             }
-            try? await store.setCanonical(mbid: mbid, canonical: resolved,
-                                          at: now().timeIntervalSince1970)
-            canonical = resolved
         }
         guard let canonicalMbid = canonical else { return nil }
         // Skip a redundant fetch if the background pass already did it recently.
