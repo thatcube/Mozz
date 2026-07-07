@@ -56,6 +56,15 @@ public final class PlaybackEngine: ObservableObject {
     /// Called when artwork should be fetched for the lock screen.
     public var onNeedsArtwork: ((Track) -> Void)?
 
+    /// Radio hook: when set, the engine calls this as the queue nears its end to
+    /// fetch more tracks (an endless "station"), then appends them. Return an
+    /// empty array to stop extending. Cleared to end radio mode.
+    public var onQueueNearEnd: (@Sendable () async -> [Track])?
+    /// Guards against firing overlapping extend requests.
+    private var isExtendingQueue = false
+    /// Extend the queue once this few tracks remain after the current one.
+    private static let radioRefillThreshold = 3
+
     /// Whether per-track loudness normalization (ReplayGain / Sound Check) is
     /// applied. When on, a track's `normalizationGainDB` is turned into an audio
     /// mix so tracks play at a consistent level. Default on.
@@ -102,10 +111,24 @@ public final class PlaybackEngine: ObservableObject {
 
     /// Load a set of tracks and start playing at `startIndex`.
     public func play(tracks: [Track], startAt startIndex: Int = 0) {
+        onQueueNearEnd = nil   // a fresh explicit play ends any active station
         logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
         reload(autoplay: true)
+    }
+
+    /// Start an endless "station": load an initial batch and keep it topped up
+    /// via `onNearEnd` as it plays down. Repeat is irrelevant (the queue extends
+    /// rather than loops); a normal `play`/`playShuffled` ends the station.
+    public func startStation(_ tracks: [Track],
+                             onNearEnd: @escaping @Sendable () async -> [Track]) {
+        logTerminal(.skipped, position: snapshot.elapsed)
+        queue.setItems(tracks, startingAt: 0)
+        onQueueNearEnd = onNearEnd
+        try? session.activate()
+        reload(autoplay: true)
+        maybeExtendQueue()
     }
 
     /// Load a set of tracks and start playing a freshly balanced shuffle. The
@@ -119,6 +142,7 @@ public final class PlaybackEngine: ObservableObject {
     public func playShuffled(_ tracks: [Track],
                              recencyScores: [String: Double]? = nil,
                              tasteScores: [String: Double]? = nil) {
+        onQueueNearEnd = nil   // a fresh explicit shuffle ends any active station
         logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItemsShuffled(tracks, recencyScores: recencyScores, tasteScores: tasteScores)
         try? session.activate()
@@ -195,6 +219,7 @@ public final class PlaybackEngine: ObservableObject {
             return
         }
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
+        maybeExtendQueue()
     }
 
     public func previous() {
@@ -256,6 +281,7 @@ public final class PlaybackEngine: ObservableObject {
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
+        onQueueNearEnd = nil   // stopping ends any active station
         report(.stopped)
         currentTrack = nil
         upNext = []
@@ -320,6 +346,21 @@ public final class PlaybackEngine: ObservableObject {
     private func refillLookahead() {
         let generation = loadGeneration
         Task { [weak self] in await self?.refillLookaheadAsync(generation: generation) }
+    }
+
+    /// If a radio station is active and the queue is running low, fetch and
+    /// append the next batch so playback never runs dry. Guarded so overlapping
+    /// low-water marks don't fire duplicate fetches.
+    private func maybeExtendQueue() {
+        guard let onQueueNearEnd, !isExtendingQueue else { return }
+        guard queue.upNext.count <= Self.radioRefillThreshold else { return }
+        isExtendingQueue = true
+        Task { [weak self] in
+            let more = await onQueueNearEnd()
+            guard let self else { return }
+            if !more.isEmpty { self.append(more) }
+            self.isExtendingQueue = false
+        }
     }
 
     private func refillLookaheadAsync(generation: Int) async {
@@ -463,6 +504,7 @@ public final class PlaybackEngine: ObservableObject {
         publish(status: .playing)
         report(.playing)
         refillLookahead()
+        maybeExtendQueue()
     }
 
     private func tick() {

@@ -2,6 +2,21 @@ import Foundation
 import MozzCore
 import MozzDatabase
 
+/// A seed for an Instant-Mix "station": the genres and artist(s) to build a
+/// station around (e.g. from a track or an artist the user tapped "Start Radio"
+/// on) plus a display title.
+public struct RadioSeed: Sendable, Equatable {
+    public var title: String
+    public var genres: [String]
+    public var artistIds: [String]
+
+    public init(title: String, genres: [String], artistIds: [String]) {
+        self.title = title
+        self.genres = genres
+        self.artistIds = artistIds
+    }
+}
+
 /// Computes and persists ranked recommendation sets in the background so the UI
 /// is instant and offline (it only ever *reads* precomputed rows — never scores
 /// on the main thread / on view load).
@@ -34,8 +49,7 @@ public actor RecommendationService {
         self.now = now
     }
 
-    /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →
-    /// normalized score in `(0, 1]` (1 == best match to the listener's taste).
+    /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →    /// normalized score in `(0, 1]` (1 == best match to the listener's taste).
     /// Tracks with no affinity are absent. Returns `[:]` when history is too thin
     /// to personalize (cold start), so the caller falls back to a plain shuffle.
     /// Mirrors `ContentRecommender`'s 0.6·genre + 0.4·artist scoring, but over the
@@ -78,6 +92,40 @@ public actor RecommendationService {
             let age = max(0, nowSec - playedAt)
             return exp(-lambda * age)
         }
+    }
+
+    /// Generate the next batch of station tracks for a radio seed: pulls a pool
+    /// of same-genre / same-artist library tracks, scores them by similarity to
+    /// the seed, blends (variety caps + exploration jitter) and returns ordered
+    /// track remote ids. `excluding` (track ids) drops the seed and anything
+    /// already queued so the station keeps moving. Fresh each call (no seed →
+    /// varied batches).
+    public func radioBatch(seed: RadioSeed, serverId: ServerID,
+                           limit: Int = 20, excluding: Set<String> = []) async throws -> [String] {
+        guard !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
+        // Include the whole matching catalog (notPlayedSince = now excludes ~none);
+        // radio may revisit tracks. Pull a generous pool to blend from.
+        let pool = try await store.candidateTracks(
+            serverId: serverId, genres: seed.genres, artistIds: seed.artistIds,
+            notPlayedSince: now().timeIntervalSince1970, limit: 500)
+        guard !pool.isEmpty else { return [] }
+
+        // Score by similarity to the SEED (treat the seed's genres/artists as a
+        // synthetic taste), so the station stays close to what it was seeded on.
+        let seedTaste = TasteProfile(
+            genreAffinity: Dictionary(seed.genres.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
+            artistAffinity: Dictionary(seed.artistIds.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
+            positiveSignal: TasteProfile.coldStartThreshold + 1)
+        let scored = content.score(candidates: pool, taste: seedTaste)
+        // Fall back to the raw pool when nothing scored (e.g. artist-only seed
+        // whose tracks carry no genres): still a valid same-artist station.
+        let sources = scored.isEmpty
+            ? [pool.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
+            : [scored]
+
+        var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
+        let ranked = blender.blend(sources: sources, config: Blender.Config(limit: limit), using: &rng)
+        return ranked.map { $0.candidate.remoteId }.filter { !excluding.contains($0) }
     }
 
     /// (Re)generate "Mozz Weekly" for a server and persist it. Pass a `seed` for

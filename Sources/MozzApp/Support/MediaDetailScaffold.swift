@@ -297,6 +297,9 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
 struct DetailPlayActions: View {
     let play: () -> Void
     let shuffle: () -> Void
+    /// Optional "Start Station" (radio) action, offered via a long-press context
+    /// menu on the Shuffle button so a plain tap still shuffles.
+    var startRadio: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -316,6 +319,13 @@ struct DetailPlayActions: View {
             }
             .buttonStyle(.bordered)
             .tint(.white)
+            .contextMenu {
+                if let startRadio {
+                    Button(action: startRadio) {
+                        Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                }
+            }
         }
         .controlSize(.large)
     }

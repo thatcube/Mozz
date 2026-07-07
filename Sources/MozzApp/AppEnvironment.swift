@@ -968,6 +968,51 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
+    // MARK: Radio / Instant Mix
+
+    /// The seed of the currently-playing station, if any. Drives the endless
+    /// queue-extension hook.
+    private var activeRadioSeed: RadioSeed?
+    /// Track ids already surfaced by the current station, so successive batches
+    /// don't immediately repeat.
+    private var radioSeenIDs: Set<String> = []
+
+    /// Start an endless station seeded from a track (its genres + artist).
+    public func startRadio(fromTrack track: Track) {
+        startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
+                                   artistIds: [track.artistID].compactMap { $0 }))
+    }
+
+    /// Start an endless station seeded from an artist.
+    public func startRadio(artistRemoteId: String, name: String, genres: [String]) {
+        startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
+    }
+
+    /// Load an initial station batch and keep the queue topped up as it plays.
+    public func startRadio(seed: RadioSeed) {
+        guard let serverId = active?.connection.id else { return }
+        Task { @MainActor in
+            let ids = (try? await recommendations.radioBatch(seed: seed, serverId: serverId, limit: 30)) ?? []
+            let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+            guard !tracks.isEmpty else { return }
+            activeRadioSeed = seed
+            radioSeenIDs = Set(tracks.map(\.id))
+            playback.startStation(tracks) { [weak self] in
+                await self?.nextRadioBatch() ?? []
+            }
+        }
+    }
+
+    /// Fetch the next station batch, excluding tracks already surfaced this session.
+    private func nextRadioBatch() async -> [Track] {
+        guard let seed = activeRadioSeed, let serverId = active?.connection.id else { return [] }
+        let ids = (try? await recommendations.radioBatch(
+            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs)) ?? []
+        let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+        radioSeenIDs.formUnion(tracks.map(\.id))
+        return tracks
+    }
+
     private static let deviceKind: String = {
         #if os(iOS)
         return "iphone"

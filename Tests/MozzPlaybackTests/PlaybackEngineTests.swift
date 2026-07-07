@@ -67,6 +67,27 @@ final class PlaybackEngineTests: XCTestCase {
         XCTAssertEqual(engine.lookaheadTrackIDsForTesting, ["t0", "t0"],
                        "stale t1 pre-roll must be replaced with the repeat-one track")
     }
+
+    /// A station tops the queue up as it nears the end, so playback never runs dry.
+    func testStationAutoExtendsQueue() async {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        let box = ExtendCounter()
+        engine.startStation((0..<4).map { Track(id: "s\($0)", title: "S", artistName: "A") }) {
+            let n = box.bump()
+            return (0..<5).map { Track(id: "x\(n)_\($0)", title: "X", artistName: "A") }
+        }
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertGreaterThanOrEqual(box.count, 1, "station fetched a batch as the queue neared its end")
+        XCTAssertTrue(engine.upNext.contains { $0.id.hasPrefix("x") }, "fetched tracks were appended")
+    }
+}
+
+/// Thread-safe counter for the station auto-extend test's `@Sendable` closure.
+private final class ExtendCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func bump() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return n }
 }
 
 /// Verifies the listening-history emission (B1): every track start is paired
