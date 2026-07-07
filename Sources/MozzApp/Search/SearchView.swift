@@ -45,6 +45,12 @@ struct SearchView: View {
     /// Actively searching — the field is focused or a query has been entered.
     /// Drives the collapse of the title header and the Cancel button.
     private var isActive: Bool { focused || !trimmedQuery.isEmpty }
+    /// Whether the "Search" title + avatar are in the scroll content. Hidden only
+    /// when active AND at the top: focusing from the top collapses the title away
+    /// (native). When already scrolled, the title is off-screen anyway, so we keep
+    /// it in the tree — removing off-screen content above the viewport would shift
+    /// everything down (a jarring "drag") the moment the Cancel button appears.
+    private var showsHeader: Bool { !isActive || scrolled }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -55,7 +61,7 @@ struct SearchView: View {
                 // ("Recently Searched", "Artists", …) is plain inline content so
                 // it scrolls too.
                 LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if !isActive {
+                    if showsHeader {
                         TightHeader(title: "Search")
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -70,7 +76,7 @@ struct SearchView: View {
                 // gray→glass crossfade run in lockstep. Scoped to the content (not
                 // the outer ScrollView) so it doesn't compound with the keyboard's
                 // safe-area animation and thrash the pinned layout.
-                .animation(fieldTransition, value: isActive)
+                .animation(fieldTransition, value: showsHeader)
             }
             .overlay { emptyState }
             .safeAreaInset(edge: .bottom) { latencyLabel }
