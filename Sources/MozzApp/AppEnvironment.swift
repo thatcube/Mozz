@@ -427,6 +427,21 @@ public final class AppEnvironment: ObservableObject {
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
+        // Resume the background enrichment crawl for the (possibly already-synced)
+        // library so coverage keeps climbing without a manual sync. Single-flight
+        // and toggle-gated inside the service, so this is a safe no-op when it's
+        // disabled or already running.
+        resumeEnrichmentIfNeeded()
+    }
+
+    /// Kick the background enrichment crawl for the active server if one isn't
+    /// already running. Safe to call on every launch/foreground: it's single-flight
+    /// and a no-op when enrichment is disabled or a pass is already in flight. This
+    /// is what lets an already-synced library keep enriching on its own.
+    public func resumeEnrichmentIfNeeded() {
+        guard let serverId = active?.connection.id else { return }
+        let enrichment = self.enrichment
+        Task { await enrichment.enrich(serverId: serverId) }
     }
 
     public func signOut() {

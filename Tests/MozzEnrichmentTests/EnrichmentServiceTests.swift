@@ -35,10 +35,12 @@ final class EnrichmentServiceTests: XCTestCase {
     }
 
     private func makeService(store: EnrichmentStore, json: String,
-                             enabled: @escaping @Sendable () -> Bool = { true })
+                             enabled: @escaping @Sendable () -> Bool = { true },
+                             perRunBudget: Int = 200, maxResolvePerPass: Int = 5000)
         -> (EnrichmentService, ServiceCannedTransport) {
         let transport = ServiceCannedTransport(json: json)
-        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )")
+        let config = EnrichmentConfig(userAgent: "MozzTest/1 ( t@e.com )",
+                                      perRunBudget: perRunBudget, maxResolvePerPass: maxResolvePerPass)
         let mb = MusicBrainzClient.make(
             config: config, limiter: AsyncRateLimiter(minInterval: 0), baseTransport: transport)
         // ListenBrainz stages get a benign transport (empty array): canonical
@@ -77,6 +79,49 @@ final class EnrichmentServiceTests: XCTestCase {
         let state = try await store.mbidState(trackRef: "srv1:t1")
         XCTAssertNil(state?.mbid)
         XCTAssertEqual(state?.lookupStatus, "notfound")
+    }
+
+    /// One pass must DRAIN the whole resolve backlog across multiple batches, not
+    /// just the first `perRunBudget`. With budget 1 and 3 unmatched tracks, all 3
+    /// resolve in a single pass.
+    func testResolveDrainsWholeBacklogAcrossBatches() async throws {
+        let (db, store) = try await makeDB()
+        let writer = CatalogWriter(db)
+        try await writer.upsertTracks([
+            Track(id: "t2", title: "A", artistName: "Artist", duration: 200),
+            Track(id: "t3", title: "B", artistName: "Artist", duration: 200),
+        ], serverId: "srv1")   // now t1, t2, t3 all need resolution
+        let (service, transport) = makeService(store: store, json: hitJSON, perRunBudget: 1)
+        await service.enrich(serverId: "srv1")
+        await service.waitForBackgroundPass()
+        for id in ["t1", "t2", "t3"] {
+            let state = try await store.mbidState(trackRef: "srv1:\(id)")
+            XCTAssertEqual(state?.mbid, recA, "\(id) should have resolved in the same pass")
+        }
+        // 3 resolve calls (one per track, batch size 1) — proves it looped past
+        // the first batch. (Canonicalize/similarity/tags add ListenBrainz/MB calls,
+        // but the resolve drain is the point here.)
+        XCTAssertGreaterThanOrEqual(transport.sendCount, 3)
+    }
+
+    /// The `maxResolvePerPass` cap bounds a single pass: with cap 2 and 3 unmatched
+    /// tracks, only 2 resolve this pass (the rest resume on the next launch).
+    func testResolveRespectsMaxPerPassCap() async throws {
+        let (db, store) = try await makeDB()
+        let writer = CatalogWriter(db)
+        try await writer.upsertTracks([
+            Track(id: "t2", title: "A", artistName: "Artist", duration: 200),
+            Track(id: "t3", title: "B", artistName: "Artist", duration: 200),
+        ], serverId: "srv1")
+        let (service, _) = makeService(store: store, json: hitJSON,
+                                       perRunBudget: 1, maxResolvePerPass: 2)
+        await service.enrich(serverId: "srv1")
+        await service.waitForBackgroundPass()
+        var resolved = 0
+        for id in ["t1", "t2", "t3"] where try await store.mbidState(trackRef: "srv1:\(id)")?.mbid != nil {
+            resolved += 1
+        }
+        XCTAssertEqual(resolved, 2, "the per-pass cap must bound one pass to 2 tracks")
     }
 
     func testDisabledIsNoOp() async throws {

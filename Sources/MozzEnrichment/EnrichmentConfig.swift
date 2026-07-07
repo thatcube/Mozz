@@ -12,9 +12,17 @@ public struct EnrichmentConfig: Sendable {
     /// How long a lookup outcome (hit or miss) is trusted before it's eligible for
     /// a re-attempt — the negative cache's TTL.
     public var lookupTTL: TimeInterval
-    /// Maximum tracks a single background pass will resolve (bounds outbound
-    /// calls per sync; coverage widens across subsequent syncs).
+    /// Per-batch fetch size for the resolve stage (how many name-search candidates
+    /// are pulled per DB query). The stage drains batches back-to-back up to
+    /// `maxResolvePerPass`, so the matched count climbs to its ceiling on its own
+    /// rather than one fixed batch per sync.
     public var perRunBudget: Int
+    /// Safety cap on how many tracks a single background pass will resolve before
+    /// yielding (a fresh pass resumes on the next launch/foreground). Bounds a
+    /// single crawl; the resolve queue shrinks via negative-caching so a full
+    /// backlog drains within this cap. Large because resolve is the user-visible
+    /// coverage metric and each call is ~1s (rate-limited).
+    public var maxResolvePerPass: Int
     /// Minimum MusicBrainz match score (0–100) to accept a name-search result.
     public var minScore: Int
     /// Max allowed |recording.length − track.duration| for a match, in
@@ -43,6 +51,7 @@ public struct EnrichmentConfig: Sendable {
         minRequestInterval: TimeInterval = 1.0,
         lookupTTL: TimeInterval = 30 * 24 * 3600,
         perRunBudget: Int = 200,
+        maxResolvePerPass: Int = 5000,
         minScore: Int = 90,
         durationToleranceMs: Double = 10_000,
         listenBrainzAlgorithm: String = "session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30",
@@ -57,6 +66,7 @@ public struct EnrichmentConfig: Sendable {
         self.minRequestInterval = minRequestInterval
         self.lookupTTL = lookupTTL
         self.perRunBudget = perRunBudget
+        self.maxResolvePerPass = maxResolvePerPass
         self.minScore = minScore
         self.durationToleranceMs = durationToleranceMs
         self.listenBrainzAlgorithm = listenBrainzAlgorithm

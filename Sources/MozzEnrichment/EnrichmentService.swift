@@ -99,22 +99,42 @@ public actor EnrichmentService {
     }
 
     // Stage 1 - resolve recording MBIDs (MusicBrainz name-search).
+    //
+    // Drains the WHOLE resolve backlog across back-to-back batches (up to the
+    // `maxResolvePerPass` safety cap), not just one fixed batch — so the
+    // user-visible "matched" coverage climbs to its ceiling on its own instead of
+    // stalling until the next sync. Termination is guaranteed: every non-throwing
+    // lookup stamps the row (a hit sets `mbid`; a miss records `notfound` + a
+    // timestamp — the 30-day negative cache), so each processed track drops out of
+    // `tracksNeedingResolution` and the queue strictly shrinks to empty. If an
+    // entire batch throws (MusicBrainz unreachable / offline), we stop early and
+    // let the next launch/foreground resume, rather than spinning on failures.
     private func resolveStage(serverId: ServerID) async throws {
         let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
-        let candidates = try await store.tracksNeedingResolution(
-            serverId: serverId, notLookedUpSince: cutoff, limit: config.perRunBudget)
-        for candidate in candidates {
+        var processed = 0
+        while processed < config.maxResolvePerPass {
             guard try checkpoint() else { return }
-            do {
-                let match = try await musicBrainz.bestRecording(
-                    artist: candidate.artistName, title: candidate.title,
-                    durationMs: candidate.durationMs, artistMBID: candidate.existingArtistMbid)
-                try await store.recordTrackResolution(
-                    trackRef: candidate.trackRef, mbid: match?.recordingMBID,
-                    artistMbid: match?.artistMBID, at: now().timeIntervalSince1970)
-            } catch is CancellationError { throw CancellationError() }
-            catch let e as MozzError where e == .cancelled { throw CancellationError() }
-            catch { log("enrichment: resolve \(candidate.trackRef) failed: \(error)") }
+            let batchLimit = min(config.perRunBudget, config.maxResolvePerPass - processed)
+            let candidates = try await store.tracksNeedingResolution(
+                serverId: serverId, notLookedUpSince: cutoff, limit: batchLimit)
+            if candidates.isEmpty { return }   // backlog drained
+            var stamped = 0
+            for candidate in candidates {
+                guard try checkpoint() else { return }
+                do {
+                    let match = try await musicBrainz.bestRecording(
+                        artist: candidate.artistName, title: candidate.title,
+                        durationMs: candidate.durationMs, artistMBID: candidate.existingArtistMbid)
+                    try await store.recordTrackResolution(
+                        trackRef: candidate.trackRef, mbid: match?.recordingMBID,
+                        artistMbid: match?.artistMBID, at: now().timeIntervalSince1970)
+                    stamped += 1
+                } catch is CancellationError { throw CancellationError() }
+                catch let e as MozzError where e == .cancelled { throw CancellationError() }
+                catch { log("enrichment: resolve \(candidate.trackRef) failed: \(error)") }
+            }
+            processed += candidates.count
+            if stamped == 0 { return }   // whole batch errored — stop; resume next launch
         }
     }
 
