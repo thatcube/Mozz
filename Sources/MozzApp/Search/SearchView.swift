@@ -24,6 +24,10 @@ struct SearchView: View {
     @State private var resolvedRecents: [RecentResolved] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var lastLatencyMs: Double?
+    /// True once the page has scrolled off its top. Drives the search field's
+    /// at-rest gray fill → Liquid Glass swap so content shows through it as it
+    /// pins, matching the system search bar.
+    @State private var scrolled = false
     @FocusState private var focused: Bool
 
     /// Shared height for the search field and the cancel ✕ so they line up.
@@ -36,35 +40,30 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                if !isActive {
-                    TightHeader(title: "Search")
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                HStack(spacing: 12) {
-                    searchField
-                    if isActive {
-                        Button { cancelSearch() } label: {
-                            Image(systemName: "xmark")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: fieldHeight, height: fieldHeight)
-                                .glassCircle()
-                                .accessibilityLabel("Cancel search")
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
+            ScrollView {
+                // Only the search field pins (it's the section header); the title
+                // + avatar sit above it as ordinary content so they scroll away
+                // 1:1 like the system large title, and every other header
+                // ("Recently Searched", "Artists", …) is plain inline content so
+                // it scrolls too.
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    if !isActive {
+                        TightHeader(title: "Search")
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    Section {
+                        resultsContent
+                    } header: {
+                        searchFieldBar
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, isActive ? 8 : 12)
-                .padding(.bottom, 10)
-
-                resultsList
-                    .minimizesBottomBarOnScroll()
-                    .scrollsToTopOnSignal()
             }
+            .overlay { emptyState }
+            .safeAreaInset(edge: .bottom) { latencyLabel }
             .animation(.snappy(duration: 0.3), value: isActive)
+            .tracksScrolled($scrolled)
+            .minimizesBottomBarOnScroll()
+            .scrollsToTopOnSignal()
             .hideNavigationBar()
             .appRouteDestinations()
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
@@ -72,10 +71,36 @@ struct SearchView: View {
         }
     }
 
-    /// A custom search field with real iOS 26 Liquid Glass. We can't use the
-    /// system `.searchable` here because it requires a visible navigation bar,
-    /// which is incompatible with the tight top-aligned title — so we recreate
-    /// the field (glass material + focus animation + Cancel) to keep both.
+    /// The pinned top bar: the search field (+ Cancel while active). Its
+    /// background is left clear so, once pinned, the scrolling content shows
+    /// around/through the Liquid Glass pill — like the native search bar.
+    private var searchFieldBar: some View {
+        HStack(spacing: 12) {
+            searchField
+            if isActive {
+                Button { cancelSearch() } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: fieldHeight, height: fieldHeight)
+                        .glassCircle()
+                        .accessibilityLabel("Cancel search")
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, isActive ? 8 : 12)
+        .padding(.bottom, 10)
+    }
+
+    /// A custom search field. We can't use the system `.searchable` here because
+    /// it requires a visible navigation bar, which is incompatible with the tight
+    /// top-aligned title — so we recreate the field (focus animation + Cancel).
+    /// At rest it's a theme-aware gray fill; once the page scrolls (or the field
+    /// is focused) it becomes real Liquid Glass so content shows through it as it
+    /// pins, matching the system search bar.
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -96,42 +121,65 @@ struct SearchView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: fieldHeight)
-        .glassCapsule()
+        .searchFieldSurface(glass: scrolled || isActive)
         // The visible pill is 44pt tall, but a bare custom TextField only takes
         // focus when the glyphs themselves are tapped — the icon, padding and
-        // glass margins are dead zones (unlike the system search bar, which
+        // capsule margins are dead zones (unlike the system search bar, which
         // forwards a tap anywhere in the pill). Make the whole capsule the tap
         // target so focusing matches native's larger hit area.
         .contentShape(Capsule())
         .onTapGesture { focused = true }
     }
 
-    private var resultsList: some View {
-        List {
-            if trimmedQuery.isEmpty {
-                if !resolvedRecents.isEmpty {
-                    Section {
-                        ForEach(resolvedRecents) { recentRow($0) }
-                    } header: {
-                        HStack {
-                            Text("Recently Searched").font(.headline).textCase(nil)
-                            Spacer()
-                            Button("Clear") { recents.clear() }.font(.subheadline)
-                        }
+    @ViewBuilder private var resultsContent: some View {
+        if trimmedQuery.isEmpty {
+            if !resolvedRecents.isEmpty {
+                recentlyHeader
+                ForEach(resolvedRecents) { resolved in
+                    VStack(spacing: 0) {
+                        recentRow(resolved)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 5)
+                        rowDivider
                     }
                 }
-            } else {
-                resultSections
             }
+        } else {
+            resultSections
         }
-        .listStyle(.plain)
-        .overlay { emptyState }
-        .safeAreaInset(edge: .bottom) {
-            if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
-                Text(String(format: "found in %.1f ms", ms))
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .padding(.bottom, 4)
-            }
+    }
+
+    /// Non-sticky "Recently Searched" header with its Clear button — plain scroll
+    /// content (unlike the old sticky `List` section header).
+    private var recentlyHeader: some View {
+        HStack {
+            Text("Recently Searched").font(.headline)
+            Spacer()
+            Button("Clear") { recents.clear() }.font(.subheadline)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    /// A plain, non-sticky result category header ("Artists" / "Albums" / …).
+    private func inlineHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+    }
+
+    /// Row separator, inset past the 44pt artwork (matching the native list).
+    private var rowDivider: some View { Divider().padding(.leading, 76) }
+
+    @ViewBuilder private var latencyLabel: some View {
+        if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
+            Text(String(format: "found in %.1f ms", ms))
+                .font(.caption2).foregroundStyle(.tertiary)
+                .padding(.bottom, 4)
         }
     }
 
@@ -149,8 +197,9 @@ struct SearchView: View {
 
     @ViewBuilder private var resultSections: some View {
         if !results.artists.isEmpty {
-            Section("Artists") {
-                ForEach(results.artists) { artist in
+            inlineHeader("Artists")
+            ForEach(results.artists) { artist in
+                VStack(spacing: 0) {
                     Button {
                         record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
                         path.append(.artist(artist))
@@ -159,12 +208,16 @@ struct SearchView: View {
                                         title: artist.name, circular: true)
                     }
                     .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 5)
+                    rowDivider
                 }
             }
         }
         if !results.albums.isEmpty {
-            Section("Albums") {
-                ForEach(results.albums) { album in
+            inlineHeader("Albums")
+            ForEach(results.albums) { album in
+                VStack(spacing: 0) {
                     Button {
                         record(.album, serverId: album.serverId, remoteId: album.remoteId)
                         path.append(.album(album))
@@ -173,18 +226,25 @@ struct SearchView: View {
                                         title: album.title, subtitle: album.artistName)
                     }
                     .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 5)
+                    rowDivider
                 }
             }
         }
         if !results.tracks.isEmpty {
-            Section("Tracks") {
-                ForEach(results.tracks) { track in
+            inlineHeader("Tracks")
+            ForEach(results.tracks) { track in
+                VStack(spacing: 0) {
                     TrackRow(track: track, showArtist: true)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             record(.track, serverId: track.serverId, remoteId: track.remoteId)
                             env.playback.play(tracks: [track.toDomain()])
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 5)
+                    rowDivider
                 }
             }
         }
@@ -321,5 +381,33 @@ private struct SearchResultRow: View {
             Spacer()
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// Tracks whether a scroll view has moved off its top, animating a `Bool`. Used
+/// to swap the search field from its at-rest gray fill to Liquid Glass once
+/// content scrolls under it. No-op before iOS 18 (the field just stays gray).
+private struct ScrolledTracker: ViewModifier {
+    @Binding var scrolled: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, y in
+                let isScrolled = y > 6
+                if isScrolled != scrolled {
+                    withAnimation(.easeInOut(duration: 0.2)) { scrolled = isScrolled }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func tracksScrolled(_ scrolled: Binding<Bool>) -> some View {
+        modifier(ScrolledTracker(scrolled: scrolled))
     }
 }
