@@ -122,11 +122,15 @@ public actor EnrichmentService {
             serverId: serverId, notLookedUpSince: cutoff, limit: config.canonicalPerRunBudget)
         for mbid in mbids {
             guard try checkpoint() else { return }
-            let canonical = await listenBrainz.canonicalRecording(forMbid: mbid)
             do {
+                // nil = decoded-but-no-mapping (safe to stamp for TTL); a throw is a
+                // transport/decode/cancel failure — skip stamping so we retry later.
+                let canonical = try await listenBrainz.canonicalRecording(forMbid: mbid)
                 try await store.setCanonical(mbid: mbid, canonical: canonical,
                                              at: now().timeIntervalSince1970)
-            } catch { log("enrichment: setCanonical \(mbid) failed: \(error)") }
+            } catch is CancellationError { throw CancellationError() }
+            catch let e as MozzError where e == .cancelled { throw CancellationError() }
+            catch { log("enrichment: canonicalize \(mbid) failed: \(error)") }
         }
     }
 
@@ -134,7 +138,8 @@ public actor EnrichmentService {
     private func similarityStage(serverId: ServerID) async throws {
         let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
         let canonicals = try await store.recordingsNeedingSimilarity(
-            serverId: serverId, notFetchedSince: cutoff, limit: config.similarityPerRunBudget)
+            serverId: serverId, notFetchedSince: cutoff,
+            algorithm: config.listenBrainzAlgorithm, limit: config.similarityPerRunBudget)
         for canonical in canonicals {
             guard try checkpoint() else { return }
             do {
@@ -170,12 +175,22 @@ public actor EnrichmentService {
         }
         guard let mbid = recordingMbid else { return nil }
         if canonical == nil {
-            let resolved = await listenBrainz.canonicalRecording(forMbid: mbid)
+            // Throws on transient/decode failure; only proceed on a real answer.
+            guard let resolved = try? await listenBrainz.canonicalRecording(forMbid: mbid) else {
+                return nil // couldn't canonicalize now; the background pass retries
+            }
             try? await store.setCanonical(mbid: mbid, canonical: resolved,
                                           at: now().timeIntervalSince1970)
             canonical = resolved
         }
         guard let canonicalMbid = canonical else { return nil }
+        // Skip a redundant fetch if the background pass already did it recently.
+        let cutoff = now().addingTimeInterval(-config.lookupTTL).timeIntervalSince1970
+        if (try? await store.similarityIsFresh(canonicalMbid: canonicalMbid,
+                                               algorithm: config.listenBrainzAlgorithm,
+                                               notFetchedSince: cutoff)) == true {
+            return canonicalMbid
+        }
         do {
             let similar = try await listenBrainz.similarRecordings(forCanonicalMbid: canonicalMbid)
             try await store.replaceSimilarRecordings(

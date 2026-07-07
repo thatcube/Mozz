@@ -64,7 +64,7 @@ final class SimilarityStoreTests: XCTestCase {
         try await seedOwnedTracks(writer, store)
         // Empty result must still stamp similar_lookup_at (negative cache).
         try await store.replaceSimilarRecordings(sourceMbid: canA, algorithm: algo, pairs: [], at: 500)
-        let needing = try await store.recordingsNeedingSimilarity(serverId: "srv1", notFetchedSince: 400, limit: 10)
+        let needing = try await store.recordingsNeedingSimilarity(serverId: "srv1", notFetchedSince: 400, algorithm: algo, limit: 10)
         XCTAssertFalse(needing.contains(canA)) // canA fetched (empty) → not due
         XCTAssertTrue(needing.contains(canB))  // canB never fetched → due
     }
@@ -111,6 +111,25 @@ final class SimilarityStoreTests: XCTestCase {
             seedCanonicalMbids: [seed1], algorithm: algo, serverId: "srv1",
             excludingRemoteIds: ["tB"], limit: 10)
         XCTAssertEqual(out.map { $0.candidate.remoteId }, ["tA"])
+    }
+
+    func testSharedMbidDedupedAndBothStamped() async throws {
+        let (_, writer, store) = try await setup()
+        // Two owned tracks share ONE raw recording MBID.
+        try await writer.upsertTracks([
+            Track(id: "tA", title: "A", artistName: "AA", mbid: rawA),
+            Track(id: "tA2", title: "A alt", artistName: "AA", mbid: rawA),
+        ], serverId: "srv1")
+        let needing = try await store.canonicalNeedingLookup(serverId: "srv1", notLookedUpSince: 1_000, limit: 10)
+        XCTAssertEqual(needing, [rawA]) // one entry, not two
+        // A single setCanonical stamps BOTH tracks' rows.
+        try await store.setCanonical(mbid: rawA, canonical: canA, at: 100)
+        let mbidTA = try await store.mbidState(trackRef: "srv1:tA")?.mbid
+        let mbidTA2 = try await store.mbidState(trackRef: "srv1:tA2")?.mbid
+        XCTAssertEqual(mbidTA, rawA)
+        XCTAssertEqual(mbidTA2, rawA)
+        let after = try await store.canonicalNeedingLookup(serverId: "srv1", notLookedUpSince: 1_000, limit: 10)
+        XCTAssertTrue(after.isEmpty) // both canonicalized by one call
     }
 
     func testMbidChangeClearsCanonicalAndSimilarCaches() async throws {

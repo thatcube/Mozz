@@ -58,17 +58,17 @@ public struct ListenBrainzClient: Sendable {
         return out
     }
 
-    /// The canonical recording MBID for a raw MBID, or `nil` on no-mapping /
-    /// transient failure (the endpoint 500s for some valid MBIDs; one bad id can
-    /// fail a whole batch, so this is single + best-effort). Never throws.
-    public func canonicalRecording(forMbid mbid: String) async -> String? {
+    /// The canonical recording MBID for a raw MBID. Returns `nil` for a
+    /// decoded-but-empty result (no mapping) — safe to negative-cache. THROWS on
+    /// transport/decoding/cancellation so the caller can skip stamping and retry
+    /// (the endpoint 500s for some valid MBIDs; a cancelled request surfaces as
+    /// MozzError.cancelled). The live endpoint returns a JSON ARRAY.
+    public func canonicalRecording(forMbid mbid: String) async throws -> String? {
         let endpoint = Endpoint(path: "recording-mbid-lookup/json", query: [
             URLQueryItem(name: "recording_mbid", value: mbid),
         ])
-        guard let result = try? await client.send(endpoint, as: LBCanonicalResult.self) else {
-            return nil
-        }
-        return MusicBrainzID.normalized(result.canonical_recording_mbid)
+        let rows = try await client.send(endpoint, as: [LBCanonicalResult].self)
+        return MusicBrainzID.normalized(rows.first?.canonical_recording_mbid)
     }
 }
 

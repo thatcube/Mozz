@@ -204,9 +204,10 @@ public struct EnrichmentStore: Sendable {
     }
 
     /// Distinct canonical MBIDs of owned tracks whose similarity hasn't been
-    /// fetched (or is stale). Prioritized recently played / favorites first.
+    /// fetched for the current `algorithm` (or is stale). Prioritized recently
+    /// played / favorites first.
     public func recordingsNeedingSimilarity(serverId: ServerID, notFetchedSince: Double,
-                                            limit: Int) async throws -> [String] {
+                                            algorithm: String, limit: Int) async throws -> [String] {
         try await database.read { db in
             try String.fetchAll(db, sql: """
                 SELECT tf.canonical_mbid
@@ -217,17 +218,32 @@ public struct EnrichmentStore: Sendable {
                        ON lp.track_ref = \(Self.refExpr)
                 WHERE track.serverId = ?
                   AND tf.canonical_mbid IS NOT NULL AND tf.canonical_mbid <> ''
-                  AND (tf.similar_lookup_at IS NULL OR tf.similar_lookup_at < ?)
+                  AND (tf.similar_lookup_at IS NULL OR tf.similar_lookup_at < ?
+                       OR tf.similar_algorithm IS NOT ?)
                 GROUP BY tf.canonical_mbid
                 ORDER BY MAX(lp.lastPlayed) DESC, MAX(track.isFavorite) DESC
                 LIMIT ?
-                """, arguments: [serverId, notFetchedSince, limit])
+                """, arguments: [serverId, notFetchedSince, algorithm, limit])
+        }
+    }
+
+    /// Whether similarity for `canonicalMbid` was already fetched for `algorithm`
+    /// within the TTL (so an on-demand seed prep can skip a redundant fetch).
+    public func similarityIsFresh(canonicalMbid: String, algorithm: String,
+                                  notFetchedSince: Double) async throws -> Bool {
+        try await database.read { db in
+            try Bool.fetchOne(db, sql: """
+                SELECT EXISTS(
+                    SELECT 1 FROM track_features
+                    WHERE canonical_mbid = ? AND similar_algorithm = ? AND similar_lookup_at >= ?)
+                """, arguments: [canonicalMbid, algorithm, notFetchedSince]) ?? false
         }
     }
 
     /// Replace the similarity rows for a source canonical MBID + algorithm, and
-    /// stamp `similar_lookup_at` for every track sharing that canonical MBID —
-    /// including when `pairs` is empty (a valid "no similar data" negative cache).
+    /// stamp `similar_lookup_at` + `similar_algorithm` for every track sharing that
+    /// canonical MBID — including when `pairs` is empty (a valid "no similar data"
+    /// negative cache).
     public func replaceSimilarRecordings(sourceMbid: String, algorithm: String,
                                          pairs: [(similarMbid: String, score: Double)],
                                          at: Double) async throws {
@@ -244,18 +260,22 @@ public struct EnrichmentStore: Sendable {
                 try stmt.execute(arguments: [sourceMbid, similar, pair.score, algorithm])
             }
             try db.execute(sql: """
-                UPDATE track_features SET similar_lookup_at = ?, updated_at = ?
+                UPDATE track_features SET similar_lookup_at = ?, similar_algorithm = ?, updated_at = ?
                 WHERE canonical_mbid = ?
-                """, arguments: [at, at, sourceMbid])
+                """, arguments: [at, algorithm, at, sourceMbid])
         }
     }
 
     /// The reverse map: owned tracks similar to any of `seedCanonicalMbids`, ranked
-    /// by similarity. Joins similarity → `track_features.canonical_mbid` → owned
-    /// `track` on this server, de-duped per track with `MAX(score)` (closest seed).
-    /// Excludes already-queued remote ids. Drives `FROM track WHERE serverId=?` so
-    /// the ref-join is index-backed. Seed/exclusion lists are bounded to stay under
-    /// SQLite's host-parameter limit.
+    /// by similarity. Drives from the small `similar_recording` side (filtered by
+    /// `source_mbid` + `algorithm`, using `idx_similar_recording_similar`), joins
+    /// `track_features` via `idx_track_features_canonical_mbid`, then SEEKS `track`
+    /// via the unique `idx_track_identity(serverId, remoteId)` — deriving the
+    /// remote id from the durable `track_ref`, with a guard so a same-id track on
+    /// another server can't leak in. De-duped per track with `MAX(score)` (closest
+    /// seed). Excludes already-queued ids. Seed/exclusion lists are bounded to stay
+    /// under SQLite's host-parameter limit. Returns full `TrackCandidate`s so B3
+    /// can run them through the same Blender.
     public func similarOwnedTracks(seedCanonicalMbids: [String], algorithm: String,
                                    serverId: ServerID, excludingRemoteIds: Set<String> = [],
                                    limit: Int) async throws -> [ScoredOwnedTrack] {
@@ -268,23 +288,26 @@ public struct EnrichmentStore: Sendable {
                 excludeClause = "AND track.remoteId NOT IN (\(placeholders(excludeList.count)))"
             }
             let sql = """
-                SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
+                SELECT track.remoteId AS remoteId, track.title AS title,
                        track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
                        track.albumRemoteId AS albumRemoteId, track.genres AS genres,
-                       track.addedAt AS addedAt, MAX(sr.score) AS score
-                FROM track
-                JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
-                JOIN similar_recording sr ON sr.similar_mbid = tf.canonical_mbid AND sr.algorithm = ?
-                WHERE track.serverId = ?
+                       track.addedAt AS addedAt, \(Self.refExpr) AS track_ref,
+                       MAX(sr.score) AS score
+                FROM similar_recording sr
+                JOIN track_features tf ON tf.canonical_mbid = sr.similar_mbid
+                JOIN track ON track.serverId = ?
+                          AND track.remoteId = substr(tf.track_ref, length(?) + 2)
+                WHERE sr.algorithm = ?
                   AND sr.source_mbid IN (\(placeholders(seeds.count)))
+                  AND tf.track_ref = \(Self.refExpr)
                   \(excludeClause)
                 GROUP BY track.remoteId
                 ORDER BY score DESC, track.remoteId ASC
                 LIMIT ?
                 """
-            // Arg order matches placeholder order: algorithm, serverId, seeds…,
-            // [excludes…], limit.
-            var ordered: [DatabaseValueConvertible] = [algorithm, serverId]
+            // Arg order matches placeholder order: serverId, serverId (substr),
+            // algorithm, seeds…, [excludes…], limit.
+            var ordered: [DatabaseValueConvertible] = [serverId, serverId, algorithm]
             ordered.append(contentsOf: seeds.map { $0 as DatabaseValueConvertible })
             ordered.append(contentsOf: excludeList.map { $0 as DatabaseValueConvertible })
             ordered.append(limit)
