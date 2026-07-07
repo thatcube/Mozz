@@ -45,6 +45,17 @@ struct NowPlayingMorphContainer: View {
     /// layer — not this container (which builds the drawer's up-next list).
     @State private var press = IslandPressState()
 
+    @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Single source of truth for the current track's rating on the player
+    /// (ratings/Plex path). Lifted here so the collapsed star, the hold-drag
+    /// reveal, and the root-hosted sticky bubble all share it — rating writes
+    /// don't propagate back through the playback engine, so the view layer owns
+    /// the optimistic value. Reseeded when the track changes.
+    @State private var playerRating: Double?
+    /// Whether the sticky tap picker (hosted at the morph root) is open.
+    @State private var ratingPickerOpen = false
+
     /// How much the docked island grows while touched.
     private static let pressScale: CGFloat = 1.04
     private static let pressSpring = Animation.spring(response: 0.28, dampingFraction: 0.62)
@@ -140,9 +151,68 @@ struct NowPlayingMorphContainer: View {
                 .onChange(of: ui.isFullPresented, initial: true) { _, want in
                     animate(to: want)
                 }
+                // Sticky rating bubble (ratings/Plex path): hosted here at the
+                // morph root — a screen-spanning ancestor — so it can catch
+                // outside taps and animate its own height (a system popover can't).
+                .overlayPreferenceValue(PlayerRatingAnchorKey.self) { anchor in
+                    ratingPickerOverlay(anchor: anchor, geo: geo)
+                }
+                .onChange(of: playback.currentTrack?.id) { _, _ in
+                    playerRating = playback.currentTrack?.rating
+                    ratingPickerOpen = false
+                }
+                .onChange(of: ui.isFullPresented) { _, open in
+                    if !open { ratingPickerOpen = false }
+                }
+                .onAppear { playerRating = playback.currentTrack?.rating }
             }
             .ignoresSafeArea()
         }
+    }
+
+    /// The root-hosted sticky rating bubble + a full-screen tap-catcher, anchored
+    /// above the player's rating star.
+    @ViewBuilder
+    private func ratingPickerOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
+        if ratingPickerOpen, let anchor, let track = playback.currentTrack {
+            let rect = geo[anchor]
+            let gap: CGFloat = 6
+            let bottomSpace = max(0, geo.size.height - (rect.minY - gap))
+            ZStack {
+                // Tap-catcher: dismiss on any tap outside the bubble.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeRatingPicker() }
+                    .accessibilityHidden(true)
+                // Bottom-pinned bubble: grows upward as the Clear row appears, its
+                // tail staying on the star. No height measurement needed.
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
+                        .padding(.bottom, RatingTuning.revealTailHeight)
+                        .glassBackground(TailedBubble())
+                        .fixedSize()
+                        .offset(x: rect.midX - geo.size.width / 2)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                        .accessibilityAddTraits(.isModal)
+                        .accessibilityAction(.escape) { closeRatingPicker() }
+                    Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private func setPlayerRating(_ value: Double?, track: Track) {
+        playerRating = value
+        Task { await env.setRating(value, track: track) }
+    }
+
+    private func closeRatingPicker() {
+        withAnimation(.snappy(duration: 0.28)) { ratingPickerOpen = false }
     }
 
     // MARK: Surface (Liquid Glass background + fading drawer body)
@@ -309,7 +379,17 @@ struct NowPlayingMorphContainer: View {
             }
             Spacer()
             if let track = playback.currentTrack {
-                PlayerLikeControl(track: track)
+                if env.usesRatings {
+                    FluidRatingControl(
+                        rating: $playerRating,
+                        onSet: { setPlayerRating($0, track: track) },
+                        onRequestPicker: {
+                            withAnimation(.snappy(duration: 0.28)) { ratingPickerOpen = true }
+                        }
+                    )
+                } else {
+                    PlayerLikeControl(track: track)
+                }
             }
             Spacer()
             Button { playback.cycleRepeatMode() } label: {

@@ -1,10 +1,10 @@
 import SwiftUI
 import MozzCore
 
-/// The now-playing screen's like/rate affordance, working from the engine's
-/// domain ``Track``. Backend-aware like ``LikeControl`` (heart for favorites
-/// backends, a star + half-star popover for ratings backends), but sized for the
-/// full player and reseeded whenever the current track changes.
+/// The now-playing screen's **favorites** (heart) affordance for backends that
+/// use favorites (Jellyfin). The ratings (Plex) path is handled directly by the
+/// morph container so its sticky picker can be hosted at the player root; see
+/// `FluidRatingControl` + `PlayerRatingAnchorKey`.
 struct PlayerLikeControl: View {
     @EnvironmentObject private var env: AppEnvironment
     let track: Track
@@ -17,18 +17,11 @@ struct PlayerLikeControl: View {
     }
 
     var body: some View {
-        Group {
-            if env.usesRatings {
-                FluidRatingControl(track: track)
-            } else {
-                heart
-            }
-        }
-        // The view is reused across track changes (same position in the drawer),
-        // so reseed the favorite when the current song changes or updates in place.
-        // (The ratings path is self-contained in `FluidRatingControl`.)
-        .onChange(of: track.id) { _, _ in isFavorite = track.isFavorite }
-        .onChange(of: track.isFavorite) { _, new in isFavorite = new }
+        heart
+            // Reused across track changes (same drawer slot) — reseed the favorite
+            // when the song changes or its value updates in place.
+            .onChange(of: track.id) { _, _ in isFavorite = track.isFavorite }
+            .onChange(of: track.isFavorite) { _, new in isFavorite = new }
     }
 
     private var heart: some View {

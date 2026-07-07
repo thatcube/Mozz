@@ -5,7 +5,7 @@ import MozzCore
 //
 // Everything about the fluid rating control's feel lives here so it's cheap to
 // iterate on-device. Sizes are points; durations are seconds.
-private enum RatingTuning {
+enum RatingTuning {
     static let starCount = 5
     /// Size of a star glyph in the expanded strip (popover + hold-drag reveal).
     static let stripStarSize: CGFloat = 30
@@ -49,7 +49,7 @@ private enum RatingTuning {
 /// centered, downward tail — drawn as ONE continuous path so the tail morphs out
 /// of the container (smooth necks in, rounded tip) instead of reading as a
 /// detached triangle. Points down at the star, mirroring the tap popover.
-private struct TailedBubble: Shape {
+struct TailedBubble: Shape {
     var cornerRadius: CGFloat = RatingTuning.revealCornerRadius
     var tailBase: CGFloat = RatingTuning.revealTailBase
     var tailHeight: CGFloat = RatingTuning.revealTailHeight
@@ -217,17 +217,19 @@ struct RatingStripView: View {
     }
 }
 
-// MARK: - Sticky popover content
+// MARK: - Rating bubble body (shared)
 //
-// The tap/slide variant used by the player's quick-tap and the row "…" menu's
-// "Rate…". Tap a star OR slide across to set the rating (live), written through
-// the supplied closure — but it does NOT dismiss; the user confirms by tapping
-// outside. Sliding left off the first star clears; a "Clear" link is also shown
-// when a rating exists.
-struct RatingPopoverContent: View {
+// The interactive stars + the delayed, animated "Clear" link. Reused by BOTH the
+// row "…" menu (wrapped in a system popover) and the player's sticky bubble
+// (wrapped in the tailed-glass overlay). Tap a star OR slide across to set the
+// rating (live); it does NOT dismiss. Sliding left off the first star clears; the
+// "Clear" link appears ~`clearRevealDelay` after you lift your finger, and only
+// while a rating exists.
+struct RatingBubbleContent: View {
     let initialRating: Double?
     let onSet: (Double?) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var current: Double?
     /// Drives the Clear link + popover height. Decoupled from `current` so it can
     /// lag: after you release on a rating it reveals ~`clearRevealDelay` later, and
@@ -278,11 +280,10 @@ struct RatingPopoverContent: View {
             .clipped()
             .allowsHitTesting(showClear)
         }
-        .animation(.snappy(duration: 0.4), value: showClear)
-        .padding(.horizontal, 28)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.4), value: showClear)
+        .padding(.horizontal, 24)
         .padding(.top, 24)
         .padding(.bottom, showClear ? 14 : 24)
-        .presentationCompactAdaptation(.popover)
     }
 
     // Live drag: update the stars only. Never change the popover height while the
@@ -325,24 +326,48 @@ struct RatingPopoverContent: View {
     }
 }
 
+/// Row "…" menu presentation: the shared body in a system popover. (A system
+/// popover can't animate its own size — that's why the player uses a custom
+/// overlay instead — but for a one-off menu action the snap is acceptable.)
+struct RatingPopoverContent: View {
+    let rating: Double?
+    let onSet: (Double?) -> Void
+    var body: some View {
+        RatingBubbleContent(rating: rating, onSet: onSet)
+            .presentationCompactAdaptation(.popover)
+    }
+}
+
+/// Publishes the player rating star's bounds so the morph root can anchor the
+/// sticky rating bubble above it (the bubble must be hosted by a screen-spanning
+/// ancestor so it can catch outside taps and animate its own height).
+struct PlayerRatingAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 // MARK: - Player fluid rating control
 //
 // Compact display for the now-playing player (ratings/Plex path only): a single
-// star + numeric rating, shown ONLY when rated; a blank star otherwise.
-//   • Quick tap  → sticky popover (tap to set, tap-outside dismisses).
-//   • Press-hold → reveals the strip; drag to live-preview (half-star snapping +
-//     selection haptics); release commits AND closes.
-// Under Reduce Motion the hold-drag reveal is disabled and a tap simply opens the
-// popover (a static tap picker).
+// star + numeric rating, shown ONLY when rated. Driven by the morph container
+// (single source of truth via the `rating` binding, since rating writes don't
+// propagate back through the playback engine):
+//   • Quick tap  → asks the container to open the sticky bubble (hosted at the
+//     player root so it can animate and catch outside taps).
+//   • Press-hold → reveals the strip in place; drag to live-preview (half-star
+//     snapping + haptics); release commits AND closes (self-contained overlay).
+// Under Reduce Motion the hold-drag reveal is disabled; a tap opens the sticky
+// bubble instead.
 struct FluidRatingControl: View {
-    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let track: Track
+    @Binding var rating: Double?
+    let onSet: (Double?) -> Void
+    var onRequestPicker: () -> Void
 
-    @State private var rating: Double?
     @State private var preview: Double?
     @State private var isDragging = false
-    @State private var showingPicker = false
     @State private var stripFrame: CGRect = .zero
     @State private var lastHapticValue: Double?
     @State private var touchDownAt: Date?
@@ -352,37 +377,23 @@ struct FluidRatingControl: View {
     private let haptic = RatingHaptic()
     private let space = "fluidRating"
 
-    init(track: Track) {
-        self.track = track
-        _rating = State(initialValue: track.rating)
-    }
-
     var body: some View {
         surface
-            .popover(isPresented: $showingPicker) {
-                RatingPopoverContent(rating: rating) { newValue in
-                    rating = newValue
-                    let snapshot = track
-                    Task { await env.setRating(newValue, track: snapshot) }
-                }
-            }
+            .anchorPreference(key: PlayerRatingAnchorKey.self, value: .bounds) { $0 }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
             .accessibilityValue(rating.map { "\(LikeControl.format($0)) stars" } ?? "No rating")
             .accessibilityAdjustableAction { direction in accessibilityAdjust(direction) }
-            .onChange(of: track.id) { _, _ in rating = track.rating }
-            .onChange(of: track.rating) { _, new in rating = new }
     }
 
-    // Reduce Motion: a plain tap opens the sticky picker (no hold-drag reveal).
-    // Otherwise a single drag gesture handles both a quick tap (→ popover) and a
-    // press-hold-drag (→ live preview + commit); it fully resolves on touch-up
-    // BEFORE the popover is presented, so the popover reliably captures touches.
+    // Reduce Motion: a plain tap opens the sticky bubble (no hold-drag reveal).
+    // Otherwise one drag gesture handles both a quick tap (→ open sticky) and a
+    // press-hold-drag (→ live preview + commit), resolving on touch-up.
     @ViewBuilder private var surface: some View {
         if reduceMotion {
             collapsedStar
                 .contentShape(Rectangle())
-                .onTapGesture { showingPicker = true }
+                .onTapGesture { onRequestPicker() }
         } else {
             collapsedStar
                 .overlay(alignment: .center) {
@@ -407,7 +418,7 @@ struct FluidRatingControl: View {
         .foregroundStyle(rated ? RatingTuning.tint : RatingTuning.inactiveTint)
     }
 
-    // MARK: Hold-drag reveal
+    // MARK: Hold-drag reveal (self-contained overlay; non-interactive)
 
     private var revealStrip: some View {
         VStack(spacing: 14) {
@@ -455,7 +466,7 @@ struct FluidRatingControl: View {
                     commit(preview)
                     endDragging()
                 } else if !moved && elapsed < RatingTuning.longPressDuration + 0.25 {
-                    showingPicker = true
+                    onRequestPicker()
                 }
                 touchDownAt = nil
             }
@@ -497,9 +508,7 @@ struct FluidRatingControl: View {
     }
 
     private func commit(_ newValue: Double?) {
-        rating = newValue
-        let snapshot = track
-        Task { await env.setRating(newValue, track: snapshot) }
+        onSet(newValue)
     }
 
     private func accessibilityAdjust(_ direction: AccessibilityAdjustmentDirection) {
