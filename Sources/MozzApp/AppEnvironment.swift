@@ -403,6 +403,12 @@ public final class AppEnvironment: ObservableObject {
             await runBenchmark()
             return
         }
+        // Headless sync measurement: force a full re-sync of the active server on
+        // launch (restore runs first). Writes timings to the pullable diagnostics
+        // log, so the sync speed can be measured without any user interaction.
+        if env["MOZZ_FORCESYNC"] == "1", active != nil {
+            startSync()
+        }
         guard env["MOZZ_AUTODEMO"] == "1" else { return }
         if active == nil {
             try? await activateDemo(size: .init(artists: 50, albums: 300, tracks: 3_000))
