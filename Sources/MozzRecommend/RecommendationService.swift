@@ -288,11 +288,14 @@ public actor RecommendationService {
             ? [candidates.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
             : [scored]
 
-        // Relax the variety caps for radio: an artist-only seed would otherwise
-        // be throttled to `maxPerArtist` (3) tracks per batch and stall.
+        // Relax the variety caps for radio: an artist-only seed (no genre signal,
+        // even after enrichment) would otherwise be throttled to `maxPerArtist`
+        // per batch and stall. Use the EFFECTIVE seed genres so a track seed whose
+        // local genres are empty but whose artist has mb_tags still gets the
+        // multi-artist genre cap (not the single-artist relaxation).
         let config = Blender.Config(
             limit: limit,
-            maxPerArtist: seed.genres.isEmpty ? limit : 6,
+            maxPerArtist: seedGenres.isEmpty ? limit : 6,
             maxPerAlbum: max(2, limit / 4))
         var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
         let ranked = blender.blend(sources: sources, config: config, using: &rng)

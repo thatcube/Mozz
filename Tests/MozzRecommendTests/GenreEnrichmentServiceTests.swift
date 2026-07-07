@@ -95,4 +95,29 @@ final class GenreEnrichmentServiceTests: XCTestCase {
         let off = try await service(db, enrich: false).tasteScores(serverId: "s1", tracks: [x])
         XCTAssertEqual(off["x"] ?? 0, 0, "with enrichment off, x (Jazz) doesn't match hip-hop taste")
     }
+
+    /// A track seed whose LOCAL genres are empty but whose artist has mb_tags gets
+    /// a real (enriched) genre focus — so the per-artist variety cap must still
+    /// apply (using the effective seed genres, not the empty raw seed.genres). One
+    /// artist must not be able to fill the whole batch.
+    func testEnrichedSeedKeepsPerArtistCap() async throws {
+        let (db, writer, enrich) = try await makeDB()
+        // Seed track: no local genres, but its artist carries the mb_tag "electronic".
+        try await writer.upsertTracks([
+            Track(id: "seed", title: "S", artistName: "SeedA", artistID: "seedArtist", genres: [], artistMbid: artistSeed),
+        ], serverId: "s1")
+        try await enrich.setArtistTags(artistMbid: artistSeed, tags: ["electronic"], at: 100)
+        // 10 electronic tracks by ONE other artist X.
+        try await writer.upsertTracks((0..<10).map {
+            Track(id: "x\($0)", title: "X\($0)", artistName: "XArtist", artistID: "X", genres: ["Electronic"])
+        }, serverId: "s1")
+
+        let seed = RadioSeed(title: "S", genres: [], artistIds: ["seedArtist"], seedTrackRef: "s1:seed")
+        let ids = try await service(db, enrich: true).radioBatch(
+            seed: seed, serverId: "s1", limit: 20, excluding: ["seed"], similar: [])
+        let fromX = ids.filter { $0.hasPrefix("x") }.count
+        XCTAssertLessThanOrEqual(fromX, 6, "per-artist cap must apply for an mb_tags-enriched track seed")
+        XCTAssertGreaterThan(fromX, 0)
+    }
 }
+

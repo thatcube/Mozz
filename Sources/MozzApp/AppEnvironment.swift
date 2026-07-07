@@ -1060,19 +1060,29 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Start an endless station seeded from an artist. When enrichment is on, the
-    /// seed genres are the artist's CANONICAL (normalized + mb_tags-merged) genres —
-    /// symmetric with the candidate pool — resolved off the caller-provided raw
-    /// genres, which remain the fallback if the artist has no local rows.
+    /// seed genres are resolved to the artist's CANONICAL (normalized + mb_tags-
+    /// merged) genres — symmetric with the candidate pool — which requires an async
+    /// DB read; the caller-provided `genres` are the fallback. To keep last-tap-wins
+    /// across that await, this reserves `radioIntent` synchronously (in tap order)
+    /// and bails if a newer start supersedes it before the seed resolves. With
+    /// enrichment off it forwards synchronously with the caller genres — byte-
+    /// identical to pre-B4.5.
     public func startRadio(artistRemoteId: String, name: String, genres: [String]) {
-        guard let serverId = active?.connection.id else {
+        let enrichmentOn = UserDefaults.standard.object(forKey: Self.enrichmentEnabledKey) as? Bool ?? true
+        guard enrichmentOn, let serverId = active?.connection.id else {
             startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
             return
         }
+        // Reserve this tap's intent NOW so a later start still wins even though we
+        // must first resolve the enriched seed genres asynchronously.
+        radioIntent += 1
+        let intent = radioIntent
         let recommendations = self.recommendations
         Task { [weak self] in
             let enriched = await recommendations.artistSeedGenres(artistId: artistRemoteId, serverId: serverId)
-            let seedGenres = enriched.isEmpty ? genres : enriched
-            self?.startRadio(seed: RadioSeed(title: name, genres: seedGenres, artistIds: [artistRemoteId]))
+            guard let self, intent == self.radioIntent else { return }  // superseded by a newer start
+            self.startRadio(seed: RadioSeed(title: name, genres: enriched.isEmpty ? genres : enriched,
+                                            artistIds: [artistRemoteId]))
         }
     }
 
