@@ -64,6 +64,15 @@ public final class DownloadManager: NSObject, ObservableObject {
             let internalId = record.id
         else { throw MozzError.notFound }
 
+        // The catalog sync may have stored this track without its audio format
+        // (backfilled lazily for speed). We need the container to name the offline
+        // file correctly, so hydrate on demand if it's still missing.
+        var track = track
+        if track.format.container == nil, track.format.codec == nil,
+           let hydrated = try? await backend.fetchTrackDetails(ids: [track.id]).first {
+            track = hydrated
+        }
+
         let url = try backend.originalFileURL(for: track)
         try await store.enqueue(trackId: internalId)
         try await store.markDownloading(trackId: internalId, totalBytes: track.fileSizeBytes)

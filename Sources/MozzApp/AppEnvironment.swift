@@ -87,6 +87,24 @@ public final class AppEnvironment: ObservableObject {
     /// Whether we're still restoring a saved session at launch.
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
+    /// A detailed per-phase timing report of the most recent sync, for the
+    /// Diagnostics screen (real throughput numbers to spot bottlenecks).
+    @Published public private(set) var lastSyncReport: String?
+
+    /// Post-authentication setup (finding the server, capabilities, first sync)
+    /// is in progress. Owned here (not by the sign-in view) so navigating away
+    /// can't cancel it; `RootView` shows a setup screen while this is true and
+    /// `active` isn't ready yet.
+    @Published public private(set) var isSettingUp = false
+    /// True once the first sync has produced something playable, so the setup
+    /// screen can offer a "Browse now" button while the rest syncs in background.
+    @Published public private(set) var canEnterEarly = false
+    /// A human-readable setup failure, shown on the setup screen with a retry.
+    @Published public var setupError: String?
+    private var activationTask: Task<Void, Never>?
+    /// Bumped each `activate(session:)` so a superseded activation's async cleanup
+    /// can't clobber a newer one's session/state.
+    private var activationGeneration = 0
 
     /// A deep-link / Handoff destination waiting to be navigated to. Set by
     /// `onOpenURL` / `onContinueUserActivity`; consumed by `MainTabsView` once it
@@ -100,12 +118,32 @@ public final class AppEnvironment: ObservableObject {
     @Published public private(set) var isSyncing = false
     @Published public private(set) var syncProgress: SyncProgress?
     private var syncTask: Task<Void, Never>?
+    /// Background pass that backfills audio format/size the light track sync
+    /// omits (Jellyfin). Single-flight; silent (never flips `isSyncing`).
+    private var mediaBackfillTask: Task<Void, Never>?
 
     /// A short human status for the sync UI, or `nil` when idle.
     public var syncStatusText: String? {
         guard isSyncing else { return nil }
         guard let p = syncProgress else { return "Starting…" }
-        return "\(p.phase.rawValue): \(p.itemsSynced)"
+        let n = p.itemsSynced
+        switch p.phase {
+        case .capabilities: return "Connecting…"
+        case .syncing, .artists, .albums, .tracks, .playlists:
+            if let total = p.totalCount, total > 0 {
+                return "Syncing your library — \(n) of \(total)"
+            }
+            return n > 0 ? "Syncing your library — \(n) items" : "Syncing your library…"
+        case .pruning: return "Finishing up…"
+        case .done: return "Up to date"
+        }
+    }
+
+    /// Determinate sync fraction in 0…1 when a total is known, else `nil` (show an
+    /// indeterminate bar). Drives the persistent in-app sync bar.
+    public var syncFraction: Double? {
+        guard isSyncing, let p = syncProgress, let total = p.totalCount, total > 0 else { return nil }
+        return min(1, Double(p.itemsSynced) / Double(total))
     }
 
     /// Single-flight guard for the favorite/rating outbox flush (see
@@ -120,6 +158,13 @@ public final class AppEnvironment: ObservableObject {
     /// Muted background colour ("#RRGGBB") derived from each track's artwork, for
     /// the widgets. Keyed by track id; bounded by the widget artwork pruning.
     private var widgetTintByTrack: [String: String] = [:]
+
+    /// Guards playback-state persistence: the widget/status Combine sinks fire
+    /// their INITIAL (empty) values the moment they're attached in `init` — before
+    /// `restoreSession()` runs — which would otherwise `clear()` the saved file
+    /// before we ever read it. We only allow persisting/clearing once a restore
+    /// has been attempted.
+    private var didAttemptPlaybackRestore = false
 
     public init(database: MusicDatabase, credentials: any CredentialStore, fileStore: DownloadFileStore) {
         self.database = database
@@ -170,32 +215,115 @@ public final class AppEnvironment: ObservableObject {
     // MARK: Session lifecycle
 
     public func restoreSession() async {
-        defer { isRestoring = false }
+        defer { isRestoring = false; didAttemptPlaybackRestore = true }
         guard let saved = SessionPersistence.load(credentials) else { return }
         do {
             try await activate(saved)
             restoreLastPlaybackSession()
+            // A restored session with an EMPTY catalog means a previous first sync
+            // never finished — or the app was reinstalled while the keychain
+            // session survived (iOS keeps keychain across uninstall). Either way,
+            // kick off a sync so the user isn't stranded on an empty library with
+            // no sync running. finishActivation already started the media backfill;
+            // this starts the catalog itself. (A populated catalog is left as-is —
+            // gateInitialSync's re-login refresh only runs on an explicit sign-in.)
+            if let serverId = active?.connection.id,
+               ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0 {
+                startSync()
+            }
         } catch {
             SessionPersistence.clear(credentials)
         }
     }
 
-    /// Activate a freshly-authenticated Plex/Jellyfin session.
-    public func activate(session: AuthenticatedSession) async throws {
+    /// Activate a freshly-authenticated Plex/Jellyfin session. Runs the setup on
+    /// an environment-owned task (NOT the caller's), so a sign-in view being
+    /// dismissed/backed-out can't cancel it — setup completes and flips `active`,
+    /// switching the UI into the app. `isSettingUp` is set synchronously so
+    /// `RootView` shows the setup screen immediately.
+    public func activate(session: AuthenticatedSession) {
+        isSettingUp = true
+        setupError = nil
+        activationTask?.cancel()
+        activationGeneration &+= 1
+        let generation = activationGeneration
+        activationTask = Task { await self.performActivation(session, generation: generation) }
+    }
+
+    /// Retry the last failed setup, or a fresh one.
+    public func retryActivation(session: AuthenticatedSession) { activate(session: session) }
+
+    private func performActivation(_ session: AuthenticatedSession, generation: Int) async {
+        canEnterEarly = false
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
             clientIdentifier: session.clientIdentifier, musicSectionID: nil,
             accountToken: session.accountToken, selectedMusicSectionIDs: nil
         )
-        // Persist BEFORE activation so buildBackend's Plex section resolution can
-        // load this session, add the resolved section id and save it back (it
-        // would otherwise be a no-op on first sign-in — nothing to load — and the
-        // section would be re-resolved every launch). Do NOT re-save `stored`
-        // afterwards: that clobbered the resolved section back to nil.
+        // Persist before activation so buildBackend's Plex section resolution can
+        // load + update it. On failure/cancel we CLEAR it, so a half-saved session
+        // can never strand the user on onboarding (the original bug).
         SessionPersistence.save(stored, to: credentials)
-        try await activate(stored)
+        do {
+            try await activate(stored)
+            // First real sign-in → run the initial sync and stay on the setup
+            // screen until there's enough to browse (or the user taps "Browse
+            // now"), so we don't drop them onto an empty Home.
+            await gateInitialSync()
+            guard generation == activationGeneration else { return }  // superseded
+            setupError = nil
+            isSettingUp = false                 // success → enter the app
+        } catch is CancellationError {
+            // Don't clobber a newer activation's freshly-saved session/state.
+            guard generation == activationGeneration else { return }
+            SessionPersistence.clear(credentials)
+            isSettingUp = false                 // cancelled → leave setup
+        } catch {
+            guard generation == activationGeneration else { return }
+            SessionPersistence.clear(credentials)
+            setupError = "Couldn't finish setting up: \(error.localizedDescription)"
+            // Keep `isSettingUp` true so the setup screen shows the error + retry.
+        }
     }
+
+    /// First-run catalog population. `startSync()` does the two-tier work (a tiny
+    /// tracks-only quick start on an empty catalog, then the full library), so
+    /// this just kicks it off and keeps the setup screen up until the quick start
+    /// has landed some playable songs — then `performActivation` drops the user
+    /// into the app while the full sync continues under the persistent bar.
+    private func gateInitialSync() async {
+        guard let serverId = active?.connection.id else { return }
+        let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        if existing > 0 {
+            // Re-login to a server we already have a catalog for: don't block —
+            // enter instantly on the cached library, but kick off a background
+            // refresh so server-side changes show up. Never gates entry.
+            startSync()
+            return
+        }
+        // A sync left running from a previous server/sign-out would make the
+        // single-flight `startSync()` a no-op; cancel and wait for it to clear.
+        if isSyncing {
+            cancelSync()
+            while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        // Let the user bail to the app whenever they like; the wait below just
+        // makes the *default* land them on real, playable content.
+        canEnterEarly = true
+        startSync()   // quick start (empty catalog) → full, in the background
+        // Hold the setup screen only until the quick start lands the first songs
+        // (or the sync ends). On a ~26 item/s server that's ~10s, not minutes.
+        while isSettingUp {
+            let tracks = (try? await repository.trackCount(serverId: serverId)) ?? 0
+            if tracks > 0 || !isSyncing { break }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+    }
+
+    /// User tapped "Browse now" on the setup screen: enter the app while the sync
+    /// continues in the background.
+    public func enterAppNow() { isSettingUp = false }
 
     /// Activate the offline demo: generate a synthetic catalog and serve a
     /// full-length tone per track so playback/scrub/downloads behave like real
@@ -254,9 +382,18 @@ public final class AppEnvironment: ObservableObject {
         // the previous server at this point.
         if connection.id != active?.connection.id { invalidateRadio() }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
+        // Fill in any track format the light sync skipped (covers relaunch/restore
+        // where no fresh sync runs). Cheap no-op once everything's backfilled.
+        startMediaBackfillIfNeeded()
     }
 
     public func signOut() {
+        activationTask?.cancel()
+        cancelSync()                 // stop any in-flight catalog sync for the old account
+        mediaBackfillTask?.cancel()  // and the background format backfill
+        isSettingUp = false
+        setupError = nil
+        canEnterEarly = false
         playback.stop()
         invalidateRadio()
         SessionPersistence.clear(credentials)
@@ -274,6 +411,21 @@ public final class AppEnvironment: ObservableObject {
             await runBenchmark()
             return
         }
+        // Headless sync measurement: force a full re-sync of the active server on
+        // launch (restore runs first). Writes timings to the pullable diagnostics
+        // log, so the sync speed can be measured without any user interaction.
+        // Controlled server-cost probe: run a matrix of /Items queries varying
+        // ONE parameter at a time (page size, sort, fields, images, ParentId,
+        // count) back-to-back against the live server, logging each timing. This
+        // isolates what actually makes the album/track queries slow — instead of
+        // guessing — without any credentials leaving the device.
+        if env["MOZZ_SYNCPROBE"] == "1", active != nil {
+            await runSyncProbe()
+            return
+        }
+        if env["MOZZ_FORCESYNC"] == "1", active != nil {
+            startSync()
+        }
         guard env["MOZZ_AUTODEMO"] == "1" else { return }
         if active == nil {
             try? await activateDemo(size: .init(artists: 50, albums: 300, tracks: 3_000))
@@ -285,6 +437,29 @@ public final class AppEnvironment: ObservableObject {
                 if !tracks.isEmpty { playback.play(tracks: tracks.map { $0.toDomain() }) }
             }
         }
+    }
+
+    /// Controlled server-cost probe (triggered by `MOZZ_SYNCPROBE=1`). Runs a
+    /// matrix of `/Items` queries against the live Jellyfin server, varying one
+    /// parameter at a time, and appends each timing to the pullable diagnostics
+    /// log. Lets us isolate what makes album/track queries slow (fixed per-query
+    /// overhead vs per-item cost, sort, fields, images, ParentId, count) with
+    /// real data instead of guesses. Jellyfin only.
+    private func runSyncProbe() async {
+        let diag = SyncDiagnosticsLog()
+        guard let active, active.connection.kind == .jellyfin else {
+            diag.append("SYNCPROBE skipped (no active Jellyfin server)")
+            return
+        }
+        let parentId = await resolvedMusicLibraryId()
+        guard let backend = makeBulkSyncBackend(requestTotals: false, musicLibraryId: parentId) as? JellyfinBackend else {
+            diag.append("SYNCPROBE skipped (no bulk backend)")
+            return
+        }
+        diag.append("SYNCPROBE START parentId=\(parentId ?? "none")")
+        let report = await backend.diagnoseItemQueryCost()
+        for line in report { diag.append("SYNCPROBE \(line)") }
+        diag.append("SYNCPROBE DONE")
     }
 
     /// Full performance run on-device: generate the 100k-track catalog, measure
@@ -366,21 +541,92 @@ public final class AppEnvironment: ObservableObject {
     /// running when the user leaves Settings or refreshes Home, and its progress
     /// is reflected everywhere via `isSyncing`/`syncProgress`. Single-flight: a
     /// second tap while syncing is a no-op.
+    ///
+    /// Two-tier on an EMPTY catalog: a tiny tracks-only quick start (~300 songs,
+    /// ~10s) so the app is playable almost immediately, then the full library in
+    /// the same task. On a populated catalog (a re-sync / "Sync Now") it's just
+    /// the full sync — the content is already there, so no quick start is needed.
     public func startSync() {
         guard !isSyncing, active != nil else { return }
         isSyncing = true
         syncProgress = nil
         syncTask = Task { [self] in
-            defer { isSyncing = false; syncProgress = nil }
-            do {
-                _ = try await syncNow { progress in
-                    Task { @MainActor in self.syncProgress = progress }
-                }
-            } catch is CancellationError {
-                // User cancelled — leave the partial catalog; next sync resumes.
-            } catch {
-                lastSyncSummary = "Sync failed: \(error.localizedDescription)"
+            // Keep the catalog sync alive if the user backgrounds the app: iOS
+            // suspends an app ~30s after it leaves the foreground, which would
+            // otherwise freeze a long first sync mid-way. This assertion asks for
+            // extra background running time; it's ended in the defer no matter how
+            // the sync exits. (Not infinite — iOS grants minutes, not hours — but
+            // enough to make real progress; the sync resumes on next launch from
+            // where the catalog left off.)
+            let bgTask = BackgroundTaskAssertion(name: "catalog-sync")
+            defer {
+                isSyncing = false
+                syncProgress = nil
+                bgTask.end()
             }
+            let emitProgress: @Sendable (SyncProgress) -> Void = { progress in
+                Task { @MainActor in self.syncProgress = progress }
+            }
+            // Retry transient failures (e.g. the network not being ready at cold
+            // launch, or a brief server hiccup) with backoff, instead of giving up
+            // on the first blip and stranding the user on an empty library. Only
+            // network-ish errors are retried; a genuine "no music" / auth error
+            // still surfaces. The isEmpty re-check means a retry after a successful
+            // quick start skips straight to the full sync.
+            let maxAttempts = 4
+            var attempt = 0
+            while !Task.isCancelled {
+                attempt += 1
+                do {
+                    var isEmpty = false
+                    if let serverId = active?.connection.id {
+                        isEmpty = ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0
+                    }
+                    // Tier 1 (empty catalog only): make the app playable in ~6-10s.
+                    // 150 tracks: /Items is a flat ~40ms/row hard ceiling on the
+                    // server (see SyncPlan.quickStart), so this is the sweet spot
+                    // between "instant" and "enough to browse".
+                    if isEmpty {
+                        _ = try await runSync(plan: .quickStart(tracks: 150), progress: emitProgress)
+                    }
+                    // Tier 2 (always): the full library + housekeeping + prune.
+                    _ = try await syncNow(progress: emitProgress)
+                    break   // success
+                } catch is CancellationError {
+                    break   // user cancelled — leave the partial catalog
+                } catch {
+                    lastSyncSummary = "Sync failed: \(error.localizedDescription)"
+                    guard attempt < maxAttempts, Self.isTransient(error) else { break }
+                    // Backoff 2s, 4s, 6s — enough to ride out cold-launch network
+                    // warmup or a brief server blip. isSyncing stays true across
+                    // retries, so the setup screen keeps waiting rather than
+                    // dumping the user onto an empty Home.
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                }
+            }
+        }
+    }
+
+    /// Whether a sync error looks transient (worth retrying) vs. terminal.
+    private static func isTransient(_ error: Error) -> Bool {
+        switch error {
+        case MozzError.serverUnreachable, MozzError.transport:
+            return true
+        case MozzError.badStatus(let code):
+            // 5xx / 429 are transient; 4xx are terminal.
+            return code >= 500 || code == 429
+        case let urlError as URLError:
+            // Connectivity/timeout class — not a 4xx or a decode problem.
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                 .dataNotAllowed, .internationalRoamingOff:
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
         }
     }
 
@@ -391,27 +637,117 @@ public final class AppEnvironment: ObservableObject {
 
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+        try await runSync(plan: .full, progress: progress)
+    }
+
+    /// The core catalog-sync routine, scoped by `plan` (full vs. a bounded
+    /// quick-start slice). Post-sync work (mixes, outbox flush, media backfill)
+    /// runs only for a full plan — the quick-start slice just populates recent
+    /// content fast, and the following full sync does the housekeeping.
+    @discardableResult
+    private func runSync(plan: SyncPlan, progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
         guard active != nil else { throw MozzError.unsupported("No active server") }
         // Plex can't browse without a music-library section id. Resolve it now if
         // activation didn't (self-healing), so a plain "Sync Now" recovers without
         // a re-login — and surfaces a clear error if the server has no music.
         try await ensurePlexMusicSection()
         guard let active else { throw MozzError.unsupported("No active server") }
-        // Catalog sync uses a bulk-timeout backend: a single page of a few
-        // hundred items can take tens of seconds to generate on a large/slow
-        // self-hosted server, which would blow the 12s interactive timeout and
-        // abort the sync (leaving albums/tracks unsynced). A smaller page size
-        // keeps each request well within the bulk timeout and bounds memory.
-        let backend = makeBulkSyncBackend() ?? active.backend
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 200)
-        let summary = try await engine.sync(progress: progress)
+        // Catalog sync uses a bulk-timeout backend (a single large page can take
+        // ~60s to generate on a slow self-hosted server). See LibrarySyncEngine
+        // for the phase orchestration (heavy /Items phases run sequentially) and
+        // JellyfinBackend.pageQuery for the query-cost tuning. The full sync uses
+        // a large page (1000) to minimize round trips; the quick start uses a
+        // small page (plan.pageSize) so its single request returns fast.
+        //
+        // The full sync needs server totals (progress % + prune completeness); the
+        // quick start doesn't prune or show a %, so it skips the expensive first-page
+        // COUNT(*) — which alone was ~15s of its time on a large library.
+        let musicLibraryId = await resolvedMusicLibraryId()
+        let backend = makeBulkSyncBackend(requestTotals: plan.prune,
+                                          musicLibraryId: musicLibraryId) ?? active.backend
+        let pageSize = plan.pageSize ?? 1000
+        let diagLog = SyncDiagnosticsLog()
+        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=\(pageSize) plan=\(plan.prune ? "full" : "quick") parentId=\(musicLibraryId ?? "none")")
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: pageSize, diag: diagLog.sink)
+        let summary: SyncSummary
+        do {
+            summary = try await engine.sync(plan: plan, progress: progress)
+        } catch is CancellationError {
+            diagLog.append("SYNC CANCELLED")
+            throw CancellationError()
+        } catch {
+            diagLog.append("SYNC FAILED: \(error.localizedDescription)")
+            throw error
+        }
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
-        // New catalog + listening → refresh the mixes off-main. Non-fatal.
-        await regenerateMozzWeekly()
-        await regenerateHomeMixes()
-        // Flush any likes/ratings that were made offline.
-        await flushFavoriteOutbox()
+        diagLog.append("SYNC DONE total=\(String(format: "%.1f", summary.duration))s tracks=\(summary.tracks) albums=\(summary.albums) artists=\(summary.artists) playlists=\(summary.playlists) pruned=\(summary.deleted)")
+        // Full sync only: record the timing report and do post-sync housekeeping.
+        // (The quick-start slice skips these — the trailing full sync handles them.)
+        if plan.prune {
+            lastSyncReport = Self.formatSyncReport(summary)
+            await regenerateMozzWeekly()
+            await regenerateHomeMixes()
+            await flushFavoriteOutbox()
+            startMediaBackfillIfNeeded()
+        }
         return summary
+    }
+
+    /// Human-readable per-phase timing report for the Diagnostics screen, e.g.
+    /// "Total 2m 14s\nSongs: 20,000 in 128s (156/s)\nAlbums: 2,500 in 41s (61/s)…".
+    private static func formatSyncReport(_ s: SyncSummary) -> String {
+        func time(_ t: TimeInterval) -> String {
+            let sec = Int(t.rounded())
+            return sec >= 60 ? "\(sec / 60)m \(sec % 60)s" : "\(sec)s"
+        }
+        var lines = ["Total: \(time(s.duration))"]
+        // Slowest phase first — that's the bottleneck to look at.
+        for t in s.phaseTimings.sorted(by: { $0.seconds > $1.seconds }) where t.items > 0 {
+            lines.append("\(t.phase.label): \(t.items) in \(time(t.seconds)) (\(Int(t.rate.rounded()))/s)")
+        }
+        if s.deleted > 0 { lines.append("Pruned: \(s.deleted)") }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Backfill the audio format + file size that the light catalog sync omits
+    /// for speed (Jellyfin drops the heavy `MediaSources` field there). Runs in
+    /// the background at low priority: it pages through the tracks still missing
+    /// format, fetches their details in batches, and updates just those rows. It
+    /// never touches `isSyncing`/`syncProgress` (so the sync bar isn't re-shown)
+    /// and no-ops for backends whose bulk sync already carries full format
+    /// (`fetchTrackDetails` defaults to `[]`). Single-flight + resumable: it only
+    /// looks at rows where `container IS NULL`, so an interrupted pass just
+    /// continues next time.
+    public func startMediaBackfillIfNeeded() {
+        guard mediaBackfillTask == nil, let active else { return }
+        let serverId = active.connection.id
+        // A bulk-timeout backend: a MediaSources batch can be sizable.
+        let backend = makeBulkSyncBackend() ?? active.backend
+        let repository = self.repository
+        let database = self.database
+        mediaBackfillTask = Task(priority: .utility) { [weak self] in
+            defer { Task { @MainActor in self?.mediaBackfillTask = nil } }
+            let writer = CatalogWriter(database)
+            var lastBatch: Set<String> = []
+            while !Task.isCancelled {
+                guard let ids = try? await repository.trackRemoteIdsMissingFormat(serverId: serverId, limit: 200),
+                      !ids.isEmpty else { return }
+                // Stop if this batch is identical to the previous one: those
+                // tracks have no resolvable container (no MediaSources / remote or
+                // virtual items), so upserting them leaves `container` NULL and
+                // they'd be reselected forever — a permanent background network +
+                // battery drain. Bailing here leaves them NULL (harmless; the
+                // download path hydrates on demand) and frees the single-flight slot.
+                let batch = Set(ids)
+                if batch == lastBatch { return }
+                lastBatch = batch
+                guard let details = try? await backend.fetchTrackDetails(ids: ids), !details.isEmpty else { return }
+                try? await writer.upsertTracks(details, serverId: serverId)
+                // Yield briefly so the backfill stays a low-priority trickle that
+                // never competes with the user's browsing/playback.
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+        }
     }
 
     // MARK: Recommendations
@@ -707,8 +1043,17 @@ public final class AppEnvironment: ObservableObject {
         SessionPersistence.save(stored, to: credentials)
         do {
             try await activate(stored)
+            // Cancel any sync still running for the previous server so the
+            // single-flight startSync() actually starts one for the new server.
+            if isSyncing {
+                cancelSync()
+                while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+            }
             startSync()
         } catch {
+            // Restore the previously-working session so a failed switch doesn't
+            // strand the user (rather than clearing it entirely).
+            SessionPersistence.save(existing, to: credentials)
             lastSyncSummary = "Couldn't switch server: \(error.localizedDescription)"
         }
     }
@@ -726,7 +1071,25 @@ public final class AppEnvironment: ObservableObject {
     /// Rebuild the active backend with a bulk-timeout transport for catalog
     /// sync. Returns `nil` for the demo (or if the session can't be loaded), so
     /// the caller falls back to the interactive backend.
-    private func makeBulkSyncBackend() -> (any MusicBackend)? {
+    /// The resolved Jellyfin music-library id, cached per server so we resolve it
+    /// once (the quick-start and full-sync passes both need it). See
+    /// `JellyfinBackend.musicLibraryId` for why ParentId scoping matters.
+    private var cachedMusicLibraryId: (serverId: String, id: String?)?
+
+    /// Resolve (and cache) the music library id used to scope Jellyfin catalog
+    /// queries via ParentId. Returns nil for Plex (uses section ids instead) and
+    /// on any resolution failure — the sync then falls back to unscoped queries.
+    private func resolvedMusicLibraryId() async -> String? {
+        guard let active, active.connection.kind == .jellyfin else { return nil }
+        if let cached = cachedMusicLibraryId, cached.serverId == active.connection.id {
+            return cached.id
+        }
+        let id = await (active.backend as? JellyfinBackend)?.resolveMusicLibraryId()
+        cachedMusicLibraryId = (active.connection.id, id)
+        return id
+    }
+
+    private func makeBulkSyncBackend(requestTotals: Bool = true, musicLibraryId: String? = nil) -> (any MusicBackend)? {
         guard let active,
               let stored = SessionPersistence.load(credentials),
               !stored.isDemo else { return nil }
@@ -734,7 +1097,9 @@ public final class AppEnvironment: ObservableObject {
         switch active.connection.kind {
         case .jellyfin:
             return JellyfinBackend(connection: active.connection, token: stored.token,
-                                   clientInfo: clientInfo, transport: bulk)
+                                   clientInfo: clientInfo, transport: bulk,
+                                   includeTotalCount: requestTotals,
+                                   musicLibraryId: musicLibraryId)
         case .plex:
             // Span whatever set of music libraries the active backend resolved
             // (see ensurePlexMusicSection, which runs first in syncNow).
@@ -875,11 +1240,28 @@ public final class AppEnvironment: ObservableObject {
             .throttle(for: .seconds(10), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in self?.persistPlaybackState() }
             .store(in: &widgetCancellables)
+
+        // Heartbeat: while actually playing, reload the now-playing widget every
+        // ~30s. This rebuilds the widget's timeline and pushes out its "went
+        // stale → neutral" fallback entry (grace 45s in the widget). If the app
+        // is force-quit, the heartbeat stops, no reload arrives, and the widget
+        // flips to a neutral (no Pause button) state within ~45s instead of
+        // showing a wrong "Pause". The snapshot only ticks while playing, so this
+        // is silent when paused. 30s (≈120 reloads/hr) stays well under
+        // WidgetKit's reload budget, so real playback never falsely goes neutral.
+        playback.$snapshot
+            .filter { $0.status == .playing }
+            .throttle(for: .seconds(30), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] _ in self?.reloadWidget(MozzWidget.nowPlayingKind) }
+            .store(in: &widgetCancellables)
     }
 
     /// Save (or clear) the on-disk playback session so it can be resumed after a
     /// cold launch.
     private func persistPlaybackState() {
+        // Don't touch the saved file until launch restore has been attempted —
+        // otherwise the sinks' initial empty emissions clear it before we read it.
+        guard didAttemptPlaybackRestore else { return }
         if let state = playback.persistentState {
             PlaybackStatePersistence.save(state)
         } else {
@@ -963,17 +1345,6 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Persist the engine's listening-history events into the on-device
-    /// `play_event` log, tagged with the active server (to form the durable
-    /// track ref) and this device. Fire-and-forget; never blocks playback.
-    private func wirePlayEventLogging() {
-        playback.onPlayEvent = { [weak self] event in
-            Task { @MainActor in
-                guard let self, let serverId = self.active?.connection.id else { return }
-                try? await self.playEvents.append(event, serverId: serverId, device: Self.deviceKind)
-            }
-        }
-    }
-
     // MARK: Radio / Instant Mix
 
     /// The seed of the currently-playing station, if any. Drives the endless
@@ -1053,6 +1424,17 @@ public final class AppEnvironment: ObservableObject {
         activeStationID += 1
         activeRadioSeed = nil
         radioSeenIDs = []
+    }
+
+    /// `play_event` log, tagged with the active server (to form the durable
+    /// track ref) and this device. Fire-and-forget; never blocks playback.
+    private func wirePlayEventLogging() {
+        playback.onPlayEvent = { [weak self] event in
+            Task { @MainActor in
+                guard let self, let serverId = self.active?.connection.id else { return }
+                try? await self.playEvents.append(event, serverId: serverId, device: Self.deviceKind)
+            }
+        }
     }
 
     private static let deviceKind: String = {

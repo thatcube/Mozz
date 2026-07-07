@@ -30,6 +30,19 @@ public final class MusicDatabase: Sendable {
         // concurrent reads (browse pages, artwork, search); a bigger pool keeps
         // an as-you-type search from starving the browse/artwork reads.
         config.maximumReaderCount = 10
+        config.prepareDatabase { db in
+            // In WAL mode `synchronous = NORMAL` is safe (a crash can only lose
+            // the last uncommitted transaction — never corrupt the file) and
+            // avoids an fsync on every commit. The catalog sync commits one
+            // transaction per page, so on a large library this removes ~100
+            // forced disk syncs and markedly speeds up the write-bound tail. The
+            // catalog is a rebuildable cache anyway (a resync restores anything a
+            // power-loss dropped), so there's no durability concern here.
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
+            // A larger page cache (~16 MB) keeps b-tree/index pages hot during
+            // the bulk write instead of round-tripping to disk.
+            try db.execute(sql: "PRAGMA cache_size = -16000")
+        }
         let pool = try DatabasePool(path: url.path, configuration: config)
         return try MusicDatabase(dbWriter: pool)
     }

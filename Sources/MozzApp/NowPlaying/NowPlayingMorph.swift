@@ -91,6 +91,18 @@ struct NowPlayingMorphContainer: View {
                               isExpanded: ui.isFullPresented, minimize: minimize)
                 ZStack(alignment: .topLeading) {
                     surface(m)
+                    // Enlarged, invisible tap target so edge taps open the player
+                    // instead of "falling through" to the page/tab-bar behind. It
+                    // sits BELOW IslandContent (so the play/pause/next buttons and
+                    // the swipe zone keep priority) but consumes taps in the margin
+                    // around the pill. Docked state only.
+                    if m.p < 0.5 {
+                        Color.clear
+                            .frame(width: m.islandTapW, height: m.islandTapH)
+                            .contentShape(Rectangle())
+                            .onTapGesture { ui.isFullPresented = true }
+                            .position(x: m.surfaceCenterX, y: m.islandTapCenterY)
+                    }
                     // Finger-following specular glow: a soft highlight on the glass
                     // that tracks the touch point, like Apple's interactive Liquid
                     // Glass. It reads `press.location`, so tracking the finger
@@ -135,7 +147,7 @@ struct NowPlayingMorphContainer: View {
                     // the whole island as one unit and lights the glow. Gated to the
                     // docked state.
                     Color.clear
-                        .frame(width: m.islandDropW, height: m.islandDropH)
+                        .frame(width: m.islandDropW, height: m.islandTapH)
                         .onTouchChanged { active, loc in
                             guard m.p < 0.5 else { return }
                             press.location = loc      // instant, tracks the finger
@@ -151,7 +163,7 @@ struct NowPlayingMorphContainer: View {
                                 }
                             }
                         }
-                        .position(x: m.surfaceCenterX, y: m.miniCenterY)
+                        .position(x: m.surfaceCenterX, y: m.islandTapCenterY)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 // Press-scale the WHOLE island as one unit: scale the entire
@@ -1114,6 +1126,14 @@ private struct Morph {
     static let expArtTopGap: CGFloat = 39       // grabber + gap above big artwork
     static let expArtMaxSide: CGFloat = 340
 
+    // Island touch-target slop: the tappable area extends beyond the 56pt visual
+    // pill so edge taps don't "fall through" to the page/tab-bar behind (Apple's
+    // hit targets are likewise larger than their visual bounds). Bottom is kept
+    // under `islandBottomGap` (8pt) so it can't steal tab-bar taps.
+    static let islandTapSlopTop: CGFloat = 12
+    static let islandTapSlopBottom: CGFloat = 6
+    static let islandTapSlopH: CGFloat = 8
+
     // Island (collapsed) frame -----------------------------------------------
     // Anchored to the screen's bottom EDGE (matching the floating tab bar, which
     // sits `BottomBar.edgeMargin` from the edge), so the island floats a fixed
@@ -1125,6 +1145,12 @@ private struct Morph {
     var islandLeft: CGFloat { (width - islandW) / 2 }
     var islandArtCenterX: CGFloat { islandLeft + Self.islandArtLeading + Self.islandArtSide / 2 }
     var islandRadius: CGFloat { Self.islandHeight / 2 }
+
+    // Enlarged island hit target (visual pill stays `islandDropH`; only the
+    // tappable/press area grows). Centred on the pill but extends more upward.
+    var islandTapW: CGFloat { islandDropW + 2 * Self.islandTapSlopH }
+    var islandTapH: CGFloat { islandDropH + Self.islandTapSlopTop + Self.islandTapSlopBottom }
+    var islandTapCenterY: CGFloat { miniCenterY + (Self.islandTapSlopBottom - Self.islandTapSlopTop) / 2 }
 
     // Expanded artwork --------------------------------------------------------
     var expArtSide: CGFloat { min(width - 90, Self.expArtMaxSide) }
