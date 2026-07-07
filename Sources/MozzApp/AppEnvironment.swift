@@ -79,6 +79,12 @@ public final class AppEnvironment: ObservableObject {
     /// On by default with a Settings off-switch; resolves MBIDs off-main and
     /// rate-limited, never blocking sync or the UI (ADR-0007).
     public let enrichment: EnrichmentService
+    /// DB-only enrichment reads for radio precedence (network-free), and the
+    /// similarity algorithm the writes were stamped with (must match).
+    private let enrichmentStore: EnrichmentStore
+    private let enrichmentAlgorithm: String
+    /// In-flight seed-similarity prep for the active station (cancel-and-replace).
+    private var seedPrepTask: Task<Void, Never>?
     /// UserDefaults key for the enrichment on/off switch (default on when unset).
     public static let enrichmentEnabledKey = "mozz.enrichmentEnabled"
     /// Offline-first like/rating writes (local DB + queued server write-back).
@@ -145,8 +151,11 @@ public final class AppEnvironment: ObservableObject {
         // (different hosts/policies).
         let mbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.minRequestInterval)
         let lbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.listenBrainzMinInterval)
+        let enrichmentStore = EnrichmentStore(database)
+        self.enrichmentStore = enrichmentStore
+        self.enrichmentAlgorithm = enrichmentConfig.listenBrainzAlgorithm
         self.enrichment = EnrichmentService(
-            store: EnrichmentStore(database),
+            store: enrichmentStore,
             musicBrainz: MusicBrainzClient.make(config: enrichmentConfig, limiter: mbLimiter),
             listenBrainz: ListenBrainzClient.make(config: enrichmentConfig, limiter: lbLimiter),
             config: enrichmentConfig,
@@ -1028,8 +1037,21 @@ public final class AppEnvironment: ObservableObject {
 
     /// Start an endless station seeded from a track (its genres + artist).
     public func startRadio(fromTrack track: Track) {
+        guard let serverId = active?.connection.id else { return }
+        let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
+        // Seed-first: resolve + canonicalize + fetch the seed's ListenBrainz
+        // similarity in the background so radio leads with it (this or the next
+        // batch, as resolution completes). Cancel-and-replace on re-seed.
+        seedPrepTask?.cancel()
+        let enrichment = self.enrichment
+        let durationMs = track.duration > 0 ? track.duration * 1000 : nil
+        seedPrepTask = Task {
+            _ = await enrichment.prepareSeedSimilarity(
+                trackRef: ref, artistName: track.artistName, title: track.title,
+                durationMs: durationMs, artistMBID: track.artistMbid)
+        }
         startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
-                                   artistIds: [track.artistID].compactMap { $0 }),
+                                   artistIds: [track.artistID].compactMap { $0 }, seedTrackRef: ref),
                    initialExcluding: [track.id])
     }
 
@@ -1049,8 +1071,11 @@ public final class AppEnvironment: ObservableObject {
         let epoch = playback.transportEpoch
         Task { [weak self] in
             guard let self else { return }
+            let similar = await self.similarCandidates(for: seed, serverId: serverId,
+                                                       excluding: initialExcluding, limit: 30)
             let ids = (try? await self.recommendations.radioBatch(
-                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding)) ?? []
+                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding,
+                similar: similar)) ?? []
             let tracks = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
             // Superseded, playback changed under us, server switched, or empty.
             guard intent == self.radioIntent,
@@ -1073,12 +1098,28 @@ public final class AppEnvironment: ObservableObject {
     private func nextRadioBatch(station: Int) async -> [Track] {
         guard station == activeStationID, let seed = activeRadioSeed,
               let serverId = active?.connection.id else { return [] }
+        let similar = await similarCandidates(for: seed, serverId: serverId,
+                                              excluding: radioSeenIDs, limit: 20)
         let ids = (try? await recommendations.radioBatch(
-            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs)) ?? []
+            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs,
+            similar: similar)) ?? []
         let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
         guard station == activeStationID else { return [] }
         radioSeenIDs.formUnion(tracks.map(\.id))
         return tracks
+    }
+
+    /// The seed's ListenBrainz-similar owned tracks for the radio precedence tier,
+    /// or `[]` (artist-only seed, unresolved MBID, disabled, or no similarity data)
+    /// — in which case radio falls back to the genre engine. Network-free DB read.
+    private func similarCandidates(for seed: RadioSeed, serverId: ServerID,
+                                   excluding: Set<String>, limit: Int) async -> [ScoredOwnedTrack] {
+        guard let ref = seed.seedTrackRef,
+              let canonical = try? await enrichmentStore.seedMbid(forTrackRef: ref)?.canonical
+        else { return [] }
+        return (try? await enrichmentStore.similarOwnedTracks(
+            seedCanonicalMbids: [canonical], algorithm: enrichmentAlgorithm,
+            serverId: serverId, excludingRemoteIds: excluding, limit: limit)) ?? []
     }
 
     /// Forget any active radio session (e.g. on sign-out). The engine's own
@@ -1088,6 +1129,8 @@ public final class AppEnvironment: ObservableObject {
         activeStationID += 1
         activeRadioSeed = nil
         radioSeenIDs = []
+        seedPrepTask?.cancel()
+        seedPrepTask = nil
     }
 
     private static let deviceKind: String = {

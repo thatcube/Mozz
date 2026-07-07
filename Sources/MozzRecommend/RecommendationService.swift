@@ -9,11 +9,16 @@ public struct RadioSeed: Sendable, Equatable {
     public var title: String
     public var genres: [String]
     public var artistIds: [String]
+    /// Durable `track_ref` of the seed track, when seeded from a track (nil for an
+    /// artist-seeded station). Lets the caller resolve the seed's ListenBrainz
+    /// similarity for the precedence tier.
+    public var seedTrackRef: String?
 
-    public init(title: String, genres: [String], artistIds: [String]) {
+    public init(title: String, genres: [String], artistIds: [String], seedTrackRef: String? = nil) {
         self.title = title
         self.genres = genres
         self.artistIds = artistIds
+        self.seedTrackRef = seedTrackRef
     }
 }
 
@@ -131,15 +136,47 @@ public actor RecommendationService {
         }
     }
 
-    /// Generate the next batch of station tracks for a radio seed: pulls a pool
-    /// of same-genre / same-artist library tracks, scores them by similarity to
-    /// the seed, blends (variety caps + exploration jitter) and returns ordered
-    /// track remote ids. `excluding` (track ids) drops the seed and anything
-    /// already queued so the station keeps moving. Fresh each call (no seed →
-    /// varied batches).
+    /// Generate the next batch of station tracks. When ListenBrainz similarity for
+    /// the seed is available (`similar`, resolved by the caller from
+    /// `EnrichmentStore.similarOwnedTracks`), those tracks LEAD the batch — the
+    /// crowd-similarity signal that separates tracks a coarse genre tag lumps
+    /// together — with the genre engine filling any remaining slots. With no
+    /// similarity the result is exactly the genre engine's (never worse than
+    /// today). `excluding` drops the seed and anything already queued.
     public func radioBatch(seed: RadioSeed, serverId: ServerID,
-                           limit: Int = 20, excluding: Set<String> = []) async throws -> [String] {
-        guard !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
+                           limit: Int = 20, excluding: Set<String> = [],
+                           similar: [ScoredOwnedTrack] = []) async throws -> [String] {
+        // Tier 1 — ListenBrainz similarity (explicit precedence). Trusted OVER the
+        // genre floor on purpose (that's the point: separate within a genre bucket);
+        // guarded only by dropping non-positive scores + ranking by score.
+        var picked: [String] = []
+        var pickedSet = excluding
+        let usableSimilar = similar.filter { $0.score > 0 && !excluding.contains($0.candidate.remoteId) }
+        if !usableSimilar.isEmpty {
+            let scored = usableSimilar.map {
+                ScoredCandidate(candidate: $0.candidate, score: $0.score, source: "collaborative")
+            }
+            // Tighter per-artist cap: ListenBrainz "similar" skews same-artist, and
+            // the seed's own artist isn't discovery.
+            let config = Blender.Config(limit: limit, maxPerArtist: 4, maxPerAlbum: max(2, limit / 4))
+            var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
+            let ranked = blender.blend(sources: [scored], config: config, using: &rng)
+            picked = ranked.map { $0.candidate.remoteId }
+            pickedSet.formUnion(picked)
+            if picked.count >= limit { return picked }
+        }
+        // Tier 3 — genre engine fills the remaining slots (unchanged behavior).
+        let genre = try await genreRadioBatch(
+            seed: seed, serverId: serverId, limit: limit - picked.count, excluding: pickedSet)
+        return picked + genre
+    }
+
+    /// The genre-similarity station batch (the pre-B3 `radioBatch` body, verbatim):
+    /// pulls a same-genre / same-artist pool, applies the IDF-weighted-Jaccard floor,
+    /// scores by similarity to the seed, and blends with variety caps + jitter.
+    private func genreRadioBatch(seed: RadioSeed, serverId: ServerID,
+                                 limit: Int, excluding: Set<String>) async throws -> [String] {
+        guard limit > 0, !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
         // Include the whole matching catalog (notPlayedSince = now excludes ~none);
         // radio may revisit tracks. Pull a generous pool to blend from, excluding
         // already-surfaced tracks in SQL so the random sample is drawn from unseen

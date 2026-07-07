@@ -115,7 +115,15 @@ recommendations fall back to the genre engine immediately.
   negative cache.
 - **B2** — ListenBrainz client + `similar_recording` store + `mbid → track_ref`
   reverse map.
-- **B3** — wire radio ranking precedence (ListenBrainz → artist → genre fallback).
+- **B3** — wire radio ranking precedence: ListenBrainz recording-similarity first,
+  then the existing genre engine as fallback. Similarity leads the batch (trusted
+  over the coarse genre floor — the whole point); genre fills remaining slots so
+  the station stays full. Never worse than today (genre-only when similarity is
+  absent/disabled).
+- **B3.5** — the artist-similarity middle tier (`/similar-artists`), a symmetric
+  add of an endpoint + `similar_artist` table + reverse map. Split out of B3
+  because it needs the same infrastructure B2 built for recordings; recording
+  similarity + genre fallback delivers the core quality win first.
 - **B4** (optional) — MusicBrainz genre/tag enrichment into `track_features.tags`,
   feeding the existing genre engine so Smart Shuffle and Mozz Weekly improve too.
 
