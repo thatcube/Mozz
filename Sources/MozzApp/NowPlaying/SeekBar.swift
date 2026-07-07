@@ -50,9 +50,9 @@ struct SeekBar: View {
             let w = geo.size.width
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(.white.opacity(scrubbing ? seekTrackOpacity : restTrackOpacity))
+                    .fill(.primary.opacity(scrubbing ? seekTrackOpacity : restTrackOpacity))
                 Capsule()
-                    .fill(.white.opacity(scrubbing ? 1 : restFillOpacity))
+                    .fill(.primary.opacity(scrubbing ? 1 : restFillOpacity))
                     .frame(width: min(w, max(h, w * progress)))
             }
             .frame(width: w, height: h)
@@ -98,7 +98,7 @@ struct SeekBar: View {
             timeLabel("\u{2212}" + Format.duration(remaining))
                 .scaleEffect(scrubbing ? seekLabelScale : 1, anchor: .trailing)
         }
-        .foregroundStyle(.white.opacity(scrubbing ? 1 : restLabelOpacity))
+        .foregroundStyle(.primary.opacity(scrubbing ? 1 : restLabelOpacity))
         .animation(anim, value: scrubbing)
     }
 
