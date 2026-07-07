@@ -2,15 +2,15 @@ import SwiftUI
 import MozzCore
 import MozzJellyfin
 
-/// Jellyfin sign-in: pick a server found on your network (or type its URL),
-/// then either use **Quick Connect** (approve a code in an existing Jellyfin
-/// session) or username/password.
+/// Jellyfin sign-in, modelled on the iOS Wi-Fi picker: choose a server found on
+/// your network (or type its address), then sign in to *that* server via Quick
+/// Connect or username/password.
 struct JellyfinLoginView: View {
     @EnvironmentObject private var env: AppEnvironment
 
     /// A server the user picked from the discovered list. Kept separate from the
-    /// manual field so discovery is clearly an *offer* (a highlighted row), not a
-    /// value silently typed into a text box the user expected to fill themselves.
+    /// manual field so discovery is an *offer* (a checked row), never a value
+    /// silently typed into the address box.
     @State private var selectedServer: DiscoveredServer?
     /// What the user typed by hand. Empty unless they actively enter an address.
     @State private var manualURL = ""
@@ -27,45 +27,11 @@ struct JellyfinLoginView: View {
 
     var body: some View {
         Form {
-            discoverySection
-
-            Section {
-                TextField("http://192.168.1.10:8096", text: $manualURL)
-                    .urlFieldStyle()
-                    .onChange(of: manualURL) { _, new in
-                        // Typing a URL means the user is going manual — drop any
-                        // discovered selection so the two never fight.
-                        if !new.isEmpty { selectedServer = nil }
-                    }
-            } header: {
-                Text("Enter address manually")
-            } footer: {
-                if let baseURL, selectedServer == nil {
-                    Text("Will connect to \(baseURL.absoluteString)")
-                }
+            networkSection
+            manualSection
+            if baseURL != nil {
+                signInSection
             }
-
-            Section("Quick Connect") {
-                if let code = quickConnectCode {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Enter this code in Jellyfin \u{25B8} Quick Connect:")
-                            .font(.footnote).foregroundStyle(.secondary)
-                        Text(code).font(.system(.title, design: .monospaced).bold())
-                    }
-                } else {
-                    Button("Start Quick Connect") { startQuickConnect() }
-                        .disabled(baseURL == nil || isBusy)
-                }
-            }
-
-            Section("Or sign in") {
-                TextField("Username", text: $username)
-                    .plainTextFieldStyle()
-                SecureField("Password", text: $password)
-                Button("Sign In") { signInWithPassword() }
-                    .disabled(baseURL == nil || username.isEmpty || isBusy)
-            }
-
             if let status {
                 Section { Text(status).foregroundStyle(.secondary).font(.footnote) }
             }
@@ -76,60 +42,133 @@ struct JellyfinLoginView: View {
         .onDisappear { quickConnectTask?.cancel() }
     }
 
-    // MARK: Discovery UI
+    // MARK: Servers on your network
 
-    @ViewBuilder private var discoverySection: some View {
-        if isDiscovering || !discovered.isEmpty {
-            Section {
-                if discovered.isEmpty {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("Searching your network\u{2026}").foregroundStyle(.secondary)
-                    }
-                    .font(.footnote)
-                } else {
-                    ForEach(discovered) { server in
-                        Button { toggle(server) } label: {
-                            HStack {
-                                Image(systemName: "server.rack").foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(server.name).foregroundStyle(.primary)
-                                    Text(server.baseURL.absoluteString)
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if selectedServer?.id == server.id {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
-                                }
-                            }
-                        }
-                    }
+    @ViewBuilder private var networkSection: some View {
+        Section {
+            if !discovered.isEmpty {
+                ForEach(discovered) { server in
+                    serverRow(server)
                 }
-            } header: {
+            } else if isDiscovering {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Searching your network\u{2026}").foregroundStyle(.secondary)
+                }
+                .font(.callout)
+            } else {
                 HStack {
-                    Text("Found on your network")
-                    if isDiscovering && !discovered.isEmpty {
-                        Spacer(); ProgressView().controlSize(.small)
-                    }
+                    Text("No servers found on this network.").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Search again") { Task { await runDiscovery() } }
                 }
-            } footer: {
-                Text("Tap a server to select it, or enter an address manually below.")
+                .font(.callout)
+            }
+        } header: {
+            HStack {
+                Text("Servers on your network")
+                if isDiscovering && !discovered.isEmpty {
+                    Spacer()
+                    ProgressView().controlSize(.small)
+                }
             }
         }
     }
 
-    /// Toggle selection of a discovered server. Selecting one clears any manually
-    /// typed URL (and stale Quick Connect code) so there's a single source of truth.
-    private func toggle(_ server: DiscoveredServer) {
-        if selectedServer?.id == server.id {
-            selectedServer = nil
-        } else {
-            selectedServer = server
-            manualURL = ""
-            quickConnectTask?.cancel()
-            quickConnectCode = nil
-            status = nil
+    /// A selection row (Wi-Fi-picker style): plain label-colored text with a blue
+    /// checkmark when chosen. `.buttonStyle(.plain)` keeps the text from turning
+    /// accent-blue (which would read as a link, not a selectable item).
+    private func serverRow(_ server: DiscoveredServer) -> some View {
+        Button {
+            select(server)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "server.rack")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.name)
+                        .foregroundStyle(.primary)
+                    Text(server.baseURL.absoluteString)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selectedServer?.id == server.id {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Manual entry
+
+    @ViewBuilder private var manualSection: some View {
+        Section {
+            TextField("192.168.1.10  or  https://jellyfin.example.com", text: $manualURL)
+                .urlFieldStyle()
+                .onChange(of: manualURL) { _, new in
+                    // Typing means the user is going manual — drop any list
+                    // selection so there's a single source of truth.
+                    if !new.isEmpty { selectedServer = nil }
+                }
+        } header: {
+            Text("Or enter an address")
+        } footer: {
+            if selectedServer == nil, let baseURL {
+                Text("Will connect to \(baseURL.absoluteString)")
+            }
+        }
+    }
+
+    // MARK: Sign in
+
+    @ViewBuilder private var signInSection: some View {
+        Section("Quick Connect") {
+            if let code = quickConnectCode {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Enter this code in Jellyfin \u{25B8} Quick Connect:")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Text(code).font(.system(.title, design: .monospaced).bold())
+                }
+            } else {
+                Button("Start Quick Connect") { startQuickConnect() }
+                    .disabled(isBusy)
+            }
+        }
+
+        Section {
+            TextField("Username", text: $username)
+                .plainTextFieldStyle()
+            SecureField("Password", text: $password)
+            Button("Sign In") { signInWithPassword() }
+                .disabled(username.isEmpty || isBusy)
+        } header: {
+            Text("Sign in to \(targetName)")
+        }
+    }
+
+    /// Name of the server sign-in will target — the discovered server's name, or
+    /// the host of a manually typed address.
+    private var targetName: String {
+        if let selectedServer { return selectedServer.name }
+        return baseURL?.host ?? "server"
+    }
+
+    // MARK: Selection + discovery
+
+    /// Select a discovered server (Wi-Fi-picker tap). Clears the manual field and
+    /// any stale Quick Connect code so there's one source of truth.
+    private func select(_ server: DiscoveredServer) {
+        selectedServer = server
+        manualURL = ""
+        quickConnectTask?.cancel()
+        quickConnectCode = nil
+        status = nil
     }
 
     private func runDiscovery() async {
@@ -144,16 +183,15 @@ struct JellyfinLoginView: View {
                 discovered.append(server)
             }
         }
-        // If the network turned up exactly one server and the user hasn't typed
-        // or picked anything, pre-select it \u2014 but visibly, as a checked row,
-        // not by stuffing the manual field.
+        // Exactly one server and nothing typed/picked → pre-select it, but
+        // visibly as a checked row (never by stuffing the address field).
         if discovered.count == 1, selectedServer == nil, manualURL.isEmpty {
             selectedServer = discovered[0]
         }
     }
 
-    /// The base URL sign-in will use: a discovered selection wins, else whatever
-    /// was typed manually (normalized: a bare host becomes http://host:8096).
+    /// The base URL sign-in will use: a discovered selection wins, else the typed
+    /// address (normalized: a bare host becomes http://host:8096).
     private var baseURL: URL? {
         if let selectedServer { return selectedServer.baseURL }
         return JellyfinURLNormalizer.normalize(manualURL)
