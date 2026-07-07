@@ -1457,7 +1457,7 @@ public final class AppEnvironment: ObservableObject {
         }
         startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
                                    artistIds: [track.artistID].compactMap { $0 }, seedTrackRef: ref),
-                   initialExcluding: [track.id])
+                   initialExcluding: [track.id], leadTrack: track)
     }
 
     /// Start an endless station seeded from an artist. When enrichment is on, the
@@ -1488,10 +1488,13 @@ public final class AppEnvironment: ObservableObject {
     }
 
     /// Load an initial station batch and keep the queue topped up as it plays.
-    /// Bails if superseded by a newer start, if the user changed playback (via a
-    /// direct play/shuffle/stop) while the batch was fetching, or if the server
-    /// changed — so a slow fetch can never hijack newer playback.
-    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = []) {
+    /// When seeded from a specific track, `leadTrack` is that track — it plays
+    /// FIRST and the generated batch (which excludes it) follows, so "start radio
+    /// from this song" begins with the song itself. Bails if superseded by a newer
+    /// start, if the user changed playback (via a direct play/shuffle/stop) while
+    /// the batch was fetching, or if the server changed — so a slow fetch can never
+    /// hijack newer playback.
+    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = [], leadTrack: Track? = nil) {
         guard let serverId = active?.connection.id else { return }
         radioIntent += 1
         let intent = radioIntent
@@ -1503,7 +1506,16 @@ public final class AppEnvironment: ObservableObject {
             let ids = (try? await self.recommendations.radioBatch(
                 seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding,
                 similar: similar)) ?? []
-            let tracks = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+            let batch = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+            // The seed track leads; the batch (which excluded it) follows — so the
+            // station starts with the song the user chose. Drop it from the batch
+            // defensively in case it slipped through.
+            let tracks: [Track]
+            if let leadTrack {
+                tracks = [leadTrack] + batch.filter { $0.id != leadTrack.id }
+            } else {
+                tracks = batch
+            }
             // Superseded, playback changed under us, server switched, or empty.
             guard intent == self.radioIntent,
                   epoch == self.playback.transportEpoch,
