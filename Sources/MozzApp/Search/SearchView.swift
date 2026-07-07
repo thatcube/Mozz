@@ -168,9 +168,13 @@ struct SearchView: View {
         .onTapGesture { focused = true }
     }
 
-    /// The field shows Liquid Glass once the page has scrolled off the top or the
-    /// field is focused; at rest at the top it's the gray fill.
-    private var fieldShowsGlass: Bool { scrolled || isActive }
+    /// The field shows Liquid Glass once the page has scrolled off the top —
+    /// i.e. only when content is actually behind it, matching the system search
+    /// bar. Deliberately NOT tied to focus: swapping the material during the
+    /// focus slide-up made the glass render at the pinned position while the gray
+    /// field animated up into it (two fields, two positions). Focusing now just
+    /// slides the gray field up; glass fades in later, in place, on scroll.
+    private var fieldShowsGlass: Bool { scrolled }
 
     @ViewBuilder private var resultsContent: some View {
         if trimmedQuery.isEmpty {
