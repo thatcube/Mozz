@@ -544,27 +544,25 @@ public final class AppEnvironment: ObservableObject {
         // a re-login — and surfaces a clear error if the server has no music.
         try await ensurePlexMusicSection()
         guard let active else { throw MozzError.unsupported("No active server") }
-        // Catalog sync uses a bulk-timeout backend: a page of items can take
-        // many seconds to generate on a large/slow self-hosted server, which
-        // would blow the 12s interactive timeout — hence the 90s bulk transport.
-        // With the entity phases running CONCURRENTLY, total time is dominated by
-        // the overlap, not the round-trip count, so a smaller 250-item page is
-        // the better trade: each page returns ~2x sooner, so the progress UI
-        // updates roughly twice as often in half-as-big steps (much less
-        // "stuck at a number" feel) while memory stays a handful of pages.
-        // Page size: the live diagnostics showed the sync is network/server-bound
-        // with a large FIXED per-request cost (artists — tiny records, trivial
-        // sort — still took ~8s/page, ~100% fetch-wait). When per-request latency
-        // dominates, total time ≈ pages × latency, so FEWER, BIGGER pages is the
-        // biggest lever. 1000 quarters the round trips vs. 250 and stays inside
-        // the 90s bulk timeout (track pages are light now — MediaSources is
-        // backfilled separately). The concurrent phases + per-phase breakdown keep
-        // progress feeling alive despite the larger step.
+        // Catalog sync uses a bulk-timeout backend (a single large page can take
+        // ~60s to generate on a slow self-hosted server). See LibrarySyncEngine
+        // for the phase orchestration (heavy /Items phases run sequentially) and
+        // JellyfinBackend.pageQuery for the query-cost tuning. Page size 1000
+        // minimizes round trips, which dominate on a latency-bound server.
         let backend = makeBulkSyncBackend() ?? active.backend
         let diagLog = SyncDiagnosticsLog()
         diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=1000")
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 1000, diag: diagLog.sink)
-        let summary = try await engine.sync(progress: progress)
+        let summary: SyncSummary
+        do {
+            summary = try await engine.sync(progress: progress)
+        } catch is CancellationError {
+            diagLog.append("SYNC CANCELLED")
+            throw CancellationError()
+        } catch {
+            diagLog.append("SYNC FAILED: \(error.localizedDescription)")
+            throw error
+        }
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         lastSyncReport = Self.formatSyncReport(summary)
         diagLog.append("SYNC DONE total=\(String(format: "%.1f", summary.duration))s tracks=\(summary.tracks) albums=\(summary.albums) artists=\(summary.artists) playlists=\(summary.playlists) pruned=\(summary.deleted)")
@@ -613,9 +611,19 @@ public final class AppEnvironment: ObservableObject {
         mediaBackfillTask = Task(priority: .utility) { [weak self] in
             defer { Task { @MainActor in self?.mediaBackfillTask = nil } }
             let writer = CatalogWriter(database)
+            var lastBatch: Set<String> = []
             while !Task.isCancelled {
                 guard let ids = try? await repository.trackRemoteIdsMissingFormat(serverId: serverId, limit: 200),
                       !ids.isEmpty else { return }
+                // Stop if this batch is identical to the previous one: those
+                // tracks have no resolvable container (no MediaSources / remote or
+                // virtual items), so upserting them leaves `container` NULL and
+                // they'd be reselected forever — a permanent background network +
+                // battery drain. Bailing here leaves them NULL (harmless; the
+                // download path hydrates on demand) and frees the single-flight slot.
+                let batch = Set(ids)
+                if batch == lastBatch { return }
+                lastBatch = batch
                 guard let details = try? await backend.fetchTrackDetails(ids: ids), !details.isEmpty else { return }
                 try? await writer.upsertTracks(details, serverId: serverId)
                 // Yield briefly so the backfill stays a low-priority trickle that

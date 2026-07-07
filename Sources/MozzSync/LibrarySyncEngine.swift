@@ -257,14 +257,20 @@ public struct LibrarySyncEngine: Sendable {
 
     /// Whether a phase enumerated completely, which is the precondition for the
     /// (all-or-nothing) prune. If the server reported a total record count, we
-    /// must have seen at least that many items; if it reported no total, we
-    /// treat a non-empty result as complete and an empty one as suspect (so an
+    /// must have seen at least that many DISTINCT items; if it reported no total,
+    /// we treat a non-empty result as complete and an empty one as suspect (so an
     /// unknown-total backend can never wipe a populated type on an empty read).
     /// This is the guard that stops a flaky/truncated page from deleting rows
     /// (and cascading into the user's downloads).
+    ///
+    /// DISTINCT is essential: pages can legitimately overlap (e.g. an item added
+    /// server-side mid-sync shifts the window), so counting raw rows could reach
+    /// `total` while real ids were never seen — which would authorize a prune
+    /// that deletes those missed-but-still-present tracks. Comparing unique ids
+    /// makes completeness a true coverage guarantee regardless of page ordering.
     private func phaseCompleted(_ enumeration: PagedEnumeration) -> Bool {
         if let total = enumeration.reportedTotal {
-            return enumeration.seen.count >= total
+            return Set(enumeration.seen).count >= total
         }
         return !enumeration.seen.isEmpty
     }
@@ -313,12 +319,26 @@ public struct LibrarySyncEngine: Sendable {
         var writeTime: TimeInterval = 0
         var pageNo = 0
         diag?("\(phase.rawValue): phase start")
+        // Prefetch the next page while writing the current one. Awaiting the
+        // detached task via `withTaskCancellationHandler` (rather than a bare
+        // `await pending.value`, which is NOT a cancellation point and doesn't
+        // inherit parent cancellation) ensures that if the sync is cancelled — or
+        // the app is backgrounded and a request freezes — the in-flight fetch is
+        // actually torn down instead of hanging silently until the ~1200s
+        // resource timeout. So a stalled page surfaces promptly as an error.
         var pending = Task { try await fetch(0, pageSize) }
+        func awaitPage(_ task: Task<CatalogPage<Item>, Error>) async throws -> CatalogPage<Item> {
+            try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        }
         do {
             while true {
                 try Task.checkCancellation()
                 let waitStart = Date()
-                let page = try await pending.value
+                let page = try await awaitPage(pending)
                 let waited = Date().timeIntervalSince(waitStart)
                 fetchWait += waited
                 if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
