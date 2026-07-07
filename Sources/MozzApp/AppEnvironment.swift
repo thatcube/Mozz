@@ -535,10 +535,13 @@ public final class AppEnvironment: ObservableObject {
         // updates roughly twice as often in half-as-big steps (much less
         // "stuck at a number" feel) while memory stays a handful of pages.
         let backend = makeBulkSyncBackend() ?? active.backend
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 250)
+        let diagLog = SyncDiagnosticsLog()
+        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=250")
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 250, diag: diagLog.sink)
         let summary = try await engine.sync(progress: progress)
         lastSyncSummary = "\(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists"
         lastSyncReport = Self.formatSyncReport(summary)
+        diagLog.append("SYNC DONE total=\(String(format: "%.1f", summary.duration))s tracks=\(summary.tracks) albums=\(summary.albums) artists=\(summary.artists) playlists=\(summary.playlists) pruned=\(summary.deleted)")
         // New catalog + listening → refresh the mixes off-main. Non-fatal.
         await regenerateMozzWeekly()
         await regenerateHomeMixes()

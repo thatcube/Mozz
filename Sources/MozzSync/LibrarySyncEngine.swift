@@ -116,13 +116,22 @@ public struct LibrarySyncEngine: Sendable {
     private let backend: any MusicBackend
     private let writer: CatalogWriter
     private let pageSize: Int
+    /// Optional diagnostic sink for detailed per-page timing (fetch vs write),
+    /// written to a file the debugger pulls off-device. `nil` in tests/normal use.
+    private let diag: (@Sendable (String) -> Void)?
 
     private var serverId: ServerID { backend.connection.id }
 
-    public init(backend: any MusicBackend, database: MusicDatabase, pageSize: Int = 500) {
+    public init(
+        backend: any MusicBackend,
+        database: MusicDatabase,
+        pageSize: Int = 500,
+        diag: (@Sendable (String) -> Void)? = nil
+    ) {
         self.backend = backend
         self.writer = CatalogWriter(database)
         self.pageSize = pageSize
+        self.diag = diag
     }
 
     /// Run a full catalog sync. Emits progress and returns a summary.
@@ -278,18 +287,26 @@ public struct LibrarySyncEngine: Sendable {
         var offset = 0
         var seen: [String] = []
         var reportedTotal: Int?
-        // Kick off the first fetch; each iteration prefetches the *next* page
-        // before writing the current one so the two overlap.
+        // Because the next page is prefetched while the current one is written,
+        // the time spent *awaiting* the prefetch vs. the time spent writing is a
+        // clean bottleneck signal: near-zero fetch-wait ⇒ write-bound; large
+        // fetch-wait ⇒ network/server-bound.
+        var fetchWait: TimeInterval = 0
+        var writeTime: TimeInterval = 0
         var pending = Task { try await fetch(0, pageSize) }
         do {
             while true {
                 try Task.checkCancellation()
+                let waitStart = Date()
                 let page = try await pending.value
+                fetchWait += Date().timeIntervalSince(waitStart)
                 if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
                 if page.items.isEmpty { break }
                 let nextOffset = offset + page.items.count
                 pending = Task { try await fetch(nextOffset, pageSize) }
+                let writeStart = Date()
                 try await write(page.items)
+                writeTime += Date().timeIntervalSince(writeStart)
                 seen.append(contentsOf: page.items.map(id))
                 await report(phase, seen.count, reportedTotal)
                 offset = nextOffset
@@ -302,6 +319,7 @@ public struct LibrarySyncEngine: Sendable {
         let elapsed = Date().timeIntervalSince(started)
         let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
         syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
+        diag?("\(phase.rawValue): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(Int(rate.rounded()))/s) — fetch-wait \(String(format: "%.1f", fetchWait))s, write \(String(format: "%.1f", writeTime))s")
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: phase, elapsed: elapsed)
     }
 
