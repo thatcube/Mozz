@@ -112,11 +112,20 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// Correlated existence check that keeps only albums with at least one synced
+    /// track. Post-full-sync this is always true (a no-op), but during the initial
+    /// quick-start / mid-sync it hides "empty album shells" whose tracks haven't
+    /// arrived yet. Cheap via the (serverId, albumRemoteId) track index.
+    private static let albumHasTracks = """
+        EXISTS (SELECT 1 FROM track t WHERE t.serverId = album.serverId AND t.albumRemoteId = album.remoteId)
+        """
+
     public func albumsPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [AlbumRecord] {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
                 SELECT *, \(Self.albumRepresentative) FROM album
                 \(Self.serverClause(serverId))
+                \(serverId == nil ? "WHERE" : "AND") \(Self.albumHasTracks)
                 GROUP BY serverId, albumGroupKey
                 ORDER BY albumGroupKey
                 LIMIT ? OFFSET ?
@@ -274,9 +283,23 @@ public struct LibraryRepository: Sendable {
         try await database.read { db in
             try AlbumRecord.fetchAll(db, sql: """
                 SELECT *, \(Self.albumRepresentative) FROM album
-                WHERE serverId = ?
+                WHERE serverId = ? AND \(Self.albumHasTracks)
                 GROUP BY albumGroupKey
                 ORDER BY addedAt DESC, albumGroupKey
+                LIMIT ?
+                """, arguments: [serverId, limit])
+        }
+    }
+
+    /// The most recently-added tracks, newest first. Used for the Home "Recently
+    /// Added" shelf — songs (immediately playable) rather than album shells,
+    /// which also means it populates from the first-run quick-start's track slice.
+    public func recentlyAddedTracks(serverId: ServerID, limit: Int = 20) async throws -> [TrackRecord] {
+        try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                WHERE serverId = ? AND addedAt IS NOT NULL
+                ORDER BY addedAt DESC
                 LIMIT ?
                 """, arguments: [serverId, limit])
         }

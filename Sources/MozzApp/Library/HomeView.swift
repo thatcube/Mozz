@@ -15,7 +15,7 @@ struct HomeView: View {
     @Binding var path: [AppRoute]
     @State private var mixes: [RecommendationService.HomeMix] = []
     @State private var recentlyPlayed: [TrackRecord] = []
-    @State private var recentlyAdded: [AlbumRecord] = []
+    @State private var recentlyAdded: [TrackRecord] = []
     @State private var playlists: [PlaylistRecord] = []
     @State private var likedCount = 0
     @State private var loaded = false
@@ -30,14 +30,14 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     TightHeader(title: "Home")
 
-                    if env.active != nil {
+                    if env.active != nil && !gridRows.isEmpty {
                         madeForYouGrid
                     }
                     if !recentlyPlayed.isEmpty {
                         TrackShelf(title: "Recently Played", tracks: recentlyPlayed)
                     }
                     if !recentlyAdded.isEmpty {
-                        AlbumShelf(title: "Recently Added", albums: recentlyAdded)
+                        TrackShelf(title: "Recently Added", tracks: recentlyAdded)
                     }
                     if !playlists.isEmpty {
                         PlaylistShelf(title: "Your Playlists", playlists: playlists)
@@ -93,9 +93,12 @@ struct HomeView: View {
         .padding(.horizontal, 20)
     }
 
-    /// Liked Songs followed by every mix, chunked into rows of two.
+    /// Liked Songs (only when there are liked songs) followed by every mix,
+    /// chunked into rows of two. When there's nothing to show the grid is hidden
+    /// entirely (see the `!gridRows.isEmpty` gate above) rather than showing an
+    /// empty "Liked Songs — Tap ♥ to add" placeholder on a brand-new library.
     private var gridRows: [[HomeCell]] {
-        let cells: [HomeCell] = [.liked] + mixes.map(HomeCell.mix)
+        let cells: [HomeCell] = (likedCount > 0 ? [.liked] : []) + mixes.map(HomeCell.mix)
         return stride(from: 0, to: cells.count, by: 2).map { Array(cells[$0..<min($0 + 2, cells.count)]) }
     }
 
@@ -130,7 +133,7 @@ struct HomeView: View {
         // succeeded (a cancelled/failed read keeps the prior value, never blank).
         let mixesResult = try? await env.recommendations.homeMixes()
         let played = try? await env.repository.recentlyPlayedTracks(serverId: serverId, limit: 20)
-        let added = try? await env.repository.recentlyAddedAlbums(serverId: serverId, limit: 20)
+        let added = try? await env.repository.recentlyAddedTracks(serverId: serverId, limit: 20)
         let lists = try? await env.repository.allPlaylists(serverId: serverId)
         let liked = try? await env.repository.likedTracksCount(serverId: serverId)
 

@@ -309,7 +309,7 @@ public final class AppEnvironment: ObservableObject {
         // prune). Progress flows to `syncProgress` so SetupView shows it.
         isSyncing = true
         syncProgress = nil
-        let quickStart = SyncPlan.quickStart(albumPages: 1, trackPages: 2)
+        let quickStart = SyncPlan.quickStart(tracks: 300)
         do {
             _ = try await runSync(plan: quickStart) { [weak self] p in
                 Task { @MainActor in self?.syncProgress = p }
@@ -322,11 +322,13 @@ public final class AppEnvironment: ObservableObject {
             return
         }
         isSyncing = false; syncProgress = nil
-        guard isSettingUp else { return }   // user tapped "Browse now" meanwhile
 
-        // Tier 2: full catalog in the background. `isSettingUp` flips false in
-        // performActivation right after this returns, dropping the user into the
-        // app while the full sync continues under the persistent sync bar.
+        // Tier 2: full catalog in the background — ALWAYS, even if the user tapped
+        // "Browse now" during the quick start (in that case they're in the app on
+        // only a recent slice, so the full sync matters even more). `isSettingUp`
+        // flips false in performActivation right after this returns (if it isn't
+        // already), dropping the user into the app while the full sync continues
+        // under the persistent sync bar.
         startSync()
     }
 
@@ -567,12 +569,14 @@ public final class AppEnvironment: ObservableObject {
         // Catalog sync uses a bulk-timeout backend (a single large page can take
         // ~60s to generate on a slow self-hosted server). See LibrarySyncEngine
         // for the phase orchestration (heavy /Items phases run sequentially) and
-        // JellyfinBackend.pageQuery for the query-cost tuning. Page size 1000
-        // minimizes round trips, which dominate on a latency-bound server.
+        // JellyfinBackend.pageQuery for the query-cost tuning. The full sync uses
+        // a large page (1000) to minimize round trips; the quick start uses a
+        // small page (plan.pageSize) so its single request returns fast.
         let backend = makeBulkSyncBackend() ?? active.backend
+        let pageSize = plan.pageSize ?? 1000
         let diagLog = SyncDiagnosticsLog()
-        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=1000 plan=\(plan.prune ? "full" : "quick")")
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 1000, diag: diagLog.sink)
+        diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=\(pageSize) plan=\(plan.prune ? "full" : "quick")")
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: pageSize, diag: diagLog.sink)
         let summary: SyncSummary
         do {
             summary = try await engine.sync(plan: plan, progress: progress)

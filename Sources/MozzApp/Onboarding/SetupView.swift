@@ -47,8 +47,9 @@ struct SetupView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .padding(.horizontal, 40)
-                Text("Your library keeps syncing in the background.")
+                Text("Your library keeps syncing in the background. Keep Mozz open until it finishes.")
                     .font(.caption2).foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -77,7 +78,17 @@ struct SetupView: View {
 
     private var subtitle: String {
         if let error = env.setupError { return error }
-        return "This can take a moment on first sign-in — larger libraries take longer."
+        // Set expectations up front — the two backends differ a lot: Plex serves
+        // the catalog fast, self-hosted Jellyfin can take several minutes on a
+        // large library. Either way we get you browsing on a recent slice first.
+        switch env.active?.connection.kind {
+        case .plex:
+            return "Getting your library ready — this is usually quick with Plex."
+        case .jellyfin:
+            return "Getting your library ready. A large Jellyfin library can take a few minutes — you'll be able to browse in a moment while the rest loads."
+        default:
+            return "Getting your library ready — larger libraries take longer."
+        }
     }
 
     private func phaseLabel(_ p: SyncProgress) -> String {

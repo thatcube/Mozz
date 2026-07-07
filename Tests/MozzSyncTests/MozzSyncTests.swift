@@ -129,14 +129,16 @@ final class LibrarySyncEngineTests: XCTestCase {
         let seededTracks = try await repository.trackCount(serverId: "srv")
         XCTAssertEqual(seededTracks, 100)
 
-        // Quick start: 1 album page + 2 track pages at pageSize 10, no artists,
-        // no playlists, no prune.
+        // Quick start: newest tracks in ONE page (engine pageSize 10), no albums,
+        // no artists, no playlists, no prune. (plan.pageSize is applied by
+        // AppEnvironment when it builds the engine; here the engine's own
+        // pageSize governs, so 1 track page = 10 tracks.)
         let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 10)
-        let summary = try await engine.sync(plan: .quickStart(albumPages: 1, trackPages: 2))
+        let summary = try await engine.sync(plan: .quickStart(tracks: 300))
 
         // Only the bounded slice was enumerated this run…
-        XCTAssertEqual(summary.albums, 10)   // 1 page × 10
-        XCTAssertEqual(summary.tracks, 20)   // 2 pages × 10
+        XCTAssertEqual(summary.albums, 0)    // albums skipped entirely
+        XCTAssertEqual(summary.tracks, 10)   // 1 page × 10
         XCTAssertEqual(summary.deleted, 0)   // MUST NOT prune on a bounded plan
 
         // …and the pre-existing catalog is fully intact (nothing pruned).

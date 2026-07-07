@@ -117,13 +117,17 @@ public struct SyncPlan: Sendable {
     /// Prune rows the server no longer has. Only safe on a full enumeration — a
     /// bounded plan MUST NOT prune (it hasn't seen the whole library).
     public var prune: Bool
+    /// Page size override (nil = the engine's default). A bounded quick start uses
+    /// a small page so its one request returns fast for an immediate first impression.
+    public var pageSize: Int?
 
-    public init(maxArtistPages: Int?, maxAlbumPages: Int?, maxTrackPages: Int?, includePlaylists: Bool, prune: Bool) {
+    public init(maxArtistPages: Int?, maxAlbumPages: Int?, maxTrackPages: Int?, includePlaylists: Bool, prune: Bool, pageSize: Int? = nil) {
         self.maxArtistPages = maxArtistPages
         self.maxAlbumPages = maxAlbumPages
         self.maxTrackPages = maxTrackPages
         self.includePlaylists = includePlaylists
         self.prune = prune
+        self.pageSize = pageSize
     }
 
     public static let full = SyncPlan(
@@ -131,13 +135,16 @@ public struct SyncPlan: Sendable {
         includePlaylists: true, prune: true
     )
 
-    /// A recent, immediately-usable slice: the newest `albumPages` of albums and
-    /// `trackPages` of tracks (with newest-first ordering), no artists/playlists,
-    /// no prune. Fast enough to unblock the app in ~1-2 min on a slow server.
-    public static func quickStart(albumPages: Int = 1, trackPages: Int = 2) -> SyncPlan {
+    /// A tiny, immediately-usable slice: the newest `tracks` in ONE small request
+    /// (newest-first), no albums/artists/playlists, no prune. On a ~26 item/s
+    /// server ~300 tracks lands in ~10-12s — just enough to make the app playable
+    /// on first launch. Albums/artists fill in via the background full sync that
+    /// follows (empty album shells are hidden until their tracks arrive), and a
+    /// track carries its own album art + title so "Recently Added" songs render.
+    public static func quickStart(tracks: Int = 300) -> SyncPlan {
         SyncPlan(
-            maxArtistPages: 0, maxAlbumPages: albumPages, maxTrackPages: trackPages,
-            includePlaylists: false, prune: false
+            maxArtistPages: 0, maxAlbumPages: 0, maxTrackPages: 1,
+            includePlaylists: false, prune: false, pageSize: tracks
         )
     }
 }

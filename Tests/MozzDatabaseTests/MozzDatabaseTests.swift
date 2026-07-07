@@ -92,13 +92,23 @@ final class SchemaAndWriteTests: XCTestCase {
                   genres: ["Jazz", "Rock"], addedAt: Date(timeIntervalSince1970: 9_000)),
             Album(id: "nodate", title: "No Date", artistName: "C", artistID: "a3",
                   genres: [], addedAt: nil),
+            Album(id: "empty", title: "Empty Shell", artistName: "D", artistID: "a4",
+                  genres: [], addedAt: Date(timeIntervalSince1970: 5_000)),
+        ], serverId: server.id)
+        // Give three albums a track so they're browsable; "empty" gets none, so
+        // it must be hidden (the empty-album-shell filter added for quick start).
+        try await writer.upsertTracks([
+            Track(id: "t_old", title: "T", albumID: "old", artistName: "A"),
+            Track(id: "t_new", title: "T", albumID: "new", artistName: "B"),
+            Track(id: "t_nodate", title: "T", albumID: "nodate", artistName: "C"),
         ], serverId: server.id)
         try await writer.upsertPlaylists([
             Playlist(id: "p2", title: "Road Trip"),
             Playlist(id: "p1", title: "Chill"),
         ], serverId: server.id)
 
-        // Recently added: newest addedAt first, nil sorts last.
+        // Recently added: newest addedAt first, nil sorts last; the track-less
+        // "empty" album is excluded even though its addedAt would place it 2nd.
         let recent = try await repo.recentlyAddedAlbums(serverId: server.id, limit: 10)
         XCTAssertEqual(recent.map(\.remoteId), ["new", "old", "nodate"])
 
