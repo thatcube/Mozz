@@ -205,7 +205,7 @@ public struct LibrarySyncEngine: Sendable {
             duration: Date().timeIntervalSince(started)
         )
         progress?(SyncProgress(phase: .done, itemsSynced: summary.tracks, totalCount: summary.tracks))
-        syncLog.info("sync complete: \(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists, \(summary.playlists) playlists, \(summary.deleted) pruned in \(String(format: "%.1f", summary.duration))s")
+        syncLog.notice("sync complete: \(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists, \(summary.playlists) playlists, \(summary.deleted) pruned in \(String(format: "%.1f", summary.duration))s")
         return summary
     }
 
@@ -261,7 +261,7 @@ public struct LibrarySyncEngine: Sendable {
         }
         let elapsed = Date().timeIntervalSince(started)
         let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
-        syncLog.info("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
+        syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal)
     }
 

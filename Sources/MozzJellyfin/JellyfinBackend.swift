@@ -235,10 +235,14 @@ public struct JellyfinBackend: MusicBackend {
             URLQueryItem(name: "SortBy", value: "SortName"),
             URLQueryItem(name: "SortOrder", value: "Ascending"),
             URLQueryItem(name: "Recursive", value: "true"),
-            // Report the total so the sync engine can tell a complete
-            // enumeration from a truncated one and only prune when complete
-            // (measured to add no meaningful server cost vs. leaving it off).
-            URLQueryItem(name: "EnableTotalRecordCount", value: "true"),
+            // Request the total record count ONLY on the first page. Jellyfin
+            // recomputes it with a full COUNT query on every request, which is
+            // cheap for a few thousand artists but expensive for tens of
+            // thousands of albums/songs — and doing it on every page was a major
+            // drag on large libraries. The first page's total is all the sync
+            // engine needs (prune-completeness + the progress bar's total); later
+            // pages skip the COUNT entirely.
+            URLQueryItem(name: "EnableTotalRecordCount", value: offset == 0 ? "true" : "false"),
         ]
     }
 
