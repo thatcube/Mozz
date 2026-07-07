@@ -220,6 +220,17 @@ public final class AppEnvironment: ObservableObject {
         do {
             try await activate(saved)
             restoreLastPlaybackSession()
+            // A restored session with an EMPTY catalog means a previous first sync
+            // never finished — or the app was reinstalled while the keychain
+            // session survived (iOS keeps keychain across uninstall). Either way,
+            // kick off a sync so the user isn't stranded on an empty library with
+            // no sync running. finishActivation already started the media backfill;
+            // this starts the catalog itself. (A populated catalog is left as-is —
+            // gateInitialSync's re-login refresh only runs on an explicit sign-in.)
+            if let serverId = active?.connection.id,
+               ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0 {
+                startSync()
+            }
         } catch {
             SessionPersistence.clear(credentials)
         }
@@ -259,7 +270,7 @@ public final class AppEnvironment: ObservableObject {
             // First real sign-in → run the initial sync and stay on the setup
             // screen until there's enough to browse (or the user taps "Browse
             // now"), so we don't drop them onto an empty Home.
-            try await gateInitialSync()
+            await gateInitialSync()
             guard generation == activationGeneration else { return }  // superseded
             setupError = nil
             isSettingUp = false                 // success → enter the app
@@ -276,22 +287,18 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
-    /// First-run catalog population, two-tier so the app is usable fast even when
-    /// a full mirror takes many minutes on a slow self-hosted server:
-    ///   1. **Quick start** (blocking, ~1-2 min): sync the newest slice — a page
-    ///      of albums + a couple pages of tracks (newest-first), no prune — so the
-    ///      user drops into a browsable, PLAYABLE recent library instead of empty
-    ///      album shells. "Browse now" is available the moment it's running.
-    ///   2. **Full sync** (background): the entire catalog via `startSync()`, with
-    ///      the persistent sync bar; UPSERTs, so it just fills in the rest.
-    private func gateInitialSync() async throws {
+    /// First-run catalog population. `startSync()` does the two-tier work (a tiny
+    /// tracks-only quick start on an empty catalog, then the full library), so
+    /// this just kicks it off and keeps the setup screen up until the quick start
+    /// has landed some playable songs — then `performActivation` drops the user
+    /// into the app while the full sync continues under the persistent bar.
+    private func gateInitialSync() async {
         guard let serverId = active?.connection.id else { return }
         let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
         if existing > 0 {
             // Re-login to a server we already have a catalog for: don't block —
             // enter instantly on the cached library, but kick off a background
-            // refresh so changes made on the server since last time show up. The
-            // persistent sync bar keeps the user informed; it never gates entry.
+            // refresh so server-side changes show up. Never gates entry.
             startSync()
             return
         }
@@ -301,35 +308,17 @@ public final class AppEnvironment: ObservableObject {
             cancelSync()
             while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         }
-        // Let the user bail to the app whenever they like; the quick start just
-        // makes the *default* wait land them on real, playable content.
+        // Let the user bail to the app whenever they like; the wait below just
+        // makes the *default* land them on real, playable content.
         canEnterEarly = true
-
-        // Tier 1: quick-start the newest slice on the setup screen (bounded, no
-        // prune). Progress flows to `syncProgress` so SetupView shows it.
-        isSyncing = true
-        syncProgress = nil
-        let quickStart = SyncPlan.quickStart(tracks: 300)
-        do {
-            _ = try await runSync(plan: quickStart) { [weak self] p in
-                Task { @MainActor in self?.syncProgress = p }
-            }
-        } catch {
-            // Quick start failed (e.g. offline) — surface via the normal error
-            // path; don't leave the user on a blank setup screen.
-            isSyncing = false; syncProgress = nil
-            if !(error is CancellationError) { throw error }
-            return
+        startSync()   // quick start (empty catalog) → full, in the background
+        // Hold the setup screen only until the quick start lands the first songs
+        // (or the sync ends). On a ~26 item/s server that's ~10s, not minutes.
+        while isSettingUp {
+            let tracks = (try? await repository.trackCount(serverId: serverId)) ?? 0
+            if tracks > 0 || !isSyncing { break }
+            try? await Task.sleep(nanoseconds: 300_000_000)
         }
-        isSyncing = false; syncProgress = nil
-
-        // Tier 2: full catalog in the background — ALWAYS, even if the user tapped
-        // "Browse now" during the quick start (in that case they're in the app on
-        // only a recent slice, so the full sync matters even more). `isSettingUp`
-        // flips false in performActivation right after this returns (if it isn't
-        // already), dropping the user into the app while the full sync continues
-        // under the persistent sync bar.
-        startSync()
     }
 
     /// User tapped "Browse now" on the setup screen: enter the app while the sync
@@ -514,6 +503,11 @@ public final class AppEnvironment: ObservableObject {
     /// running when the user leaves Settings or refreshes Home, and its progress
     /// is reflected everywhere via `isSyncing`/`syncProgress`. Single-flight: a
     /// second tap while syncing is a no-op.
+    ///
+    /// Two-tier on an EMPTY catalog: a tiny tracks-only quick start (~300 songs,
+    /// ~10s) so the app is playable almost immediately, then the full library in
+    /// the same task. On a populated catalog (a re-sync / "Sync Now") it's just
+    /// the full sync — the content is already there, so no quick start is needed.
     public func startSync() {
         guard !isSyncing, active != nil else { return }
         isSyncing = true
@@ -532,10 +526,20 @@ public final class AppEnvironment: ObservableObject {
                 syncProgress = nil
                 bgTask.end()
             }
+            let emitProgress: @Sendable (SyncProgress) -> Void = { progress in
+                Task { @MainActor in self.syncProgress = progress }
+            }
             do {
-                _ = try await syncNow { progress in
-                    Task { @MainActor in self.syncProgress = progress }
+                var isEmpty = false
+                if let serverId = active?.connection.id {
+                    isEmpty = ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0
                 }
+                // Tier 1 (empty catalog only): make the app playable in ~10s.
+                if isEmpty {
+                    _ = try await runSync(plan: .quickStart(tracks: 300), progress: emitProgress)
+                }
+                // Tier 2 (always): the full library + post-sync housekeeping + prune.
+                _ = try await syncNow(progress: emitProgress)
             } catch is CancellationError {
                 // User cancelled — leave the partial catalog; next sync resumes.
             } catch {
