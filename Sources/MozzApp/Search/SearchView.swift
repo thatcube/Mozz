@@ -145,17 +145,19 @@ struct SearchView: View {
         .frame(height: fieldHeight)
         // The gray/glass surface lives in a BACKGROUND layer, never wrapping the
         // content — so the TextField's identity is stable (swapping it on focus
-        // was tearing down the field mid-first-responder and freezing the app),
-        // and the glass is genuinely ABSENT at rest (Apple's field is a plain
-        // gray capsule until it pins under scrolling content — no glass, no glass
-        // shadow). The glass only fades in once scrolled/focused.
+        // was tearing down the field mid-first-responder and freezing the app).
+        // BOTH layers are always mounted and only their opacity crossfades: an
+        // inserted (`if`) glass layer with a .transition would be placed at its
+        // FINAL frame immediately while the gray field animated its position up
+        // on focus — reading as two fields at two positions. Persistent layers
+        // both move with the field, so the crossfade happens in place. Glass at
+        // opacity 0 is fully invisible (no stray glass shadow at rest).
         .background {
             ZStack {
                 Capsule().fill(Color.searchFieldRest)
                     .opacity(fieldShowsGlass ? 0 : 1)
-                if fieldShowsGlass {
-                    GlassCapsuleFill().transition(.opacity)
-                }
+                GlassCapsuleFill()
+                    .opacity(fieldShowsGlass ? 1 : 0)
             }
             .animation(fieldTransition, value: fieldShowsGlass)
         }
@@ -168,13 +170,12 @@ struct SearchView: View {
         .onTapGesture { focused = true }
     }
 
-    /// The field shows Liquid Glass once the page has scrolled off the top —
-    /// i.e. only when content is actually behind it, matching the system search
-    /// bar. Deliberately NOT tied to focus: swapping the material during the
-    /// focus slide-up made the glass render at the pinned position while the gray
-    /// field animated up into it (two fields, two positions). Focusing now just
-    /// slides the gray field up; glass fades in later, in place, on scroll.
-    private var fieldShowsGlass: Bool { scrolled }
+    /// The field shows Liquid Glass when the field is focused OR the page has
+    /// scrolled off the top; at rest at the top it's the plain gray fill. Both
+    /// the gray and glass background layers are persistent (see `searchField`),
+    /// so this can drive focus too without the two-position ghosting that an
+    /// inserted glass layer caused.
+    private var fieldShowsGlass: Bool { scrolled || isActive }
 
     @ViewBuilder private var resultsContent: some View {
         if trimmedQuery.isEmpty {
