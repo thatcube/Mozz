@@ -37,6 +37,20 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
     /// yet determined or not applicable.
     public var hasPlexPass: Bool?
 
+    /// Subsonic-only: the server's self-reported product/type name, e.g.
+    /// `"Navidrome"`, `"gonic"`, `"Ampache"` (the `subsonic-response.type`
+    /// field). `nil` for non-Subsonic backends or when not yet detected.
+    /// Displayed at runtime so the UI can show what the generic `.subsonic`
+    /// `BackendKind` actually connected to, without needing a dedicated enum
+    /// case per server product.
+    public var serverProduct: String?
+    /// Subsonic-only: whether the server advertised OpenSubsonic API support
+    /// (`subsonic-response.openSubsonic == true`, or a non-404
+    /// `getOpenSubsonicExtensions`). `false` means "classic Subsonic profile"
+    /// — a normal, non-error state, not a failed probe. Always `false` for
+    /// non-Subsonic backends.
+    public var isOpenSubsonic: Bool
+
     /// When these capabilities were last probed.
     public var detectedAt: Date
 
@@ -52,6 +66,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         supportsNormalizationGain: Bool = false,
         supportsProgressReporting: Bool = true,
         hasPlexPass: Bool? = nil,
+        serverProduct: String? = nil,
+        isOpenSubsonic: Bool = false,
         detectedAt: Date = Date()
     ) {
         self.backend = backend
@@ -65,6 +81,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.supportsNormalizationGain = supportsNormalizationGain
         self.supportsProgressReporting = supportsProgressReporting
         self.hasPlexPass = hasPlexPass
+        self.serverProduct = serverProduct
+        self.isOpenSubsonic = isOpenSubsonic
         self.detectedAt = detectedAt
     }
 }

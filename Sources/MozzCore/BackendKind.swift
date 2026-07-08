@@ -9,12 +9,22 @@ import Foundation
 public enum BackendKind: String, Codable, Sendable, Hashable, CaseIterable {
     case plex
     case jellyfin
+    /// Subsonic / OpenSubsonic REST API. A single generic conformer covers the
+    /// whole family (Navidrome, Gonic, Ampache, LMS, …); the *specific* product
+    /// and version are runtime-detected facts on ``ServerCapabilities``
+    /// (`serverProduct`/`isOpenSubsonic`), not separate `BackendKind` cases —
+    /// there is exactly one Subsonic wire protocol to speak, and branching the
+    /// enum per server product would just duplicate the same client for no
+    /// behavioral difference. v1 is scoped/QA'd against Navidrome; other
+    /// OpenSubsonic servers are best-effort.
+    case subsonic
 
     /// Human-facing name for the backend.
     public var displayName: String {
         switch self {
         case .plex: return "Plex"
         case .jellyfin: return "Jellyfin"
+        case .subsonic: return "Subsonic"
         }
     }
 }

@@ -1,0 +1,38 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "navidrome",
+    "serverVersion": "0.51.1",
+    "openSubsonic": true,
+    "artists": {
+      "ignoredArticles": "The El La Los Las Le Les",
+      "index": [
+        {
+          "name": "A",
+          "artist": [
+            {
+              "id": "ar-a1f9",
+              "name": "Aphex Twin",
+              "coverArt": "ar-a1f9",
+              "albumCount": 2,
+              "starred": "2023-04-01T12:00:00.000Z",
+              "musicBrainzId": "f22942a1-6f70-4f48-866e-238cb2308fbd",
+              "sortName": "Aphex Twin"
+            }
+          ]
+        },
+        {
+          "name": "B",
+          "artist": [
+            {
+              "id": "ar-b207",
+              "name": "Bjork",
+              "albumCount": 1
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

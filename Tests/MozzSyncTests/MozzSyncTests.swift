@@ -65,10 +65,63 @@ struct MockBackend: MusicBackend {
     func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {}
     func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws {}
 
-    private static func page<T>(_ all: [T], offset: Int, limit: Int) -> CatalogPage<T> {
+    fileprivate static func page<T>(_ all: [T], offset: Int, limit: Int) -> CatalogPage<T> {
         guard offset < all.count else { return CatalogPage(items: [], totalCount: all.count) }
         let end = min(offset + limit, all.count)
         return CatalogPage(items: Array(all[offset..<end]), totalCount: all.count)
+    }
+}
+
+/// Wraps ``MockBackend`` but advertises a real bulk enumerator, simulating a
+/// Subsonic-style backend so ``LibrarySyncEngine``'s bulk dispatch path (and
+/// its stricter, unknown-total-never-prunes gating) can be exercised without
+/// depending on the MozzSubsonic module.
+struct BulkMockBackend: MusicBackend {
+    var inner: MockBackend
+    /// When `true`, every yielded page omits `totalCount` — simulating a
+    /// server that cannot report an expected total (e.g. missing `songCount`
+    /// on one or more albums during an album-walk).
+    var totalIsUnknown = false
+    /// Optional bulk-specific error to throw partway through enumeration,
+    /// simulating a network failure mid-walk.
+    var failAfterPages: Int?
+
+    var connection: ServerConnection { inner.connection }
+    func detectCapabilities() async throws -> ServerCapabilities { try await inner.detectCapabilities() }
+    func fetchArtists(offset: Int, limit: Int) async throws -> CatalogPage<Artist> { try await inner.fetchArtists(offset: offset, limit: limit) }
+    func fetchAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album> { try await inner.fetchAlbums(offset: offset, limit: limit) }
+    func fetchTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track> { try await inner.fetchTracks(offset: offset, limit: limit) }
+    func fetchPlaylists(offset: Int, limit: Int) async throws -> CatalogPage<Playlist> { try await inner.fetchPlaylists(offset: offset, limit: limit) }
+    func fetchPlaylistItems(playlistID: String, offset: Int, limit: Int) async throws -> CatalogPage<Track> {
+        try await inner.fetchPlaylistItems(playlistID: playlistID, offset: offset, limit: limit)
+    }
+    func streamSource(for track: Track, options: StreamOptions) async throws -> StreamSource { try await inner.streamSource(for: track, options: options) }
+    func originalFileURL(for track: Track) throws -> URL { try inner.originalFileURL(for: track) }
+    func artworkURL(for artwork: ArtworkRef, size: Int) -> URL? { inner.artworkURL(for: artwork, size: size) }
+    func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws { try await inner.setFavorite(isFavorite, itemID: itemID, type: type) }
+    func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws { try await inner.setRating(stars, itemID: itemID, type: type) }
+
+    var hasBulkEnumerator: Bool { true }
+
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<BulkTrackPage, Error> {
+        let tracks = inner.tracks
+        let total = totalIsUnknown ? nil : tracks.count
+        let failAfterPages = self.failAfterPages
+        return AsyncThrowingStream { continuation in
+            var offset = 0
+            var pageIndex = 0
+            while offset < tracks.count {
+                if let failAfterPages, pageIndex >= failAfterPages {
+                    continuation.finish(throwing: MozzError.transport("simulated bulk-enumeration failure"))
+                    return
+                }
+                let end = min(offset + pageSize, tracks.count)
+                continuation.yield(CatalogPage(items: Array(tracks[offset..<end]), totalCount: total))
+                offset = end
+                pageIndex += 1
+            }
+            continuation.finish()
+        }
     }
 }
 
@@ -277,5 +330,112 @@ final class LibrarySyncEngineTests: XCTestCase {
         let repository = LibraryRepository(database)
         let items = try await repository.tracks(forPlaylistRemoteId: "pl1", serverId: "srv")
         XCTAssertEqual(items.map(\.remoteId), ["t3", "t1", "t2"])
+    }
+
+    // MARK: - Bulk enumerator dispatch (architecture point 4)
+
+    func testBulkEnumeratorIsPreferredOverFlatPager() async throws {
+        let database = try MusicDatabase.inMemory()
+        var mock = MockBackend()
+        mock.tracks = makeTracks(23)
+        let backend = BulkMockBackend(inner: mock)
+
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 7)
+        let summary = try await engine.sync()
+
+        // All 23 tracks arrived via the bulk walk (dispatch didn't silently
+        // fall back to the flat fetchTracks pager, which MockBackend backs
+        // with the same array — so this alone doesn't prove the bulk path
+        // was used, but combined with the prune-safety tests below it does).
+        XCTAssertEqual(summary.tracks, 23)
+        let repository = LibraryRepository(database)
+        let count = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(count, 23)
+    }
+
+    func testBulkEnumeratorUnknownTotalNeverPrunes() async throws {
+        // The core B2/prune-safety guarantee for Subsonic-shaped backends:
+        // if the bulk enumerator cannot derive an expected total (e.g. one
+        // or more albums lacked a `songCount` during the album-walk), the
+        // engine must NEVER treat "non-empty walk" as "complete" and must
+        // skip pruning — even though every yielded page was non-empty.
+        let database = try MusicDatabase.inMemory()
+        var mock = MockBackend()
+        mock.tracks = makeTracks(10)
+        let seedBackend = BulkMockBackend(inner: mock)
+        _ = try await LibrarySyncEngine(backend: seedBackend, database: database, pageSize: 4).sync()
+
+        let repository = LibraryRepository(database)
+        let seeded = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(seeded, 10)
+
+        // Re-sync: server now only has 6 tracks AND cannot report a total
+        // (simulating a missing songCount during the album walk).
+        mock.tracks = Array(makeTracks(10).prefix(6))
+        let flakyBackend = BulkMockBackend(inner: mock, totalIsUnknown: true)
+        let summary = try await LibrarySyncEngine(backend: flakyBackend, database: database, pageSize: 4).sync()
+
+        let after = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(after, 10, "unknown-total bulk enumeration must never authorize pruning")
+        XCTAssertEqual(summary.deleted, 0)
+    }
+
+    func testBulkEnumeratorKnownTotalPrunesWhenComplete() async throws {
+        // Contrast case: when the bulk enumerator DOES derive a total and
+        // the walk fully matches it, pruning proceeds normally.
+        let database = try MusicDatabase.inMemory()
+        var mock = MockBackend()
+        mock.tracks = makeTracks(10)
+        let seedBackend = BulkMockBackend(inner: mock)
+        _ = try await LibrarySyncEngine(backend: seedBackend, database: database, pageSize: 4).sync()
+
+        mock.tracks = Array(makeTracks(10).prefix(6))
+        let resyncBackend = BulkMockBackend(inner: mock, totalIsUnknown: false)
+        let summary = try await LibrarySyncEngine(backend: resyncBackend, database: database, pageSize: 4).sync()
+
+        let repository = LibraryRepository(database)
+        let after = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(after, 6, "a fully-enumerated, correctly-totalled walk should prune deleted tracks")
+        XCTAssertEqual(summary.deleted, 4)
+    }
+
+    func testBulkEnumeratorMidWalkFailurePropagatesAndDoesNotPrune() async throws {
+        // A backend whose bulk stream throws partway through (e.g. a
+        // getAlbum(id:) network failure mid album-walk) must surface the
+        // error and must not prune the previously-healthy catalog.
+        let database = try MusicDatabase.inMemory()
+        var mock = MockBackend()
+        mock.tracks = makeTracks(10)
+        let seedBackend = BulkMockBackend(inner: mock)
+        _ = try await LibrarySyncEngine(backend: seedBackend, database: database, pageSize: 4).sync()
+
+        let flakyBackend = BulkMockBackend(inner: mock, failAfterPages: 1)
+        do {
+            _ = try await LibrarySyncEngine(backend: flakyBackend, database: database, pageSize: 4).sync()
+            XCTFail("expected mid-walk failure to propagate")
+        } catch {
+            // expected
+        }
+
+        let repository = LibraryRepository(database)
+        let after = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(after, 10, "a mid-walk failure must not prune the previously-synced catalog")
+    }
+
+    func testBulkEnumeratorRespectsQuickStartBoundAndUsesFlatPager() async throws {
+        // A bounded quick-start plan must never invoke the (whole-catalog)
+        // bulk walk, even when the backend advertises one — quick start
+        // relies on the flat pager's offset/limit semantics to fetch just
+        // the newest slice, and never prunes regardless.
+        let database = try MusicDatabase.inMemory()
+        var mock = MockBackend()
+        mock.tracks = makeTracks(100)
+        let backend = BulkMockBackend(inner: mock, totalIsUnknown: true)
+
+        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: 10)
+        let summary = try await engine.sync(plan: .quickStart(tracks: 300))
+
+        XCTAssertEqual(summary.tracks, 10, "quick start must use the bounded flat pager, not the whole-catalog bulk walk")
+        XCTAssertEqual(summary.deleted, 0)
     }
 }

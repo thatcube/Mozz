@@ -10,6 +10,7 @@ import MozzEnrichment
 import MozzSync
 import MozzPlex
 import MozzJellyfin
+import MozzSubsonic
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -1196,6 +1197,13 @@ public final class AppEnvironment: ObservableObject {
             return PlexBackend(connection: active.connection, token: stored.token,
                                clientInfo: clientInfo, transport: bulk,
                                musicSectionIDs: sectionIDs)
+        case .subsonic:
+            // SubsonicBackend.init throws (a corrupted/undecodable credential
+            // envelope) — the bulk-sync backend is a best-effort rebuild, so a
+            // failure here just falls back to the already-active interactive
+            // backend (matching this function's documented nil-on-failure
+            // contract) rather than propagating.
+            return try? SubsonicBackend(connection: active.connection, token: stored.token, transport: bulk)
         }
     }
 
@@ -1240,6 +1248,15 @@ public final class AppEnvironment: ObservableObject {
                     if let updated { SessionPersistence.save(updated, to: credentials) }
                 }
             }
+            return (connection, backend)
+        case .subsonic:
+            let connection = ServerConnection(
+                id: Self.serverId(kind: .subsonic, baseURL: stored.baseURL, username: stored.userID),
+                kind: .subsonic, name: stored.serverName, baseURL: stored.baseURL,
+                userID: stored.userID, clientIdentifier: stored.clientIdentifier,
+                musicSectionID: stored.musicSectionID
+            )
+            let backend = try SubsonicBackend(connection: connection, token: stored.token, transport: URLSessionTransport())
             return (connection, backend)
         }
     }
@@ -1624,8 +1641,16 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Helpers
 
-    public static func serverId(kind: BackendKind, baseURL: URL) -> String {
-        "\(kind.rawValue)-\(baseURL.absoluteString)"
+    public static func serverId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
+        // Subsonic servers commonly host multiple independent accounts
+        // (architecture point 9) — folding the normalized username into the
+        // id keeps two accounts on the same server from colliding into a
+        // single local library/download/sync identity. Jellyfin/Plex callers
+        // never pass `username`, so their ids are byte-for-byte unchanged.
+        guard let username, !username.isEmpty else {
+            return "\(kind.rawValue)-\(baseURL.absoluteString)"
+        }
+        return "\(kind.rawValue)-\(baseURL.absoluteString)-\(username.lowercased())"
     }
 
     static func demoClipURL() throws -> URL {

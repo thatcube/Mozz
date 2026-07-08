@@ -1,0 +1,17 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "playlists": {
+      "playlist": [
+        {
+          "id": "pl-7742",
+          "name": "Late Night",
+          "songCount": 42,
+          "duration": 9000,
+          "coverArt": "pl-7742"
+        }
+      ]
+    }
+  }
+}

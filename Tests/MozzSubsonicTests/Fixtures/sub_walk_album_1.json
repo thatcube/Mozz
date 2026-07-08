@@ -1,0 +1,16 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "album": {
+      "id": "al-w1",
+      "name": "Album One",
+      "artist": "Test Artist",
+      "songCount": 2,
+      "song": [
+        { "id": "sg-w1", "title": "Song One", "albumId": "al-w1", "artist": "Test Artist", "suffix": "flac", "track": 1, "duration": 200 },
+        { "id": "sg-w2", "title": "Song Two", "albumId": "al-w1", "artist": "Test Artist", "suffix": "flac", "track": 2, "duration": 210 }
+      ]
+    }
+  }
+}

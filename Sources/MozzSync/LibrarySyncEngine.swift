@@ -255,13 +255,7 @@ public struct LibrarySyncEngine: Sendable {
                 report: report
             )
             await complete(albumIDs)
-            trackIDs = try await syncPages(
-                phase: .tracks, maxPages: plan.maxTrackPages,
-                fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
-                write: { try await writer.upsertTracks($0, serverId: serverId) },
-                id: \.id,
-                report: report
-            )
+            trackIDs = try await syncTracks(plan: plan, report: report)
             await complete(trackIDs)
             artistIDs = try await artistsTask
             await complete(artistIDs)
@@ -338,6 +332,9 @@ public struct LibrarySyncEngine: Sendable {
         if let total = enumeration.reportedTotal {
             return Set(enumeration.seen).count >= total
         }
+        if enumeration.requiresKnownTotal {
+            return false
+        }
         return !enumeration.seen.isEmpty
     }
 
@@ -350,6 +347,17 @@ public struct LibrarySyncEngine: Sendable {
         var reportedTotal: Int?
         var phase: SyncProgress.Phase = .syncing
         var elapsed: TimeInterval = 0
+        /// Set for an enumeration that came from a backend's authoritative
+        /// bulk enumerator (``MusicBackend/enumerateAllTracks(pageSize:)``,
+        /// e.g. Subsonic's album-walk). Such a backend derives its total
+        /// UPFRONT (before yielding any items), so a `nil` total here means
+        /// the total was genuinely unknowable (not just "this backend never
+        /// reports one") — completeness is therefore NOT provable, and
+        /// `phaseCompleted` must refuse the "non-empty ⇒ complete" fallback
+        /// it otherwise allows a plain flat-pager phase (see architecture
+        /// point 3: protect offline data by never pruning on an unprovable
+        /// count).
+        var requiresKnownTotal: Bool = false
     }
 
     /// Page one entity type to exhaustion, writing each batch and collecting the
@@ -443,6 +451,66 @@ public struct LibrarySyncEngine: Sendable {
         syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
         diag?("\(phase.rawValue): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(Int(rate.rounded()))/s) — fetch-wait \(String(format: "%.1f", fetchWait))s, write \(String(format: "%.1f", writeTime))s")
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: phase, elapsed: elapsed)
+    }
+
+    /// Dispatch the tracks phase to whichever enumeration the backend and plan
+    /// call for. A bounded plan (quick start) ALWAYS uses the flat pager —
+    /// `enumerateAllTracks` walks the whole catalog by design, which has no
+    /// natural "first N pages" bound the way a plain offset/limit pager does,
+    /// and the quick start's whole point is a fast, tiny, non-authoritative
+    /// preview (`plan.prune` is already `false` for it regardless). Only a
+    /// full plan on a backend that advertises ``MusicBackend/hasBulkEnumerator``
+    /// prefers the authoritative bulk path (architecture point 4); every other
+    /// backend/plan combination is byte-for-byte the pre-existing flat-pager
+    /// behavior.
+    private func syncTracks(
+        plan: SyncPlan,
+        report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
+    ) async throws -> PagedEnumeration {
+        if backend.hasBulkEnumerator && plan.maxTrackPages == nil {
+            return try await syncTracksBulk(report: report)
+        }
+        return try await syncPages(
+            phase: .tracks, maxPages: plan.maxTrackPages,
+            fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
+            write: { try await writer.upsertTracks($0, serverId: serverId) },
+            id: \.id,
+            report: report
+        )
+    }
+
+    /// Consume a backend's authoritative ``MusicBackend/enumerateAllTracks(pageSize:)``
+    /// stream, writing each batch as it arrives. Unlike ``syncPages``, this
+    /// enumeration is NOT prefetch-overlapped with its own write (the backend
+    /// controls its own internal pacing/concurrency, e.g. Subsonic's
+    /// album-walk), but writes still happen incrementally per page so peak
+    /// memory stays at one batch, matching the flat pager's behavior.
+    private func syncTracksBulk(
+        report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
+    ) async throws -> PagedEnumeration {
+        let started = Date()
+        var seen: [String] = []
+        var reportedTotal: Int?
+        diag?("tracks: bulk-enumerator phase start")
+        do {
+            for try await page in backend.enumerateAllTracks(pageSize: pageSize) {
+                try Task.checkCancellation()
+                if let total = page.totalCount { reportedTotal = total }
+                try await writer.upsertTracks(page.items, serverId: serverId)
+                seen.append(contentsOf: page.items.map(\.id))
+                await report(.tracks, seen.count, reportedTotal)
+            }
+        } catch {
+            diag?("tracks: bulk-enumerator ERROR after \(seen.count) items: \(error)")
+            throw error
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
+        syncLog.notice("phase tracks (bulk): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
+        return PagedEnumeration(
+            seen: seen, reportedTotal: reportedTotal, phase: .tracks, elapsed: elapsed,
+            requiresKnownTotal: true
+        )
     }
 
     /// Playlists need a second pass to sync their ordered items.

@@ -25,7 +25,11 @@ public struct ServerConnection: Codable, Sendable, Hashable, Identifiable {
     /// never be regenerated once issued, or Plex will treat the app as a new
     /// device on every launch.
     public var clientIdentifier: String
-    /// For Plex, the library section id that holds music; nil until resolved.
+    /// The library-scope selector that narrows sync to one music library, when
+    /// the backend has more than one: for Plex, the library section id; for
+    /// Subsonic, the `musicFolderId` (mirrors Jellyfin's `musicLibraryId`, which
+    /// is passed straight into `JellyfinBackend` instead of stored here). Nil
+    /// until resolved, or when the server has a single implicit library.
     public var musicSectionID: String?
 
     public init(

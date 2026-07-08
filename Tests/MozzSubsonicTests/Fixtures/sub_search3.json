@@ -1,0 +1,37 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "searchResult3": {
+      "song": [
+        {
+          "id": "sg-4471",
+          "parent": "al-9c31",
+          "title": "Xtal",
+          "album": "Selected Ambient Works 85-92",
+          "albumId": "al-9c31",
+          "artist": "Aphex Twin",
+          "artistId": "ar-a1f9",
+          "track": 1,
+          "discNumber": 1,
+          "year": 1992,
+          "genres": [{ "name": "Ambient" }],
+          "coverArt": "al-9c31",
+          "size": 31457280,
+          "contentType": "audio/flac",
+          "suffix": "flac",
+          "duration": 315,
+          "bitRate": 900,
+          "bitDepth": 16,
+          "samplingRate": 44100,
+          "channelCount": 2,
+          "created": "2023-04-01T12:00:00.000Z",
+          "starred": "2023-04-02T00:00:00.000Z",
+          "userRating": 4,
+          "musicBrainzId": "d3b8e2a1-1111-4222-8333-444455556666",
+          "replayGain": { "trackGain": -6.5, "albumGain": -5.2 }
+        }
+      ]
+    }
+  }
+}

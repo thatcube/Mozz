@@ -34,6 +34,7 @@ let package = Package(
         .library(name: "MozzDatabase", targets: ["MozzDatabase"]),
         .library(name: "MozzPlex", targets: ["MozzPlex"]),
         .library(name: "MozzJellyfin", targets: ["MozzJellyfin"]),
+        .library(name: "MozzSubsonic", targets: ["MozzSubsonic"]),
         .library(name: "MozzSync", targets: ["MozzSync"]),
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
@@ -74,6 +75,9 @@ let package = Package(
         // MARK: Backends (one `MusicBackend` conformer each)
         .target(name: "MozzPlex", dependencies: ["MozzCore", "MozzNetworking"]),
         .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking"]),
+        // Subsonic / OpenSubsonic (v1 scoped/QA'd to Navidrome; other
+        // OpenSubsonic servers such as Gonic, Ampache and LMS are best-effort).
+        .target(name: "MozzSubsonic", dependencies: ["MozzCore", "MozzNetworking"]),
 
         // MARK: Catalog sync engine (backend -> DB, off-main)
         .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
@@ -120,7 +124,7 @@ let package = Package(
             name: "MozzApp",
             dependencies: [
                 "MozzCore", "MozzNetworking", "MozzDatabase",
-                "MozzPlex", "MozzJellyfin", "MozzSync",
+                "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
                 "MozzPlayback", "MozzDownloads", "MozzRecommend", "MozzEnrichment",
             ],
             resources: [.process("Resources")]
@@ -138,6 +142,11 @@ let package = Package(
         .testTarget(
             name: "MozzJellyfinTests",
             dependencies: ["MozzJellyfin", "MozzNetworking"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "MozzSubsonicTests",
+            dependencies: ["MozzSubsonic", "MozzNetworking", "MozzCore"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),

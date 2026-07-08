@@ -98,6 +98,12 @@ public struct PlaybackReport: Sendable, Hashable {
 /// - **Sendable & stateless-ish.** Implementations hold only immutable
 ///   configuration (base URL, token, client info) so they are safe to share
 ///   across the concurrency domains that sync, playback and downloads run in.
+/// A single page from ``MusicBackend/enumerateAllTracks(pageSize:)``. Each page
+/// carries the SAME `totalCount` once known (computed upfront from an
+/// authoritative enumeration plan, e.g. summed album `songCount`s), so a
+/// consumer accumulating `seen.count` against the first page's total is safe.
+public typealias BulkTrackPage = CatalogPage<Track>
+
 public protocol MusicBackend: Sendable {
     /// Which backend this is (used only where a real protocol difference
     /// forces a branch; prefer capabilities elsewhere).
@@ -125,6 +131,38 @@ public protocol MusicBackend: Sendable {
     /// sync for speed. Default: `[]` — a backend whose bulk `fetchTracks` already
     /// carries full format needs no backfill.
     func fetchTrackDetails(ids: [String]) async throws -> [Track]
+
+    // MARK: Bulk enumeration (optional, additive)
+
+    /// Whether ``enumerateAllTracks(pageSize:)`` is a real, authoritative
+    /// enumeration for this backend (vs. the default pass-through over
+    /// ``fetchTracks(offset:limit:)``). ``LibrarySyncEngine`` uses this to
+    /// decide whether it may trust the stream's `totalCount` to gate pruning as
+    /// strictly "complete iff seen >= total, and total must be known" — the
+    /// default (flat-pager) path keeps its existing, looser completeness rule
+    /// (a genuinely empty/short terminal page is itself proof of full
+    /// coverage), so Plex/Jellyfin are byte-for-byte unaffected by this
+    /// protocol addition. Default `false`.
+    var hasBulkEnumerator: Bool { get }
+
+    /// An authoritative, whole-catalog track enumeration, for backends that can
+    /// derive a stable, dependable total *before* streaming any tracks (e.g.
+    /// Subsonic's album-walk: sum album `songCount`s up front, then walk each
+    /// album for its songs). Every yielded page must carry the SAME
+    /// `totalCount` — computed once, up front — so downstream prune-gating can
+    /// safely compare a running `seen.count` against the first page's total.
+    ///
+    /// This is a *protocol requirement* (not extension-only) so it dynamically
+    /// dispatches through `any MusicBackend`/generic call sites — a default
+    /// implemented only in an extension would use static dispatch and a
+    /// conformer overriding it would silently never be called through
+    /// `LibrarySyncEngine`'s generic `Backend` parameter.
+    ///
+    /// Default: wraps ``fetchTracks(offset:limit:)`` in a stream that pages
+    /// until a short/empty page, matching the existing flat-pager behavior
+    /// exactly (so this default is inert for any conformer that doesn't
+    /// override ``hasBulkEnumerator``).
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<BulkTrackPage, Error>
 
     // MARK: Playback & downloads
 
@@ -162,4 +200,37 @@ public extension MusicBackend {
 
     /// Default: no backfill needed (the bulk sync already carries full details).
     func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }
+
+    /// Default: no authoritative bulk enumerator.
+    var hasBulkEnumerator: Bool { false }
+
+    /// Default: page over the existing flat `fetchTracks(offset:limit:)` until
+    /// a page comes back short of `pageSize` (including empty) — identical in
+    /// effect to how `LibrarySyncEngine`'s own flat-pager loop already
+    /// terminates, so backends that don't override ``hasBulkEnumerator`` see no
+    /// behavioral change from this default existing.
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<BulkTrackPage, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var offset = 0
+                    while true {
+                        try Task.checkCancellation()
+                        let page = try await fetchTracks(offset: offset, limit: pageSize)
+                        if !page.items.isEmpty {
+                            continuation.yield(page)
+                        }
+                        if page.items.count < pageSize {
+                            break
+                        }
+                        offset += page.items.count
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }

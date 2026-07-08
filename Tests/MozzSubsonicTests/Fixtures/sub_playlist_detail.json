@@ -1,0 +1,17 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "playlist": {
+      "id": "pl-7742",
+      "name": "Late Night",
+      "songCount": 2,
+      "duration": 600,
+      "coverArt": "pl-7742",
+      "entry": [
+        { "id": "sg-4471", "title": "Xtal", "suffix": "flac", "duration": 315 },
+        { "id": "sg-9981", "title": "Alarm Will Sound", "suffix": "mp3", "duration": 210 }
+      ]
+    }
+  }
+}

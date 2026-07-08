@@ -17,6 +17,12 @@ public struct HTTPClient: Sendable {
     public let baseURL: URL
     private let transport: any HTTPTransport
     private let defaultHeaders: [String: String]
+    /// A hook that produces query items appended to EVERY request against this
+    /// client — the ergonomic seam for backends whose auth lives in query
+    /// params rather than headers (Subsonic's `u`/`t`/`s`/`apiKey`/`v`/`c`/`f`).
+    /// A closure (not a fixed array) so a future backend could rotate a value
+    /// per-call; Subsonic's own signing is static for the life of one client.
+    private let defaultQueryItems: @Sendable () -> [URLQueryItem]
     private let retryPolicy: RetryPolicy
     private let logger: any NetworkLogger
 
@@ -24,12 +30,14 @@ public struct HTTPClient: Sendable {
         baseURL: URL,
         transport: any HTTPTransport = URLSessionTransport(),
         defaultHeaders: [String: String] = [:],
+        defaultQueryItems: @escaping @Sendable () -> [URLQueryItem] = { [] },
         retryPolicy: RetryPolicy = .default,
         logger: any NetworkLogger = NoopNetworkLogger()
     ) {
         self.baseURL = baseURL
         self.transport = transport
         self.defaultHeaders = defaultHeaders
+        self.defaultQueryItems = defaultQueryItems
         self.retryPolicy = retryPolicy
         self.logger = logger
     }
@@ -41,6 +49,20 @@ public struct HTTPClient: Sendable {
             baseURL: baseURL,
             transport: transport,
             defaultHeaders: defaultHeaders.merging(extra) { _, new in new },
+            defaultQueryItems: defaultQueryItems,
+            retryPolicy: retryPolicy,
+            logger: logger
+        )
+    }
+
+    /// Return a copy with a signing hook installed (or replaced). Every request
+    /// built by this client will have `items()` appended to its query.
+    public func withDefaultQueryItems(_ items: @escaping @Sendable () -> [URLQueryItem]) -> HTTPClient {
+        HTTPClient(
+            baseURL: baseURL,
+            transport: transport,
+            defaultHeaders: defaultHeaders,
+            defaultQueryItems: items,
             retryPolicy: retryPolicy,
             logger: logger
         )
@@ -51,12 +73,21 @@ public struct HTTPClient: Sendable {
     /// Send a request and return the raw body. Retries transient failures.
     @discardableResult
     public func send(_ endpoint: Endpoint) async throws -> Data {
+        try await sendWithResponse(endpoint).0
+    }
+
+    /// Send a request and return both the raw body and the HTTP response, so
+    /// callers can inspect headers (e.g. `Content-Type`) that ``send(_:)``
+    /// discards. Used by binary/stream fetches that must validate the response
+    /// actually looks like media before trusting the bytes.
+    @discardableResult
+    public func sendWithResponse(_ endpoint: Endpoint) async throws -> (Data, HTTPURLResponse) {
         let request = try makeRequest(endpoint)
         return try await withRetry {
             logger.log("\(endpoint.method.rawValue) \(SecretRedactor.redacted(request.url ?? baseURL))")
             let (data, response) = try await transport.send(request)
             try Self.validate(response, data: data, logger: logger)
-            return data
+            return (data, response)
         }
     }
 
@@ -88,8 +119,9 @@ public struct HTTPClient: Sendable {
         ) else {
             throw MozzError.invalidResponse
         }
-        if !endpoint.query.isEmpty {
-            components.queryItems = (components.queryItems ?? []) + endpoint.query
+        let query = defaultQueryItems() + endpoint.query
+        if !query.isEmpty {
+            components.queryItems = (components.queryItems ?? []) + query
         }
         guard let url = components.url else { throw MozzError.invalidResponse }
 
