@@ -26,6 +26,13 @@ struct SubsonicLoginView: View {
     var body: some View {
         Form {
             Section {
+                BrandHero(brand: .navidrome)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 8, trailing: 16))
+            .listRowSeparator(.hidden)
+
+            Section {
                 TextField("https://music.example.com", text: $serverURL)
                     .urlFieldStyle()
                     .accessibilityLabel("Server address")

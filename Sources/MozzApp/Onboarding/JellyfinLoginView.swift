@@ -27,6 +27,13 @@ struct JellyfinLoginView: View {
 
     var body: some View {
         Form {
+            Section {
+                BrandHero(brand: .jellyfin)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 8, trailing: 16))
+            .listRowSeparator(.hidden)
+
             networkSection
             manualSection
             if baseURL != nil {

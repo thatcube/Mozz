@@ -77,6 +77,13 @@ struct PlexLoginView: View {
     var body: some View {
         Form {
             Section {
+                BrandHero(brand: .plex)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 8, trailing: 16))
+            .listRowSeparator(.hidden)
+
+            Section {
                 switch phase {
                 case .idle:
                     Text("Sign in to your Plex account to connect your music library. A secure Plex window opens, and Mozz returns here automatically once you're authorized.")
