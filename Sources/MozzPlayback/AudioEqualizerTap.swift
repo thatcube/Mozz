@@ -119,11 +119,14 @@ final class EqualizerTapContext {
         let channels = max(Int(format.mChannelsPerFrame), 1)
         let interleaved = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
 
-        // Build the initial cascade from whatever the UI last set.
+        // Build the initial cascade from whatever the UI last set. `sampleRate` is
+        // the one field also read cross-thread (by `update` on the main thread), so
+        // set it here under the lock; the remaining fields are audio-thread-only.
         lock.lock()
         let settings = latestSettings
         pendingDirty = false
         pendingCoeffs = nil
+        sampleRate = rate
         lock.unlock()
 
         let coeffs = settings.biquadCoefficients(sampleRate: rate)
@@ -134,7 +137,6 @@ final class EqualizerTapContext {
             cascade.append(coeffs.map { Biquad(coefficients: $0) })
         }
 
-        sampleRate = rate
         channelCount = channels
         isInterleaved = interleaved
         filters = cascade
