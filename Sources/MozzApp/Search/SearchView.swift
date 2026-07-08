@@ -136,10 +136,10 @@ struct SearchView: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        // Solid page-colored fill so content scrolling under the pinned bar is
-        // occluded (including the padding around the pill), and taps in the whole
-        // bar are absorbed rather than falling through to a result beneath it.
-        .background(Color.mozzBackground)
+        // No opaque fill: the content scrolls fully UNDER the glass pill so it
+        // reads as real Liquid Glass over live content (not glass over a solid
+        // white strip). We still absorb taps across the whole bar so a result
+        // that has scrolled beneath it can't be tapped through the clear gaps.
         .contentShape(Rectangle())
         .onTapGesture { }
     }
