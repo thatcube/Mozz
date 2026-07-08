@@ -122,6 +122,84 @@ final class NormalizationGainTests: XCTestCase {
     }
 }
 
+final class EqualizerSettingsTests: XCTestCase {
+    func testFlatIsNeutral() {
+        let flat = EqualizerSettings.flat
+        XCTAssertTrue(flat.isFlat)
+        XCTAssertEqual(flat.gains.count, EqualizerSettings.bandCount)
+        XCTAssertTrue(flat.gains.allSatisfy { $0 == 0 })
+        XCTAssertEqual(flat.preampDB, 0)
+    }
+
+    func testInitNormalizesGainLength() {
+        // Too few → padded with 0; too many → truncated. Always bandCount long.
+        XCTAssertEqual(EqualizerSettings(gains: [1, 2, 3]).gains.count, EqualizerSettings.bandCount)
+        XCTAssertEqual(EqualizerSettings(gains: Array(repeating: 1, count: 40)).gains.count,
+                       EqualizerSettings.bandCount)
+        let padded = EqualizerSettings(gains: [3, 3]).gains
+        XCTAssertEqual(padded[0], 3)
+        XCTAssertEqual(padded[2], 0)
+    }
+
+    func testGainsAreClampedToRange() {
+        let s = EqualizerSettings(gains: Array(repeating: 999, count: EqualizerSettings.bandCount),
+                                  preampDB: -999)
+        XCTAssertTrue(s.gains.allSatisfy { $0 == EqualizerSettings.gainRange.upperBound })
+        XCTAssertEqual(s.preampDB, EqualizerSettings.gainRange.lowerBound)
+    }
+
+    func testNonFiniteBecomesZero() {
+        var s = EqualizerSettings.flat
+        s.setGain(.nan, forBand: 0)
+        s.setPreamp(.infinity)
+        XCTAssertEqual(s.gains[0], 0)
+        XCTAssertEqual(s.preampDB, 0)
+    }
+
+    func testSetGainOutOfRangeIndexIsIgnored() {
+        var s = EqualizerSettings.flat
+        s.setGain(6, forBand: 999)   // no crash, no change
+        XCTAssertTrue(s.isFlat)
+        s.setGain(6, forBand: -1)
+        XCTAssertTrue(s.isFlat)
+    }
+
+    func testCodableRoundTrip() throws {
+        let original = EqualizerPreset.bassBoost.settings
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(EqualizerSettings.self, from: data)
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testPresetsAreValidAndDistinct() {
+        for preset in EqualizerPreset.allCases {
+            let s = preset.settings
+            XCTAssertEqual(s.gains.count, EqualizerSettings.bandCount, "\(preset) wrong band count")
+            XCTAssertTrue(s.gains.allSatisfy { EqualizerSettings.gainRange.contains($0) },
+                          "\(preset) has an out-of-range band")
+        }
+        XCTAssertTrue(EqualizerPreset.flat.settings.isFlat)
+        XCTAssertFalse(EqualizerPreset.bassBoost.settings.isFlat)
+    }
+
+    func testMatchingRecognizesPresetsAndCustom() {
+        XCTAssertEqual(EqualizerPreset.matching(EqualizerPreset.vocal.settings), .vocal)
+        XCTAssertEqual(EqualizerPreset.matching(.flat), .flat)
+        var custom = EqualizerSettings.flat
+        custom.setGain(7, forBand: 4)
+        XCTAssertNil(EqualizerPreset.matching(custom))
+    }
+
+    func testFrequencyLabels() {
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(31), "31")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(500), "500")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(1_000), "1k")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(16_000), "16k")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(forBand: 0), "31")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(forBand: EqualizerSettings.bandCount - 1), "16k")
+    }
+}
+
 final class MozzErrorTests: XCTestCase {
     func testRetryability() {
         XCTAssertTrue(MozzError.serverUnreachable.isRetryable)

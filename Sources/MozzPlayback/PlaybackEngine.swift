@@ -79,6 +79,14 @@ public final class PlaybackEngine: ObservableObject {
     /// Global preamp (dB) added on top of each track's gain.
     public var normalizationPreampDB: Double = 0
 
+    /// The in-app graphic equalizer. Off by default (identical playback to before
+    /// EQ existed). When enabled, an `MTAudioProcessingTap` is attached per item
+    /// alongside the normalization volume in a single audio mix. Drive it through
+    /// `setEqualizerEnabled(_:)` / `updateEqualizer(_:)` so master on/off rebuilds
+    /// loaded items (a hard requirement for gapless: all queued items must be
+    /// homogeneously tapped or untapped).
+    public let equalizer = EqualizerProcessor()
+
     private let player = AVQueuePlayer()
     private let resolver: TrackURLResolver
     private let session = AudioSessionController()
@@ -331,7 +339,11 @@ public final class PlaybackEngine: ObservableObject {
     // MARK: Loading
 
     /// Rebuild the player from the queue's current track (+ lookahead).
-    private func reload(autoplay: Bool) {
+    ///
+    /// `logStartOnLoad` is `false` only for an in-place rebuild (e.g. toggling the
+    /// equalizer) where the same track keeps playing and must not emit a fresh
+    /// `.started` listening event.
+    private func reload(autoplay: Bool, logStartOnLoad: Bool = true) {
         loadGeneration += 1
         let generation = loadGeneration
         player.pause()
@@ -349,7 +361,7 @@ public final class PlaybackEngine: ObservableObject {
         // Emit `.started` on intent (synchronously), so it's paired correctly
         // with the terminal event even if the async URL resolve below is slow
         // or fails. A paused load (autoplay == false) logs its start on resume.
-        if autoplay { logStart(track) }
+        if autoplay && logStartOnLoad { logStart(track) }
 
         Task { [weak self] in
             guard let self else { return }
@@ -357,7 +369,8 @@ public final class PlaybackEngine: ObservableObject {
                 let resolved = try await resolver.resolve(track)
                 guard generation == self.loadGeneration else { return }
                 let item = AVPlayerItem(url: resolved.url)
-                self.applyNormalization(to: item, gainDB: track.normalizationGainDB)
+                await self.installAudioProcessing(on: item, gainDB: track.normalizationGainDB)
+                guard generation == self.loadGeneration else { return }
                 self.player.insert(item, after: nil)
                 self.loaded = [(item, track, resolved.sessionID)]
                 if let seek = self.pendingSeek {
@@ -435,7 +448,12 @@ public final class PlaybackEngine: ObservableObject {
                   loaded.count == 1,
                   queue.peekNext?.id == nextTrack.id else { return }
             let item = AVPlayerItem(url: resolved.url)
-            applyNormalization(to: item, gainDB: nextTrack.normalizationGainDB)
+            await installAudioProcessing(on: item, gainDB: nextTrack.normalizationGainDB)
+            // Re-validate again: the audio-processing build may await a track load,
+            // during which the queue could have changed or a newer refill run.
+            guard generation == loadGeneration,
+                  loaded.count == 1,
+                  queue.peekNext?.id == nextTrack.id else { return }
             if player.canInsert(item, after: loaded.last?.item) {
                 player.insert(item, after: loaded.last?.item)
                 loaded.append((item, nextTrack, resolved.sessionID))
@@ -466,6 +484,44 @@ public final class PlaybackEngine: ObservableObject {
         return true
     }
 
+    /// Attach the per-item audio mix that carries loudness normalization
+    /// (ReplayGain / Sound Check) and, when the equalizer is on, the EQ tap —
+    /// consolidated into ONE mix because an input-parameters block has a single
+    /// tap slot.
+    ///
+    /// Two paths, chosen by whether the EQ is enabled:
+    ///  - **EQ off** (the default — behaves exactly as before EQ existed): the
+    ///    normalization volume is attached asynchronously *after* enqueue so it
+    ///    never delays time-to-first-audio. This returns immediately.
+    ///  - **EQ on**: the tap must be installed *before* the item is enqueued (or it
+    ///    won't fire on `AVQueuePlayer`'s pre-rolled item), so this awaits the
+    ///    audio-track load and builds the combined mix synchronously with respect
+    ///    to the caller (which re-checks its generation guard afterward).
+    ///
+    /// Either way it silently no-ops for assets with no accessible audio track
+    /// (HLS), leaving playback untouched.
+    private func installAudioProcessing(on item: AVPlayerItem, gainDB: Double?) async {
+        if equalizer.isEnabled {
+            await buildCombinedMix(on: item, gainDB: gainDB)
+        } else {
+            applyNormalization(to: item, gainDB: gainDB)
+        }
+    }
+
+    /// The EQ-on path: load the audio track, then build a single mix with the
+    /// normalization volume ramp and the EQ tap, and attach it before enqueue.
+    private func buildCombinedMix(on item: AVPlayerItem, gainDB: Double?) async {
+        guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first else { return }
+        let params = AVMutableAudioMixInputParameters(track: track)
+        if normalizationEnabled, let gainDB {
+            params.setVolume(NormalizationGain.linearScalar(gainDB: gainDB, preampDB: normalizationPreampDB), at: .zero)
+        }
+        equalizer.attach(to: params)
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [params]
+        item.audioMix = mix
+    }
+
     /// Attach an audio mix that applies the track's loudness-normalization gain
     /// (ReplayGain / Sound Check), so tracks play at a consistent level.
     ///
@@ -486,6 +542,41 @@ public final class PlaybackEngine: ObservableObject {
             mix.inputParameters = [params]
             item.audioMix = mix
         }
+    }
+
+    // MARK: Equalizer control
+
+    /// Whether the graphic EQ is on. The engine-owned setter side-effect rebuilds
+    /// the loaded items so all queued items are homogeneously tapped/untapped
+    /// (required for gapless); the underlying flag lives on ``equalizer``.
+    public var equalizerEnabled: Bool { equalizer.isEnabled }
+
+    /// The current EQ curve (bands + preamp).
+    public var equalizerSettings: EqualizerSettings { equalizer.settings }
+
+    /// Turn the EQ on or off. Rebuilds the currently-loaded item(s) in place —
+    /// preserving position and play/pause — so the tap is added to / removed from
+    /// every queued item consistently. A brief re-buffer on this explicit toggle
+    /// is acceptable; ordinary track-to-track playback stays gapless.
+    public func setEqualizerEnabled(_ enabled: Bool) {
+        guard equalizer.isEnabled != enabled else { return }
+        equalizer.isEnabled = enabled
+        rebuildAudioProcessing()
+    }
+
+    /// Apply a new EQ curve. While playing this is a live, glitch-free update
+    /// pushed straight to the active tap(s) — no reload, no gap.
+    public func updateEqualizer(_ settings: EqualizerSettings) {
+        equalizer.apply(settings)
+    }
+
+    /// Rebuild the loaded item(s) so a master EQ on/off change takes effect while
+    /// keeping the same track and position. No new listening event is emitted.
+    private func rebuildAudioProcessing() {
+        guard currentTrack != nil else { return }
+        let wasPlaying = snapshot.status == .playing
+        pendingSeek = snapshot.elapsed > 1 ? snapshot.elapsed : nil
+        reload(autoplay: wasPlaying, logStartOnLoad: false)
     }
 
     // MARK: Observers

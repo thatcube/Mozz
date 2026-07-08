@@ -53,6 +53,11 @@ struct SettingsView: View {
                         }
                         Text("Plays tracks at a consistent loudness using each track's normalization gain, when available.")
                             .font(.caption).foregroundStyle(.secondary)
+                        NavigationLink {
+                            EqualizerSettingsView()
+                        } label: {
+                            Label("Equalizer", mozz: "waveform")
+                        }
                     }
 
                     Section {

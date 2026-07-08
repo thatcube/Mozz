@@ -88,6 +88,10 @@ public final class AppEnvironment: ObservableObject {
     private var seedPrepTask: Task<Void, Never>?
     /// UserDefaults key for the enrichment on/off switch (default on when unset).
     public static let enrichmentEnabledKey = "mozz.enrichmentEnabled"
+    /// UserDefaults key for the graphic-EQ master on/off (default off when unset).
+    public static let equalizerEnabledKey = "mozz.equalizerEnabled"
+    /// UserDefaults key for the persisted EQ curve (JSON `EqualizerSettings`).
+    public static let equalizerSettingsKey = "mozz.equalizerSettings"
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -223,6 +227,7 @@ public final class AppEnvironment: ObservableObject {
         wireBackgroundDownloads()
         wireNowPlayingArtwork()
         wireNowPlayingWidget()
+        restoreEqualizer()
     }
 
     /// The default on-disk environment (App Support DB + downloads dir + Keychain).
@@ -461,6 +466,43 @@ public final class AppEnvironment: ObservableObject {
             let enrichment = self.enrichment
             Task { await enrichment.cancel() }
         }
+    }
+
+    // MARK: Equalizer
+
+    /// The current EQ master switch / curve, read from the live engine.
+    public var equalizerEnabled: Bool { playback.equalizerEnabled }
+    public var equalizerSettings: EqualizerSettings { playback.equalizerSettings }
+
+    /// Turn the graphic EQ on/off (persisted; the engine rebuilds loaded items so
+    /// the change takes effect immediately while playing).
+    public func setEqualizerEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: Self.equalizerEnabledKey)
+        playback.setEqualizerEnabled(enabled)
+    }
+
+    /// Apply + persist a new EQ curve. Live and glitch-free while playing.
+    public func updateEqualizerSettings(_ settings: EqualizerSettings) {
+        if let data = try? JSONEncoder().encode(settings) {
+            UserDefaults.standard.set(data, forKey: Self.equalizerSettingsKey)
+        }
+        playback.updateEqualizer(settings)
+    }
+
+    /// Load the persisted EQ state into the engine at launch, before any track is
+    /// restored, so the first item is built with the right processing.
+    private func restoreEqualizer() {
+        let settings: EqualizerSettings
+        if let data = UserDefaults.standard.data(forKey: Self.equalizerSettingsKey),
+           let decoded = try? JSONDecoder().decode(EqualizerSettings.self, from: data) {
+            settings = decoded
+        } else {
+            settings = .flat
+        }
+        playback.equalizer.apply(settings)
+        // Default OFF when unset — EQ is opt-in and playback is byte-identical
+        // to before EQ existed until the user turns it on.
+        playback.equalizer.isEnabled = UserDefaults.standard.bool(forKey: Self.equalizerEnabledKey)
     }
 
     public func signOut() {
