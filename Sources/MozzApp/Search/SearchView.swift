@@ -28,13 +28,6 @@ struct SearchView: View {
     /// at-rest gray fill → Liquid Glass swap so content shows through it as it
     /// pins, matching the system search bar.
     @State private var scrolled = false
-    /// Sticky "search mode": entered when the field first gains focus, left only
-    /// via Cancel. Kept independent of live focus so that scrolling can dismiss
-    /// the keyboard (like Apple Music) WITHOUT dropping search mode — the title
-    /// stays collapsed and the results/recents page stays put (no content shift,
-    /// no scroll fight from the system trying to keep the first responder
-    /// visible).
-    @State private var searching = false
     @FocusState private var focused: Bool
 
     /// Shared height for the search field and the cancel ✕ so they line up.
@@ -49,9 +42,10 @@ struct SearchView: View {
     private let fieldTransition: Animation = .smooth(duration: 0.4)
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
-    /// Actively searching — in sticky search mode or a query has been entered.
-    /// Drives the collapse of the title header, the Cancel button, and the glass.
-    private var isActive: Bool { searching || !trimmedQuery.isEmpty }
+    /// Actively searching — the field is focused or a query has been entered.
+    /// Drives the Cancel button and the field's glass; the title is NOT affected
+    /// (it only leaves by scrolling), so nothing ever shifts on focus.
+    private var isActive: Bool { focused || !trimmedQuery.isEmpty }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -76,22 +70,18 @@ struct SearchView: View {
                         searchFieldBar
                     }
                 }
+                // Fade the Cancel ✕ in/out as active toggles. Kept on the content
+                // stack (not on the pinned header itself — animating a pinned
+                // section header directly can blank the scroll view).
+                .animation(fieldTransition, value: isActive)
             }
             .overlay { emptyState }
             .safeAreaInset(edge: .bottom) { latencyLabel }
             .tracksScrolled($scrolled)
             .minimizesBottomBarOnScroll()
             .scrollsToTopOnSignal()
-            // Scrolling dismisses the keyboard (Apple Music style) so a focused
-            // field's layout frame moving under the bar can't make the system
-            // fight the user's scroll to keep the first responder visible. Sticky
-            // `searching` keeps the ✕/glass while the keyboard is away.
-            .scrollDismissesKeyboard(.immediately)
             .hideNavigationBar()
             .appRouteDestinations()
-            .onChange(of: focused) { _, isFocused in
-                if isFocused { searching = true }
-            }
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
         }
@@ -132,8 +122,6 @@ struct SearchView: View {
         .background(Color.mozzBackground)
         .contentShape(Rectangle())
         .onTapGesture { }
-        // Animate the ✕ (Cancel) fading in/out as search mode toggles.
-        .animation(fieldTransition, value: isActive)
     }
 
     /// A custom search field. We can't use the system `.searchable` here because
@@ -358,7 +346,6 @@ struct SearchView: View {
     private func cancelSearch() {
         query = ""
         focused = false
-        searching = false
         results = SearchResults(artists: [], albums: [], tracks: [])
         lastLatencyMs = nil
     }
