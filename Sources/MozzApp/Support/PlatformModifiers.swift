@@ -275,6 +275,22 @@ extension Color {
         #endif
     }
 
+    /// The solid fill for a primary CTA pill (see `MozzProminentButtonStyle`) — a
+    /// concrete label color (near-black in light, near-white in dark). We use the
+    /// concrete `UIColor.label` rather than `Color.primary` because `Color.primary`
+    /// used as a *shape fill* resolves through SwiftUI's foreground-style hierarchy
+    /// and gets dimmed to a dull gray inside a button; the concrete color can't be
+    /// dimmed, so the pill stays a strong black/white.
+    static var mozzProminentFill: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .label)
+        #elseif canImport(AppKit)
+        Color(nsColor: .labelColor)
+        #else
+        Color.primary
+        #endif
+    }
+
     /// A subtle, theme-aware neutral fill for artwork placeholders — a quiet gray
     /// box (never a colorful tile) shown while real artwork loads or is missing.
     /// Adapts to light/dark so it reads as a calm empty frame in both.
@@ -396,7 +412,7 @@ struct MozzProminentButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .padding(.horizontal, 20)
-            .background(Capsule().fill(Color.primary))
+            .background(Capsule().fill(Color.mozzProminentFill))
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
             .contentShape(Capsule())
     }
