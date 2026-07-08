@@ -55,8 +55,6 @@ struct NowPlayingMorphContainer: View {
     @State private var playerRating: Double?
     /// Whether the sticky tap picker (hosted at the morph root) is open.
     @State private var ratingPickerOpen = false
-    /// Whether the equalizer sheet is showing (opened from the bottom control row).
-    @State private var equalizerOpen = false
     /// Whether the queue panel (Continue Playing + History) is showing in place of
     /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
     @State private var queueOpen = false
@@ -603,17 +601,15 @@ struct NowPlayingMorphContainer: View {
 
     /// The bottom control row: an equalizer button (opens the EQ sheet, tinted
     /// when the EQ is on), the current-output-route control (shows the real device
-    /// icon; tap to open the AirPlay picker), and the queue toggle.
+    /// The bottom control row: a (dummy) lyrics button, the current-output-route
+    /// control (shows the real device icon; tap to open the AirPlay picker), and
+    /// the queue toggle. Lyrics + a per-track context menu aren't built yet, so
+    /// lyrics is a disabled placeholder. (The equalizer lives in Settings for now.)
     private var bottomButtonRow: some View {
         HStack {
-            Button {
-                equalizerOpen = true
-            } label: {
-                Image(mozz: "slider.vertical.3")
-                    .font(.system(size: 24))
-                    .foregroundStyle(env.equalizerEnabled ? Color.accentColor : Color.secondary)
-            }
-            .accessibilityLabel("Equalizer")
+            Button { } label: { AppIcon.lyrics.styled(size: 26) }
+                .disabled(true)
+                .foregroundStyle(.secondary)
             Spacer()
             #if canImport(UIKit)
             routeControl
@@ -627,12 +623,6 @@ struct NowPlayingMorphContainer: View {
             }
         }
         .tint(.primary)
-        .sheet(isPresented: $equalizerOpen) {
-            NavigationStack {
-                EqualizerSettingsView(presentedAsSheet: true)
-            }
-            .environmentObject(env)
-        }
     }
 
     #if canImport(UIKit)

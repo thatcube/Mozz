@@ -106,13 +106,13 @@ struct EqualizerSettingsView: View {
                     VerticalEQSlider(
                         value: settings.gains[index],
                         range: EqualizerSettings.gainRange,
+                        height: 150,
                         onChange: { newValue in
                             update { $0.setGain(newValue, forBand: index) }
                         },
                         onReset: {
                             update { $0.setGain(0, forBand: index) }
                         })
-                        .frame(height: 150)
                     Text(EqualizerSettings.frequencyLabel(forBand: index))
                         .font(.system(size: 10).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -181,10 +181,12 @@ struct EqualizerSettingsView: View {
 
 /// A vertical slider tuned for a graphic EQ: a center-anchored fill that grows up
 /// for a boost and down for a cut, with a draggable knob. Snaps to 0 dB near the
-/// middle; double-tap resets the band.
+/// middle; double-tap resets the band. Uses a fixed `height` (no `GeometryReader`,
+/// which is unstable inside a Form row) so layout is deterministic.
 private struct VerticalEQSlider: View {
     let value: Double
     let range: ClosedRange<Double>
+    let height: CGFloat
     let onChange: (Double) -> Void
     let onReset: () -> Void
 
@@ -192,53 +194,42 @@ private struct VerticalEQSlider: View {
     private let trackWidth: CGFloat = 4
 
     var body: some View {
-        GeometryReader { geo in
-            let height = geo.size.height
-            let usable = height - knob
-            let span = range.upperBound - range.lowerBound
-            let frac = span > 0 ? (value - range.lowerBound) / span : 0.5
-            let knobY = usable * (1 - frac)                 // 0 = top
-            let centerY = usable * 0.5 + knob / 2
+        let usable = max(height - knob, 1)
+        let span = range.upperBound - range.lowerBound
+        let frac = span > 0 ? (value - range.lowerBound) / span : 0.5
+        let knobCenterY = knob / 2 + usable * (1 - frac)
+        let zeroFrac = span > 0 ? (0 - range.lowerBound) / span : 0.5
+        let zeroCenterY = knob / 2 + usable * (1 - zeroFrac)
 
-            ZStack(alignment: .top) {
-                // Background track.
-                Capsule()
-                    .fill(Color.secondary.opacity(0.2))
-                    .frame(width: trackWidth)
-                    .frame(maxHeight: .infinity)
-
-                // Fill between the 0 dB center and the knob.
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(width: trackWidth,
-                           height: max(0, abs((knobY + knob / 2) - centerY)))
-                    .position(x: geo.size.width / 2,
-                              y: (knobY + knob / 2 + centerY) / 2)
-
-                // Knob.
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: knob, height: knob)
-                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-                    .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
-                    .position(x: geo.size.width / 2, y: knobY + knob / 2)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { g in
-                        let clampedY = min(max(0, g.location.y - knob / 2), usable)
-                        var f = 1 - Double(clampedY / max(usable, 1))
-                        f = min(max(f, 0), 1)
-                        var newValue = range.lowerBound + f * span
-                        // Snap to 0 dB when close, for a satisfying detent.
-                        if abs(newValue) < 0.75 { newValue = 0 }
-                        onChange(newValue)
-                    }
-            )
-            .onTapGesture(count: 2) { onReset() }
+        ZStack {
+            Capsule()
+                .fill(Color.secondary.opacity(0.2))
+                .frame(width: trackWidth, height: height)
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(width: trackWidth, height: max(1, abs(knobCenterY - zeroCenterY)))
+                .position(x: knob / 2, y: (knobCenterY + zeroCenterY) / 2)
+            Circle()
+                .fill(Color.white)
+                .frame(width: knob, height: knob)
+                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
+                .position(x: knob / 2, y: knobCenterY)
         }
-        .frame(width: knob)
+        .frame(width: knob, height: height)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { g in
+                    let clampedY = min(max(0, g.location.y - knob / 2), usable)
+                    var f = 1 - Double(clampedY / usable)
+                    f = min(max(f, 0), 1)
+                    var newValue = range.lowerBound + f * span
+                    // Snap to 0 dB when close, for a satisfying detent.
+                    if abs(newValue) < 0.75 { newValue = 0 }
+                    onChange(newValue)
+                }
+        )
+        .onTapGesture(count: 2) { onReset() }
     }
 }
