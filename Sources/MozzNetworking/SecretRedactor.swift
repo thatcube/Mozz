@@ -10,9 +10,17 @@ import FoundationNetworking
 /// leaks credentials into logs. This scrubs those, plus auth headers.
 public enum SecretRedactor {
     /// Lowercased query keys whose values must never be logged.
+    ///
+    /// Includes Subsonic's short auth params: `p` (plaintext password), `t`
+    /// (MD5(password+salt)), `s` (per-request salt — treated as a secret because
+    /// combined with `t` it makes the derived credential trivially reproducible),
+    /// and `u` (username — treated as PII, not a rotating secret, but redacted
+    /// so logs/fixtures don't out multi-user households).
     public static let sensitiveQueryKeys: Set<String> = [
         "x-plex-token", "x-plex-client-identifier", "api_key", "apikey",
         "token", "secret", "pw", "password", "x-plex-session-identifier",
+        // Subsonic query-string auth surface.
+        "p", "t", "s", "u",
     ]
 
     public static let placeholder = "REDACTED"

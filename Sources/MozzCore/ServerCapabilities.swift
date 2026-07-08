@@ -37,6 +37,17 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
     /// yet determined or not applicable.
     public var hasPlexPass: Bool?
 
+    /// The detected server *product* string when known (e.g. "Navidrome",
+    /// "Gonic", "Ampache", "LMS"). Distinct from ``backend`` (the *protocol*):
+    /// several products all speak Subsonic/OpenSubsonic and we display which one
+    /// is on the other end for support/UX.
+    public var serverProductType: String?
+    /// True when the server advertises the OpenSubsonic extensions endpoint —
+    /// i.e. it is an OpenSubsonic-capable server rather than a strict classic
+    /// Subsonic implementation. Missing/false is a legitimate "classic" profile,
+    /// not a failure.
+    public var isOpenSubsonic: Bool
+
     /// When these capabilities were last probed.
     public var detectedAt: Date
 
@@ -52,6 +63,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         supportsNormalizationGain: Bool = false,
         supportsProgressReporting: Bool = true,
         hasPlexPass: Bool? = nil,
+        serverProductType: String? = nil,
+        isOpenSubsonic: Bool = false,
         detectedAt: Date = Date()
     ) {
         self.backend = backend
@@ -65,6 +78,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.supportsNormalizationGain = supportsNormalizationGain
         self.supportsProgressReporting = supportsProgressReporting
         self.hasPlexPass = hasPlexPass
+        self.serverProductType = serverProductType
+        self.isOpenSubsonic = isOpenSubsonic
         self.detectedAt = detectedAt
     }
 }

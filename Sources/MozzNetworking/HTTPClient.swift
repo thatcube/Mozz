@@ -17,6 +17,13 @@ public struct HTTPClient: Sendable {
     public let baseURL: URL
     private let transport: any HTTPTransport
     private let defaultHeaders: [String: String]
+    /// Query items appended to every request URL. Used by backends like Subsonic
+    /// where every API call carries a fixed set of signing/protocol params
+    /// (`u=`, `t=`, `s=` or `apiKey=`, plus `v=`, `c=`, `f=json`) — the client
+    /// merges them once so the per-endpoint call sites stay clean and no code
+    /// path can accidentally omit them. Non-secret request-scoped params on the
+    /// `Endpoint` win over these when names collide.
+    private let defaultQueryItems: [URLQueryItem]
     private let retryPolicy: RetryPolicy
     private let logger: any NetworkLogger
 
@@ -24,12 +31,14 @@ public struct HTTPClient: Sendable {
         baseURL: URL,
         transport: any HTTPTransport = URLSessionTransport(),
         defaultHeaders: [String: String] = [:],
+        defaultQueryItems: [URLQueryItem] = [],
         retryPolicy: RetryPolicy = .default,
         logger: any NetworkLogger = NoopNetworkLogger()
     ) {
         self.baseURL = baseURL
         self.transport = transport
         self.defaultHeaders = defaultHeaders
+        self.defaultQueryItems = defaultQueryItems
         self.retryPolicy = retryPolicy
         self.logger = logger
     }
@@ -41,6 +50,25 @@ public struct HTTPClient: Sendable {
             baseURL: baseURL,
             transport: transport,
             defaultHeaders: defaultHeaders.merging(extra) { _, new in new },
+            defaultQueryItems: defaultQueryItems,
+            retryPolicy: retryPolicy,
+            logger: logger
+        )
+    }
+
+    /// Return a copy with additional/overriding default query items (e.g. after
+    /// re-signing a Subsonic session). Items with the same name replace the
+    /// existing entry.
+    public func withDefaultQueryItems(_ extra: [URLQueryItem]) -> HTTPClient {
+        var merged = defaultQueryItems.filter { existing in
+            !extra.contains(where: { $0.name == existing.name })
+        }
+        merged.append(contentsOf: extra)
+        return HTTPClient(
+            baseURL: baseURL,
+            transport: transport,
+            defaultHeaders: defaultHeaders,
+            defaultQueryItems: merged,
             retryPolicy: retryPolicy,
             logger: logger
         )
@@ -88,9 +116,20 @@ public struct HTTPClient: Sendable {
         ) else {
             throw MozzError.invalidResponse
         }
-        if !endpoint.query.isEmpty {
-            components.queryItems = (components.queryItems ?? []) + endpoint.query
+        // Merge in this order: any existing query items on the base URL, the
+        // client's default items (signing/protocol params), then the endpoint's
+        // own items. Endpoint items with a name that collides with a default
+        // item WIN so a call site can override a signing param when it truly
+        // needs to (rarely) without mutating the client's defaults.
+        var merged = components.queryItems ?? []
+        if !defaultQueryItems.isEmpty {
+            let endpointNames = Set(endpoint.query.map(\.name))
+            merged.append(contentsOf: defaultQueryItems.filter { !endpointNames.contains($0.name) })
         }
+        if !endpoint.query.isEmpty {
+            merged.append(contentsOf: endpoint.query)
+        }
+        if !merged.isEmpty { components.queryItems = merged }
         guard let url = components.url else { throw MozzError.invalidResponse }
 
         var request = URLRequest(url: url)

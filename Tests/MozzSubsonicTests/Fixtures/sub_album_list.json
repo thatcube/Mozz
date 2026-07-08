@@ -1,0 +1,35 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "navidrome",
+    "serverVersion": "0.51.1",
+    "albumList2": {
+      "album": [
+        {
+          "id": "al-1",
+          "name": "Selected Ambient Works 85-92",
+          "artist": "Aphex Twin",
+          "artistId": "ar-1",
+          "coverArt": "al-1",
+          "songCount": 2,
+          "year": 1992,
+          "genre": "IDM",
+          "created": "2024-01-05T12:00:00.000Z"
+        },
+        {
+          "id": "al-2",
+          "name": "Discovery",
+          "artist": "Daft Punk",
+          "artistId": "ar-2",
+          "coverArt": "al-2",
+          "songCount": 3,
+          "year": 2001,
+          "genre": "Electronic",
+          "created": "2024-01-06T12:00:00.000Z",
+          "starred": "2024-05-01T00:00:00.000Z"
+        }
+      ]
+    }
+  }
+}

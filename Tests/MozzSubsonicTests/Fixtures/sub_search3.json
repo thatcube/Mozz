@@ -1,0 +1,12 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "searchResult3": {
+      "song": [
+        { "id": "sg-100", "title": "Xtal", "albumId": "al-1", "artist": "Aphex Twin", "coverArt": "al-1", "contentType": "audio/flac", "suffix": "flac", "duration": 293 },
+        { "id": "sg-201", "title": "One More Time", "albumId": "al-2", "artist": "Daft Punk", "coverArt": "al-2", "contentType": "audio/mpeg", "suffix": "mp3", "duration": 320 }
+      ]
+    }
+  }
+}

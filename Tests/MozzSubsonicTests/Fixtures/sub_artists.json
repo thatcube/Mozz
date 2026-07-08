@@ -1,0 +1,30 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "artists": {
+      "ignoredArticles": "The El La Los Las Le Les",
+      "index": [
+        {
+          "name": "A",
+          "artist": [
+            {
+              "id": "ar-1",
+              "name": "Aphex Twin",
+              "coverArt": "ar-1",
+              "albumCount": 12,
+              "starred": "2024-04-01T00:00:00.000Z",
+              "musicBrainzId": "f22942a1-6f70-4f48-866e-238cb2308fbf"
+            }
+          ]
+        },
+        {
+          "name": "D",
+          "artist": [
+            { "id": "ar-2", "name": "Daft Punk", "coverArt": "ar-2", "albumCount": 6 }
+          ]
+        }
+      ]
+    }
+  }
+}

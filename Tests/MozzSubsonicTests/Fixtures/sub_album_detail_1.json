@@ -1,0 +1,67 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "album": {
+      "id": "al-1",
+      "name": "Selected Ambient Works 85-92",
+      "artist": "Aphex Twin",
+      "artistId": "ar-1",
+      "coverArt": "al-1",
+      "songCount": 2,
+      "year": 1992,
+      "genre": "IDM",
+      "created": "2024-01-05T12:00:00.000Z",
+      "musicBrainzId": "b81b6fd0-9b52-4d19-8dfd-b09e9c62f36e",
+      "song": [
+        {
+          "id": "sg-100",
+          "title": "Xtal",
+          "album": "Selected Ambient Works 85-92",
+          "albumId": "al-1",
+          "artist": "Aphex Twin",
+          "artistId": "ar-1",
+          "track": 1,
+          "discNumber": 1,
+          "year": 1992,
+          "genre": "IDM",
+          "coverArt": "al-1",
+          "size": 8102400,
+          "contentType": "audio/flac",
+          "suffix": "flac",
+          "duration": 293,
+          "bitRate": 992,
+          "samplingRate": 44100,
+          "channelCount": 2,
+          "bitDepth": 16,
+          "starred": "2024-05-01T00:00:00.000Z",
+          "userRating": 5,
+          "musicBrainzId": "8b7c1d10-70f6-45b1-9d1a-1c9c3c1a1c7f",
+          "replayGain": {
+            "trackGain": -6.5,
+            "albumGain": -7.1,
+            "trackPeak": 0.98,
+            "albumPeak": 1.02
+          }
+        },
+        {
+          "id": 200,
+          "title": "Tha",
+          "albumId": "al-1",
+          "artist": "Aphex Twin",
+          "artistId": "ar-1",
+          "track": 4,
+          "discNumber": 1,
+          "coverArt": "al-1",
+          "size": 12000000,
+          "contentType": "audio/opus",
+          "suffix": "opus",
+          "duration": 552,
+          "bitRate": 128,
+          "samplingRate": 48000,
+          "channelCount": 2
+        }
+      ]
+    }
+  }
+}

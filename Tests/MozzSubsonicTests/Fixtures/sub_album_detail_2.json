@@ -1,0 +1,21 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "album": {
+      "id": "al-2",
+      "name": "Discovery",
+      "artist": "Daft Punk",
+      "artistId": "ar-2",
+      "coverArt": "al-2",
+      "songCount": 3,
+      "year": 2001,
+      "created": "2024-01-06T12:00:00.000Z",
+      "song": [
+        { "id": "sg-201", "title": "One More Time", "albumId": "al-2", "artist": "Daft Punk", "track": 1, "coverArt": "al-2", "contentType": "audio/mpeg", "suffix": "mp3", "duration": 320, "bitRate": 320 },
+        { "id": "sg-202", "title": "Aerodynamic", "albumId": "al-2", "artist": "Daft Punk", "track": 2, "coverArt": "al-2", "contentType": "audio/mpeg", "suffix": "mp3", "duration": 210, "bitRate": 320 },
+        { "id": "sg-203", "title": "Digital Love", "albumId": "al-2", "artist": "Daft Punk", "track": 3, "coverArt": "al-2", "contentType": "audio/mpeg", "suffix": "mp3", "duration": 302, "bitRate": 320 }
+      ]
+    }
+  }
+}

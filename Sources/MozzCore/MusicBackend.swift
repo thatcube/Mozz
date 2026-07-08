@@ -126,6 +126,25 @@ public protocol MusicBackend: Sendable {
     /// carries full format needs no backfill.
     func fetchTrackDetails(ids: [String]) async throws -> [Track]
 
+    /// Bulk enumeration of *every* track in the library as an ordered stream of
+    /// pages, preferred by the sync engine when a backend supplies it.
+    ///
+    /// The default implementation bridges the flat ``fetchTracks(offset:limit:)``
+    /// pager so Plex/Jellyfin are unaffected. A backend whose native pager is
+    /// unstable under mutation (Subsonic's `search3` with an empty query is the
+    /// motivating case) provides an override that walks a stable ordering — e.g.
+    /// Subsonic walks `getAlbumList2` → `getAlbum(id)` for songs — so the sync
+    /// gets stable order, deduped ids, AND a *derivable expected total* it can
+    /// safely use to gate the destructive prune.
+    ///
+    /// Each yielded ``CatalogPage`` carries the running expected total in
+    /// `totalCount` — the sum of album `songCount`s seen so far — so the sync
+    /// engine's completeness check can require `seen >= totalCount` before
+    /// allowing a prune. This is the guard that preserves offline downloads
+    /// (whose files cascade-delete with the track row) on any backend that
+    /// cannot report an authoritative total up front.
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, Error>
+
     // MARK: Playback & downloads
 
     /// Resolve a playable stream URL for a track.
@@ -162,4 +181,32 @@ public extension MusicBackend {
 
     /// Default: no backfill needed (the bulk sync already carries full details).
     func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }
+
+    /// Default bulk enumeration: bridge the flat ``fetchTracks(offset:limit:)``
+    /// pager. Terminates only on a genuinely empty page (a short page mid-run is
+    /// legitimate — some servers do that), so it matches the sync engine's own
+    /// paging contract. Backends whose flat pager is unstable under mutation
+    /// override this to walk a stable ordering.
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var offset = 0
+                    while !Task.isCancelled {
+                        let page = try await self.fetchTracks(offset: offset, limit: pageSize)
+                        if page.items.isEmpty {
+                            continuation.finish()
+                            return
+                        }
+                        continuation.yield(page)
+                        offset += page.items.count
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }

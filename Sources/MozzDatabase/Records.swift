@@ -58,6 +58,12 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
     public var supportsNormalizationGain: Bool
     public var supportsProgressReporting: Bool
     public var hasPlexPass: Bool?
+    /// The specific server product (e.g. "Navidrome"). Nullable for legacy rows
+    /// and for backends where it doesn't apply (Plex/Jellyfin).
+    public var serverProductType: String?
+    /// Whether an OpenSubsonic extensions endpoint was found. Persisted so a
+    /// classic-Subsonic (no extensions endpoint) profile survives offline.
+    public var isOpenSubsonic: Bool
     public var detectedAt: Double
 
     public init(serverId: String, capabilities: ServerCapabilities) {
@@ -73,6 +79,8 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
         self.supportsNormalizationGain = capabilities.supportsNormalizationGain
         self.supportsProgressReporting = capabilities.supportsProgressReporting
         self.hasPlexPass = capabilities.hasPlexPass
+        self.serverProductType = capabilities.serverProductType
+        self.isOpenSubsonic = capabilities.isOpenSubsonic
         self.detectedAt = capabilities.detectedAt.timeIntervalSince1970
     }
 
@@ -90,6 +98,8 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
             supportsNormalizationGain: supportsNormalizationGain,
             supportsProgressReporting: supportsProgressReporting,
             hasPlexPass: hasPlexPass,
+            serverProductType: serverProductType,
+            isOpenSubsonic: isOpenSubsonic,
             detectedAt: Date(timeIntervalSince1970: detectedAt)
         )
     }

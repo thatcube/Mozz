@@ -10,6 +10,7 @@ import MozzEnrichment
 import MozzSync
 import MozzPlex
 import MozzJellyfin
+import MozzSubsonic
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -1196,6 +1197,19 @@ public final class AppEnvironment: ObservableObject {
             return PlexBackend(connection: active.connection, token: stored.token,
                                clientInfo: clientInfo, transport: bulk,
                                musicSectionIDs: sectionIDs)
+        case .subsonic:
+            // Subsonic doesn't need a distinct bulk backend — the album-walk
+            // enumerator handles pagination on the same client. But we honor
+            // the `bulk` role so the sync path still uses the bulk URLSession
+            // (longer timeouts, separate connection pool).
+            guard let creds = try? SubsonicAuthCoder.decode(stored.token) else { return nil }
+            return SubsonicBackend(
+                connection: active.connection,
+                credentials: creds,
+                clientInfo: clientInfo,
+                transport: bulk,
+                musicFolderId: active.connection.musicSectionID
+            )
         }
     }
 
@@ -1240,6 +1254,24 @@ public final class AppEnvironment: ObservableObject {
                     if let updated { SessionPersistence.save(updated, to: credentials) }
                 }
             }
+            return (connection, backend)
+        case .subsonic:
+            // Decode the JSON credential envelope from the keychain token slot.
+            // The plaintext password is NOT stored — the envelope carries either
+            // an OpenSubsonic apiKey or an md5 (username, salt, token) triple.
+            let creds = try SubsonicAuthCoder.decode(stored.token)
+            let connection = ServerConnection(
+                id: Self.serverId(kind: .subsonic, baseURL: stored.baseURL, username: creds.username),
+                kind: .subsonic, name: stored.serverName, baseURL: stored.baseURL,
+                userID: stored.userID, clientIdentifier: stored.clientIdentifier,
+                musicSectionID: stored.musicSectionID
+            )
+            let backend = SubsonicBackend(
+                connection: connection,
+                credentials: creds,
+                clientInfo: clientInfo,
+                musicFolderId: stored.musicSectionID
+            )
             return (connection, backend)
         }
     }
@@ -1624,8 +1656,16 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Helpers
 
-    public static func serverId(kind: BackendKind, baseURL: URL) -> String {
-        "\(kind.rawValue)-\(baseURL.absoluteString)"
+    public static func serverId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
+        // Subsonic needs the username in the id so two accounts on the same
+        // server don't collide (they have separate favorites, ratings, and
+        // played-state on the server, so Mozz must treat them as distinct
+        // catalogs). Plex/Jellyfin already scope via the returned userID at
+        // login time and preserve the historical id format.
+        if kind == .subsonic, let username, !username.isEmpty {
+            return "\(kind.rawValue)-\(username.lowercased())-\(baseURL.absoluteString)"
+        }
+        return "\(kind.rawValue)-\(baseURL.absoluteString)"
     }
 
     static func demoClipURL() throws -> URL {

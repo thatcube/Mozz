@@ -255,13 +255,7 @@ public struct LibrarySyncEngine: Sendable {
                 report: report
             )
             await complete(albumIDs)
-            trackIDs = try await syncPages(
-                phase: .tracks, maxPages: plan.maxTrackPages,
-                fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
-                write: { try await writer.upsertTracks($0, serverId: serverId) },
-                id: \.id,
-                report: report
-            )
+            trackIDs = try await syncTracksStream(maxPages: plan.maxTrackPages, report: report)
             await complete(trackIDs)
             artistIDs = try await artistsTask
             await complete(artistIDs)
@@ -443,6 +437,61 @@ public struct LibrarySyncEngine: Sendable {
         syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
         diag?("\(phase.rawValue): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(Int(rate.rounded()))/s) — fetch-wait \(String(format: "%.1f", fetchWait))s, write \(String(format: "%.1f", writeTime))s")
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: phase, elapsed: elapsed)
+    }
+
+    /// Enumerate tracks via the backend's ``MusicBackend/enumerateAllTracks(pageSize:)``
+    /// stream. This is the plug point for backends whose flat offset/limit pager
+    /// is unstable under mutation (Subsonic's `search3` empty-query paging) — the
+    /// Subsonic override walks `getAlbumList2` → `getAlbum(id)` for a stable
+    /// order and, crucially, a *derivable* running total (sum of album
+    /// `songCount`s) that the prune-completeness guard can trust.
+    ///
+    /// Plex/Jellyfin get the default protocol implementation, which just wraps
+    /// their existing `fetchTracks(offset:limit:)` pager — so their behavior is
+    /// unchanged. `maxPages` from a quick-start plan still applies: we take the
+    /// first N pages then stop, and the prune guard correctly refuses to prune.
+    private func syncTracksStream(
+        maxPages: Int?,
+        report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
+    ) async throws -> PagedEnumeration {
+        if maxPages == 0 {
+            return PagedEnumeration(seen: [], reportedTotal: nil, phase: .tracks, elapsed: 0)
+        }
+        let started = Date()
+        var seen: [String] = []
+        // Dedupe across pages: the album-walk enumerator can legitimately re-emit
+        // a track that appears on multiple albums / compilations, and the sync
+        // must count each remoteId once for the prune-completeness check.
+        var seenSet = Set<String>()
+        var reportedTotal: Int?
+        var pageNo = 0
+        diag?("tracks: phase start (stream)")
+        let stream = backend.enumerateAllTracks(pageSize: pageSize)
+        do {
+            for try await page in stream {
+                try Task.checkCancellation()
+                if let total = page.totalCount {
+                    reportedTotal = max(reportedTotal ?? 0, total)
+                }
+                if !page.items.isEmpty {
+                    try await writer.upsertTracks(page.items, serverId: serverId)
+                    for track in page.items where seenSet.insert(track.id).inserted {
+                        seen.append(track.id)
+                    }
+                    await report(.tracks, seen.count, reportedTotal)
+                }
+                pageNo += 1
+                diag?("tracks: page \(pageNo) got=\(page.items.count) seen=\(seen.count) total=\(reportedTotal.map(String.init) ?? "?")")
+                if let maxPages, pageNo >= maxPages { break }
+            }
+        } catch {
+            diag?("tracks: ERROR after \(seen.count) items: \(error)")
+            throw error
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
+        syncLog.notice("phase tracks: \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
+        return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: .tracks, elapsed: elapsed)
     }
 
     /// Playlists need a second pass to sync their ordered items.

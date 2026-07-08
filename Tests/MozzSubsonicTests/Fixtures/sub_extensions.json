@@ -1,0 +1,14 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "navidrome",
+    "serverVersion": "0.51.1",
+    "openSubsonicExtensions": [
+      { "name": "apiKeyAuthentication", "versions": [1] },
+      { "name": "songLyrics", "versions": [1] },
+      { "name": "replayGain", "versions": [1] },
+      { "name": "transcodeOffset", "versions": [1] }
+    ]
+  }
+}

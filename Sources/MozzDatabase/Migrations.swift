@@ -19,6 +19,7 @@ enum Schema {
         registerV11(&migrator)
         registerV12(&migrator)
         registerV13(&migrator)
+        registerV14(&migrator)
         return migrator
     }
 
@@ -532,6 +533,21 @@ enum Schema {
             try db.alter(table: "track_features") { t in
                 t.add(column: "mb_tags", .text)             // JSON array, lowercased
                 t.add(column: "mb_tags_lookup_at", .double) // TTL negative cache
+            }
+        }
+    }
+
+    /// v14 — Subsonic backend metadata on the capabilities row. `serverProductType`
+    /// distinguishes Navidrome/Gonic/Ampache/LMS behind the same Subsonic
+    /// protocol; `isOpenSubsonic` records whether the server advertises the
+    /// OpenSubsonic extensions endpoint, so a classic-Subsonic profile survives
+    /// a subsequent offline start without being overwritten by a "detection
+    /// failed" fallback. Additive; existing rows default to NULL / 0.
+    private static func registerV14(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v14.subsonicCapabilities") { db in
+            try db.alter(table: "serverCapabilities") { t in
+                t.add(column: "serverProductType", .text)
+                t.add(column: "isOpenSubsonic", .boolean).notNull().defaults(to: false)
             }
         }
     }
