@@ -19,8 +19,9 @@ struct OnboardingView: View {
                         .scaledToFit()
                         .frame(width: 112, height: 112)
                     Text("Mozz").font(.largeTitle.bold())
-                    Text("Offline-first music for Plex & Jellyfin")
+                    Text("Offline-first music for Plex, Jellyfin & Navidrome")
                         .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
 
                 Spacer()
@@ -29,17 +30,20 @@ struct OnboardingView: View {
                     NavigationLink {
                         JellyfinLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Jellyfin", systemImage: "server.rack")
+                        connectLabel(title: "Connect to Jellyfin", systemImage: "server.rack",
+                                     colors: Self.jellyfinColors)
                     }
                     NavigationLink {
                         PlexLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Plex", systemImage: "play.tv")
+                        connectLabel(title: "Connect to Plex", systemImage: "play.tv",
+                                     colors: Self.plexColors)
                     }
                     NavigationLink {
                         SubsonicLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Navidrome", systemImage: "waveform")
+                        connectLabel(title: "Connect to Navidrome (Subsonic)", systemImage: "waveform",
+                                     colors: Self.navidromeColors)
                     }
 
                     Button {
@@ -49,10 +53,8 @@ struct OnboardingView: View {
                             isLoadingDemo = false
                         }
                     } label: {
-                        HStack {
-                            if isLoadingDemo { ProgressView().tint(.white) }
-                            connectLabel(title: "Try the offline demo", systemImage: "sparkles")
-                        }
+                        connectLabel(title: "Try the offline demo", systemImage: "sparkles",
+                                     colors: Self.demoColors, isLoading: isLoadingDemo)
                     }
                     .disabled(isLoadingDemo)
                 }
@@ -66,12 +68,60 @@ struct OnboardingView: View {
         }
     }
 
-    private func connectLabel(title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.accentColor.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    /// A "connect" row with a brand-colored icon chip. We deliberately use each
+    /// service's signature COLOR with a neutral SF Symbol rather than embedding
+    /// the official Plex/Jellyfin/Navidrome logos (those are trademarked assets);
+    /// the color carries the recognition and nothing is reproduced.
+    private func connectLabel(
+        title: String,
+        systemImage: String,
+        colors: [Color],
+        isLoading: Bool = false
+    ) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 38, height: 38)
+                if isLoading {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer()
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
+
+    // Brand signature colors (a gradient per service) for the icon chips.
+    private static let jellyfinColors = [
+        Color(red: 0.667, green: 0.361, blue: 0.765),   // #AA5CC3 purple
+        Color(red: 0.0,   green: 0.643, blue: 0.863),   // #00A4DC blue
+    ]
+    private static let plexColors = [
+        Color(red: 0.898, green: 0.627, blue: 0.051),   // #E5A00D gold
+        Color(red: 0.808, green: 0.451, blue: 0.086),   // #CE7316 amber
+    ]
+    private static let navidromeColors = [
+        Color(red: 0.180, green: 0.545, blue: 0.965),   // #2E8BF6 blue
+        Color(red: 0.094, green: 0.388, blue: 0.863),   // #1863DC deep blue
+    ]
+    private static let demoColors = [
+        Color(.systemGray), Color(.systemGray2),
+    ]
 }
