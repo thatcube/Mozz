@@ -87,6 +87,11 @@ final class EqualizerTapContext {
     private var au: EqualizerAudioUnit?
     private var gains: [Double]
     private var preampDB: Double
+    /// Set by the main thread on a live change; consumed by the render thread.
+    /// Per-band gains must be pushed to AUNBandEQ from the audio thread — setting
+    /// them from the main thread does not take effect (only the global gain does),
+    /// so live gain changes are applied inside `process` instead.
+    private var paramsDirty = false
 
     /// Set for the duration of a single `AudioUnitRender` so the AU's input render
     /// callback can copy the tap's source samples. Audio-thread only.
@@ -107,12 +112,15 @@ final class EqualizerTapContext {
 
     // MARK: Main thread
 
-    /// Push new gains to the live AU (no-op until `prepare` has built it).
+    /// Stash new gains for the render thread to apply. We do NOT push to the AU
+    /// here: per-band gains set from the main thread don't take effect on a
+    /// tap-hosted AUNBandEQ (only the render thread does), so `process` applies
+    /// them via the `paramsDirty` flag.
     func update(settings: EqualizerSettings) {
         lock.lock()
         gains = settings.gains
         preampDB = settings.preampDB
-        au?.applyGains(gains, preampDB: preampDB)
+        paramsDirty = true
         lock.unlock()
     }
 
@@ -128,6 +136,7 @@ final class EqualizerTapContext {
         }
         lock.lock()
         unit.applyGains(gains, preampDB: preampDB)
+        paramsDirty = false
         au = unit
         lock.unlock()
     }
@@ -137,6 +146,18 @@ final class EqualizerTapContext {
         au?.dispose()
         au = nil
         lock.unlock()
+    }
+
+    /// Apply any pending live gain change on the render thread (where AUNBandEQ
+    /// per-band coefficients actually recompute). Cheap when nothing changed.
+    private func applyPendingParams(to unit: EqualizerAudioUnit) {
+        lock.lock()
+        guard paramsDirty else { lock.unlock(); return }
+        paramsDirty = false
+        let g = gains          // COW reference copy — no heap allocation
+        let p = preampDB
+        lock.unlock()
+        unit.applyGains(g, preampDB: p)
     }
 
     // MARK: Audio thread — render
@@ -152,6 +173,8 @@ final class EqualizerTapContext {
             _ = MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut)
             return
         }
+        // Apply any live gain change here, on the render thread.
+        applyPendingParams(to: unit)
         // Pull the source audio into the shared buffer list.
         let getStatus = MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut)
         guard getStatus == noErr else { return }
