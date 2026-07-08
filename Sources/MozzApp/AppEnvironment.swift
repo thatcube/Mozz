@@ -957,25 +957,27 @@ public final class AppEnvironment: ObservableObject {
     public func suppressTrack(_ track: Track) async {
         guard let serverId = active?.connection.id else { return }
         try? await recommendations.suppressTrack(remoteId: track.id, serverId: serverId)
-        await regenerateMozzWeekly()
-        await regenerateHomeMixes()
+        // Confirm immediately (with Undo) — the shelf regeneration below can take a
+        // moment on a large library, and the user shouldn't wait for feedback.
         let title = track.title
         let remoteId = track.id
         toasts.undoable("Won't recommend \(title)", icon: "hand.thumbsdown") { [weak self] in
             Task { await self?.unsuppressTrack(remoteId: remoteId, serverId: serverId) }
         }
+        await regenerateMozzWeekly()
+        await regenerateHomeMixes()
     }
 
     /// "Don't recommend" the artist of `track` (suppresses all their tracks).
     public func suppressArtist(ofTrack track: Track) async {
         guard let serverId = active?.connection.id, let artistId = track.artistID else { return }
         try? await recommendations.suppressArtist(remoteId: artistId, serverId: serverId)
-        await regenerateMozzWeekly()
-        await regenerateHomeMixes()
         let name = track.artistName
         toasts.undoable("Won't recommend \(name)", icon: "hand.thumbsdown") { [weak self] in
             Task { await self?.unsuppressArtist(remoteId: artistId, serverId: serverId) }
         }
+        await regenerateMozzWeekly()
+        await regenerateHomeMixes()
     }
 
     /// Reverse a track suppression (from Undo or the Settings list), then refresh
