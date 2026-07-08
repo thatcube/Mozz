@@ -46,9 +46,11 @@ struct OnboardingView: View {
                                      colors: Self.navidromeColors)
                     }
 
-                    #if DEBUG
-                    // Dev/sim only: the offline demo (synthetic catalog + bundled
-                    // clip). Hidden in release builds so real users don't see it.
+                    #if targetEnvironment(simulator)
+                    // Simulator only: the offline demo (synthetic catalog +
+                    // bundled clip) — useful because the sim can't reach a real
+                    // server. Hidden on device builds (incl. Debug) so it's not
+                    // in the way for real use.
                     Button {
                         Task {
                             isLoadingDemo = true
