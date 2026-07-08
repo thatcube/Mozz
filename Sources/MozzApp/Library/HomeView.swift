@@ -10,6 +10,9 @@ import MozzRecommend
 /// offline); generation happens off-main on a schedule.
 struct HomeView: View {
     @EnvironmentObject private var env: AppEnvironment
+    // Observed so the `mozzSurface` cards re-resolve live when the dark flavor
+    // (Dim↔Black) toggles; see `MozzScreenBackground`.
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
     /// This tab's navigation path (value-based routing), owned by MainTabsView so
     /// pop-to-root and depth-preservation-on-switch work across tab changes.
     @Binding var path: [AppRoute]
@@ -44,8 +47,11 @@ struct HomeView: View {
                     }
                     if loaded && mixes.isEmpty && recentlyPlayed.isEmpty
                         && recentlyAdded.isEmpty && playlists.isEmpty {
-                        ContentUnavailableView("Nothing Here Yet", systemImage: "house",
-                            description: Text("Play something or sync your library — it'll show up here."))
+                        ContentUnavailableView {
+                            Label("Nothing Here Yet", mozz: "house")
+                        } description: {
+                            Text("Play something or sync your library — it'll show up here.")
+                        }
                             .padding(.top, 60)
                     }
                 }
@@ -54,6 +60,7 @@ struct HomeView: View {
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()
             .scrollsToTopOnSignal()
+            .mozzScreenBackground()
             .appRouteDestinations()
             .task { await load() }
             .refreshable { await load() }
@@ -186,7 +193,7 @@ struct HomeShortcutTile<Leading: View>: View {
         }
         .frame(height: 56)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial)
+        .background(Color.mozzSurface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
@@ -200,8 +207,8 @@ struct LikedSongsSquare: View {
                      Color(red: 0.50, green: 0.09, blue: 0.16)],
             startPoint: .topLeading, endPoint: .bottomTrailing)
         .overlay {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 20, weight: .semibold))
+            Image(mozz: "heart.fill")
+                .resizable().scaledToFit().frame(width: 20, height: 20)
                 .foregroundStyle(.white)
         }
     }

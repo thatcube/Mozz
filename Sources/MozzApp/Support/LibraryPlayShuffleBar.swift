@@ -24,7 +24,7 @@ struct LibraryPlayShuffleBar: View {
     @ViewBuilder private var smartShuffleMenu: some View {
         if let smartShuffle {
             Button(action: smartShuffle) {
-                Label("Smart Shuffle", systemImage: "wand.and.stars")
+                Label("Smart Shuffle", mozz: "wand.and.stars")
             }
         }
     }
@@ -32,7 +32,7 @@ struct LibraryPlayShuffleBar: View {
     private func button(_ title: String, systemImage: String,
                         action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
+            Label(title, mozz: systemImage)
                 .font(.headline)
                 .foregroundStyle(Color.accentColor)
                 .frame(maxWidth: .infinity)
