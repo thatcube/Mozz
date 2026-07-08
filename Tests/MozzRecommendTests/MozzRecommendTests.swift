@@ -198,6 +198,54 @@ final class RecommendationServiceTests: XCTestCase {
         XCTAssertNotNil(items.first?.reason)
     }
 
+    func testSuppressionExcludesFromMozzWeekly() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let plays = PlayEventStore(db)
+        let store = RecommendationStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertTracks([
+            Track(id: "p1", title: "P1", artistName: "Nirvana", artistID: "ar1", genres: ["Rock"]),
+            Track(id: "p2", title: "P2", artistName: "Nirvana", artistID: "ar1", genres: ["Rock"]),
+            Track(id: "p3", title: "P3", artistName: "Nirvana", artistID: "ar1", genres: ["Rock"]),
+            Track(id: "p4", title: "P4", artistName: "Nirvana", artistID: "ar1", genres: ["Rock"]),
+            Track(id: "rock1", title: "R1", artistName: "Pixies", artistID: "ar2", genres: ["Rock"]),
+            Track(id: "rock2", title: "R2", artistName: "Hole", artistID: "ar3", genres: ["Rock"]),
+        ], serverId: server.id)
+        for id in ["p1", "p2", "p3", "p4"] {
+            try await plays.append(
+                PlayEvent(trackID: id, kind: .completed, createdAt: Date(timeIntervalSince1970: daysAgo(1))),
+                serverId: server.id)
+        }
+        let service = RecommendationService(store: store, now: { now })
+
+        // Baseline: both discovery tracks surface.
+        _ = try await service.generateMozzWeekly(serverId: server.id, limit: 30, seed: 7)
+        var refs = Set(try await service.mozzWeeklyTracks().map(\.remoteId))
+        XCTAssertTrue(refs.contains("rock1"))
+        XCTAssertTrue(refs.contains("rock2"))
+
+        // Suppress a single track → it drops; the other stays.
+        try await service.suppressTrack(remoteId: "rock1", serverId: server.id)
+        _ = try await service.generateMozzWeekly(serverId: server.id, limit: 30, seed: 7)
+        refs = Set(try await service.mozzWeeklyTracks().map(\.remoteId))
+        XCTAssertFalse(refs.contains("rock1"), "suppressed track excluded")
+        XCTAssertTrue(refs.contains("rock2"), "other tracks unaffected")
+
+        // Suppress an artist → every track by that artist drops.
+        try await service.suppressArtist(remoteId: "ar3", serverId: server.id)
+        _ = try await service.generateMozzWeekly(serverId: server.id, limit: 30, seed: 7)
+        refs = Set(try await service.mozzWeeklyTracks().map(\.remoteId))
+        XCTAssertFalse(refs.contains("rock2"), "suppressed artist's tracks excluded")
+
+        // Un-suppress restores the track.
+        try await service.unsuppressTrack(remoteId: "rock1", serverId: server.id)
+        _ = try await service.generateMozzWeekly(serverId: server.id, limit: 30, seed: 7)
+        refs = Set(try await service.mozzWeeklyTracks().map(\.remoteId))
+        XCTAssertTrue(refs.contains("rock1"), "un-suppressed track returns")
+    }
+
     func testGenerateMozzWeeklyColdStart() async throws {
         let db = try MusicDatabase.inMemory()
         let writer = CatalogWriter(db)

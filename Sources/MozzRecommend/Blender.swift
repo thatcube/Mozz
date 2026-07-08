@@ -73,6 +73,7 @@ public struct Blender: Sendable {
 
     public func blend(sources: [[ScoredCandidate]], config: Config,
                       excluding excludeRefs: Set<String> = [],
+                      excludingArtists: Set<String> = [],
                       using rng: inout some RandomNumberGenerator) -> [ScoredCandidate] {
         // 1+2. Per-source min-max normalize, then weighted-fuse by track_ref.
         var fused: [String: FusedCandidate] = [:]
@@ -80,7 +81,8 @@ public struct Blender: Sendable {
             let scores = list.map(\.score)
             let lo = scores.min() ?? 0
             let hi = scores.max() ?? 0
-            for sc in list where !excludeRefs.contains(sc.trackRef) {
+            for sc in list where !excludeRefs.contains(sc.trackRef)
+                && !(sc.candidate.artistRemoteId.map(excludingArtists.contains) ?? false) {
                 let norm = hi > lo ? (sc.score - lo) / (hi - lo) : 1.0
                 let contribution = config.weights.weight(for: sc.source) * norm
                 if var existing = fused[sc.trackRef] {

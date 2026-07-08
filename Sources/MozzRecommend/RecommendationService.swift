@@ -184,9 +184,14 @@ public actor RecommendationService {
         // Tier 1 — ListenBrainz similarity (explicit precedence). Trusted OVER the
         // genre floor on purpose (that's the point: separate within a genre bucket);
         // guarded only by dropping non-positive scores + ranking by score.
+        let suppressedArtists = (try? await store.suppressedArtistIds(serverId: serverId)) ?? []
+        let suppressedTrackIds = (try? await store.suppressedTrackRemoteIds(serverId: serverId)) ?? []
         var picked: [String] = []
-        var pickedSet = excluding
-        let usableSimilar = similar.filter { $0.score > 0 && !excluding.contains($0.candidate.remoteId) }
+        var pickedSet = excluding.union(suppressedTrackIds)
+        let usableSimilar = similar.filter {
+            $0.score > 0 && !pickedSet.contains($0.candidate.remoteId)
+                && !($0.candidate.artistRemoteId.map(suppressedArtists.contains) ?? false)
+        }
         if !usableSimilar.isEmpty {
             let scored = usableSimilar.map {
                 ScoredCandidate(candidate: $0.candidate, score: $0.score, source: "collaborative")
@@ -199,14 +204,16 @@ public actor RecommendationService {
             let config = Blender.Config(limit: limit, explorationJitter: 0.02,
                                         maxPerArtist: 4, maxPerAlbum: max(2, limit / 4))
             var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
-            let ranked = blender.blend(sources: [scored], config: config, using: &rng)
+            let ranked = blender.blend(sources: [scored], config: config,
+                                       excludingArtists: suppressedArtists, using: &rng)
             picked = ranked.map { $0.candidate.remoteId }
             pickedSet.formUnion(picked)
             if picked.count >= limit { return picked }
         }
         // Tier 3 — genre engine fills the remaining slots (unchanged behavior).
         let genre = try await genreRadioBatch(
-            seed: seed, serverId: serverId, limit: limit - picked.count, excluding: pickedSet)
+            seed: seed, serverId: serverId, limit: limit - picked.count,
+            excluding: pickedSet, excludingArtists: suppressedArtists)
         return picked + genre
     }
 
@@ -214,7 +221,8 @@ public actor RecommendationService {
     /// pulls a same-genre / same-artist pool, applies the IDF-weighted-Jaccard floor,
     /// scores by similarity to the seed, and blends with variety caps + jitter.
     private func genreRadioBatch(seed: RadioSeed, serverId: ServerID,
-                                 limit: Int, excluding: Set<String>) async throws -> [String] {
+                                 limit: Int, excluding: Set<String>,
+                                 excludingArtists: Set<String> = []) async throws -> [String] {
         guard limit > 0, !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
         let enrich = isEnrichmentEnabled()
         // Effective seed genres: when enriched, normalize the caller's genres and
@@ -244,7 +252,7 @@ public actor RecommendationService {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: seedGenres, artistIds: seed.artistIds,
                 notPlayedSince: now().timeIntervalSince1970, excludingRemoteIds: excluding,
-                limit: 500, enrich: enrich)
+                excludingArtistIds: excludingArtists, limit: 500, enrich: enrich)
             fresh = pool.filter { !excluding.contains($0.remoteId) }
             if !fresh.isEmpty { break }
         }
@@ -298,7 +306,8 @@ public actor RecommendationService {
             maxPerArtist: seedGenres.isEmpty ? limit : 6,
             maxPerAlbum: max(2, limit / 4))
         var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
-        let ranked = blender.blend(sources: sources, config: config, using: &rng)
+        let ranked = blender.blend(sources: sources, config: config,
+                                   excludingArtists: excludingArtists, using: &rng)
         return ranked.map { $0.candidate.remoteId }
     }
 
@@ -314,6 +323,8 @@ public actor RecommendationService {
 
         let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback, enrich: enrich)
         let taste = TasteProfile.build(from: signals, now: nowDate)
+        let suppressedArtists = (try? await store.suppressedArtistIds(serverId: serverId)) ?? []
+        let suppressedRefs = (try? await store.suppressedTrackRefs(serverId: serverId)) ?? []
 
         let scored: [[ScoredCandidate]]
         let title: String
@@ -327,14 +338,17 @@ public actor RecommendationService {
         } else {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: taste.topGenres(12), artistIds: taste.topArtists(20),
-                notPlayedSince: notPlayedSince, limit: 2000, enrich: enrich)
+                notPlayedSince: notPlayedSince, excludingArtistIds: suppressedArtists,
+                limit: 2000, enrich: enrich)
             scored = [await contentScorer(for: serverId).score(candidates: pool, taste: taste)]
             title = "Mozz Weekly"
         }
 
         // Deterministic when seeded; otherwise varies by generation time.
         var rng = SeededGenerator(seed: seed ?? UInt64(bitPattern: Int64(nowDate.timeIntervalSince1970)))
-        let blended = blender.blend(sources: scored, config: Blender.Config(limit: limit), using: &rng)
+        let blended = blender.blend(sources: scored, config: Blender.Config(limit: limit),
+                                    excluding: suppressedRefs, excludingArtists: suppressedArtists,
+                                    using: &rng)
 
         let set = RecommendationSetRecord(id: Self.mozzWeeklyId, title: title, kind: "forgotten",
                                           generatedAt: nowDate.timeIntervalSince1970)
@@ -406,13 +420,16 @@ public actor RecommendationService {
         try await store.deleteSets(kinds: Self.homeBatchKinds)
         guard !taste.isThin else { return }
         let scorer = await contentScorer(for: serverId)
+        let suppressedArtists = (try? await store.suppressedArtistIds(serverId: serverId)) ?? []
+        let suppressedRefs = (try? await store.suppressedTrackRefs(serverId: serverId)) ?? []
 
         // Supermix — broad, familiar-leaning blend across all of the listener's taste.
         let superPool = try await store.candidateTracks(
             serverId: serverId, genres: taste.topGenres(20), artistIds: taste.topArtists(30),
-            notPlayedSince: includeFamiliar, limit: 3000, enrich: enrich)
+            notPlayedSince: includeFamiliar, excludingArtistIds: suppressedArtists, limit: 3000, enrich: enrich)
         if let ranked = ranked(superPool, taste: taste, scorer: scorer,
                                config: .init(limit: 60, explorationJitter: 0.12, maxPerArtist: 5, maxPerAlbum: 3),
+                               excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
                                rng: &rng) {
             try await save(id: "supermix", title: "Supermix", kind: Self.kindSupermix, items: ranked)
         }
@@ -421,9 +438,10 @@ public actor RecommendationService {
         for (i, genre) in taste.topGenres(3).enumerated() {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: [genre], artistIds: [],
-                notPlayedSince: includeFamiliar, limit: 1000, enrich: enrich)
+                notPlayedSince: includeFamiliar, excludingArtistIds: suppressedArtists, limit: 1000, enrich: enrich)
             if let ranked = ranked(pool, taste: taste, scorer: scorer,
                                    config: .init(limit: 40, explorationJitter: 0.12, maxPerArtist: 4, maxPerAlbum: 2),
+                                   excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
                                    rng: &rng) {
                 try await save(id: "daily-mix-\(i + 1)", title: "Daily Mix \(i + 1)", kind: Self.kindDaily, items: ranked)
             }
@@ -431,21 +449,26 @@ public actor RecommendationService {
 
         // Artist Mixes — a top artist plus same-genre neighbours.
         for (i, artistId) in taste.topArtists(2).enumerated() {
-            guard let seedArtist = try await store.seedArtist(remoteId: artistId, serverId: serverId, enrich: enrich)
+            guard !suppressedArtists.contains(artistId),
+                  let seedArtist = try await store.seedArtist(remoteId: artistId, serverId: serverId, enrich: enrich)
             else { continue }
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: Array(seedArtist.genres.prefix(4)), artistIds: [artistId],
-                notPlayedSince: includeFamiliar, limit: 1000, enrich: enrich)
+                notPlayedSince: includeFamiliar, excludingArtistIds: suppressedArtists, limit: 1000, enrich: enrich)
             if let ranked = ranked(pool, taste: taste, scorer: scorer,
                                    config: .init(limit: 40, explorationJitter: 0.1, maxPerArtist: 6, maxPerAlbum: 3),
+                                   excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
                                    rng: &rng) {
                 let title = seedArtist.name.isEmpty ? "Artist Mix" : "\(seedArtist.name) Mix"
                 try await save(id: "artist-mix-\(i + 1)", title: title, kind: Self.kindArtist, items: ranked)
             }
         }
 
-        // Replay — most-played recently, in play-count order (no re-ranking).
+        // Replay — most-played recently, in play-count order (no re-ranking). Still
+        // honors suppression: a "don't recommend" item shouldn't resurface here.
         let replayPool = try await store.mostPlayedCandidates(serverId: serverId, since: nowSec - 60 * 24 * 3600, limit: 50)
+            .filter { !suppressedRefs.contains($0.trackRef)
+                && !($0.artistRemoteId.map(suppressedArtists.contains) ?? false) }
         if replayPool.count >= Self.minTracks {
             let items = replayPool.enumerated().map { idx, c in
                 ScoredCandidate(candidate: c, score: Double(replayPool.count - idx), source: "content", reason: "On repeat")
@@ -478,14 +501,41 @@ public actor RecommendationService {
         try await store.set(id: id)
     }
 
+    // MARK: - Suppression ("Don't recommend")
+
+    /// Suppress a track from all recommendations (hard exclusion). Reversible.
+    public func suppressTrack(remoteId: String, serverId: ServerID) async throws {
+        try await store.suppress(serverId: serverId, scope: "track", ref: remoteId, at: now().timeIntervalSince1970)
+    }
+
+    /// Suppress an artist (and thus all their tracks) from recommendations.
+    public func suppressArtist(remoteId: String, serverId: ServerID) async throws {
+        try await store.suppress(serverId: serverId, scope: "artist", ref: remoteId, at: now().timeIntervalSince1970)
+    }
+
+    public func unsuppressTrack(remoteId: String, serverId: ServerID) async throws {
+        try await store.unsuppress(serverId: serverId, scope: "track", ref: remoteId)
+    }
+
+    public func unsuppressArtist(remoteId: String, serverId: ServerID) async throws {
+        try await store.unsuppress(serverId: serverId, scope: "artist", ref: remoteId)
+    }
+
+    /// All active suppressions for a server, newest first (Settings list).
+    public func suppressions(serverId: ServerID) async throws -> [(scope: String, ref: String, createdAt: Double)] {
+        try await store.suppressions(serverId: serverId)
+    }
+
     // MARK: - Home mix helpers
 
     /// Content-score a pool and blend it; nil if the result is too thin to ship.
     private func ranked(_ pool: [TrackCandidate], taste: TasteProfile, scorer: ContentRecommender,
-                        config: Blender.Config, rng: inout SeededGenerator) -> [ScoredCandidate]? {
+                        config: Blender.Config, excludingRefs: Set<String> = [],
+                        excludingArtists: Set<String> = [], rng: inout SeededGenerator) -> [ScoredCandidate]? {
         guard pool.count >= Self.minTracks else { return nil }
         let scored = scorer.score(candidates: pool, taste: taste)
-        let blended = blender.blend(sources: [scored], config: config, using: &rng)
+        let blended = blender.blend(sources: [scored], config: config,
+                                    excluding: excludingRefs, excludingArtists: excludingArtists, using: &rng)
         return blended.count >= Self.minTracks ? blended : nil
     }
 

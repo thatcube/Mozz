@@ -20,9 +20,9 @@ enum Schema {
         registerV12(&migrator)
         registerV13(&migrator)
         registerV14(&migrator)
+        registerV15(&migrator)
         return migrator
     }
-
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
         migrator.registerMigration("v1.catalog") { db in
             try db.create(table: "server") { t in
@@ -547,6 +547,25 @@ enum Schema {
             try db.alter(table: "serverCapabilities") { t in
                 t.add(column: "serverProduct", .text)
                 t.add(column: "isOpenSubsonic", .boolean).notNull().defaults(to: false)
+            }
+        }
+    }
+
+    /// v15 — "Don't recommend" suppression list. A user can explicitly suppress a
+    /// track or an artist from the recommender; the row is a hard exclusion the
+    /// blender drops (kept SEPARATE from the rolling "already-heard" set so
+    /// un-suppressing is a simple row delete and never depends on play history).
+    /// `scope` is 'track' (ref = track.remoteId) or 'artist' (ref = artist
+    /// remoteId); per-server so the same id on two servers is independent.
+    private static func registerV15(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v15.suppressedRefs") { db in
+            try db.create(table: "suppressed_ref") { t in
+                t.column("serverId", .text).notNull()
+                    .references("server", onDelete: .cascade)
+                t.column("scope", .text).notNull()      // 'track' | 'artist'
+                t.column("ref", .text).notNull()        // remoteId of the track / artist
+                t.column("createdAt", .double).notNull()
+                t.primaryKey(["serverId", "scope", "ref"])
             }
         }
     }

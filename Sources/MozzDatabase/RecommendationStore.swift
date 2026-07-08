@@ -329,9 +329,11 @@ public struct RecommendationStore: Sendable {
     /// the bound is left to the caller's in-memory filter.
     public func candidateTracks(serverId: ServerID, genres: [String], artistIds: [String],
                                 notPlayedSince: Double, excludingRemoteIds: Set<String> = [],
+                                excludingArtistIds: Set<String> = [],
                                 limit: Int = 2000, enrich: Bool = false) async throws -> [TrackCandidate] {
         guard !genres.isEmpty || !artistIds.isEmpty else { return [] }
         let excludeList = Array(excludingRemoteIds.prefix(Self.maxSQLExclusions))
+        let excludeArtistList = Array(excludingArtistIds.prefix(Self.maxSQLExclusions))
         return try await database.read { db in
             var args: [DatabaseValueConvertible?] = [serverId, notPlayedSince]
             var matchClauses: [String] = []
@@ -370,6 +372,10 @@ public struct RecommendationStore: Sendable {
                 excludeClause = "AND track.remoteId NOT IN (\(databasePlaceholders(excludeList.count)))"
                 args.append(contentsOf: excludeList)
             }
+            if !excludeArtistList.isEmpty {
+                excludeClause += " AND (track.artistRemoteId IS NULL OR track.artistRemoteId NOT IN (\(databasePlaceholders(excludeArtistList.count))))"
+                args.append(contentsOf: excludeArtistList)
+            }
             args.append(limit)
             let mbTagsSelect = enrich ? ", tf.mb_tags AS mb_tags" : ""
             let mbTagsJoin = enrich ? "LEFT JOIN track_features tf ON tf.track_ref = \(Self.refExpr)" : ""
@@ -395,6 +401,62 @@ public struct RecommendationStore: Sendable {
     /// Upper bound on ids passed to a SQL `NOT IN` (SQLite's default host-param
     /// limit is 999; stay comfortably under it alongside the other bindings).
     private static let maxSQLExclusions = 800
+
+    // MARK: - Suppression ("Don't recommend")
+
+    /// Add a hard "don't recommend" suppression. `scope` is `"track"` (ref =
+    /// track.remoteId) or `"artist"` (ref = artist remoteId). Idempotent.
+    public func suppress(serverId: ServerID, scope: String, ref: String, at time: Double) async throws {
+        try await database.write { db in
+            try db.execute(sql: """
+                INSERT INTO suppressed_ref (serverId, scope, ref, createdAt)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(serverId, scope, ref) DO NOTHING
+                """, arguments: [serverId, scope, ref, time])
+        }
+    }
+
+    /// Remove a suppression (un-suppress). No-op if absent.
+    public func unsuppress(serverId: ServerID, scope: String, ref: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM suppressed_ref WHERE serverId = ? AND scope = ? AND ref = ?",
+                           arguments: [serverId, scope, ref])
+        }
+    }
+
+    private func suppressedRefs(serverId: ServerID, scope: String) async throws -> Set<String> {
+        try await database.read { db in
+            Set(try String.fetchAll(db, sql: "SELECT ref FROM suppressed_ref WHERE serverId = ? AND scope = ?",
+                                    arguments: [serverId, scope]))
+        }
+    }
+
+    /// Suppressed track **remoteIds** — for SQL/`excluding` paths keyed on
+    /// `track.remoteId` (candidate pool, radio seen-set).
+    public func suppressedTrackRemoteIds(serverId: ServerID) async throws -> Set<String> {
+        try await suppressedRefs(serverId: serverId, scope: "track")
+    }
+
+    /// Suppressed track **refs** (`serverId:remoteId`) — for the blender, which
+    /// keys on `trackRef`. Composed (never split) per the track_ref contract.
+    public func suppressedTrackRefs(serverId: ServerID) async throws -> Set<String> {
+        Set(try await suppressedTrackRemoteIds(serverId: serverId).map { "\(serverId):\($0)" })
+    }
+
+    /// Suppressed artist remoteIds — expands to every track by that artist.
+    public func suppressedArtistIds(serverId: ServerID) async throws -> Set<String> {
+        try await suppressedRefs(serverId: serverId, scope: "artist")
+    }
+
+    /// All suppressions for a server, newest first (for a Settings "Suppressed"
+    /// list). Each is `(scope, ref, createdAt)`.
+    public func suppressions(serverId: ServerID) async throws -> [(scope: String, ref: String, createdAt: Double)] {
+        try await database.read { db in
+            try Row.fetchAll(db, sql: "SELECT scope, ref, createdAt FROM suppressed_ref WHERE serverId = ? ORDER BY createdAt DESC",
+                             arguments: [serverId])
+                .map { (scope: $0["scope"], ref: $0["ref"], createdAt: $0["createdAt"]) }
+        }
+    }
 
     /// Cold-start pool for a thin/empty history: most-recently-added tracks not
     /// played since `notPlayedSince`. (Popularity would also feed cold start, but

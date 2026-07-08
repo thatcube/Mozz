@@ -947,6 +947,24 @@ public final class AppEnvironment: ObservableObject {
         }
     }
 
+    /// "Don't recommend" a track: persist a hard suppression, then regenerate the
+    /// home shelves so it disappears immediately (a running station picks it up on
+    /// its next batch). Reversible from a future Settings list.
+    public func suppressTrack(_ track: Track) async {
+        guard let serverId = active?.connection.id else { return }
+        try? await recommendations.suppressTrack(remoteId: track.id, serverId: serverId)
+        await regenerateMozzWeekly()
+        await regenerateHomeMixes()
+    }
+
+    /// "Don't recommend" the artist of `track` (suppresses all their tracks).
+    public func suppressArtist(ofTrack track: Track) async {
+        guard let serverId = active?.connection.id, let artistId = track.artistID else { return }
+        try? await recommendations.suppressArtist(remoteId: artistId, serverId: serverId)
+        await regenerateMozzWeekly()
+        await regenerateHomeMixes()
+    }
+
     /// The Home mix tiles (daily batch + Mozz Weekly), ordered for display.
     public func homeMixes() async -> [RecommendationService.HomeMix] {
         (try? await recommendations.homeMixes()) ?? []

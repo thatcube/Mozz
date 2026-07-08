@@ -112,5 +112,22 @@ struct TrackActionButtons: View {
                 Label("Download", mozz: "arrow.down.circle")
             }
         }
+
+        Divider()
+
+        Button {
+            let snapshot = track
+            Task { await env.suppressTrack(snapshot) }
+        } label: {
+            Label("Don't recommend this track", mozz: "hand.thumbsdown")
+        }
+        if track.artistID != nil {
+            Button {
+                let snapshot = track
+                Task { await env.suppressArtist(ofTrack: snapshot) }
+            } label: {
+                Label("Don't recommend this artist", mozz: "hand.thumbsdown")
+            }
+        }
     }
 }
