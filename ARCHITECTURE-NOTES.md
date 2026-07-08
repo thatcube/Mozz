@@ -118,7 +118,7 @@ winning on name collision. Also added `p`, `t`, `s`, `u` to
 
 ## Test coverage (`swift test --filter MozzSubsonicTests`)
 
-20 tests, all passing. Cover the required cases from the brief:
+32 tests, all passing. Cover the required cases from the brief plus follow-up polish:
 
 - **Signing (5)** — MD5 sends u+t+s + protocol trio; apiKey mode OMITS `u`;
   legacy mode sends `p`; MD5 derivation deterministic given the same salt;
@@ -140,6 +140,17 @@ winning on name collision. Also added `p`, `t`, `s`, `u` to
 - **Prune safety (1)** — a partial walk with a mid-walk transport error
   throws AND every page it yielded reports total strictly greater than
   seen-at-that-point (the derivable-total invariant).
+- **Stream source decisions (6)** — FLAC / MP3 direct-play via `format=raw`;
+  opus transcodes to aac; a bitrate cap forces transcode even for
+  iOS-playable containers; `forceTranscode` always wins; unknown container
+  transcodes conservatively.
+- **Classic-server fallback (1)** — an HTTP 400 on
+  `getOpenSubsonicExtensions` (a common classic-Subsonic failure mode) is
+  ALSO absorbed and produces `isOpenSubsonic=false` without throwing.
+- **Artists route (1)** — `getArtists` index gets flattened; second page
+  returns empty so the sync engine stops.
+- **URL normalization (4)** — bare host gets `http://`, trailing `/rest`
+  stripped, whitespace trimmed, empty input returns nil.
 
 ## Deviations from the spec
 

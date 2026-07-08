@@ -480,6 +480,158 @@ final class SubsonicPruneSafetyTests: XCTestCase {
     }
 }
 
+// MARK: - Stream source decisions
+
+final class SubsonicStreamSourceTests: XCTestCase {
+    private func track(container: String?, codec: String?) -> Track {
+        Track(
+            id: "sg-1", title: "T", albumTitle: nil, albumID: nil,
+            artistName: "A", artistID: nil, albumArtistName: nil,
+            trackNumber: nil, discNumber: nil, duration: 100,
+            format: AudioFormat(container: container, codec: codec,
+                                bitrateKbps: nil, sampleRateHz: nil,
+                                channels: nil, bitDepth: nil),
+            fileSizeBytes: nil, mediaKey: "sg-1", artwork: nil,
+            genres: [], isFavorite: false, rating: nil,
+            normalizationGainDB: nil, addedAt: nil,
+            mbid: nil, artistMbid: nil
+        )
+    }
+
+    private func decide(_ track: Track, _ options: StreamOptions = .bestAvailable) async throws -> (URL, Bool) {
+        let backend = makeBackend(transport: FixtureTransport([]))
+        let src = try await backend.streamSource(for: track, options: options)
+        return (src.url, src.isTranscoded)
+    }
+
+    func testFLACDirectPlays() async throws {
+        let (url, transcoded) = try await decide(track(container: "flac", codec: "flac"))
+        XCTAssertFalse(transcoded, "FLAC is iOS-playable and must direct-play")
+        XCTAssertTrue(url.absoluteString.contains("format=raw"))
+    }
+
+    func testMP3DirectPlays() async throws {
+        let (url, transcoded) = try await decide(track(container: "mp3", codec: "mp3"))
+        XCTAssertFalse(transcoded)
+        XCTAssertTrue(url.absoluteString.contains("format=raw"))
+    }
+
+    func testOpusTranscodesToAAC() async throws {
+        let (url, transcoded) = try await decide(track(container: "opus", codec: "opus"))
+        XCTAssertTrue(transcoded, "opus is not iOS-playable — must transcode")
+        XCTAssertTrue(url.absoluteString.contains("format=aac"))
+        XCTAssertFalse(url.absoluteString.contains("maxBitRate"), "no cap requested")
+    }
+
+    func testBitrateCapForcesTranscodeEvenForIOSPlayable() async throws {
+        let (url, transcoded) = try await decide(
+            track(container: "flac", codec: "flac"),
+            StreamOptions(maxBitrateKbps: 192)
+        )
+        XCTAssertTrue(transcoded, "bitrate cap requires transcode (server can't recompress raw)")
+        XCTAssertTrue(url.absoluteString.contains("format=aac"))
+        XCTAssertTrue(url.absoluteString.contains("maxBitRate=192"))
+    }
+
+    func testForceTranscodeAlwaysWins() async throws {
+        let (url, transcoded) = try await decide(
+            track(container: "mp3", codec: "mp3"),
+            StreamOptions(forceTranscode: true)
+        )
+        XCTAssertTrue(transcoded)
+        XCTAssertTrue(url.absoluteString.contains("format=aac"))
+    }
+
+    func testUnknownContainerTranscodesConservatively() async throws {
+        // No container / codec info at all — default to transcode rather than
+        // gamble the AVFoundation decode path.
+        let (url, transcoded) = try await decide(track(container: nil, codec: nil))
+        XCTAssertTrue(transcoded)
+        XCTAssertTrue(url.absoluteString.contains("format=aac"))
+    }
+}
+
+// MARK: - Classic-server fallback across HTTP failure modes
+
+final class SubsonicClassicFallbackTests: XCTestCase {
+    /// Server returns HTTP 400 on unknown endpoint (some subsonic clones do).
+    /// Detection MUST NOT throw — must fall back to classic profile.
+    func testHTTP400OnExtensionsFallsBackToClassic() async throws {
+        final class BadStatusTransport: HTTPTransport, @unchecked Sendable {
+            func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                let url = request.url!
+                if url.path.contains("ping.view") {
+                    let data = try Data(contentsOf: Bundle.module.url(
+                        forResource: "sub_ping", withExtension: "json", subdirectory: "Fixtures"
+                    )!)
+                    return (data, HTTPURLResponse(
+                        url: url, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!)
+                }
+                // Extensions endpoint returns HTTP 400 — the classic Subsonic
+                // failure mode when an unknown REST endpoint is called.
+                return (Data(), HTTPURLResponse(
+                    url: url, statusCode: 400, httpVersion: nil, headerFields: nil
+                )!)
+            }
+        }
+        let backend = SubsonicBackend(
+            connection: makeConnection(),
+            credentials: stableMD5Creds(),
+            clientInfo: clientInfo,
+            transport: BadStatusTransport()
+        )
+        let caps = try await backend.detectCapabilities()
+        XCTAssertFalse(caps.isOpenSubsonic)
+        XCTAssertEqual(caps.serverProductType, "navidrome")
+    }
+}
+
+// MARK: - Artists route
+
+final class SubsonicArtistsRouteTests: XCTestCase {
+    func testFetchArtistsFlattensIndex() async throws {
+        let transport = FixtureTransport([
+            .init(contains: "getArtists.view", fixture: "sub_artists"),
+        ])
+        let backend = makeBackend(transport: transport)
+        let page = try await backend.fetchArtists(offset: 0, limit: 500)
+        XCTAssertEqual(page.items.count, 2)
+        XCTAssertEqual(page.items.map(\.id), ["ar-1", "ar-2"])
+        // getArtists returns everything in one call — a second page must be
+        // empty so the sync engine stops.
+        let empty = try await backend.fetchArtists(offset: 500, limit: 500)
+        XCTAssertTrue(empty.items.isEmpty)
+    }
+}
+
+// MARK: - URL normalization
+
+final class SubsonicURLNormalizationTests: XCTestCase {
+    func testAddsHTTPWhenSchemeMissing() {
+        XCTAssertEqual(SubsonicAuthenticator.normalize("navidrome.local:4533")?.absoluteString,
+                       "http://navidrome.local:4533")
+    }
+
+    func testStripsTrailingREST() {
+        XCTAssertEqual(SubsonicAuthenticator.normalize("https://ss.example.com/rest")?.absoluteString,
+                       "https://ss.example.com")
+        XCTAssertEqual(SubsonicAuthenticator.normalize("https://ss.example.com/rest/")?.absoluteString,
+                       "https://ss.example.com")
+    }
+
+    func testEmptyInputReturnsNil() {
+        XCTAssertNil(SubsonicAuthenticator.normalize(""))
+        XCTAssertNil(SubsonicAuthenticator.normalize("   "))
+    }
+
+    func testTrimsWhitespace() {
+        XCTAssertEqual(SubsonicAuthenticator.normalize("  https://ss.example.com  ")?.absoluteString,
+                       "https://ss.example.com")
+    }
+}
+
 // MARK: - Helpers
 
 func loadFixture(_ name: String) throws -> Data {

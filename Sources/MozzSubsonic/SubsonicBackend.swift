@@ -86,25 +86,28 @@ public struct SubsonicBackend: MusicBackend {
         // envelope maps to MozzError in the client.
         let ping = try await client.sendVoid("ping.view")
 
-        // getOpenSubsonicExtensions is BEST-EFFORT — a 404/70 means classic
-        // Subsonic (no OpenSubsonic profile), not a detection failure.
+        // getOpenSubsonicExtensions is BEST-EFFORT — anything short of a
+        // successful decode means "classic Subsonic profile", not a detection
+        // failure. Classic servers surface the missing endpoint in wildly
+        // different ways: some 404 the HTTP request (mapped to .notFound), some
+        // return a `failed` envelope with code 70 (mapped to .notFound), some
+        // return code 30 (mapped to .unsupported), a few 400/500 the request
+        // (mapped to .badStatus). We treat ALL of those uniformly.
         var extensions: [SSExtension] = []
         var openSubsonic = false
         do {
-            let payload = try await client.send(
+            extensions = try await client.send(
                 "getOpenSubsonicExtensions.view",
                 payloadKey: "openSubsonicExtensions",
                 as: [SSExtension].self
             )
-            extensions = payload
             openSubsonic = true
-        } catch MozzError.notFound {
+        } catch MozzError.unauthorized {
+            // A 401/403 on THIS call means the credential doesn't allow
+            // extension introspection but ping succeeded — that's still
+            // authenticated. Fall back to classic profile.
             openSubsonic = false
-        } catch MozzError.unsupported {
-            openSubsonic = false
-        } catch MozzError.decodingFailed {
-            // Some classic servers respond with an unknown-command failed
-            // envelope; treat that as "no extensions endpoint".
+        } catch is MozzError {
             openSubsonic = false
         }
 
@@ -308,32 +311,28 @@ public struct SubsonicBackend: MusicBackend {
         let codec = (track.format.codec ?? "").lowercased()
         let iosPlayable = Self.directPlaySuffixes.contains(container)
             || Self.directPlaySuffixes.contains(codec)
-        var query: [URLQueryItem] = [
-            URLQueryItem(name: "id", value: track.id),
-        ]
-        var isTranscoded: Bool
-        if options.forceTranscode {
+
+        // Decide whether we can direct-play. A bitrate cap ALWAYS transcodes
+        // (the server can't recompress without decoding). A caller-forced
+        // transcode always transcodes. Otherwise, iOS-playable containers get
+        // `format=raw` so we get gapless + full quality, and unsupported
+        // containers (opus / ogg / wma) transcode to aac.
+        let mustTranscode = options.forceTranscode
+            || options.maxBitrateKbps != nil
+            || !iosPlayable
+
+        var query: [URLQueryItem] = [URLQueryItem(name: "id", value: track.id)]
+        if mustTranscode {
             query.append(URLQueryItem(name: "format", value: "aac"))
             if let bitrate = options.maxBitrateKbps {
                 query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
             }
-            isTranscoded = true
-        } else if let bitrate = options.maxBitrateKbps {
-            query.append(URLQueryItem(name: "format", value: iosPlayable ? "aac" : "aac"))
-            query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
-            isTranscoded = true
-        } else if iosPlayable {
-            // Ask for the ORIGINAL bytes so we get gapless + full quality.
-            query.append(URLQueryItem(name: "format", value: "raw"))
-            isTranscoded = false
         } else {
-            // Unsupported source (opus / ogg / wma / etc.) — transcode to aac.
-            query.append(URLQueryItem(name: "format", value: "aac"))
-            isTranscoded = true
+            query.append(URLQueryItem(name: "format", value: "raw"))
         }
         let url = try client.url(path: "stream.view", query: query)
         // Subsonic has no per-stream session id concept the way Jellyfin does.
-        return StreamSource(url: url, isTranscoded: isTranscoded, sessionID: nil)
+        return StreamSource(url: url, isTranscoded: mustTranscode, sessionID: nil)
     }
 
     public func originalFileURL(for track: Track) throws -> URL {
