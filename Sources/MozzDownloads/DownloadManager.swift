@@ -169,6 +169,32 @@ public final class DownloadManager: NSObject, ObservableObject {
         if let codec = track.format.codec, !codec.isEmpty { return codec }
         return "audio"
     }
+
+    /// Reject a finished transfer whose HTTP response is actually an *error
+    /// body* rather than media, so it is never moved into the offline store as
+    /// the track's "audio" file. Servers in the Subsonic family return errors
+    /// over **HTTP 200** with an XML/JSON `subsonic-response` body, and a plain
+    /// 4xx/5xx download still calls `didFinishDownloadingTo` with the error page
+    /// as its file — both would otherwise permanently corrupt the offline copy.
+    /// Returns a human-readable reason to record as the failure, or `nil` when
+    /// the response looks like real media (`audio/*`, `application/octet-stream`,
+    /// or an unknown/absent content-type — we stay permissive so a genuine audio
+    /// MIME we don't enumerate is never rejected). Backend-agnostic: this
+    /// protects Plex, Jellyfin and Subsonic downloads alike.
+    nonisolated static func downloadRejectionReason(for response: URLResponse?) -> String? {
+        guard let http = response as? HTTPURLResponse else { return nil }
+        guard (200...299).contains(http.statusCode) else {
+            return "server returned HTTP \(http.statusCode) instead of the file"
+        }
+        guard let contentType = http.value(forHTTPHeaderField: "Content-Type") else { return nil }
+        let mime = contentType.lowercased()
+            .split(separator: ";").first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? contentType.lowercased()
+        if mime.hasPrefix("text/") || mime == "application/json" || mime.contains("xml") {
+            return "server returned a \(mime) error body instead of audio"
+        }
+        return nil
+    }
 }
 
 // MARK: - URLSessionDownloadDelegate
@@ -183,6 +209,17 @@ extension DownloadManager: URLSessionDownloadDelegate {
         // We can't hop to the main actor first, so do the file move on this
         // thread using a temp copy, then hand off to the main actor.
         let description = downloadTask.taskDescription
+        // Guard against saving an error body as audio: a Subsonic-family server
+        // returns errors over HTTP 200 with an XML/JSON body, and a 4xx/5xx
+        // download still delivers its error page here as the "downloaded file".
+        // Reject those before they reach the store instead of corrupting the
+        // offline copy.
+        if let reason = Self.downloadRejectionReason(for: downloadTask.response) {
+            if let info = TaskInfo(description) {
+                Task { @MainActor in await self.recordFailed(trackId: info.trackId, error: reason) }
+            }
+            return
+        }
         let fileManager = FileManager.default
         let holding = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

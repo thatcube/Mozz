@@ -233,6 +233,12 @@ final class SubsonicClientTests: XCTestCase {
         XCTAssertEqual(SubsonicClient.mapError(code: 40, message: nil), .unauthorized)
         XCTAssertEqual(SubsonicClient.mapError(code: 44, message: nil), .unauthorized)
         XCTAssertEqual(SubsonicClient.mapError(code: 50, message: nil), .unauthorized)
+        // 41 (token auth unsupported for LDAP) and 42/43 (unsupported/conflicting
+        // OpenSubsonic auth mechanism) are genuine auth failures: they must drive
+        // a re-auth flow, so they map to .unauthorized rather than .unsupported.
+        XCTAssertEqual(SubsonicClient.mapError(code: 41, message: nil), .unauthorized)
+        XCTAssertEqual(SubsonicClient.mapError(code: 42, message: nil), .unauthorized)
+        XCTAssertEqual(SubsonicClient.mapError(code: 43, message: nil), .unauthorized)
         XCTAssertEqual(SubsonicClient.mapError(code: 70, message: nil), .notFound)
         if case .unsupported = SubsonicClient.mapError(code: 30, message: "boom") {} else {
             XCTFail("Non-auth codes should map to .unsupported")
@@ -422,6 +428,28 @@ final class SubsonicEnumerationTests: XCTestCase {
 
         XCTAssertFalse(pages.isEmpty)
         for page in pages { XCTAssertNil(page.totalCount, "unprovable total must be nil") }
+    }
+
+    /// An empty album walk must report an UNPROVABLE total (nil), never an
+    /// authoritative 0. A transient/divergent `getAlbumList2` read (the
+    /// tracks-walk momentarily empty while the albums phase is non-empty) must
+    /// not be able to self-report "complete" (0 >= 0) and green-light a prune
+    /// that deletes every track row and its offline download.
+    func testEmptyLibraryYieldsNilTotalToProtectDownloads() async throws {
+        let transport = albumWalkTransport(albumList: "sub_albumlist2_empty")
+        let stream = try XCTUnwrap(backend(transport).enumerateAllTracks(pageSize: 50))
+        var pages: [CatalogPage<Track>] = []
+        for try await page in stream { pages.append(page) }
+
+        XCTAssertTrue(pages.allSatisfy(\.items.isEmpty), "no tracks in an empty library")
+        for page in pages { XCTAssertNil(page.totalCount, "empty walk must not report a provable total") }
+
+        // And the engine-side effect: a nil-total bulk phase is NOT complete, so
+        // the destructive prune is refused.
+        let phase = LibrarySyncEngine.PagedEnumeration(
+            seen: [], reportedTotal: pages.last?.totalCount, requiresReportedTotalForPrune: true)
+        XCTAssertFalse(LibrarySyncEngine.phaseCompleted(phase),
+                       "empty walk must never authorize a prune")
     }
 
     /// Regression: an empty-id album inside a FULL album-list window must not

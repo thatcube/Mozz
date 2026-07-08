@@ -137,14 +137,17 @@ public struct SubsonicClient: Sendable {
     }
 
     /// Map a Subsonic `error.code` to a ``MozzError``. Codes per the Subsonic
-    /// API: 40 wrong credentials, 44 invalid apiKey, 50 not authorized → auth
-    /// failures; 70 the requested data was not found; the rest (0/10/20/30/41/
-    /// 42/43/60) surface as ``MozzError/unsupported(_:)`` carrying the server's
-    /// message so the real reason is not lost.
+    /// API: 40 wrong credentials, 41 token auth not supported for the user
+    /// (LDAP), 42/43 the provided/conflicting auth mechanism is unsupported
+    /// (OpenSubsonic), 44 invalid apiKey, 50 not authorized → all auth failures
+    /// that should drive a re-auth / credential-clear flow, so they map to
+    /// ``MozzError/unauthorized``. 70 → the requested data was not found; the
+    /// rest (0/10/20/30/60) surface as ``MozzError/unsupported(_:)`` carrying the
+    /// server's message so the real reason is not lost.
     public static func mapError(code: Int?, message: String?) -> MozzError {
         let detail = message ?? "Subsonic error \(code.map(String.init) ?? "?")"
         switch code {
-        case 40, 44, 50:
+        case 40, 41, 42, 43, 44, 50:
             return .unauthorized
         case 70:
             return .notFound

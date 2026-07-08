@@ -241,9 +241,17 @@ public struct SubsonicBackend: MusicBackend {
                     if !buffer.isEmpty {
                         continuation.yield(CatalogPage(items: buffer, totalCount: expectedTotal))
                     } else if albumIDs.isEmpty {
-                        // Empty library: emit one empty page carrying the (0)
-                        // expected total so completeness can still be proven.
-                        continuation.yield(CatalogPage(items: [], totalCount: expectedTotal))
+                        // Empty album walk: emit an empty page with NO provable
+                        // total (nil), NOT an authoritative 0. A transient or
+                        // divergent `getAlbumList2` read — e.g. the tracks-walk
+                        // momentarily seeing zero albums while the albums phase
+                        // (a separate listing) is non-empty — must never be able
+                        // to self-report "complete" (0 >= 0) and green-light a
+                        // prune that deletes every track row and its offline
+                        // download. "If not provable, do not prune": a genuinely
+                        // empty server simply leaves prior rows in place until a
+                        // future sync can prove completeness some other way.
+                        continuation.yield(CatalogPage(items: [], totalCount: nil))
                     }
                     continuation.finish()
                 } catch {
