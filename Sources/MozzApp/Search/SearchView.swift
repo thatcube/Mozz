@@ -24,59 +24,153 @@ struct SearchView: View {
     @State private var resolvedRecents: [RecentResolved] = []
     @State private var searchTask: Task<Void, Never>?
     @State private var lastLatencyMs: Double?
+    /// True once the page has scrolled off its top. Drives the search field's
+    /// at-rest gray fill → Liquid Glass swap so content shows through it as it
+    /// pins, matching the system search bar.
+    @State private var scrolled = false
     @FocusState private var focused: Bool
+    /// Bumped when the user re-taps the Search tab while already on it. We use it
+    /// to focus the field + open the keyboard, so tapping Search when you're
+    /// already there starts a search. (A dedicated signal — not the shared
+    /// scroll-to-top one — so re-tapping OTHER tabs can't focus us in the
+    /// background.)
+    @Environment(\.searchReselectSignal) private var searchReselectSignal
+    /// Bumped when the user leaves the Search tab; drop focus so the keyboard
+    /// doesn't stay open over another tab (all tabs remain mounted).
+    @Environment(\.searchBlurSignal) private var searchBlurSignal
 
     /// Shared height for the search field and the cancel ✕ so they line up.
     private let fieldHeight: CGFloat = 44
 
+    /// One shared timing for everything that changes when the field activates or
+    /// the page scrolls: the header collapse / field slide-up AND the field's
+    /// gray↔glass crossfade. Using a single curve+duration keeps them in lockstep
+    /// (they previously ran at different timings, which felt disjointed).
+    /// `.smooth` (a spring with no overshoot) reads more naturally here than
+    /// `easeInOut`, which felt slightly draggy at the ends.
+    private let fieldTransition: Animation = .smooth(duration: 0.4)
+
+    /// Scroll anchor id for the very top, so beginning/refining a search can jump
+    /// the list back up (results under the bar; avoids swapping content while
+    /// scrolled deep, which blanked the lazy pinned stack).
+    private let topAnchor = "search-top-anchor"
+
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
-    /// Drives the collapse of the title header and the Cancel button.
+    /// Drives the Cancel button and the field's glass; the title is NOT affected
+    /// (it only leaves by scrolling), so nothing ever shifts on focus.
     private var isActive: Bool { focused || !trimmedQuery.isEmpty }
 
     var body: some View {
         NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                if !isActive {
-                    TightHeader(title: "Search")
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                HStack(spacing: 12) {
-                    searchField
-                    if isActive {
-                        Button { cancelSearch() } label: {
-                            Image(mozz: "xmark")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: fieldHeight, height: fieldHeight)
-                                .glassCircle()
-                                .accessibilityLabel("Cancel search")
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // Eager VStack (NOT LazyVStack): result/recent counts are
+                    // small (search is capped at 20 per type), so eager rendering
+                    // is cheap — and it removes the lazy cell realization that was
+                    // BLANKING the screen when content changed while scrolled into
+                    // a pinned-section stack.
+                    VStack(spacing: 0) {
+                        // Zero-height anchor at the very top so a new search can
+                        // jump the list back up (see onChange below).
+                        Color.clear.frame(height: 0).id(topAnchor)
+                        // Title + avatar are ordinary scroll content, so they
+                        // scroll away exactly 1:1 with the finger — no jump, and
+                        // never removed by state, so nothing ever shifts. (Per the
+                        // spec: the title leaves by SCROLLING; the ✕ appears on
+                        // focus.)
+                        TightHeader(title: "Search")
+                        // Pin the field with a render-time visualEffect (holds it
+                        // at the top once it would scroll past) + zIndex + an
+                        // opaque background so the content scrolls UNDER it. In an
+                        // eager VStack, zIndex is honored reliably (it was not in
+                        // the LazyVStack, which caused the earlier clipping).
+                        searchFieldBar
+                            .zIndex(1)
+                            .visualEffect { content, proxy in
+                                let minY = proxy.frame(in: .scrollView).minY
+                                return content.offset(y: minY < 0 ? -minY : 0)
+                            }
+                        resultsContent
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, isActive ? 8 : 12)
-                .padding(.bottom, 10)
-
-                resultsList
-                    .minimizesBottomBarOnScroll()
-                    .scrollsToTopOnSignal()
+                .overlay { emptyState }
+                .safeAreaInset(edge: .bottom) { latencyLabel }
+                .tracksScrolled($scrolled)
+                .minimizesBottomBarOnScroll()
+                .scrollsToTopOnSignal()
+                .hideNavigationBar()
+                .mozzScreenBackground()
+                .appRouteDestinations()
+                .onChange(of: query) { _, newValue in
+                    scheduleSearch(newValue)
+                    // Jump to the top the moment the query changes so fresh results
+                    // render right under the search bar (what you want while
+                    // typing) instead of somewhere off-screen below your scroll
+                    // position.
+                    if !trimmedQuery.isEmpty {
+                        jumpToTop(proxy)
+                    }
+                }
+                // Re-tapping the Search tab while already on it focuses the field
+                // and opens the keyboard, so you can start typing immediately.
+                .onChange(of: searchReselectSignal) { _, _ in focused = true }
+                // Leaving the Search tab drops focus so the keyboard doesn't stay
+                // open over another tab.
+                .onChange(of: searchBlurSignal) { _, _ in focused = false }
+                .task(id: recents.items) { await resolveRecents() }
             }
-            .animation(.snappy(duration: 0.3), value: isActive)
-            .hideNavigationBar()
-            .mozzScreenBackground()
-            .appRouteDestinations()
-            .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
-            .task(id: recents.items) { await resolveRecents() }
         }
     }
 
-    /// A custom search field with real iOS 26 Liquid Glass. We can't use the
-    /// system `.searchable` here because it requires a visible navigation bar,
-    /// which is incompatible with the tight top-aligned title — so we recreate
-    /// the field (glass material + focus animation + Cancel) to keep both.
+    /// The pinned top bar: the search field (+ Cancel while active). It carries a
+    /// solid page-colored background so the content scrolling underneath the
+    /// pinned bar is fully occluded (no rows peeking in the padding around the
+    /// pill), and it absorbs touches (`contentShape`) so you can't tap a result
+    /// that has scrolled beneath it. The pill itself still animates gray↔glass.
+    private var searchFieldBar: some View {
+        HStack(spacing: 12) {
+            searchField
+            if isActive {
+                Button { cancelSearch() } label: {
+                    Image(mozz: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: fieldHeight, height: fieldHeight)
+                        .glassCircle()
+                        // Make the whole 44pt circle tappable. Without this the
+                        // button's hit area is just the small "✕" glyph, so taps
+                        // on the glass ring fall through to the content pinned
+                        // behind the bar.
+                        .contentShape(Circle())
+                        .accessibilityLabel("Cancel search")
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        // No opaque fill: the content scrolls fully UNDER the glass pill so it
+        // reads as real Liquid Glass over live content (not glass over a solid
+        // white strip). We still absorb taps across the whole bar so a result
+        // that has scrolled beneath it can't be tapped through the clear gaps.
+        .contentShape(Rectangle())
+        .onTapGesture { }
+        // Animate the ✕ (Cancel) fading in/out when search activates. Keyed on
+        // isActive only, so it never fires during scroll (won't perturb the
+        // visualEffect pin). Needed for the button's .transition(.opacity) — which
+        // otherwise pops in with no animation once the bar has docked.
+        .animation(fieldTransition, value: isActive)
+    }
+
+    /// A custom search field. We can't use the system `.searchable` here because
+    /// it requires a visible navigation bar, which is incompatible with the tight
+    /// top-aligned title — so we recreate the field (focus animation + Cancel).
+    /// At rest it's a plain theme-aware gray fill (no glass); once the page
+    /// scrolls (or the field is focused) it becomes real Liquid Glass so content
+    /// shows through it as it pins, matching the system search bar.
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(mozz: "magnifyingglass").foregroundStyle(.secondary)
@@ -86,42 +180,106 @@ struct SearchView: View {
                 .plainTextFieldStyle()
             if !query.isEmpty {
                 Button { query = "" } label: {
-                    Image(mozz: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Image(mozz: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: fieldHeight, alignment: .trailing)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear text")
             }
         }
         .padding(.horizontal, 14)
         .frame(height: fieldHeight)
-        .glassCapsule()
+        // The gray/glass surface lives in a BACKGROUND layer, never wrapping the
+        // content — so the TextField's identity is stable (swapping it on focus
+        // was tearing down the field mid-first-responder and freezing the app).
+        // BOTH layers are always mounted and only their opacity crossfades: an
+        // inserted (`if`) glass layer with a .transition would be placed at its
+        // FINAL frame immediately while the gray field animated its position up
+        // on focus — reading as two fields at two positions. Persistent layers
+        // both move with the field, so the crossfade happens in place. Glass at
+        // opacity 0 is fully invisible (no stray glass shadow at rest).
+        .background {
+            ZStack {
+                Capsule().fill(Color.searchFieldRest)
+                    .opacity(fieldShowsGlass ? 0 : 1)
+                GlassCapsuleFill()
+                    .opacity(fieldShowsGlass ? 1 : 0)
+            }
+            .animation(fieldTransition, value: fieldShowsGlass)
+        }
+        // The visible pill is 44pt tall, but a bare custom TextField only takes
+        // focus when the glyphs themselves are tapped — the icon, padding and
+        // capsule margins are dead zones (unlike the system search bar, which
+        // forwards a tap anywhere in the pill). Make the whole capsule the tap
+        // target so focusing matches native's larger hit area.
+        .contentShape(Capsule())
+        .onTapGesture { focused = true }
     }
 
-    private var resultsList: some View {
-        List {
-            if trimmedQuery.isEmpty {
-                if !resolvedRecents.isEmpty {
-                    Section {
-                        ForEach(resolvedRecents) { recentRow($0) }
-                    } header: {
-                        HStack {
-                            Text("Recently Searched").font(.headline).textCase(nil)
-                            Spacer()
-                            Button("Clear") { recents.clear() }.font(.subheadline)
-                        }
-                    }
+    /// The field shows Liquid Glass when the field is focused OR the page has
+    /// scrolled off the top; at rest at the top it's the plain gray fill. Both
+    /// the gray and glass background layers are persistent (see `searchField`),
+    /// so this can drive focus too without the two-position ghosting that an
+    /// inserted glass layer caused.
+    private var fieldShowsGlass: Bool { scrolled || isActive }
+
+    @ViewBuilder private var resultsContent: some View {
+        if trimmedQuery.isEmpty {
+            if !resolvedRecents.isEmpty {
+                recentsList
+            }
+        } else {
+            resultSections
+        }
+    }
+
+    private var recentsList: some View {
+        VStack(spacing: 0) {
+            recentlyHeader
+            ForEach(resolvedRecents) { resolved in
+                VStack(spacing: 0) {
+                    recentRow(resolved)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 5)
+                    rowDivider
                 }
-            } else {
-                resultSections
             }
         }
-        .listStyle(.plain)
-        .overlay { emptyState }
-        .safeAreaInset(edge: .bottom) {
-            if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
-                Text(String(format: "found in %.1f ms", ms))
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .padding(.bottom, 4)
-            }
+    }
+
+    /// Non-sticky "Recently Searched" header with its Clear button — plain scroll
+    /// content (unlike the old sticky `List` section header).
+    private var recentlyHeader: some View {
+        HStack {
+            Text("Recently Searched").font(.headline)
+            Spacer()
+            Button("Clear") { recents.clear() }.font(.subheadline)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    /// A plain, non-sticky result category header ("Artists" / "Albums" / …).
+    private func inlineHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+    }
+
+    /// Row separator, inset past the 44pt artwork (matching the native list).
+    private var rowDivider: some View { Divider().padding(.leading, 76) }
+
+    @ViewBuilder private var latencyLabel: some View {
+        if let ms = lastLatencyMs, !trimmedQuery.isEmpty {
+            Text(String(format: "found in %.1f ms", ms))
+                .font(.caption2).foregroundStyle(.tertiary)
+                .padding(.bottom, 4)
         }
     }
 
@@ -139,41 +297,54 @@ struct SearchView: View {
 
     @ViewBuilder private var resultSections: some View {
         if !results.artists.isEmpty {
-            Section("Artists") {
-                ForEach(results.artists) { artist in
-                    NavigationLink(value: AppRoute.artist(artist)) {
-                        Label(artist.name, mozz: "music.mic")
-                    }
-                    .simultaneousGesture(TapGesture().onEnded {
+            inlineHeader("Artists")
+            ForEach(results.artists) { artist in
+                VStack(spacing: 0) {
+                    Button {
                         record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
-                    })
+                        path.append(.artist(artist))
+                    } label: {
+                        SearchResultRow(artworkKey: artist.artworkKey, seed: artist.name,
+                                        title: artist.name, circular: true)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 5)
+                    rowDivider
                 }
             }
         }
         if !results.albums.isEmpty {
-            Section("Albums") {
-                ForEach(results.albums) { album in
-                    NavigationLink(value: AppRoute.album(album)) {
-                        VStack(alignment: .leading) {
-                            Text(album.title)
-                            Text(album.artistName).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .simultaneousGesture(TapGesture().onEnded {
+            inlineHeader("Albums")
+            ForEach(results.albums) { album in
+                VStack(spacing: 0) {
+                    Button {
                         record(.album, serverId: album.serverId, remoteId: album.remoteId)
-                    })
+                        path.append(.album(album))
+                    } label: {
+                        SearchResultRow(artworkKey: album.artworkKey, seed: album.title,
+                                        title: album.title, subtitle: album.artistName)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 5)
+                    rowDivider
                 }
             }
         }
         if !results.tracks.isEmpty {
-            Section("Tracks") {
-                ForEach(results.tracks) { track in
+            inlineHeader("Tracks")
+            ForEach(results.tracks) { track in
+                VStack(spacing: 0) {
                     TrackRow(track: track, showArtist: true)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             record(.track, serverId: track.serverId, remoteId: track.remoteId)
                             env.playback.play(tracks: [track.toDomain()])
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 5)
+                    rowDivider
                 }
             }
         }
@@ -182,34 +353,50 @@ struct SearchView: View {
     @ViewBuilder private func recentRow(_ resolved: RecentResolved) -> some View {
         switch resolved {
         case .artist(let a):
-            NavigationLink(value: AppRoute.artist(a)) {
-                RecentRowLabel(artworkKey: a.artworkKey, seed: a.name,
-                               title: a.name, subtitle: "Artist", circular: true)
-            }
-            .simultaneousGesture(TapGesture().onEnded {
+            Button {
                 record(.artist, serverId: a.serverId, remoteId: a.remoteId)
-            })
-        case .album(let a):
-            NavigationLink(value: AppRoute.album(a)) {
-                RecentRowLabel(artworkKey: a.artworkKey, seed: a.title,
-                               title: a.title, subtitle: "Album · \(a.artistName)")
+                path.append(.artist(a))
+            } label: {
+                SearchResultRow(artworkKey: a.artworkKey, seed: a.name,
+                                title: a.name, subtitle: "Artist", circular: true)
             }
-            .simultaneousGesture(TapGesture().onEnded {
+            .buttonStyle(.plain)
+        case .album(let a):
+            Button {
                 record(.album, serverId: a.serverId, remoteId: a.remoteId)
-            })
+                path.append(.album(a))
+            } label: {
+                SearchResultRow(artworkKey: a.artworkKey, seed: a.title,
+                                title: a.title, subtitle: "Album · \(a.artistName)")
+            }
+            .buttonStyle(.plain)
         case .track(let t):
             Button {
                 record(.track, serverId: t.serverId, remoteId: t.remoteId)
                 env.playback.play(tracks: [t.toDomain()])
             } label: {
-                RecentRowLabel(artworkKey: t.artworkKey, seed: t.albumTitle ?? t.title,
-                               title: t.title, subtitle: "Song · \(t.artistName)")
+                SearchResultRow(artworkKey: t.artworkKey, seed: t.albumTitle ?? t.title,
+                                title: t.title, subtitle: "Song · \(t.artistName)")
             }
             .buttonStyle(.plain)
         }
     }
 
     // MARK: Actions
+
+    /// Scroll the list back to the top when a search changes. Issued both
+    /// immediately and again on the next runloop tick: a `scrollTo` fired
+    /// synchronously while the scroll view is mid-fling / decelerating is often
+    /// swallowed, so the deferred, animated re-issue reliably overrides the
+    /// momentum (a no-op if we're already at the top).
+    private func jumpToTop(_ proxy: ScrollViewProxy) {
+        proxy.scrollTo(topAnchor, anchor: .top)
+        DispatchQueue.main.async {
+            withAnimation(fieldTransition) {
+                proxy.scrollTo(topAnchor, anchor: .top)
+            }
+        }
+    }
 
     private func cancelSearch() {
         query = ""
@@ -282,12 +469,17 @@ enum RecentResolved: Identifiable {
     }
 }
 
-/// A single "Recently Searched" row: artwork + title + kind/subtitle.
-private struct RecentRowLabel: View {
+/// A single search row — artwork + title + optional subtitle. Shared by the
+/// "Recently Searched" list and the live result sections so every row gets the
+/// same 44pt album/artist artwork and a full-width, comfortably tall touch
+/// target. Artists render with circular artwork; albums and songs use a rounded
+/// square. When `subtitle` is nil (e.g. artist results, where the section header
+/// already says "Artists") the title sits vertically centered on its own.
+private struct SearchResultRow: View {
     let artworkKey: String?
     let seed: String
     let title: String
-    let subtitle: String
+    var subtitle: String?
     var circular = false
 
     var body: some View {
@@ -296,10 +488,59 @@ private struct RecentRowLabel: View {
                         seed: seed, size: 44, cornerRadius: 6, circular: circular)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer()
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A standalone Liquid Glass capsule for use as a background layer (iOS 26+),
+/// with a material fallback below. Unlike `glassCapsule()` it does NOT wrap the
+/// field's content, so the search field's surface can be swapped gray↔glass in a
+/// background layer without ever changing the content's (TextField's) identity.
+private struct GlassCapsuleFill: View {
+    var body: some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: Capsule())
+        } else {
+            Capsule().fill(.regularMaterial)
+        }
+        #else
+        Capsule().fill(.regularMaterial)
+        #endif
+    }
+}
+
+/// Tracks whether a scroll view has moved off its top, toggling a `Bool`. Used
+/// to swap the search field from its at-rest gray fill to Liquid Glass once
+/// content scrolls under it. No-op before iOS 18 (the field just stays gray).
+private struct ScrolledTracker: ViewModifier {
+    @Binding var scrolled: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, y in
+                // Set plainly (no withAnimation): the field animates its own
+                // gray→glass opacity locally. Animating from here during the
+                // keyboard's geometry changes risks a relayout feedback loop.
+                let isScrolled = y > 6
+                if isScrolled != scrolled { scrolled = isScrolled }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func tracksScrolled(_ scrolled: Binding<Bool>) -> some View {
+        modifier(ScrolledTracker(scrolled: scrolled))
     }
 }
