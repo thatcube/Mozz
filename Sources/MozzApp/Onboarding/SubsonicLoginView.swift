@@ -28,6 +28,8 @@ struct SubsonicLoginView: View {
             Section {
                 TextField("https://music.example.com", text: $serverURL)
                     .urlFieldStyle()
+                    .accessibilityLabel("Server address")
+                    .accessibilityHint("For example, https://music.example.com")
             } header: {
                 Text("Server address")
             } footer: {
@@ -41,6 +43,7 @@ struct SubsonicLoginView: View {
             Section {
                 TextField("Username", text: $username)
                     .plainTextFieldStyle()
+                    .usernameContentType()
                 Picker("Sign in with", selection: $method) {
                     ForEach(Method.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -48,8 +51,10 @@ struct SubsonicLoginView: View {
                 switch method {
                 case .password:
                     SecureField("Password", text: $password)
+                        .passwordContentType()
                 case .apiKey:
                     SecureField("API key", text: $apiKey)
+                        .accessibilityLabel("API key")
                 }
                 Button("Sign In") { signIn() }
                     .disabled(!canSubmit || isBusy)

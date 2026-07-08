@@ -38,6 +38,26 @@ extension View {
         #endif
     }
 
+    /// Marks a field as the account username, so iOS/password-manager AutoFill
+    /// can offer to fill it. iOS only; no-op on the macOS test host.
+    @ViewBuilder func usernameContentType() -> some View {
+        #if os(iOS)
+        self.textContentType(.username)
+        #else
+        self
+        #endif
+    }
+
+    /// Marks a field as the account password for AutoFill / keychain save. iOS
+    /// only; no-op on the macOS test host.
+    @ViewBuilder func passwordContentType() -> some View {
+        #if os(iOS)
+        self.textContentType(.password)
+        #else
+        self
+        #endif
+    }
+
     /// Hides the navigation bar on iOS so a custom scroll-away header (title +
     /// avatar, tight to the top like Apple Music) can stand in for it — the
     /// native SwiftUI large title can't be pulled that high (its top inset is
