@@ -13,6 +13,10 @@ public enum SecretRedactor {
     public static let sensitiveQueryKeys: Set<String> = [
         "x-plex-token", "x-plex-client-identifier", "api_key", "apikey",
         "token", "secret", "pw", "password", "x-plex-session-identifier",
+        // Subsonic auth params: `p` (cleartext password), `t` (MD5 token) and
+        // `s` (salt) are directly credential-bearing; `u` (username) is PII we
+        // also keep out of logs and fixtures.
+        "u", "p", "t", "s",
     ]
 
     public static let placeholder = "REDACTED"

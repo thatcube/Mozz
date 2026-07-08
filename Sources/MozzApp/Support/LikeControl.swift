@@ -45,7 +45,7 @@ struct LikeControl: View {
             isFavorite.toggle()
             Task { await env.setLiked(isFavorite, track: snapshot) }
         } label: {
-            Image(systemName: liked ? "heart.fill" : "heart")
+            Image(mozz: liked ? "heart.fill" : "heart")
                 .foregroundStyle(liked ? Color.pink : Color.secondary)
                 .font(.body)
         }
@@ -56,7 +56,7 @@ struct LikeControl: View {
     private var ratingChip: some View {
         Button { showingPicker = true } label: {
             HStack(spacing: 3) {
-                Image(systemName: (rating ?? 0) > 0 ? "star.fill" : "star")
+                Image(mozz: (rating ?? 0) > 0 ? "star.fill" : "star")
                 if let r = rating, r > 0 {
                     Text(Self.format(r)).font(.caption.monospacedDigit())
                 }
@@ -95,7 +95,7 @@ struct RatingStarsPicker: View {
                 ForEach(1...5, id: \.self) { i in star(i) }
             }
             Button(role: .destructive) { onSelect(nil) } label: {
-                Label("Clear rating", systemImage: "star.slash")
+                Label("Clear rating", mozz: "star.slash")
             }
             .font(.subheadline)
             .disabled((rating ?? 0) == 0)
@@ -106,8 +106,8 @@ struct RatingStarsPicker: View {
         let value = rating ?? 0
         let symbol = value >= Double(i) ? "star.fill"
             : value >= Double(i) - 0.5 ? "star.leadinghalf.filled" : "star"
-        return Image(systemName: symbol)
-            .font(.title)
+        return Image(mozz: symbol)
+            .resizable().scaledToFit().frame(width: 28, height: 28)
             .foregroundStyle(.yellow)
             .overlay {
                 HStack(spacing: 0) {

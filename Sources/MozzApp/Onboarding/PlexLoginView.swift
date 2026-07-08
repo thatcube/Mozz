@@ -79,12 +79,13 @@ struct PlexLoginView: View {
             Section {
                 switch phase {
                 case .idle:
-                    Button("Sign in with Plex") { start() }
+                    Text("Sign in to your Plex account to connect your music library. A secure Plex window opens, and Mozz returns here automatically once you're authorized.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 case .authorizing:
                     Text("Complete sign-in in the Plex window. Mozz returns here automatically once you're authorized.")
                         .font(.footnote).foregroundStyle(.secondary)
                 case .completing:
-                    Label("Signed in", systemImage: "checkmark.circle.fill")
+                    Label("Signed in", mozz: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.headline)
                 }
@@ -97,6 +98,11 @@ struct PlexLoginView: View {
                         Text(status).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if phase == .idle {
+                SignInBar(title: "Sign in with Plex") { start() }
             }
         }
         .navigationTitle("Plex")

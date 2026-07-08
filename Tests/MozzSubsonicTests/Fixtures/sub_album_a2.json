@@ -1,0 +1,27 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "album": {
+      "id": "al-2",
+      "name": "Second",
+      "artist": "Artist Two",
+      "artistId": "ar-2",
+      "songCount": 1,
+      "song": [
+        {
+          "id": "tr-a2",
+          "parent": "al-2",
+          "title": "Song A2",
+          "album": "Second",
+          "albumId": "al-2",
+          "artistId": "ar-2",
+          "track": 1,
+          "duration": 100,
+          "suffix": "mp3",
+          "contentType": "audio/mpeg"
+        }
+      ]
+    }
+  }
+}

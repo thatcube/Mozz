@@ -34,6 +34,7 @@ let package = Package(
         .library(name: "MozzDatabase", targets: ["MozzDatabase"]),
         .library(name: "MozzPlex", targets: ["MozzPlex"]),
         .library(name: "MozzJellyfin", targets: ["MozzJellyfin"]),
+        .library(name: "MozzSubsonic", targets: ["MozzSubsonic"]),
         .library(name: "MozzSync", targets: ["MozzSync"]),
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
@@ -74,6 +75,9 @@ let package = Package(
         // MARK: Backends (one `MusicBackend` conformer each)
         .target(name: "MozzPlex", dependencies: ["MozzCore", "MozzNetworking"]),
         .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking"]),
+        // Generic Subsonic / OpenSubsonic backend (Navidrome-QA'd, others
+        // best-effort). CryptoKit (system framework) is used for MD5 token auth.
+        .target(name: "MozzSubsonic", dependencies: ["MozzCore", "MozzNetworking"]),
 
         // MARK: Catalog sync engine (backend -> DB, off-main)
         .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
@@ -120,7 +124,7 @@ let package = Package(
             name: "MozzApp",
             dependencies: [
                 "MozzCore", "MozzNetworking", "MozzDatabase",
-                "MozzPlex", "MozzJellyfin", "MozzSync",
+                "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
                 "MozzPlayback", "MozzDownloads", "MozzRecommend", "MozzEnrichment",
             ],
             resources: [.process("Resources")]
@@ -138,6 +142,11 @@ let package = Package(
         .testTarget(
             name: "MozzJellyfinTests",
             dependencies: ["MozzJellyfin", "MozzNetworking"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "MozzSubsonicTests",
+            dependencies: ["MozzSubsonic", "MozzNetworking", "MozzSync", "MozzDatabase"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),

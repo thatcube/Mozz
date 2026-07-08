@@ -37,6 +37,18 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
     /// yet determined or not applicable.
     public var hasPlexPass: Bool?
 
+    /// The detected server *product* name, when a backend reports one. Subsonic
+    /// servers advertise their implementation in the OpenSubsonic `type` field
+    /// (e.g. "navidrome", "gonic", "lms"); Plex/Jellyfin leave this nil (their
+    /// product is the backend kind itself). Used to show an accurate label like
+    /// "Navidrome 0.51" instead of the generic protocol name.
+    public var serverProduct: String?
+    /// Whether the server was detected as an OpenSubsonic implementation (the
+    /// `openSubsonic` flag on its `ping`/handshake). `false` for classic
+    /// Subsonic profiles and for non-Subsonic backends. Gates OpenSubsonic-only
+    /// features (ReplayGain tags, extension-based capabilities).
+    public var isOpenSubsonic: Bool
+
     /// When these capabilities were last probed.
     public var detectedAt: Date
 
@@ -52,6 +64,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         supportsNormalizationGain: Bool = false,
         supportsProgressReporting: Bool = true,
         hasPlexPass: Bool? = nil,
+        serverProduct: String? = nil,
+        isOpenSubsonic: Bool = false,
         detectedAt: Date = Date()
     ) {
         self.backend = backend
@@ -65,6 +79,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.supportsNormalizationGain = supportsNormalizationGain
         self.supportsProgressReporting = supportsProgressReporting
         self.hasPlexPass = hasPlexPass
+        self.serverProduct = serverProduct
+        self.isOpenSubsonic = isOpenSubsonic
         self.detectedAt = detectedAt
     }
 }

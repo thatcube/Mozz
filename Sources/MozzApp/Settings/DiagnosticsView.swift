@@ -15,23 +15,23 @@ struct DiagnosticsView: View {
                     LabeledContent {
                         Text(active.connection.name)
                     } label: {
-                        Label("Name", systemImage: "tag")
+                        Label("Name", mozz: "tag")
                     }
                     LabeledContent {
                         Text(active.connection.kind.displayName)
                     } label: {
-                        Label("Type", systemImage: "server.rack")
+                        Label("Type", mozz: "server.rack")
                     }
                     LabeledContent {
                         Text(active.connection.baseURL.absoluteString)
                     } label: {
-                        Label("Address", systemImage: "network")
+                        Label("Address", mozz: "network")
                     }
                     if let version = active.capabilities.serverVersion, !version.isEmpty {
                         LabeledContent {
                             Text(version)
                         } label: {
-                            Label("Version", systemImage: "number")
+                            Label("Version", mozz: "number")
                         }
                     }
                 }
@@ -54,14 +54,14 @@ struct DiagnosticsView: View {
                     Text("Probed from your server on \(active.capabilities.detectedAt.formatted(date: .abbreviated, time: .shortened)). These control which features appear in the app.")
                 }
             } else {
-                ContentUnavailableView("No active server", systemImage: "server.rack")
+                ContentUnavailableView { Label("No active server", mozz: "server.rack") }
             }
 
             Section {
                 NavigationLink {
                     BenchmarksView()
                 } label: {
-                    Label("Performance Benchmarks", systemImage: "speedometer")
+                    Label("Performance Benchmarks", mozz: "speedometer")
                 }
             }
 
@@ -71,7 +71,7 @@ struct DiagnosticsView: View {
                         .font(.footnote.monospaced())
                         .textSelection(.enabled)
                 } header: {
-                    Label("Last sync", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Last sync", mozz: "arrow.triangle.2.circlepath")
                 } footer: {
                     Text("Per-phase throughput from the most recent sync. The slowest phase is listed first — that's the bottleneck.")
                 }
@@ -86,10 +86,10 @@ struct DiagnosticsView: View {
     /// VoiceOver as a value rather than relying on icon color alone.
     private func capabilityRow(_ title: String, _ systemImage: String, _ enabled: Bool) -> some View {
         LabeledContent {
-            Image(systemName: enabled ? "checkmark.circle.fill" : "xmark.circle")
+            Image(mozz: enabled ? "checkmark.circle.fill" : "xmark.circle")
                 .foregroundStyle(enabled ? Color.green : Color.secondary)
         } label: {
-            Label(title, systemImage: systemImage)
+            Label(title, mozz: systemImage)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)

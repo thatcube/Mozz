@@ -1,0 +1,66 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "navidrome",
+    "serverVersion": "0.52.5",
+    "openSubsonic": true,
+    "album": {
+      "id": "al-100",
+      "name": "Kind of Blue",
+      "artist": "Miles Davis",
+      "artistId": "ar-50",
+      "coverArt": "al-100",
+      "songCount": 2,
+      "duration": 600,
+      "year": 1959,
+      "genre": "Jazz",
+      "created": "2023-04-01T12:00:00.000Z",
+      "musicBrainzId": "6fe9f7d5-3a5f-4b6a-8f2e-1c2d3e4f5a6b",
+      "sortName": "Kind of Blue",
+      "song": [
+        {
+          "id": "tr-1001",
+          "parent": "al-100",
+          "title": "So What",
+          "album": "Kind of Blue",
+          "artist": "Miles Davis",
+          "albumId": "al-100",
+          "artistId": "ar-50",
+          "coverArt": "tr-1001",
+          "track": 1,
+          "discNumber": 1,
+          "year": 1959,
+          "duration": 545,
+          "bitRate": 1005,
+          "size": 68000000,
+          "suffix": "flac",
+          "contentType": "audio/flac",
+          "created": "2023-04-01T12:00:00.000Z",
+          "starred": "2024-01-02T00:00:00.000Z",
+          "userRating": 5,
+          "musicBrainzId": "6fe9f7d5-3a5f-4b6a-8f2e-1c2d3e4f5a6b",
+          "sortName": "So What",
+          "samplingRate": 44100,
+          "bitDepth": 16,
+          "channelCount": 2,
+          "genres": [{ "name": "Jazz" }, { "name": "Modal" }],
+          "replayGain": { "trackGain": -6.5, "albumGain": -6.2, "trackPeak": 0.98 }
+        },
+        {
+          "id": 1002,
+          "parent": "al-100",
+          "title": "Freddie Freeloader",
+          "album": "Kind of Blue",
+          "albumId": "al-100",
+          "artistId": "ar-50",
+          "track": 2,
+          "discNumber": 1,
+          "duration": 583,
+          "suffix": "opus",
+          "contentType": "audio/opus"
+        }
+      ]
+    }
+  }
+}

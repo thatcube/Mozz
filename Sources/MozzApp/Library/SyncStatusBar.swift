@@ -77,15 +77,15 @@ struct SyncStatusBar: View {
                 HStack(spacing: 4) {
                     switch d.state {
                     case .done:
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 9))
+                        Image(mozz: "checkmark.circle.fill")
+                            .resizable().scaledToFit().frame(width: 9, height: 9)
                             .foregroundStyle(.green)
                     case .syncing:
                         // small active dot
                         Circle().fill(.tint).frame(width: 5, height: 5)
                     case .pending:
-                        Image(systemName: "circle")
-                            .font(.system(size: 8))
+                        Image(mozz: "circle")
+                            .resizable().scaledToFit().frame(width: 8, height: 8)
                             .foregroundStyle(.tertiary)
                     }
                     Text(d.phase.label)

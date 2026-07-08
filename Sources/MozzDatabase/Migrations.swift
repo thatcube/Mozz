@@ -19,6 +19,7 @@ enum Schema {
         registerV11(&migrator)
         registerV12(&migrator)
         registerV13(&migrator)
+        registerV14(&migrator)
         return migrator
     }
 
@@ -532,6 +533,20 @@ enum Schema {
             try db.alter(table: "track_features") { t in
                 t.add(column: "mb_tags", .text)             // JSON array, lowercased
                 t.add(column: "mb_tags_lookup_at", .double) // TTL negative cache
+            }
+        }
+    }
+
+    /// v14 — Subsonic/OpenSubsonic capability detection fields. A Subsonic
+    /// server reports its concrete product (`type`, e.g. "navidrome") and an
+    /// `openSubsonic` flag on `ping`; store both so the UI can show an accurate
+    /// label and gate OpenSubsonic-only features. Additive; existing installs
+    /// get `serverProduct = NULL` and `isOpenSubsonic = 0` until the next probe.
+    private static func registerV14(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v14.subsonicCapabilities") { db in
+            try db.alter(table: "serverCapabilities") { t in
+                t.add(column: "serverProduct", .text)
+                t.add(column: "isOpenSubsonic", .boolean).notNull().defaults(to: false)
             }
         }
     }

@@ -17,6 +17,7 @@ public struct HTTPClient: Sendable {
     public let baseURL: URL
     private let transport: any HTTPTransport
     private let defaultHeaders: [String: String]
+    private let defaultQueryItems: [URLQueryItem]
     private let retryPolicy: RetryPolicy
     private let logger: any NetworkLogger
 
@@ -24,12 +25,14 @@ public struct HTTPClient: Sendable {
         baseURL: URL,
         transport: any HTTPTransport = URLSessionTransport(),
         defaultHeaders: [String: String] = [:],
+        defaultQueryItems: [URLQueryItem] = [],
         retryPolicy: RetryPolicy = .default,
         logger: any NetworkLogger = NoopNetworkLogger()
     ) {
         self.baseURL = baseURL
         self.transport = transport
         self.defaultHeaders = defaultHeaders
+        self.defaultQueryItems = defaultQueryItems
         self.retryPolicy = retryPolicy
         self.logger = logger
     }
@@ -41,6 +44,23 @@ public struct HTTPClient: Sendable {
             baseURL: baseURL,
             transport: transport,
             defaultHeaders: defaultHeaders.merging(extra) { _, new in new },
+            defaultQueryItems: defaultQueryItems,
+            retryPolicy: retryPolicy,
+            logger: logger
+        )
+    }
+
+    /// Return a copy with default query items appended to *every* request (and
+    /// preserved by ``makeRequest`` so the same signed URL can be reused for
+    /// media/download sessions). This is the ergonomic signing hook used by
+    /// Subsonic, whose every call carries the same `u`/`t`/`s`/`v`/`c`/`f`
+    /// authentication parameters.
+    public func withDefaultQueryItems(_ extra: [URLQueryItem]) -> HTTPClient {
+        HTTPClient(
+            baseURL: baseURL,
+            transport: transport,
+            defaultHeaders: defaultHeaders,
+            defaultQueryItems: defaultQueryItems + extra,
             retryPolicy: retryPolicy,
             logger: logger
         )
@@ -88,8 +108,8 @@ public struct HTTPClient: Sendable {
         ) else {
             throw MozzError.invalidResponse
         }
-        if !endpoint.query.isEmpty {
-            components.queryItems = (components.queryItems ?? []) + endpoint.query
+        if !defaultQueryItems.isEmpty || !endpoint.query.isEmpty {
+            components.queryItems = (components.queryItems ?? []) + defaultQueryItems + endpoint.query
         }
         guard let url = components.url else { throw MozzError.invalidResponse }
 

@@ -17,7 +17,7 @@ struct SettingsAvatar: View {
         Button {
             showSettings = true
         } label: {
-            Image(systemName: "person.crop.circle.fill")
+            Image(mozz: "person.crop.circle.fill")
                 .resizable()
                 .frame(width: 30, height: 30)
                 .foregroundStyle(.secondary)

@@ -79,12 +79,23 @@ public struct JellyfinAuthenticator: Sendable {
 
     // MARK: Username / password
 
-    public func authenticate(username: String, password: String) async throws -> AuthenticatedSession {
+    public func authenticate(
+        username: String,
+        password: String,
+        onWaitingForLocalNetwork: (@Sendable () -> Void)? = nil
+    ) async throws -> AuthenticatedSession {
         struct Body: Encodable { let Username: String; let Pw: String }
-        let result = try await client.send(
-            try Endpoint.jsonPost("Users/AuthenticateByName", body: Body(Username: username, Pw: password)),
-            as: JFAuthenticationResult.self
-        )
+        // Wrapped so a local server whose first connection is refused while iOS
+        // shows its one-time local-network permission prompt is retried once the
+        // user taps Allow, instead of failing and needing a second Sign In.
+        let result = try await LocalNetworkPermission.retrying(
+            for: baseURL, onWaiting: onWaitingForLocalNetwork
+        ) {
+            try await client.send(
+                try Endpoint.jsonPost("Users/AuthenticateByName", body: Body(Username: username, Pw: password)),
+                as: JFAuthenticationResult.self
+            )
+        }
         return try await finish(result)
     }
 

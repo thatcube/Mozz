@@ -89,6 +89,13 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         return tail.map { tracks[$0] }
     }
 
+    /// The tracks played BEFORE the current one, in playback order (oldest first),
+    /// for a queue "history" view. Excludes the current track.
+    public var history: [Track] {
+        guard position > 0 else { return [] }
+        return order[0..<position].map { tracks[$0] }
+    }
+
     /// Whether ``advance()`` would yield a track (there's somewhere to go).
     public var hasNext: Bool {
         guard !isEmpty else { return false }
@@ -266,6 +273,33 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         position = p
         refreshWrapCache()
         return current
+    }
+
+    /// Jump directly to a track by its position in the play `order` (not the base
+    /// index) — the index a "history" / "up next" list row maps to. Unlike
+    /// ``jump(toBaseIndex:)`` this addresses a specific occurrence, so duplicate
+    /// tracks in the queue resolve to the exact row tapped.
+    @discardableResult
+    public mutating func jump(toOrderPosition orderPosition: Int) -> Track? {
+        guard order.indices.contains(orderPosition) else { return current }
+        position = orderPosition
+        refreshWrapCache()
+        return current
+    }
+
+    /// Drop the played "history" (everything before the current track), keeping
+    /// the current track and everything after it. The current track becomes
+    /// position 0. Base `tracks` is rebuilt to the surviving set so indices stay
+    /// consistent. No-op when there's no history.
+    public mutating func clearHistory() {
+        guard position > 0 else { return }
+        let survivingBase = Array(order[position...])
+        let newTracks = survivingBase.map { tracks[$0] }
+        tracks = newTracks
+        order = Array(newTracks.indices)
+        position = 0
+        nextLoopOrder = nil
+        refreshWrapCache()
     }
 
     // MARK: Repeat

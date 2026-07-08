@@ -1,0 +1,17 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "albumList2": {
+      "album": [
+        {
+          "id": "al-100",
+          "name": "Kind of Blue",
+          "artist": "Miles Davis",
+          "artistId": "ar-50",
+          "coverArt": "al-100"
+        }
+      ]
+    }
+  }
+}

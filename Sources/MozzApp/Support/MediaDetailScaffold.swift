@@ -304,7 +304,7 @@ struct DetailPlayActions: View {
     var body: some View {
         HStack(spacing: 12) {
             Button(action: play) {
-                Label("Play", systemImage: "play.fill")
+                Label("Play", mozz: "play.fill")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(.black)
@@ -313,7 +313,7 @@ struct DetailPlayActions: View {
             .tint(.white)
 
             Button(action: shuffle) {
-                Label("Shuffle", systemImage: "shuffle")
+                Label("Shuffle", mozz: "shuffle")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -322,7 +322,7 @@ struct DetailPlayActions: View {
             .contextMenu {
                 if let startRadio {
                     Button(action: startRadio) {
-                        Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
+                        Label("Start Station", mozz: "dot.radiowaves.left.and.right")
                     }
                 }
             }
@@ -368,7 +368,7 @@ struct DetailBackButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: "chevron.backward")
+            Image(mozz: "chevron.backward")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 34, height: 34)

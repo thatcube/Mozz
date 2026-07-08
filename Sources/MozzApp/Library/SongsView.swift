@@ -35,7 +35,7 @@ struct SongsView: View {
         .navigationTitle("Songs")
         .overlay {
             if list.items.isEmpty && !list.isLoading {
-                ContentUnavailableView("No Songs", systemImage: "music.note")
+                ContentUnavailableView { Label("No Songs", mozz: "music.note") }
             }
         }
         .task { await bootstrap() }

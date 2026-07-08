@@ -97,6 +97,7 @@ struct SearchView: View {
                 .minimizesBottomBarOnScroll()
                 .scrollsToTopOnSignal()
                 .hideNavigationBar()
+                .mozzScreenBackground()
                 .appRouteDestinations()
                 .onChange(of: query) { _, newValue in
                     scheduleSearch(newValue)
@@ -126,7 +127,7 @@ struct SearchView: View {
             searchField
             if isActive {
                 Button { cancelSearch() } label: {
-                    Image(systemName: "xmark")
+                    Image(mozz: "xmark")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: fieldHeight, height: fieldHeight)
@@ -166,14 +167,14 @@ struct SearchView: View {
     /// shows through it as it pins, matching the system search bar.
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            Image(mozz: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Artists, albums, songs", text: $query)
                 .focused($focused)
                 .submitLabel(.search)
                 .plainTextFieldStyle()
             if !query.isEmpty {
                 Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(mozz: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
                         .frame(width: 36, height: fieldHeight, alignment: .trailing)
                         .contentShape(Rectangle())
@@ -281,7 +282,7 @@ struct SearchView: View {
     @ViewBuilder private var emptyState: some View {
         if trimmedQuery.isEmpty {
             if resolvedRecents.isEmpty {
-                ContentUnavailableView("Search Your Library", systemImage: "magnifyingglass")
+                ContentUnavailableView { Label("Search Your Library", mozz: "magnifyingglass") }
             }
         } else if results.isEmpty {
             ContentUnavailableView.search(text: query)
@@ -464,7 +465,7 @@ private struct SearchResultRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ArtworkView(artwork: artworkKey.map(ArtworkRef.init(key:)),
-                        seed: seed, size: 44, cornerRadius: circular ? 22 : 6)
+                        seed: seed, size: 44, cornerRadius: 6, circular: circular)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(1)
                 if let subtitle {

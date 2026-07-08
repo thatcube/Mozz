@@ -39,13 +39,64 @@ struct NowPlayingMorphContainer: View {
     /// True only during the collapse, so the downward receive-bounce fires on the
     /// way into the island and never while opening or dragging.
     @State private var receiving = false
-    @State private var scrubbing = false
-    @State private var scrubValue = 0.0
     /// Live island-press state: `pressed` drives the whole-island scale, `location`
     /// (pill-local) drives the finger-following glow. Kept in an `@Observable` so
     /// the high-frequency `location` updates re-render ONLY the lightweight glow
     /// layer — not this container (which builds the drawer's up-next list).
     @State private var press = IslandPressState()
+
+    @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Single source of truth for the current track's rating on the player
+    /// (ratings/Plex path). Lifted here so the collapsed star, the hold-drag
+    /// reveal, and the root-hosted sticky bubble all share it — rating writes
+    /// don't propagate back through the playback engine, so the view layer owns
+    /// the optimistic value. Reseeded when the track changes.
+    @State private var playerRating: Double?
+    /// Whether the sticky tap picker (hosted at the morph root) is open.
+    @State private var ratingPickerOpen = false
+    /// Whether the queue panel (Continue Playing + History) is showing in place of
+    /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
+    @State private var queueOpen = false
+    /// True only once the expand spring has fully settled (and false the moment a
+    /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
+    /// soft shadow and the backdrop's live drift — OFF during the transition, so
+    /// the spring settles without per-frame shadow re-rasterization or a competing
+    /// 30fps mesh tick. That's what removes the "settling feels laggy" hitch.
+    @State private var settled = false
+    #if canImport(UIKit)
+    /// Live current-output-route (device name + icon) for the AirPlay control.
+    @StateObject private var routeMonitor = AudioRouteMonitor()
+    #endif
+    /// Live Low Power Mode state — used to keep the cheaper mid-morph surface even
+    /// after settling on throttled devices (see `useGlassSurface`).
+    @StateObject private var power = LowPowerModeObserver()
+
+    @AppStorage(PlayerBackgroundStyle.storageKey) private var bgStyleRaw = PlayerBackgroundStyle.default.rawValue
+    /// User setting: use Liquid Glass chrome for the player (default on). When off,
+    /// the player uses a cheaper opaque chrome surface.
+    @AppStorage("mozz.liquidGlass") private var liquidGlassEnabled = true
+    // Observed so the island/player chrome token re-resolves live when the dark
+    // flavor (Dim↔Black) toggles; see `MozzScreenBackground`.
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+    @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    /// Colors sampled from the current artwork for the adaptive backdrop.
+    @State private var artGrid: ArtworkColorGrid?
+
+    private var bgStyle: PlayerBackgroundStyle {
+        PlayerBackgroundStyle(rawValue: bgStyleRaw) ?? .default
+    }
+    /// Identity for the palette task: re-derive when the artwork changes.
+    private var artworkToken: String {
+        (playback.currentTrack?.artwork?.key) ?? (playback.currentTrack?.id ?? "none")
+    }
+    /// Identity for artwork prefetching: changes when the current track or the
+    /// next few up-next tracks change, so we warm their covers ahead of a skip.
+    private var prefetchToken: String {
+        ([playback.currentTrack?.id] + playback.upNext.prefix(3).map { $0.id })
+            .compactMap { $0 }.joined(separator: "|")
+    }
 
     /// How much the docked island grows while touched.
     private static let pressScale: CGFloat = 1.04
@@ -154,64 +205,219 @@ struct NowPlayingMorphContainer: View {
                 .onChange(of: ui.isFullPresented, initial: true) { _, want in
                     animate(to: want)
                 }
+                // Sticky rating bubble (ratings/Plex path): hosted here at the
+                // morph root — a screen-spanning ancestor — so it can catch
+                // outside taps and animate its own height (a system popover can't).
+                .overlayPreferenceValue(PlayerRatingAnchorKey.self) { anchor in
+                    ratingPickerOverlay(anchor: anchor, geo: geo)
+                }
+                .onChange(of: playback.currentTrack?.id) { _, _ in
+                    playerRating = playback.currentTrack?.rating
+                    ratingPickerOpen = false
+                }
+                .onChange(of: ui.isFullPresented) { _, open in
+                    if !open {
+                        ratingPickerOpen = false
+                        queueOpen = false
+                    }
+                }
+                .onAppear { playerRating = playback.currentTrack?.rating }
+                // Derive the adaptive backdrop palette from the artwork; resolve
+                // synchronously if cached (correct on first frame), else crossfade.
+                .task(id: artworkToken) {
+                    if let cached = ArtworkPalette.cachedGrid(
+                        for: playback.currentTrack?.artwork, backend: env.active?.backend, seed: artworkToken) {
+                        artGrid = cached
+                    } else {
+                        let g = await ArtworkPalette.grid(
+                            for: playback.currentTrack?.artwork, backend: env.active?.backend, seed: artworkToken)
+                        withAnimation(.easeInOut(duration: 0.5)) { artGrid = g }
+                    }
+                }
+                // Warm the current + upcoming covers at the player's pixel size so
+                // skipping finds the artwork already cached — no placeholder flash.
+                .onChange(of: prefetchToken, initial: true) { _, _ in
+                    prefetchNearbyArtwork()
+                }
             }
             .ignoresSafeArea()
         }
     }
 
+    /// Prefetch the current + next few covers at the player's pixel size (matching
+    /// `MorphArtwork`: base 340 × 2 = 680) so a skip finds the art already cached
+    /// and renders it on the first frame instead of flashing a placeholder.
+    private func prefetchNearbyArtwork() {
+        guard let backend = env.active?.backend else { return }
+        let tracks = [playback.currentTrack].compactMap { $0 } + playback.upNext.prefix(3)
+        for track in tracks {
+            if let artwork = track.artwork, let url = backend.artworkURL(for: artwork, size: 680) {
+                ArtworkImageLoader.shared.prefetch(url)
+            }
+        }
+    }
+
+    /// The root-hosted sticky rating bubble + a full-screen tap-catcher, anchored
+    /// above the player's rating star.
+    @ViewBuilder
+    private func ratingPickerOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
+        if ratingPickerOpen, let anchor, let track = playback.currentTrack {
+            let rect = geo[anchor]
+            let gap: CGFloat = 6
+            let bottomSpace = max(0, geo.size.height - (rect.minY - gap))
+            ZStack {
+                // Tap-catcher: dismiss on any tap outside the bubble.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeRatingPicker() }
+                    .accessibilityHidden(true)
+                // Bottom-pinned bubble: grows upward as the Clear row appears, its
+                // tail staying on the star. No height measurement needed.
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
+                        .padding(.bottom, RatingTuning.revealTailHeight)
+                        .glassBackground(TailedBubble())
+                        .fixedSize()
+                        .offset(x: rect.midX - geo.size.width / 2)
+                        // Native popover feel: scale-pop UP OUT OF the tail (the
+                        // anchor at the star) on present; a quick pure fade on
+                        // dismiss (no scale/slide).
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
+                                removal: .opacity))
+                        .accessibilityAddTraits(.isModal)
+                        .accessibilityAction(.escape) { closeRatingPicker() }
+                    Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private func setPlayerRating(_ value: Double?, track: Track) {
+        playerRating = value
+        Task { await env.setRating(value, track: track) }
+    }
+
+    private func closeRatingPicker() {
+        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.16)) { ratingPickerOpen = false }
+    }
+
     // MARK: Surface (Liquid Glass background + fading drawer body)
+
+    /// Whether the player uses real Liquid Glass (blur) vs a cheap opaque chrome
+    /// surface. Decided per MODE and held CONSTANT through the morph (never swapped
+    /// mid-animation — that black↔glass flip was the jarring part). Glass is the
+    /// default; it drops to solid when the user turns it off, in Low Power Mode, or
+    /// with Reduce Transparency on (accessibility) — all cases where a consistent
+    /// opaque surface is smoother / preferred.
+    private var useGlassSurface: Bool {
+        liquidGlassEnabled && !power.isLowPower && !reduceTransparency
+    }
+
+    /// Opaque chrome surface used when glass is off — a theme-aware elevated color
+    /// that matches the surrounding nav, not pure black.
+    private var cheapSurfaceFill: Color { .mozzChrome }
 
     private func surface(_ m: Morph) -> some View {
         ZStack(alignment: .top) {
-            // Opaque frosted panel for the expanded drawer. It fades out during
-            // the collapse, revealing the Liquid Glass behind — so mid-collapse
-            // the shrinking bubble is translucent, exactly like Apple's.
+            // Opaque panel for the expanded drawer. A frosted material base (so
+            // mid-collapse the shrinking bubble stays translucent, revealing the
+            // Liquid Glass behind) with the artwork-adaptive backdrop painted on
+            // top. Both fade out together via `solidBgOpacity` during the collapse.
             RoundedRectangle(cornerRadius: m.radius, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(
-                    LinearGradient(colors: [.black.opacity(0.04), .black.opacity(0.26)],
-                                   startPoint: .top, endPoint: .bottom)
-                )
+                .fill(useGlassSurface ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(cheapSurfaceFill))
+                .overlay {
+                    PlayerBackdrop(style: bgStyle, grid: artGrid, animated: settled && useGlassSurface)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
                 .opacity(m.solidBgOpacity)
 
             drawerBody(m)
                 .frame(width: m.width, height: m.surfaceHExpanded, alignment: .top)
                 .opacity(m.bodyOpacity)
                 .allowsHitTesting(m.p > 0.5)
+                // On the adaptive/OLED backdrop the surface is dark-colored, so
+                // render the drawer content light (matches the detail pages). In
+                // `theme` mode it follows the system scheme.
+                .environment(\.colorScheme, bgStyle == .theme ? systemColorScheme : .dark)
         }
         .frame(width: m.surfaceW, height: m.surfaceH, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
-        .liquidGlass(radius: m.radius)
+        .liquidGlass(radius: m.radius, enabled: useGlassSurface, fallbackFill: cheapSurfaceFill)
         .position(x: m.surfaceCenterX, y: m.surfaceCenterY)
     }
 
     // MARK: Traveling artwork (single image, big-center ⇄ small-left)
 
     private func travelingArtwork(_ m: Morph) -> some View {
-        MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
-            .shadow(color: .black.opacity(0.35 * m.bodyOpacity),
-                    radius: 18 * m.p, y: 10 * m.p)
+        // Apple-Music-style paused shrink: at rest the cover sits 25% smaller,
+        // growing to full size while playing. Only in the expanded player (scaled
+        // by `m.p`) so the island/mini art is unaffected.
+        let isPlaying = playback.snapshot.status == .playing || playback.snapshot.status == .buffering
+        let pausedScale = 1 - Self.pausedArtShrink * m.p * (isPlaying ? 0 : 1)
+        // Shadow only once settled, at a CONSTANT blur radius: an animated blur
+        // radius re-rasterizes the shadow every frame (a classic hitch during the
+        // expand). Gated on `settled` + faded via color opacity, the shadow costs
+        // nothing during the transition and rasterizes once at rest.
+        let showShadow = settled && !queueOpen
+        return MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
+            .scaleEffect(pausedScale)
+            .shadow(color: .black.opacity(showShadow ? 0.35 : 0), radius: 16, y: 8)
             .position(x: m.artCenterX, y: m.artCenterY)
+            .opacity(queueOpen ? 0 : 1)
             .allowsHitTesting(false)
+            .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.72),
+                       value: isPlaying)
+            .animation(.easeOut(duration: 0.3), value: showShadow)
     }
+
+    /// How much the cover shrinks when paused (fraction), in the expanded player.
+    private static let pausedArtShrink: CGFloat = 0.25
 
     // MARK: Drawer body (everything below the top edge; fades + clips on collapse)
 
     private func drawerBody(_ m: Morph) -> some View {
         VStack(spacing: 0) {
+            // Top region: the now-playing hero and the queue occupy the same
+            // space and cross-fade. The queue is an overlay on the hero so it
+            // inherits the hero's fixed height — it never competes with the
+            // trailing Spacer for vertical space, so the controls below never
+            // shift and the queue list isn't squished.
             header(m)
+                .opacity(queueOpen ? 0 : 1)
+                .allowsHitTesting(!queueOpen)
+                .overlay(alignment: .top) {
+                    if queueOpen {
+                        queueTop(m)
+                            .transition(.opacity)
+                    }
+                }
 
             scrubber
                 .padding(.horizontal, 32)
                 .padding(.top, 22)
             transport
-                .padding(.top, 14)
-            secondaryControls
-                .padding(.top, 20)
+                .padding(.top, 54)
             if let track = playback.currentTrack {
-                formatBadge(track: track).padding(.top, 12)
+                formatBadge(track: track).padding(.top, 10)
             }
-            upNext.padding(.top, 18)
+            Spacer(minLength: 8)
+            VStack(spacing: 10) {
+                bottomButtonRow
+                    .padding(.horizontal, 48)
+                #if canImport(UIKit)
+                routeLabel
+                #endif
+            }
+            // The surface overhangs the screen by `bottomOverhang`; lift the
+            // row out of that off-screen region so it sits at the safe-area
+            // bottom rather than 120pt below it.
+            .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -230,21 +436,85 @@ struct NowPlayingMorphContainer: View {
                 .frame(width: m.expArtSide, height: m.expArtSide)
                 .padding(.top, 26)
 
-            VStack(spacing: 5) {
-                Text(playback.currentTrack?.title ?? "").font(.title2.bold())
-                    .multilineTextAlignment(.center).lineLimit(2)
-                Text(playback.currentTrack?.artistName ?? "").font(.title3)
-                    .foregroundStyle(.secondary).lineLimit(1)
-                if let album = playback.currentTrack?.albumTitle {
-                    Text(album).font(.subheadline).foregroundStyle(.tertiary).lineLimit(1)
-                }
-            }
-            .padding(.top, 26)
-            .padding(.horizontal, 32)
+            titleRow
+                .padding(.top, 22)
+                .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .gesture(dragGesture)
+    }
+
+    /// Left-aligned title/artist with the rating star and a (dummy) overflow menu
+    /// on the right — the Apple-Music now-playing header.
+    private var titleRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(playback.currentTrack?.title ?? "")
+                    .font(.title2.bold()).lineLimit(1)
+                Text(playback.currentTrack?.artistName ?? "")
+                    .font(.title3).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let track = playback.currentTrack {
+                if env.usesRatings {
+                    FluidRatingControl(
+                        rating: $playerRating,
+                        onSet: { setPlayerRating($0, track: track) },
+                        onRequestPicker: {
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
+                        }
+                    )
+                } else {
+                    PlayerLikeControl(track: track)
+                }
+            }
+            // Dummy overflow — the per-track context menu isn't built yet.
+            Button { } label: {
+                AppIcon.overflow.styled(size: 22)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(true)
+        }
+        .font(.title3)
+    }
+
+    /// The queue view shown in place of the hero when `queueOpen`: a compact
+    /// now-playing header (drag to dismiss) over the scrollable History /
+    /// Continue-Playing list.
+    private func queueTop(_ m: Morph) -> some View {
+        VStack(spacing: 0) {
+            Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
+                .padding(.top, m.safeTop + 8)
+
+            queueCompactHeader
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 10)
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+
+            PlayerQueuePanel(
+                playback: playback,
+                onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
+                onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } }
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Compact now-playing row at the top of the queue: thumbnail + title/artist.
+    private var queueCompactHeader: some View {
+        HStack(spacing: 12) {
+            MorphArtwork(track: playback.currentTrack, side: 52, cornerRadius: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playback.currentTrack?.title ?? "")
+                    .font(.headline).lineLimit(1)
+                Text(playback.currentTrack?.artistName ?? "")
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: Gestures / animation
@@ -279,11 +549,16 @@ struct NowPlayingMorphContainer: View {
     private func animate(to open: Bool) {
         if open {
             receiving = false
+            settled = false
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) {
                 p = 1; dragY = 0
+            } completion: {
+                // Only now (fully at rest) enable the shadow + backdrop drift.
+                settled = true
             }
         } else {
             receiving = true
+            settled = false
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 p = 0; dragY = 0
             } completion: {
@@ -296,57 +571,26 @@ struct NowPlayingMorphContainer: View {
 
     private var scrubber: some View {
         let snapshot = playback.snapshot
-        return VStack(spacing: 4) {
-            Slider(
-                value: Binding(get: { scrubbing ? scrubValue : snapshot.elapsed },
-                               set: { scrubValue = $0 }),
-                in: 0...max(snapshot.duration, 1),
-                onEditingChanged: { editing in
-                    scrubbing = editing
-                    if !editing { playback.seek(to: scrubValue) }
-                }
-            )
-            HStack {
-                Text(Format.duration(scrubbing ? scrubValue : snapshot.elapsed))
-                Spacer()
-                Text(Format.duration(snapshot.duration))
-            }
-            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        return SeekBar(elapsed: snapshot.elapsed, duration: snapshot.duration) { target in
+            playback.seek(to: target)
         }
     }
 
     private var transport: some View {
-        HStack(spacing: 44) {
-            Button { playback.previous() } label: { Image(systemName: "backward.fill").font(.title) }
-                .disabled(!playback.snapshot.hasPrevious)
-            Button { playback.togglePlayPause() } label: {
-                Image(systemName: playback.snapshot.status == .playing ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
+        HStack(spacing: 84) {
+            Button { playback.previous() } label: {
+                AppIcon.skipBack.styled(size: 34)
             }
-            Button { playback.next() } label: { Image(systemName: "forward.fill").font(.title) }
-                .disabled(!playback.snapshot.hasNext)
+            .disabled(!playback.snapshot.hasPrevious)
+            Button { playback.togglePlayPause() } label: {
+                (playback.snapshot.status == .playing ? AppIcon.pause : AppIcon.play).styled(size: 56)
+            }
+            Button { playback.next() } label: {
+                AppIcon.skipForward.styled(size: 34)
+            }
+            .disabled(!playback.snapshot.hasNext)
         }
         .tint(.primary)
-    }
-
-    private var secondaryControls: some View {
-        HStack(spacing: 0) {
-            Button { playback.toggleShuffle() } label: {
-                Image(systemName: "shuffle")
-                    .foregroundStyle(playback.snapshot.isShuffled ? Color.accentColor : .secondary)
-            }
-            Spacer()
-            if let track = playback.currentTrack {
-                PlayerLikeControl(track: track)
-            }
-            Spacer()
-            Button { playback.cycleRepeatMode() } label: {
-                Image(systemName: repeatIcon(playback.snapshot.repeatMode))
-                    .foregroundStyle(playback.snapshot.repeatMode == .off ? .secondary : Color.accentColor)
-            }
-        }
-        .font(.title3)
-        .padding(.horizontal, 56)
     }
 
     private func formatBadge(track: Track) -> some View {
@@ -355,42 +599,65 @@ struct NowPlayingMorphContainer: View {
         return Text(parts.joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary)
     }
 
-    @ViewBuilder private var upNext: some View {
-        if !playback.upNext.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Up Next").font(.headline)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(Array(playback.upNext.prefix(100).enumerated()), id: \.offset) { _, track in
-                            HStack(spacing: 10) {
-                                ArtworkView(artwork: track.artwork,
-                                            seed: track.albumTitle ?? track.title,
-                                            size: 40, cornerRadius: 6)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(track.title).lineLimit(1)
-                                    Text(track.artistName).font(.caption)
-                                        .foregroundStyle(.secondary).lineLimit(1)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .font(.subheadline)
-                        }
-                    }
-                }
+    /// The bottom control row: a (dummy) lyrics button, the current-output-route
+    /// control (shows the real device icon; tap to open the AirPlay picker), and
+    /// the queue toggle. Lyrics + a per-track context menu aren't built yet, so
+    /// lyrics is a disabled placeholder.
+    private var bottomButtonRow: some View {
+        HStack {
+            Button { } label: { AppIcon.lyrics.styled(size: 26) }
+                .disabled(true)
+                .foregroundStyle(.secondary)
+            Spacer()
+            #if canImport(UIKit)
+            routeControl
+            #endif
+            Spacer()
+            Button {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { queueOpen.toggle() }
+            } label: {
+                AppIcon.queue.styled(size: 26)
+                    .foregroundStyle(queueOpen ? Color.primary : Color.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 32)
-        } else {
-            Spacer(minLength: 0)
         }
+        .tint(.primary)
     }
 
-    private func repeatIcon(_ mode: MozzPlayback.RepeatMode) -> String {
-        switch mode {
-        case .off, .all: return "repeat"
-        case .one: return "repeat.1"
+    #if canImport(UIKit)
+    /// The output-route control: the real device icon (AirPods / headphones /
+    /// AirPlay / car / TV / speaker) drawn over an invisible `AVRoutePickerView`
+    /// (so a tap still opens the system picker). Tinted to signal when audio is
+    /// routed off the phone speaker.
+    private var routeControl: some View {
+        ZStack {
+            AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
+            Image(systemName: routeMonitor.output.icon)
+                .font(.system(size: 26))
+                .foregroundStyle(routeMonitor.output.showsLabel ? Color.accentColor : Color.primary)
+                .allowsHitTesting(false)
+        }
+        .frame(width: 44, height: 32)
+    }
+
+    /// The route line under the controls. For external speakers/rooms (AirPlay,
+    /// CarPlay, TV) it reads "iPhone → Name"; for personal audio (AirPods,
+    /// headphones) just the device name; nothing on the built-in speaker — like
+    /// Apple Music.
+    @ViewBuilder private var routeLabel: some View {
+        let out = routeMonitor.output
+        if out.showsLabel {
+            HStack(spacing: 5) {
+                if out.showsSourcePrefix {
+                    Text("iPhone").foregroundStyle(.secondary)
+                    Image(mozz: "arrow.forward").font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(out.name).foregroundStyle(.primary)
+            }
+            .font(.footnote)
+            .lineLimit(1)
         }
     }
+    #endif
 }
 
 // MARK: - Island content (self-contained: swipe + title/artist slide)
@@ -651,8 +918,9 @@ private struct IslandContent: View {
             .highPriorityGesture(islandGesture)
 
             Button { playback.togglePlayPause() } label: {
-                Image(systemName: playback.snapshot.status == .playing ? "pause.fill" : "play.fill")
-                    .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
+                (playback.snapshot.status == .playing ? AppIcon.pause : AppIcon.play)
+                    .styled(size: 20)
+                    .frame(width: 30, height: 30).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -661,7 +929,7 @@ private struct IslandContent: View {
                 commitTick &+= 1
                 changeTrack(goNext: true, from: 0)
             } label: {
-                Image(systemName: "forward.fill")
+                Image(mozz: "forward.fill")
                     .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1018,14 +1286,13 @@ private struct Morph {
     static let islandBottomGap: CGFloat = BottomBar.islandGap    // gap between island and tab bar
     static let tabBarHeight: CGFloat = BottomBar.tabHeight       // floating tab-bar height
     static let expandedRadius: CGFloat = 24
-    static let expandedArtRadius: CGFloat = 10
+    static let expandedArtRadius: CGFloat = 18
     static let bottomOverhang: CGFloat = 120    // surface runs off-screen at p=1
     static let receiveDepth: CGFloat = 4        // how far the island grows UP on the catch
     static let receiveZone: CGFloat = 0.18      // last fraction of collapse the bounce lives in
     static let miniFadeFull: CGFloat = 0.10     // p at/below which mini controls are fully shown
     static let miniFadeEnd: CGFloat = 0.34      // p at/above which mini controls are hidden
     static let expArtTopGap: CGFloat = 39       // grabber + gap above big artwork
-    static let expArtMaxSide: CGFloat = 340
 
     // Island touch-target slop: the tappable area extends beyond the 56pt visual
     // pill so edge taps don't "fall through" to the page/tab-bar behind (Apple's
@@ -1054,7 +1321,9 @@ private struct Morph {
     var islandTapCenterY: CGFloat { miniCenterY + (Self.islandTapSlopBottom - Self.islandTapSlopTop) / 2 }
 
     // Expanded artwork --------------------------------------------------------
-    var expArtSide: CGFloat { min(width - 90, Self.expArtMaxSide) }
+    // Matches the content width (scrubber / titles / buttons use 32pt side
+    // padding), so the cover lines up flush with the controls below it.
+    var expArtSide: CGFloat { width - 64 }
     var expArtCenterY: CGFloat { safeTop + Self.expArtTopGap + expArtSide / 2 }
 
     // Morphing surface --------------------------------------------------------
@@ -1145,14 +1414,18 @@ private func clamp(_ x: CGFloat, _ lo: CGFloat = 0, _ hi: CGFloat = 1) -> CGFloa
 
 private extension View {
     /// The island's Liquid Glass on iOS/macOS 26+, a material fallback below it.
+    /// When `enabled` is false, a plain opaque `fallbackFill` is used instead —
+    /// cheap to resize during the morph (no backdrop blur) — so the expensive
+    /// glass is only paid at rest / outside Low Power Mode.
     @ViewBuilder
-    func liquidGlass(radius: CGFloat) -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
-            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+    func liquidGlass(radius: CGFloat, enabled: Bool = true, fallbackFill: Color = .black) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if !enabled {
+            self.background(shape.fill(fallbackFill))
+        } else if #available(iOS 26.0, macOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
         } else {
-            self.background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous).fill(.ultraThinMaterial)
-            )
+            self.background(shape.fill(.ultraThinMaterial))
         }
     }
 }
@@ -1269,7 +1542,9 @@ struct TouchDownReader: UIViewRepresentable {
 
 /// One traveling artwork. Its display size animates, but the pixel size used to
 /// resolve the backend URL is fixed, so scaling never triggers a reload and the
-/// image never flashes its placeholder mid-flight.
+/// image never flashes its placeholder mid-flight. On a track change it keeps
+/// showing the previous cover until the new one is ready (`retainWhileLoading`),
+/// so — combined with up-next prefetching — skipping never reveals a placeholder.
 private struct MorphArtwork: View {
     let track: Track?
     let side: CGFloat
@@ -1281,7 +1556,7 @@ private struct MorphArtwork: View {
     var body: some View {
         Group {
             if let url = resolvedURL {
-                CachedArtworkImage(url: url) { placeholder }
+                CachedArtworkImage(url: url, retainWhileLoading: true) { placeholder }
             } else {
                 placeholder
             }
@@ -1295,21 +1570,5 @@ private struct MorphArtwork: View {
         return backend.artworkURL(for: artwork, size: Int(base * 2))
     }
 
-    private var placeholder: some View {
-        let seed = track?.albumTitle ?? track?.title ?? ""
-        let hash = abs(seed.hashValue)
-        let hue = Double(hash % 360) / 360.0
-        return LinearGradient(
-            colors: [Color(hue: hue, saturation: 0.5, brightness: 0.7),
-                     Color(hue: (hue + 0.1).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.45)],
-            startPoint: .topLeading, endPoint: .bottomTrailing
-        )
-        .overlay(
-            Image(systemName: "music.note")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: side * 0.4, height: side * 0.4)
-                .foregroundStyle(.white.opacity(0.85))
-        )
-    }
+    private var placeholder: some View { ArtworkPlaceholder() }
 }
