@@ -28,7 +28,7 @@ struct BrandStyle {
         logo: "PlexLogo",
         name: "Plex",
         pickerName: "Plex",
-        heroSubtitle: "Sign in to stream your Plex music"
+        heroSubtitle: "Connect your Plex music library"
     )
 
     static let navidrome = BrandStyle(

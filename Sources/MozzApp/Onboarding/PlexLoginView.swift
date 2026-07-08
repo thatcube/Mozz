@@ -83,28 +83,32 @@ struct PlexLoginView: View {
             .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 8, trailing: 16))
             .listRowSeparator(.hidden)
 
-            Section {
-                switch phase {
-                case .idle:
-                    Text("Sign in to your Plex account to connect your music library. A secure Plex window opens, and Mozz returns here automatically once you're authorized.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                case .authorizing:
-                    Text("Complete sign-in in the Plex window. Mozz returns here automatically once you're authorized.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                case .completing:
-                    Label("Signed in", mozz: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.headline)
+            // Progress/confirmation feedback only once sign-in is underway. The
+            // idle screen stays clean (hero + button); the button's external-link
+            // glyph signals that it opens a secure Plex web page.
+            if phase != .idle {
+                Section {
+                    switch phase {
+                    case .idle:
+                        EmptyView()
+                    case .authorizing:
+                        Text("Complete sign-in in the Plex window. Mozz returns here automatically once you're authorized.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    case .completing:
+                        Label("Signed in", mozz: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.headline)
+                    }
                 }
             }
 
             // Plex has no fields/keyboard, so its primary action lives inline on
-            // the page (right under the explainer) rather than floating above the
+            // the page (right under the hero) rather than floating above the
             // bottom safe area — a floating button over this near-empty screen
             // reads as stranded.
             if phase == .idle {
                 Section {
-                    SignInBar(title: "Sign in with Plex") { start() }
+                    SignInBar(title: "Sign in with Plex", systemImage: "arrow.up.forward") { start() }
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
