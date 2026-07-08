@@ -303,11 +303,13 @@ extension Color {
     }
 
     /// Theme-aware gray fill for the search field at rest (before it turns to
-    /// Liquid Glass on scroll) — light: near-white gray, dark: dark gray, like
-    /// the system search bar.
+    /// Liquid Glass on scroll). Uses `.systemGray5` — one step above the page
+    /// floor (`mozzBackground` is `.systemGray6` in light mode), so the field
+    /// stays visible against the page in both light and dark, like the system
+    /// search bar.
     static var searchFieldRest: Color {
         #if canImport(UIKit)
-        Color(uiColor: .systemGray6)
+        Color(uiColor: .systemGray5)
         #elseif canImport(AppKit)
         Color(nsColor: .windowBackgroundColor)
         #else
