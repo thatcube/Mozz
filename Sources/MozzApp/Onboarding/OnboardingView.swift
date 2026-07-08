@@ -122,7 +122,7 @@ struct OnboardingView: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemBackground))
+        .background(Color.mozzSecondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
@@ -140,6 +140,6 @@ struct OnboardingView: View {
         Color(red: 0.094, green: 0.388, blue: 0.863),   // #1863DC deep blue
     ]
     private static let demoColors = [
-        Color(.systemGray), Color(.systemGray2),
+        Color.gray, Color.gray.opacity(0.7),
     ]
 }

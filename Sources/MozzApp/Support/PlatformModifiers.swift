@@ -129,6 +129,19 @@ extension Color {
     /// The near-black content background for the (always-dark, Apple-Music-style)
     /// media detail page, below the colored hero.
     static var mozzDetailBackground: Color { Color(white: 0.07) }
+
+    /// A secondary grouped-surface background (for cards/rows) that works on both
+    /// iOS and the macOS test host. `Color(.secondarySystemBackground)` is
+    /// UIKit-only and won't compile for the macOS host used by `swift test`.
+    static var mozzSecondaryBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .secondarySystemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .underPageBackgroundColor)
+        #else
+        Color(white: 0.12)
+        #endif
+    }
 }
 
 #if os(iOS)
