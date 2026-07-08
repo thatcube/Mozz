@@ -64,6 +64,19 @@ public struct EqualizerSettings: Codable, Equatable, Sendable {
         return min(max(value, gainRange.lowerBound), gainRange.upperBound)
     }
 
+    // Decode through the validating memberwise initializer so a corrupt, tampered,
+    // or future-format persisted blob (e.g. a short `gains` array or out-of-range
+    // values) can never yield an invalid EQ — the synthesized decoder would
+    // otherwise assign the stored properties directly and bypass every guarantee.
+    private enum CodingKeys: String, CodingKey { case gains, preampDB }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawGains = try container.decodeIfPresent([Double].self, forKey: .gains) ?? []
+        let rawPreamp = try container.decodeIfPresent(Double.self, forKey: .preampDB) ?? 0
+        self.init(gains: rawGains, preampDB: rawPreamp)
+    }
+
     /// A short human label for a band's center frequency, e.g. "31", "500",
     /// "1k", "16k".
     public static func frequencyLabel(forBand index: Int) -> String {

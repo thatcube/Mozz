@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 import AudioToolbox
 import MediaToolbox
-import os.lock
+import os
 import MozzCore
 
 // MARK: - Equalizer DSP (MTAudioProcessingTap + kAudioUnitSubType_NBandEQ)
@@ -80,7 +80,10 @@ public final class EqualizerProcessor {
 /// `AudioUnitSetParameter` itself is documented safe to call concurrently with
 /// rendering.
 final class EqualizerTapContext {
-    private var lock = os_unfair_lock()
+    // A heap-stable unfair lock (iOS 16+). Do NOT use a bare `os_unfair_lock`
+    // stored property with `&lock`: Swift doesn't guarantee a stable address for
+    // `&` of a stored property, which would silently break mutual exclusion.
+    private let lock = OSAllocatedUnfairLock()
     private var au: EqualizerAudioUnit?
     private var gains: [Double]
     private var preampDB: Double
@@ -106,11 +109,11 @@ final class EqualizerTapContext {
 
     /// Push new gains to the live AU (no-op until `prepare` has built it).
     func update(settings: EqualizerSettings) {
-        os_unfair_lock_lock(&lock)
+        lock.lock()
         gains = settings.gains
         preampDB = settings.preampDB
         au?.applyGains(gains, preampDB: preampDB)
-        os_unfair_lock_unlock(&lock)
+        lock.unlock()
     }
 
     // MARK: Audio thread — tap lifecycle
@@ -123,17 +126,17 @@ final class EqualizerTapContext {
             unit.dispose()
             return
         }
-        os_unfair_lock_lock(&lock)
+        lock.lock()
         unit.applyGains(gains, preampDB: preampDB)
         au = unit
-        os_unfair_lock_unlock(&lock)
+        lock.unlock()
     }
 
     func unprepare() {
-        os_unfair_lock_lock(&lock)
+        lock.lock()
         au?.dispose()
         au = nil
-        os_unfair_lock_unlock(&lock)
+        lock.unlock()
     }
 
     // MARK: Audio thread — render
@@ -154,7 +157,9 @@ final class EqualizerTapContext {
         guard getStatus == noErr else { return }
 
         // A seek restarts the stream: clear the biquad state so it doesn't click.
-        if (flags & MTAudioProcessingTapFlags(kMTAudioProcessingTapFlag_StartOfStream)) != 0 {
+        // The start/end-of-stream signal is returned via `flagsOut` from
+        // `MTAudioProcessingTapGetSourceAudio`, not the incoming `flags`.
+        if (flagsOut.pointee & MTAudioProcessingTapFlags(kMTAudioProcessingTapFlag_StartOfStream)) != 0 {
             unit.reset()
         }
 
@@ -178,6 +183,8 @@ final class EqualizerTapContext {
 
     /// Copy the stashed source samples into the AU's input buffer. Called by the
     /// AU's render callback during `AudioUnitRender` — real-time, no allocation.
+    /// Fills every destination buffer fully (source bytes, then zero-padded) and
+    /// uses `memmove` so the in-place same-buffer case is well-defined.
     fileprivate func copySource(into ioData: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
         let dst = UnsafeMutableAudioBufferListPointer(ioData)
         guard let source = pendingSource else {
@@ -185,14 +192,16 @@ final class EqualizerTapContext {
             return noErr
         }
         let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: source))
-        let count = min(src.count, dst.count)
-        for i in 0..<count {
-            let srcBuf = src[i]
-            let dstBuf = dst[i]
-            if let s = srcBuf.mData, let d = dstBuf.mData {
-                let bytes = min(srcBuf.mDataByteSize, dstBuf.mDataByteSize)
-                memcpy(d, s, Int(bytes))
-                dst[i].mDataByteSize = bytes
+        for i in 0..<dst.count {
+            guard let d = dst[i].mData else { continue }
+            let dstBytes = Int(dst[i].mDataByteSize)
+            if i < src.count, let s = src[i].mData {
+                let copyBytes = min(Int(src[i].mDataByteSize), dstBytes)
+                memmove(d, s, copyBytes)
+                if copyBytes < dstBytes { memset(d + copyBytes, 0, dstBytes - copyBytes) }
+            } else {
+                // No matching source channel — silence rather than leave it stale.
+                memset(d, 0, dstBytes)
             }
         }
         return noErr
@@ -231,10 +240,13 @@ private final class EqualizerAudioUnit {
               AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &asbd, fmtSize) == noErr
         else { return false }
 
-        // Ten bands at our ISO frequencies, parametric peaking filters.
+        // Ten bands at our ISO frequencies, parametric peaking filters. The band
+        // count is critical (our per-band param IDs assume it); bail to a
+        // passthrough (no tap) if it can't be set rather than mis-address bands.
         var bandCount = UInt32(EqualizerSettings.bandCount)
-        _ = AudioUnitSetProperty(unit, kAUNBandEQProperty_NumberOfBands, kAudioUnitScope_Global, 0,
-                                 &bandCount, UInt32(MemoryLayout<UInt32>.size))
+        guard AudioUnitSetProperty(unit, kAUNBandEQProperty_NumberOfBands, kAudioUnitScope_Global, 0,
+                                   &bandCount, UInt32(MemoryLayout<UInt32>.size)) == noErr
+        else { return false }
         for i in 0..<EqualizerSettings.bandCount {
             let band = AudioUnitParameterID(i)
             AudioUnitSetParameter(unit, AudioUnitParameterID(kAUNBandEQParam_FilterType) + band,
@@ -246,10 +258,12 @@ private final class EqualizerAudioUnit {
         }
 
         // Cap the render slice generously; the tap can deliver large buffers on
-        // iPad. MUST be set before AudioUnitInitialize.
+        // iPad. MUST be set before AudioUnitInitialize, and is critical: too small
+        // and a big slice fails to render (silence), so bail to passthrough.
         var maxSlice = max(maxFrames, 8192)
-        _ = AudioUnitSetProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0,
-                                 &maxSlice, UInt32(MemoryLayout<UInt32>.size))
+        guard AudioUnitSetProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0,
+                                   &maxSlice, UInt32(MemoryLayout<UInt32>.size)) == noErr
+        else { return false }
 
         var callback = AURenderCallbackStruct(inputProc: equalizerRenderCallback, inputProcRefCon: renderContext)
         guard AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0,

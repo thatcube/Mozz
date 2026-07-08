@@ -171,6 +171,24 @@ final class EqualizerSettingsTests: XCTestCase {
         XCTAssertEqual(decoded, original)
     }
 
+    func testCodableDecodeNormalizesMalformedBlob() throws {
+        // A tampered/legacy blob: too-short gains + out-of-range values. Decode
+        // must pad, clamp, and never crash (the synthesized decoder would not).
+        let json = Data(#"{"gains":[3.0,99.0],"preampDB":-99.0}"#.utf8)
+        let s = try JSONDecoder().decode(EqualizerSettings.self, from: json)
+        XCTAssertEqual(s.gains.count, EqualizerSettings.bandCount)
+        XCTAssertEqual(s.gains[0], 3.0)
+        XCTAssertEqual(s.gains[1], EqualizerSettings.gainRange.upperBound)   // 99 → +12
+        XCTAssertEqual(s.gains[2], 0)                                         // padded
+        XCTAssertEqual(s.preampDB, EqualizerSettings.gainRange.lowerBound)   // -99 → -12
+    }
+
+    func testCodableDecodeMissingFieldsIsFlat() throws {
+        let s = try JSONDecoder().decode(EqualizerSettings.self, from: Data("{}".utf8))
+        XCTAssertTrue(s.isFlat)
+        XCTAssertEqual(s.gains.count, EqualizerSettings.bandCount)
+    }
+
     func testPresetsAreValidAndDistinct() {
         for preset in EqualizerPreset.allCases {
             let s = preset.settings

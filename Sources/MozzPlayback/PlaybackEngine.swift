@@ -510,8 +510,20 @@ public final class PlaybackEngine: ObservableObject {
 
     /// The EQ-on path: load the audio track, then build a single mix with the
     /// normalization volume ramp and the EQ tap, and attach it before enqueue.
+    ///
+    /// The track load is bounded by a timeout: with EQ off the item is enqueued
+    /// immediately and `AVPlayer` handles buffering, but here we must load the
+    /// track before enqueue, so a stalled/broken remote asset could otherwise wedge
+    /// playback in `.buffering` forever. On timeout (or no track — HLS) we simply
+    /// enqueue unequalized.
+    ///
+    /// Homogeneity note: while EQ is on, every item goes through here, so a normal
+    /// same-source queue stays uniformly tapped (gapless preserved). A queue that
+    /// mixes a no-track item (e.g. HLS) with a direct item would tap only some
+    /// items and could reconfigure the pipeline at that boundary — not reachable
+    /// today (nothing transcodes), but worth knowing if HLS playback is added.
     private func buildCombinedMix(on item: AVPlayerItem, gainDB: Double?) async {
-        guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first else { return }
+        guard let track = await loadAudioTrack(from: item.asset, timeout: 4) else { return }
         let params = AVMutableAudioMixInputParameters(track: track)
         if normalizationEnabled, let gainDB {
             params.setVolume(NormalizationGain.linearScalar(gainDB: gainDB, preampDB: normalizationPreampDB), at: .zero)
@@ -520,6 +532,21 @@ public final class PlaybackEngine: ObservableObject {
         let mix = AVMutableAudioMix()
         mix.inputParameters = [params]
         item.audioMix = mix
+    }
+
+    /// Load the first audio track of an asset, giving up after `timeout` seconds
+    /// so a slow/broken asset can't block enqueue indefinitely.
+    private func loadAudioTrack(from asset: AVAsset, timeout: TimeInterval) async -> AVAssetTrack? {
+        await withTaskGroup(of: AVAssetTrack?.self) { group in
+            group.addTask { try? await asset.loadTracks(withMediaType: .audio).first }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     /// Attach an audio mix that applies the track's loudness-normalization gain
@@ -574,8 +601,23 @@ public final class PlaybackEngine: ObservableObject {
     /// keeping the same track and position. No new listening event is emitted.
     private func rebuildAudioProcessing() {
         guard currentTrack != nil else { return }
-        let wasPlaying = snapshot.status == .playing
-        pendingSeek = snapshot.elapsed > 1 ? snapshot.elapsed : nil
+        // If the player already auto-advanced into the pre-rolled next item but
+        // `handleNaturalFinish` hasn't run yet, reconcile first so we rebuild the
+        // new current track instead of restarting the one that just finished.
+        if loaded.count == 2,
+           loaded.first?.item !== player.currentItem,
+           loaded[1].item === player.currentItem {
+            handleNaturalFinish()
+            guard currentTrack != nil else { return }
+        }
+        // Treat `.buffering` as "should keep playing" — the user may toggle EQ
+        // during the initial load, and we must not silently drop autoplay.
+        let wasPlaying = snapshot.status == .playing || snapshot.status == .buffering
+        // Preserve position across rapid toggles: while a prior rebuild is still in
+        // flight the player can momentarily read 0 elapsed, so keep the larger of
+        // the live position and any pending seek.
+        let position = max(snapshot.elapsed, pendingSeek ?? 0)
+        pendingSeek = position > 1 ? position : nil
         reload(autoplay: wasPlaying, logStartOnLoad: false)
     }
 
