@@ -394,9 +394,16 @@ public struct JellyfinBackend: MusicBackend {
             URLQueryItem(name: "DeviceId", value: connection.clientIdentifier),
             URLQueryItem(name: "PlaySessionId", value: sessionID),
             URLQueryItem(name: "Container", value: Self.directPlayContainers),
-            URLQueryItem(name: "TranscodingContainer", value: "ts"),
-            URLQueryItem(name: "TranscodingProtocol", value: "hls"),
-            URLQueryItem(name: "AudioCodec", value: "aac"),
+            // Progressive (HTTP) transcode instead of HLS: this restores
+            // Jellyfin's own GetDeviceProfile default (Container=mp3,
+            // AudioCodec=mp3, Protocol=http) and, crucially, produces a stream
+            // that exposes an AVAssetTrack — so the per-item MTAudioProcessing
+            // tap (EQ + ReplayGain normalization) works on transcodes too. HLS
+            // transcodes have no track and can't be processed. Seeking uses
+            // StartTimeTicks (server restarts ffmpeg), ~same latency as HLS.
+            URLQueryItem(name: "TranscodingContainer", value: "mp3"),
+            URLQueryItem(name: "TranscodingProtocol", value: "http"),
+            URLQueryItem(name: "AudioCodec", value: "mp3"),
             URLQueryItem(name: "api_key", value: token),
         ]
         var transcoded = options.forceTranscode

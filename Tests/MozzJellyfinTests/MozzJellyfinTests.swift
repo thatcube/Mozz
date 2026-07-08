@@ -178,8 +178,14 @@ final class JellyfinURLTests: XCTestCase {
 
     func testStreamURLTranscodeWhenBitrateCapped() async throws {
         let source = try await makeBackend().streamSource(for: track, options: StreamOptions(maxBitrateKbps: 192))
+        let string = source.url.absoluteString
         XCTAssertTrue(source.isTranscoded)
-        XCTAssertTrue(source.url.absoluteString.contains("MaxStreamingBitrate=192000"))
+        XCTAssertTrue(string.contains("MaxStreamingBitrate=192000"))
+        // Progressive (HTTP) transcode so the stream exposes an AVAssetTrack
+        // (required for the EQ / ReplayGain audio-processing tap). HLS wouldn't.
+        XCTAssertTrue(string.contains("TranscodingContainer=mp3"))
+        XCTAssertTrue(string.contains("TranscodingProtocol=http"))
+        XCTAssertTrue(string.contains("AudioCodec=mp3"))
     }
 
     func testOriginalFileURL() throws {
