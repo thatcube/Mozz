@@ -61,3 +61,22 @@ extension View {
         navigationDestination(for: AppRoute.self) { $0.destination }
     }
 }
+
+/// Where a navigation command originated, which decides how it is applied.
+enum NavOrigin: Hashable {
+    /// Issued from inside a tab (a row "…"/context menu) — push onto the *current*
+    /// tab's stack.
+    case tab
+    /// Issued from the Now Playing player, which lives OUTSIDE the tab stacks —
+    /// push onto a canonical tab and collapse the player to reveal it.
+    case player
+}
+
+/// A one-shot request to push an already-resolved `AppRoute`. Menus resolve the
+/// track → record asynchronously, then hand a concrete route to `MainTabsView`
+/// via `AppEnvironment.pendingNav` (mirrors the `pendingDeepLink` command bus so
+/// both share the same latest-wins generation token).
+struct NavCommand: Hashable {
+    let route: AppRoute
+    let origin: NavOrigin
+}

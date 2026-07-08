@@ -137,6 +137,12 @@ public final class AppEnvironment: ObservableObject {
     /// UI exists, so it must be queued rather than applied immediately).
     @Published var pendingDeepLink: DeepLinkTarget?
 
+    /// A one-shot in-app navigation request from a track menu (Go to Artist /
+    /// Album). Queued here — like `pendingDeepLink` — so `MainTabsView` applies it
+    /// through the SAME latest-wins generation token, whether it came from a tab
+    /// row or the Now Playing player (which lives outside the tab stacks).
+    @Published var pendingNav: NavCommand?
+
     /// Whether a catalog sync is currently running, and its latest progress.
     /// Owned by the environment (not a view) so a sync survives navigating away
     /// from Settings / refreshing Home, and every view reflects the true state.
@@ -1088,6 +1094,28 @@ public final class AppEnvironment: ObservableObject {
             else { return nil }
             return (.library, [.playlist(playlist)])
         }
+    }
+
+    /// Queue an in-app navigation for `MainTabsView` to apply. Called by track
+    /// menus after they resolve a track → artist/album record.
+    func requestNavigation(to route: AppRoute, from origin: NavOrigin) {
+        pendingNav = NavCommand(route: route, origin: origin)
+    }
+
+    /// Resolve the artist that owns `remoteId` (a track's `artistID`) to its
+    /// catalog record, or `nil` if absent/unsynced. Menus hide "Go to Artist"
+    /// synchronously when the id is nil (compilations / Various Artists), so this
+    /// only returns nil for the rare present-but-unsynced case.
+    func resolveArtist(remoteId: String?) async -> ArtistRecord? {
+        guard let remoteId, let serverId = active?.connection.id else { return nil }
+        return try? await repository.artist(serverId: serverId, remoteId: remoteId)
+    }
+
+    /// Resolve the album that owns `remoteId` (a track's `albumID`) to its catalog
+    /// record, or `nil` if absent/unsynced.
+    func resolveAlbum(remoteId: String?) async -> AlbumRecord? {
+        guard let remoteId, let serverId = active?.connection.id else { return nil }
+        return try? await repository.album(serverId: serverId, remoteId: remoteId)
     }
 
     /// Ensure the active Plex backend is set up to sync ALL the server's music

@@ -174,6 +174,7 @@ struct MainTabsView: View {
         }
         .task { consumePendingDeepLinkIfNeeded() }
         .onChange(of: env.pendingDeepLink) { _, _ in consumePendingDeepLinkIfNeeded() }
+        .onChange(of: env.pendingNav) { _, _ in consumePendingNavIfNeeded() }
         // Force light/dark (or follow system) per the appearance setting.
         .preferredColorScheme((Color.MozzAppearance(rawValue: appearanceRaw) ?? .system).colorScheme)
         // NOTE: `darkStyleRaw` is observed (above) so this view re-renders when the
@@ -205,6 +206,28 @@ struct MainTabsView: View {
                 minimize = 0
             }
         }
+    }
+
+    /// Apply a queued in-app navigation (Go to Artist / Album from a track menu).
+    /// Unlike a deep link this route is already resolved, so we push it directly.
+    /// A row-issued command pushes onto the CURRENT tab; a player-issued one
+    /// targets a canonical tab (Library, captured here — `selectedTab` may be
+    /// Search), pushes FIRST behind the still-presented player, then collapses the
+    /// player to reveal it. Bumps the shared deep-link generation so any in-flight
+    /// deep-link resolve is superseded (latest intent wins).
+    private func consumePendingNavIfNeeded() {
+        guard let cmd = env.pendingNav else { return }
+        env.pendingNav = nil
+        deepLinkGeneration &+= 1
+        let targetTab: AppTab = cmd.origin == .player ? .library : selectedTab
+        loadedTabs.insert(targetTab)
+        expandLockUntil = Date.now + Self.expandCooldown
+        withAnimation(Self.expandSpring) {
+            if cmd.origin == .player { selectedTab = targetTab }
+            paths[targetTab, default: []].append(cmd.route)
+            minimize = 0
+        }
+        if cmd.origin == .player { ui.isFullPresented = false }
     }
 
     /// All visited pages stay mounted (state preserved); only the selected one is

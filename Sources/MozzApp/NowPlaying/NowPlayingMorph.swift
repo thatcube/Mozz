@@ -472,7 +472,7 @@ struct NowPlayingMorphContainer: View {
             // Per-track overflow — shares the row/detail action set (P1 factory).
             if let track = playback.currentTrack {
                 Menu {
-                    TrackActionButtons(track: track, downloadState: nil, internalId: nil)
+                    TrackActionButtons(track: track, downloadState: nil, internalId: nil, surface: .player)
                 } label: {
                     AppIcon.overflow.styled(size: 22)
                         .foregroundStyle(.secondary)

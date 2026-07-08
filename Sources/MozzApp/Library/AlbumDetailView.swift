@@ -127,7 +127,7 @@ struct TrackRow: View {
             downloadIndicator
             Text(Format.duration(track.duration))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            SongActionsMenu(track: track, downloadState: downloadState)
+            SongActionsMenu(track: track, downloadState: downloadState, surface: .albumDetail)
         }
         .padding(.vertical, 2)
     }

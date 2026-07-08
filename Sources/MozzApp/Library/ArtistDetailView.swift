@@ -121,7 +121,7 @@ struct ArtistTopSongRow: View {
             Spacer()
             Text(Format.duration(track.duration))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            SongActionsMenu(track: track)
+            SongActionsMenu(track: track, surface: .artistDetail)
         }
         .padding(.vertical, 6)
     }

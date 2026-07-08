@@ -13,14 +13,16 @@ struct SongActionsMenu: View {
     @EnvironmentObject private var env: AppEnvironment
     let track: TrackRecord
     var downloadState: DownloadState?
+    var surface: TrackActionSurface = .row
 
     @State private var isFavorite: Bool
     @State private var rating: Double?
     @State private var showingRatingPopover = false
 
-    init(track: TrackRecord, downloadState: DownloadState? = nil) {
+    init(track: TrackRecord, downloadState: DownloadState? = nil, surface: TrackActionSurface = .row) {
         self.track = track
         self.downloadState = downloadState
+        self.surface = surface
         _isFavorite = State(initialValue: track.isFavorite)
         _rating = State(initialValue: track.rating)
     }
@@ -36,7 +38,8 @@ struct SongActionsMenu: View {
             TrackActionButtons(
                 track: track.toDomain(),
                 downloadState: downloadState,
-                internalId: track.id
+                internalId: track.id,
+                surface: surface
             )
         } label: {
             Image(mozz: "ellipsis")
