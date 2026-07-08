@@ -227,7 +227,9 @@ struct JellyfinLoginView: View {
     private func signInWithPassword() {
         guard let auth = authenticator() else { return }
         isBusy = true
-        status = "Signing in\u{2026}"
+        status = (baseURL.map(LocalNetworkPermission.isLocalHost) ?? false)
+            ? "Signing in\u{2026} If iOS asks, allow local network access."
+            : "Signing in\u{2026}"
         Task {
             do {
                 let result = try await auth.authenticate(username: username, password: password)

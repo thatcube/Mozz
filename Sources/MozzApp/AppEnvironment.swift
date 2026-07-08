@@ -395,8 +395,12 @@ public final class AppEnvironment: ObservableObject {
         // Prefer live detection; if the server is unreachable (offline launch),
         // keep the last-known capabilities rather than clobbering them with
         // generic defaults. Only persist detected/fallback values (never re-save
-        // the cached row). See CapabilityResolver.
-        let detected = try? await backend.detectCapabilities()
+        // the cached row). See CapabilityResolver. Wrapped in the local-network
+        // retry so a launch reconnect to a LAN server isn't defeated by the iOS
+        // permission prompt racing the first request.
+        let detected = try? await LocalNetworkPermission.retrying(for: connection.baseURL) {
+            try await backend.detectCapabilities()
+        }
         let cached = try? await repository.capabilities(serverId: connection.id)
         let resolved = CapabilityResolver.resolve(detected: detected, cached: cached, backend: stored.kind)
         if resolved.shouldPersist {

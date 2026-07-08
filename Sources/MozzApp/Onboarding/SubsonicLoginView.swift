@@ -33,6 +33,8 @@ struct SubsonicLoginView: View {
             } footer: {
                 if let baseURL {
                     Text("Will connect to \(baseURL.absoluteString)")
+                } else {
+                    Text("Works with Navidrome and other Subsonic-compatible servers (Gonic, Ampache, LMS…).")
                 }
             }
 
@@ -65,7 +67,7 @@ struct SubsonicLoginView: View {
                 Section { Text(status).foregroundStyle(.secondary).font(.footnote) }
             }
         }
-        .navigationTitle("Subsonic")
+        .navigationTitle("Navidrome")
         .inlineNavigationTitle()
     }
 
@@ -97,7 +99,9 @@ struct SubsonicLoginView: View {
             clientIdentifier: env.clientIdentifier
         )
         isBusy = true
-        status = "Signing in\u{2026}"
+        status = LocalNetworkPermission.isLocalHost(baseURL)
+            ? "Signing in\u{2026} If iOS asks, allow local network access."
+            : "Signing in\u{2026}"
         Task {
             do {
                 let session: AuthenticatedSession

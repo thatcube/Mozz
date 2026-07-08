@@ -39,7 +39,7 @@ struct OnboardingView: View {
                     NavigationLink {
                         SubsonicLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Subsonic", systemImage: "waveform")
+                        connectLabel(title: "Connect to Navidrome", systemImage: "waveform")
                     }
 
                     Button {

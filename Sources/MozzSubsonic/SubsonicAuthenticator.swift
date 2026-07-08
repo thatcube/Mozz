@@ -31,20 +31,34 @@ public struct SubsonicAuthenticator: Sendable {
     }
 
     /// Username + password → MD5-token credential (password is discarded).
-    public func authenticate(username: String, password: String) async throws -> AuthenticatedSession {
+    /// `onWaitingForLocalNetwork` fires if the first attempt is refused while iOS
+    /// shows its local-network permission prompt (the call is auto-retried).
+    public func authenticate(
+        username: String,
+        password: String,
+        onWaitingForLocalNetwork: (@Sendable () -> Void)? = nil
+    ) async throws -> AuthenticatedSession {
         let credential = SubsonicCredential.md5(username: username, password: password)
-        return try await verify(credential, username: username)
+        return try await verify(credential, username: username, onWaiting: onWaitingForLocalNetwork)
     }
 
     /// Username + OpenSubsonic API key → apiKey credential (omits `u` in signing).
-    public func authenticate(username: String, apiKey: String) async throws -> AuthenticatedSession {
+    public func authenticate(
+        username: String,
+        apiKey: String,
+        onWaitingForLocalNetwork: (@Sendable () -> Void)? = nil
+    ) async throws -> AuthenticatedSession {
         let credential = SubsonicCredential.apiKey(username: username, apiKey: apiKey)
-        return try await verify(credential, username: username)
+        return try await verify(credential, username: username, onWaiting: onWaitingForLocalNetwork)
     }
 
     // MARK: Helpers
 
-    private func verify(_ credential: SubsonicCredential, username: String) async throws -> AuthenticatedSession {
+    private func verify(
+        _ credential: SubsonicCredential,
+        username: String,
+        onWaiting: (@Sendable () -> Void)?
+    ) async throws -> AuthenticatedSession {
         let client = SubsonicClient(
             baseURL: baseURL,
             credential: credential,
@@ -52,8 +66,13 @@ public struct SubsonicAuthenticator: Sendable {
             transport: transport
         )
         // ping validates the chosen auth (a bad credential returns status=failed
-        // code 40/44 → SubsonicClient maps it to `.unauthorized`).
-        let ping = try await client.send("ping", as: SubsonicEmpty.self)
+        // code 40/44 → SubsonicClient maps it to `.unauthorized`). Wrapped so a
+        // local server whose first connection is refused by the iOS local-network
+        // permission prompt is retried once the user taps Allow, instead of
+        // failing and forcing them to hit Sign In again.
+        let ping = try await LocalNetworkPermission.retrying(for: baseURL, onWaiting: onWaiting) {
+            try await client.send("ping", as: SubsonicEmpty.self)
+        }
         return AuthenticatedSession(
             kind: .subsonic,
             baseURL: baseURL,
