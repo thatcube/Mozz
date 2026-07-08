@@ -540,10 +540,10 @@ final class SchemaAndWriteTests: XCTestCase {
         let server = makeServer()
         try await writer.saveServer(server)
         try await writer.upsertArtists([
-            Artist(id: "ar1", name: "Nine Inch Nails", sortName: "Nine Inch Nails"),
+            Artist(id: "ar1", name: "Nine Inch Nails", sortName: "Nine Inch Nails", artwork: ArtworkRef(key: "art-ar1")),
         ], serverId: server.id)
         try await writer.upsertTracks([
-            Track(id: "t1", title: "Hurt", artistName: "Nine Inch Nails", artistID: "ar1"),
+            Track(id: "t1", title: "Hurt", artistName: "Nine Inch Nails", artistID: "ar1", artwork: ArtworkRef(key: "art-t1")),
         ], serverId: server.id)
 
         try await store.suppress(serverId: server.id, scope: "track", ref: "t1", at: 100)
@@ -559,13 +559,16 @@ final class SchemaAndWriteTests: XCTestCase {
         let artist = items.first { $0.scope == "artist" }
         XCTAssertEqual(artist?.title, "Nine Inch Nails")
         XCTAssertNil(artist?.subtitle)
+        XCTAssertEqual(artist?.artworkKey, "art-ar1")
 
         let track = items.first { $0.scope == "track" && $0.ref == "t1" }
         XCTAssertEqual(track?.title, "Hurt")
         XCTAssertEqual(track?.subtitle, "Nine Inch Nails")
+        XCTAssertEqual(track?.artworkKey, "art-t1")
 
         let ghost = items.first { $0.ref == "ghost" }
         XCTAssertEqual(ghost?.title, "ghost", "missing catalog row falls back to the ref")
+        XCTAssertNil(ghost?.artworkKey, "missing catalog row has no artwork")
 
         // Un-suppress drops it from the list.
         try await store.unsuppress(serverId: server.id, scope: "track", ref: "t1")

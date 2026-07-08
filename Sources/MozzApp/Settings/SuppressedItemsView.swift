@@ -1,4 +1,5 @@
 import SwiftUI
+import MozzCore
 import MozzDatabase
 
 /// Settings → "Not Recommended": the durable management surface for everything
@@ -39,11 +40,11 @@ struct SuppressedItemsView: View {
     }
 
     private func row(_ item: RecommendationStore.SuppressedItem) -> some View {
-        HStack(spacing: 12) {
-            Image(mozz: item.scope == "artist" ? "music.mic" : "music.note")
-                .resizable().scaledToFit()
-                .frame(width: 16, height: 16)
-                .foregroundStyle(.secondary)
+        let isArtist = item.scope == "artist"
+        return HStack(spacing: 12) {
+            ArtworkView(artwork: item.artworkKey.map(ArtworkRef.init(key:)),
+                        seed: item.title, size: 44,
+                        cornerRadius: isArtist ? 22 : 6, circular: isArtist)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).lineLimit(1)
                 if let subtitle = item.subtitle, !subtitle.isEmpty {

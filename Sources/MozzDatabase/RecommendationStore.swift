@@ -469,6 +469,9 @@ public struct RecommendationStore: Sendable {
         public let title: String
         /// Secondary label — the artist name for tracks; nil for artists.
         public let subtitle: String?
+        /// Artwork key for the resolved catalog row (nil when the row is missing
+        /// or has no artwork), used to render a thumbnail.
+        public let artworkKey: String?
         public let createdAt: Double
         public var id: String { "\(scope):\(ref)" }
     }
@@ -479,8 +482,8 @@ public struct RecommendationStore: Sendable {
         try await database.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT s.scope AS scope, s.ref AS ref, s.createdAt AS createdAt,
-                       t.title AS trackTitle, t.artistName AS trackArtist,
-                       a.name AS artistName
+                       t.title AS trackTitle, t.artistName AS trackArtist, t.artworkKey AS trackArt,
+                       a.name AS artistName, a.artworkKey AS artistArt
                 FROM suppressed_ref s
                 LEFT JOIN track t ON s.scope = 'track' AND t.serverId = s.serverId AND t.remoteId = s.ref
                 LEFT JOIN artist a ON s.scope = 'artist' AND a.serverId = s.serverId AND a.remoteId = s.ref
@@ -494,15 +497,19 @@ public struct RecommendationStore: Sendable {
                 let artistName: String? = row["artistName"]
                 let title: String
                 let subtitle: String?
+                let artworkKey: String?
                 if scope == "track" {
                     title = trackTitle ?? ref
                     subtitle = trackArtist
+                    artworkKey = row["trackArt"]
                 } else {
                     title = artistName ?? ref
                     subtitle = nil
+                    artworkKey = row["artistArt"]
                 }
                 return SuppressedItem(scope: scope, ref: ref, title: title,
-                                      subtitle: subtitle, createdAt: row["createdAt"])
+                                      subtitle: subtitle, artworkKey: artworkKey,
+                                      createdAt: row["createdAt"])
             }
         }
     }
