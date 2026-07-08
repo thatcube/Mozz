@@ -142,6 +142,11 @@ struct SearchView: View {
         // that has scrolled beneath it can't be tapped through the clear gaps.
         .contentShape(Rectangle())
         .onTapGesture { }
+        // Animate the ✕ (Cancel) fading in/out when search activates. Keyed on
+        // isActive only, so it never fires during scroll (won't perturb the
+        // visualEffect pin). Needed for the button's .transition(.opacity) — which
+        // otherwise pops in with no animation once the bar has docked.
+        .animation(fieldTransition, value: isActive)
     }
 
     /// A custom search field. We can't use the system `.searchable` here because
