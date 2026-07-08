@@ -98,6 +98,19 @@ struct PlexLoginView: View {
                 }
             }
 
+            // Plex has no fields/keyboard, so its primary action lives inline on
+            // the page (right under the explainer) rather than floating above the
+            // bottom safe area — a floating button over this near-empty screen
+            // reads as stranded.
+            if phase == .idle {
+                Section {
+                    SignInBar(title: "Sign in with Plex") { start() }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                .listRowSeparator(.hidden)
+            }
+
             if let status {
                 Section {
                     HStack(spacing: 10) {
@@ -105,11 +118,6 @@ struct PlexLoginView: View {
                         Text(status).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if phase == .idle {
-                SignInBar(title: "Sign in with Plex") { start() }
             }
         }
         .navigationTitle("Plex")
