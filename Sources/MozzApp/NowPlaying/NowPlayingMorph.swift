@@ -639,7 +639,7 @@ struct NowPlayingMorphContainer: View {
             AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
             Image(systemName: routeMonitor.output.icon)
                 .font(.system(size: 26))
-                .foregroundStyle(routeMonitor.output.showsLabel ? Color.accentColor : Color.primary)
+                .foregroundStyle(routeMonitor.output.showsLabel ? Color.primary : Color.secondary)
                 .allowsHitTesting(false)
         }
         .frame(width: 44, height: 32)
