@@ -382,7 +382,11 @@ public final class PlaybackEngine: ObservableObject {
     // MARK: Loading
 
     /// Rebuild the player from the queue's current track (+ lookahead).
-    private func reload(autoplay: Bool) {
+    ///
+    /// `logStartOnLoad` is `false` only for an in-place rebuild (e.g. superseding
+    /// an in-flight load when the equalizer is toggled mid-load) where the same
+    /// track keeps playing and must not emit a fresh `.started` listening event.
+    private func reload(autoplay: Bool, logStartOnLoad: Bool = true) {
         loadGeneration += 1
         let generation = loadGeneration
         cancelRecovery()          // a fresh load abandons any in-flight recovery
@@ -401,7 +405,7 @@ public final class PlaybackEngine: ObservableObject {
         // Emit `.started` on intent (synchronously), so it's paired correctly
         // with the terminal event even if the async URL resolve below is slow
         // or fails. A paused load (autoplay == false) logs its start on resume.
-        if autoplay { logStart(track) }
+        if autoplay && logStartOnLoad { logStart(track) }
 
         Task { [weak self] in
             guard let self else { return }
@@ -783,11 +787,31 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     /// Rebuild the current item (and its lookahead) so a master EQ on/off change
-    /// takes effect while keeping the same track and position. Reuses the seek
-    /// rebuild path, which refills the lookahead and emits no new listening event.
+    /// takes effect while keeping the same track and position. No new listening
+    /// event is emitted.
     private func rebuildAudioProcessing() {
-        guard currentTrack != nil, loaded.first != nil else { return }
-        reloadCurrent(atElapsed: snapshot.elapsed, reason: .seek)
+        guard currentTrack != nil else { return }
+        // If the player already auto-advanced into the pre-rolled next item but
+        // `handleNaturalFinish` hasn't run yet, reconcile first so we rebuild the
+        // new current track instead of restarting the one that just finished.
+        if loaded.count == 2,
+           loaded.first?.item !== player.currentItem,
+           loaded[1].item === player.currentItem {
+            handleNaturalFinish()
+            guard currentTrack != nil else { return }
+        }
+        if loaded.first != nil {
+            // Steady state: rebuild current + lookahead in place, preserving the
+            // position and play/pause, and refilling the lookahead (homogeneous
+            // taps). Reuses the seek path; emits no listening event.
+            reloadCurrent(atElapsed: snapshot.elapsed, reason: .seek)
+        } else {
+            // A load is in flight (loaded not yet populated) — it already built its
+            // item with the pre-toggle EQ state. Supersede it with a fresh load
+            // carrying the new state, without re-logging the start.
+            reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering,
+                   logStartOnLoad: false)
+        }
     }
 
     // MARK: Observers
