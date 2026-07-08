@@ -65,10 +65,16 @@ struct RootView: View {
 
 struct SplashView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "music.note.list").font(.system(size: 44))
+        VStack(spacing: 24) {
+            Image("MozzLogo")
+                .interpolation(.none) // preserve crisp pixel-art edges
+                .resizable()
+                .scaledToFit()
+                .frame(width: 160, height: 160)
             ProgressView()
         }
         .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color("SplashBackground").ignoresSafeArea())
     }
 }
