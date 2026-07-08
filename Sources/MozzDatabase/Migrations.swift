@@ -16,6 +16,9 @@ enum Schema {
         registerV8(&migrator)
         registerV9(&migrator)
         registerV10(&migrator)
+        registerV11(&migrator)
+        registerV12(&migrator)
+        registerV13(&migrator)
         return migrator
     }
 
@@ -447,6 +450,88 @@ enum Schema {
                     WHERE serverId IN (\(jellyfinServers))
                       AND artworkKey IS NOT NULL AND artworkKey NOT LIKE '%|%'
                     """)
+            }
+        }
+    }
+
+    /// v11 — open metadata enrichment (ADR-0007, phase B1). The `mbid` /
+    /// `artist_mbid` columns already exist (v6); this adds a negative cache so a
+    /// name-search miss isn't re-attempted every sync, plus the indexes the radio
+    /// similarity joins (B3) will need.
+    ///
+    /// `mbid_lookup_status` (`embedded`|`found`|`notfound`) records provenance and
+    /// distinguishes "never looked up" (NULL) from "looked up, no match"
+    /// (`notfound`). `mbid_lookup_at` gates re-tries by TTL. Deliberately NOT
+    /// stored in `feature_source`, which is reserved for the sonic-embedding
+    /// source (`ondevice|audiomuse|plex`).
+    private static func registerV11(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v11.mbidResolution") { db in
+            try db.alter(table: "track_features") { t in
+                t.add(column: "mbid_lookup_status", .text)
+                t.add(column: "mbid_lookup_at", .double)
+            }
+            try db.create(index: "idx_track_features_mbid", on: "track_features",
+                          columns: ["mbid"])
+            try db.create(index: "idx_track_features_artist_mbid", on: "track_features",
+                          columns: ["artist_mbid"])
+        }
+    }
+
+    /// v12 — ListenBrainz similarity (ADR-0007, phase B2).
+    ///
+    /// ListenBrainz keys similarity on CANONICAL recording MBIDs, but the MBIDs
+    /// resolved in B1 are per-release/tag. So we canonicalize (via
+    /// `/recording-mbid-lookup`) and store `canonical_mbid`; both the similarity
+    /// fetch and the reverse-map join key on it. `canonical_lookup_at` /
+    /// `similar_lookup_at` are TTL negative caches (mirroring v11's mbid one).
+    ///
+    /// `similar_recording` holds the crowd-similarity graph keyed on canonical
+    /// MBIDs; `algorithm` is part of the identity so switching algorithms doesn't
+    /// silently mix similarity spaces. `similar_algorithm` records which algorithm
+    /// `similar_lookup_at` reflects, so a changed algorithm counts as due. The
+    /// reverse-map read joins `similar_mbid = track_features.canonical_mbid`
+    /// (index `idx_similar_recording_similar`), then seeks `track` via the unique
+    /// `idx_track_identity`.
+    private static func registerV12(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v12.listenBrainzSimilarity") { db in
+            try db.alter(table: "track_features") { t in
+                t.add(column: "canonical_mbid", .text)
+                t.add(column: "canonical_lookup_at", .double)
+                t.add(column: "similar_lookup_at", .double)
+                t.add(column: "similar_algorithm", .text)
+            }
+            try db.create(index: "idx_track_features_canonical_mbid", on: "track_features",
+                          columns: ["canonical_mbid"])
+
+            try db.create(table: "similar_recording") { t in
+                t.column("source_mbid", .text).notNull()
+                t.column("similar_mbid", .text).notNull()
+                t.column("score", .double).notNull()
+                t.column("algorithm", .text).notNull()
+                t.primaryKey(["source_mbid", "similar_mbid", "algorithm"])
+            }
+            // Reverse-map join path: similar_mbid (+ algorithm) -> owned tracks.
+            try db.create(index: "idx_similar_recording_similar", on: "similar_recording",
+                          columns: ["similar_mbid", "algorithm"])
+        }
+    }
+
+    /// v13 — MusicBrainz artist-genre tags (ADR-0007, phase B4 data capture).
+    ///
+    /// Stored in a DISTINCT `mb_tags` column, NOT the reserved `tags` (which is
+    /// owned by the future on-device sonic/mood analysis and is wholesale-written
+    /// by `RecommendationStore.upsertTrackFeatures`). `mb_tags_lookup_at` is the
+    /// per-artist TTL negative cache. Keyed by `artist_mbid` (dense; recording
+    /// genres are ~empty), applied to all of an artist's tracks.
+    ///
+    /// NOTE: this column is captured now but NOT yet wired into the genre engine
+    /// (that's B4.5 — it requires symmetric + case-folded merging on both the
+    /// candidate AND seed/taste sides to avoid regressing the tuned radio floor).
+    private static func registerV13(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v13.musicBrainzTags") { db in
+            try db.alter(table: "track_features") { t in
+                t.add(column: "mb_tags", .text)             // JSON array, lowercased
+                t.add(column: "mb_tags_lookup_at", .double) // TTL negative cache
             }
         }
     }

@@ -9,11 +9,16 @@ public struct RadioSeed: Sendable, Equatable {
     public var title: String
     public var genres: [String]
     public var artistIds: [String]
+    /// Durable `track_ref` of the seed track, when seeded from a track (nil for an
+    /// artist-seeded station). Lets the caller resolve the seed's ListenBrainz
+    /// similarity for the precedence tier.
+    public var seedTrackRef: String?
 
-    public init(title: String, genres: [String], artistIds: [String]) {
+    public init(title: String, genres: [String], artistIds: [String], seedTrackRef: String? = nil) {
         self.title = title
         self.genres = genres
         self.artistIds = artistIds
+        self.seedTrackRef = seedTrackRef
     }
 }
 
@@ -33,10 +38,17 @@ public actor RecommendationService {
     private let coldStart: ColdStartRecommender
     private let blender: Blender
     private let now: @Sendable () -> Date
+    /// Whether open-metadata enrichment is on (B4.5). When true the genre engine
+    /// reads the CANONICAL, normalized union of `track.genres` + `mb_tags` on every
+    /// side (corpus/candidates/seed/taste); when false it reads today's raw,
+    /// case-sensitive `track.genres` — byte-identical to pre-B4.5 behavior. Honors
+    /// the same Settings switch the enrichment pipeline uses (off = fully offline).
+    private let isEnrichmentEnabled: @Sendable () -> Bool
 
     /// Cached per-server TF-IDF genre space (a full-catalog aggregate), refreshed
-    /// on a TTL so repeated radio/shuffle scoring doesn't re-scan every call.
-    private var genreSpaceCache: [ServerID: (space: GenreSimilarity, computedAt: Date)] = [:]
+    /// on a TTL so repeated radio/shuffle scoring doesn't re-scan every call. Keyed
+    /// also by the enrichment flag so toggling it never serves a stale corpus.
+    private var genreSpaceCache: [ServerID: (space: GenreSimilarity, computedAt: Date, enrich: Bool)] = [:]
     private static let genreSpaceTTL: TimeInterval = 3600
 
     /// Stable id of the weekly rediscovery set.
@@ -53,27 +65,31 @@ public actor RecommendationService {
                 content: ContentRecommender = ContentRecommender(),
                 coldStart: ColdStartRecommender = ColdStartRecommender(),
                 blender: Blender = Blender(),
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() },
+                isEnrichmentEnabled: @escaping @Sendable () -> Bool = { true }) {
         self.store = store
         self.content = content
         self.coldStart = coldStart
         self.blender = blender
         self.now = now
+        self.isEnrichmentEnabled = isEnrichmentEnabled
     }
 
     /// The TF-IDF genre space for a server (cached with a TTL), or `nil` when no
     /// genre corpus is available. Feeds cosine similarity for radio / Smart
     /// Shuffle / Weekly.
     private func genreSpace(for serverId: ServerID) async -> GenreSimilarity? {
-        if let cached = genreSpaceCache[serverId],
+        let enrich = isEnrichmentEnabled()
+        if let cached = genreSpaceCache[serverId], cached.enrich == enrich,
            now().timeIntervalSince(cached.computedAt) < Self.genreSpaceTTL {
             return cached.space
         }
-        guard let freq = try? await store.genreFrequencies(serverId: serverId), freq.total > 0 else {
+        guard let freq = try? await store.genreFrequencies(serverId: serverId, enrich: enrich),
+              freq.total > 0 else {
             return nil
         }
         let space = GenreSimilarity(totalTracks: freq.total, counts: freq.counts)
-        genreSpaceCache[serverId] = (space, now())
+        genreSpaceCache[serverId] = (space, now(), enrich)
         return space
     }
 
@@ -85,6 +101,19 @@ public actor RecommendationService {
         return content.withGenreSpace(space)
     }
 
+    /// The canonical genres of an artist (across its tracks), for seeding an
+    /// artist radio station. When enrichment is on these are the normalized union
+    /// of `track.genres` and the artist's `mb_tags` — the SAME normalization the
+    /// candidate pool uses, so an artist-seeded station is symmetric with its
+    /// candidates (an un-enriched seed vs enriched candidates would recreate the
+    /// asymmetric floor drop). Empty when the artist has no local tracks.
+    public func artistSeedGenres(artistId: String, serverId: ServerID) async -> [String] {
+        let enrich = isEnrichmentEnabled()
+        guard let seed = try? await store.seedArtist(remoteId: artistId, serverId: serverId, enrich: enrich)
+        else { return [] }
+        return seed.genres
+    }
+
     /// A "Smart Shuffle" affinity map for a specific set of tracks: track id →
     /// normalized score in `(0, 1]` (1 == best match to the listener's taste).
     /// Tracks with no affinity are absent. Returns `[:]` when history is too thin
@@ -92,19 +121,30 @@ public actor RecommendationService {
     /// Uses TF-IDF cosine genre similarity + artist affinity (see ``ContentRecommender``).
     public func tasteScores(serverId: ServerID, tracks: [Track]) async throws -> [String: Double] {
         let nowDate = now()
+        let enrich = isEnrichmentEnabled()
         let lookback = nowDate.addingTimeInterval(-90 * 24 * 3600).timeIntervalSince1970
-        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback)
+        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback, enrich: enrich)
         let taste = TasteProfile.build(from: signals, now: nowDate)
         guard !taste.isThin else { return [:] }
 
         // Score the caller's own tracks against the taste profile via the shared
         // content scorer (cosine genre similarity + artist affinity), mapping
-        // domain Tracks into the TrackCandidate shape the scorer consumes.
+        // domain Tracks into the TrackCandidate shape the scorer consumes. When
+        // enriched, merge each track's mb_tags (keyed by the COMPOSED track_ref,
+        // not the bare id) so Smart Shuffle candidates are symmetric with the
+        // (identically normalized) taste side.
         let scorer = await contentScorer(for: serverId)
-        let candidates = tracks.map {
-            TrackCandidate(trackRef: $0.id, remoteId: $0.id, title: $0.title,
-                           artistName: $0.artistName, artistRemoteId: $0.artistID,
-                           albumRemoteId: $0.albumID, genres: $0.genres, addedAt: nil)
+        var mbByRef: [String: [String]] = [:]
+        if enrich {
+            let refs = tracks.map { PlayEventStore.trackRef(serverId: serverId, remoteId: $0.id) }
+            mbByRef = (try? await store.mbTags(forTrackRefs: refs)) ?? [:]
+        }
+        let candidates = tracks.map { track -> TrackCandidate in
+            let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
+            let genres = enrich ? GenreNormalizer.merge(track.genres, mbByRef[ref] ?? []) : track.genres
+            return TrackCandidate(trackRef: ref, remoteId: track.id, title: track.title,
+                                  artistName: track.artistName, artistRemoteId: track.artistID,
+                                  albumRemoteId: track.albumID, genres: genres, addedAt: nil)
         }
         let scored = scorer.score(candidates: candidates, taste: taste)
         let maxScore = scored.map(\.score).max() ?? 0
@@ -131,15 +171,65 @@ public actor RecommendationService {
         }
     }
 
-    /// Generate the next batch of station tracks for a radio seed: pulls a pool
-    /// of same-genre / same-artist library tracks, scores them by similarity to
-    /// the seed, blends (variety caps + exploration jitter) and returns ordered
-    /// track remote ids. `excluding` (track ids) drops the seed and anything
-    /// already queued so the station keeps moving. Fresh each call (no seed →
-    /// varied batches).
+    /// Generate the next batch of station tracks. When ListenBrainz similarity for
+    /// the seed is available (`similar`, resolved by the caller from
+    /// `EnrichmentStore.similarOwnedTracks`), those tracks LEAD the batch — the
+    /// crowd-similarity signal that separates tracks a coarse genre tag lumps
+    /// together — with the genre engine filling any remaining slots. With no
+    /// similarity the result is exactly the genre engine's (never worse than
+    /// today). `excluding` drops the seed and anything already queued.
     public func radioBatch(seed: RadioSeed, serverId: ServerID,
-                           limit: Int = 20, excluding: Set<String> = []) async throws -> [String] {
-        guard !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
+                           limit: Int = 20, excluding: Set<String> = [],
+                           similar: [ScoredOwnedTrack] = []) async throws -> [String] {
+        // Tier 1 — ListenBrainz similarity (explicit precedence). Trusted OVER the
+        // genre floor on purpose (that's the point: separate within a genre bucket);
+        // guarded only by dropping non-positive scores + ranking by score.
+        var picked: [String] = []
+        var pickedSet = excluding
+        let usableSimilar = similar.filter { $0.score > 0 && !excluding.contains($0.candidate.remoteId) }
+        if !usableSimilar.isEmpty {
+            let scored = usableSimilar.map {
+                ScoredCandidate(candidate: $0.candidate, score: $0.score, source: "collaborative")
+            }
+            // Rank tier 1 by the ListenBrainz score (near-zero jitter so the crowd
+            // signal — not exploration noise — orders the lead; batch-to-batch
+            // variety comes from the growing `excluding` set). Tighter per-artist
+            // cap: ListenBrainz "similar" skews same-artist, and the seed's own
+            // artist isn't discovery.
+            let config = Blender.Config(limit: limit, explorationJitter: 0.02,
+                                        maxPerArtist: 4, maxPerAlbum: max(2, limit / 4))
+            var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
+            let ranked = blender.blend(sources: [scored], config: config, using: &rng)
+            picked = ranked.map { $0.candidate.remoteId }
+            pickedSet.formUnion(picked)
+            if picked.count >= limit { return picked }
+        }
+        // Tier 3 — genre engine fills the remaining slots (unchanged behavior).
+        let genre = try await genreRadioBatch(
+            seed: seed, serverId: serverId, limit: limit - picked.count, excluding: pickedSet)
+        return picked + genre
+    }
+
+    /// The genre-similarity station batch (the pre-B3 `radioBatch` body, verbatim):
+    /// pulls a same-genre / same-artist pool, applies the IDF-weighted-Jaccard floor,
+    /// scores by similarity to the seed, and blends with variety caps + jitter.
+    private func genreRadioBatch(seed: RadioSeed, serverId: ServerID,
+                                 limit: Int, excluding: Set<String>) async throws -> [String] {
+        guard limit > 0, !seed.genres.isEmpty || !seed.artistIds.isEmpty else { return [] }
+        let enrich = isEnrichmentEnabled()
+        // Effective seed genres: when enriched, normalize the caller's genres and
+        // union the SEED TRACK's mb_tags (so the seed is enriched symmetrically with
+        // the candidates — an un-enriched seed vs enriched candidates would recreate
+        // the asymmetric floor drop). Falls back to the (normalized) caller genres if
+        // the seed row/tags are absent, so a missing row never empties the station.
+        var seedGenres = seed.genres
+        if enrich {
+            var merged = seed.genres
+            if let ref = seed.seedTrackRef {
+                merged += (try? await store.mbTags(forTrackRef: ref)) ?? []
+            }
+            seedGenres = GenreNormalizer.keys(merged)
+        }
         // Include the whole matching catalog (notPlayedSince = now excludes ~none);
         // radio may revisit tracks. Pull a generous pool to blend from, excluding
         // already-surfaced tracks in SQL so the random sample is drawn from unseen
@@ -152,8 +242,9 @@ public actor RecommendationService {
         var fresh: [TrackCandidate] = []
         for _ in 0..<3 {
             let pool = try await store.candidateTracks(
-                serverId: serverId, genres: seed.genres, artistIds: seed.artistIds,
-                notPlayedSince: now().timeIntervalSince1970, excludingRemoteIds: excluding, limit: 500)
+                serverId: serverId, genres: seedGenres, artistIds: seed.artistIds,
+                notPlayedSince: now().timeIntervalSince1970, excludingRemoteIds: excluding,
+                limit: 500, enrich: enrich)
             fresh = pool.filter { !excluding.contains($0.remoteId) }
             if !fresh.isEmpty { break }
         }
@@ -169,10 +260,10 @@ public actor RecommendationService {
         let space = await genreSpace(for: serverId)
         let seedArtists = Set(seed.artistIds)
         let relevant: [TrackCandidate]
-        if space != nil, !seed.genres.isEmpty {
+        if space != nil, !seedGenres.isEmpty {
             relevant = fresh.filter { candidate in
                 if let artist = candidate.artistRemoteId, seedArtists.contains(artist) { return true }
-                return space!.weightedJaccard(seed.genres, candidate.genres) >= Self.minRadioSimilarity
+                return space!.weightedJaccard(seedGenres, candidate.genres) >= Self.minRadioSimilarity
             }
         } else {
             relevant = fresh
@@ -186,7 +277,7 @@ public actor RecommendationService {
         // Score by similarity to the SEED (treat the seed's genres/artists as a
         // synthetic taste), so the station stays close to what it was seeded on.
         let seedTaste = TasteProfile(
-            genreAffinity: Dictionary(seed.genres.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
+            genreAffinity: Dictionary(seedGenres.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             artistAffinity: Dictionary(seed.artistIds.map { ($0, 1.0) }, uniquingKeysWith: { a, _ in a }),
             positiveSignal: TasteProfile.coldStartThreshold + 1)
         let scorer = content.withGenreSpace(space)
@@ -197,11 +288,14 @@ public actor RecommendationService {
             ? [candidates.map { ScoredCandidate(candidate: $0, score: 1, source: "content") }]
             : [scored]
 
-        // Relax the variety caps for radio: an artist-only seed would otherwise
-        // be throttled to `maxPerArtist` (3) tracks per batch and stall.
+        // Relax the variety caps for radio: an artist-only seed (no genre signal,
+        // even after enrichment) would otherwise be throttled to `maxPerArtist`
+        // per batch and stall. Use the EFFECTIVE seed genres so a track seed whose
+        // local genres are empty but whose artist has mb_tags still gets the
+        // multi-artist genre cap (not the single-artist relaxation).
         let config = Blender.Config(
             limit: limit,
-            maxPerArtist: seed.genres.isEmpty ? limit : 6,
+            maxPerArtist: seedGenres.isEmpty ? limit : 6,
             maxPerAlbum: max(2, limit / 4))
         var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
         let ranked = blender.blend(sources: sources, config: config, using: &rng)
@@ -214,10 +308,11 @@ public actor RecommendationService {
     public func generateMozzWeekly(serverId: ServerID, limit: Int = 30,
                                    seed: UInt64? = nil) async throws -> RecommendationSetRecord {
         let nowDate = now()
+        let enrich = isEnrichmentEnabled()
         let lookback = nowDate.addingTimeInterval(-90 * 24 * 3600).timeIntervalSince1970
         let notPlayedSince = nowDate.addingTimeInterval(-30 * 24 * 3600).timeIntervalSince1970
 
-        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback)
+        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback, enrich: enrich)
         let taste = TasteProfile.build(from: signals, now: nowDate)
 
         let scored: [[ScoredCandidate]]
@@ -232,7 +327,7 @@ public actor RecommendationService {
         } else {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: taste.topGenres(12), artistIds: taste.topArtists(20),
-                notPlayedSince: notPlayedSince, limit: 2000)
+                notPlayedSince: notPlayedSince, limit: 2000, enrich: enrich)
             scored = [await contentScorer(for: serverId).score(candidates: pool, taste: taste)]
             title = "Mozz Weekly"
         }
@@ -297,13 +392,14 @@ public actor RecommendationService {
     /// history) generates none — "Mozz Weekly" already covers day one.
     public func generateHomeMixes(serverId: ServerID, seed: UInt64? = nil) async throws {
         let nowDate = now()
+        let enrich = isEnrichmentEnabled()
         let nowSec = nowDate.timeIntervalSince1970
         let lookback = nowSec - 90 * 24 * 3600
         // notPlayedSince in the future ⇒ exclude nothing ⇒ include familiar
         // (recently-played) tracks, which is what a Daily Mix / Supermix wants.
         let includeFamiliar = nowSec + 24 * 3600
 
-        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback)
+        let signals = try await store.playedTrackSignals(serverId: serverId, since: lookback, enrich: enrich)
         let taste = TasteProfile.build(from: signals, now: nowDate)
         var rng = SeededGenerator(seed: seed ?? UInt64(bitPattern: Int64(nowSec)))
 
@@ -314,7 +410,7 @@ public actor RecommendationService {
         // Supermix — broad, familiar-leaning blend across all of the listener's taste.
         let superPool = try await store.candidateTracks(
             serverId: serverId, genres: taste.topGenres(20), artistIds: taste.topArtists(30),
-            notPlayedSince: includeFamiliar, limit: 3000)
+            notPlayedSince: includeFamiliar, limit: 3000, enrich: enrich)
         if let ranked = ranked(superPool, taste: taste, scorer: scorer,
                                config: .init(limit: 60, explorationJitter: 0.12, maxPerArtist: 5, maxPerAlbum: 3),
                                rng: &rng) {
@@ -325,7 +421,7 @@ public actor RecommendationService {
         for (i, genre) in taste.topGenres(3).enumerated() {
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: [genre], artistIds: [],
-                notPlayedSince: includeFamiliar, limit: 1000)
+                notPlayedSince: includeFamiliar, limit: 1000, enrich: enrich)
             if let ranked = ranked(pool, taste: taste, scorer: scorer,
                                    config: .init(limit: 40, explorationJitter: 0.12, maxPerArtist: 4, maxPerAlbum: 2),
                                    rng: &rng) {
@@ -335,10 +431,11 @@ public actor RecommendationService {
 
         // Artist Mixes — a top artist plus same-genre neighbours.
         for (i, artistId) in taste.topArtists(2).enumerated() {
-            guard let seedArtist = try await store.seedArtist(remoteId: artistId, serverId: serverId) else { continue }
+            guard let seedArtist = try await store.seedArtist(remoteId: artistId, serverId: serverId, enrich: enrich)
+            else { continue }
             let pool = try await store.candidateTracks(
                 serverId: serverId, genres: Array(seedArtist.genres.prefix(4)), artistIds: [artistId],
-                notPlayedSince: includeFamiliar, limit: 1000)
+                notPlayedSince: includeFamiliar, limit: 1000, enrich: enrich)
             if let ranked = ranked(pool, taste: taste, scorer: scorer,
                                    config: .init(limit: 40, explorationJitter: 0.1, maxPerArtist: 6, maxPerAlbum: 3),
                                    rng: &rng) {

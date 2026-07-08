@@ -4,6 +4,7 @@ import SwiftUI
 /// into the environment, then routes between onboarding and the main UI.
 public struct MozzRootScene: Scene {
     @StateObject private var env: AppEnvironment
+    @Environment(\.scenePhase) private var scenePhase
 
     public init() {
         // Fall back to an in-memory environment if the on-disk one can't open,
@@ -21,6 +22,12 @@ public struct MozzRootScene: Scene {
                 .task {
                     await env.restoreSession()
                     await env.runLaunchAutomationIfNeeded()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // Returning to the foreground resumes the enrichment crawl so an
+                    // already-synced library keeps filling in without a manual sync.
+                    // No-op when disabled or already running.
+                    if phase == .active { env.resumeEnrichmentIfNeeded() }
                 }
         }
     }
@@ -58,10 +65,16 @@ struct RootView: View {
 
 struct SplashView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "music.note.list").font(.system(size: 44))
+        VStack(spacing: 24) {
+            Image("MozzLogo")
+                .interpolation(.none) // preserve crisp pixel-art edges
+                .resizable()
+                .scaledToFit()
+                .frame(width: 160, height: 160)
             ProgressView()
         }
         .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color("SplashBackground").ignoresSafeArea())
     }
 }

@@ -6,6 +6,7 @@ import MozzDownloads
 import MozzPlayback
 import MozzNetworking
 import MozzRecommend
+import MozzEnrichment
 import MozzSync
 import MozzPlex
 import MozzJellyfin
@@ -74,6 +75,18 @@ public final class AppEnvironment: ObservableObject {
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
     public let recommendations: RecommendationService
+    /// Open metadata enrichment (MusicBrainz IDs → later ListenBrainz similarity).
+    /// On by default with a Settings off-switch; resolves MBIDs off-main and
+    /// rate-limited, never blocking sync or the UI (ADR-0007).
+    public let enrichment: EnrichmentService
+    /// DB-only enrichment reads for radio precedence (network-free), and the
+    /// similarity algorithm the writes were stamped with (must match).
+    private let enrichmentStore: EnrichmentStore
+    private let enrichmentAlgorithm: String
+    /// In-flight seed-similarity prep for the active station (cancel-and-replace).
+    private var seedPrepTask: Task<Void, Never>?
+    /// UserDefaults key for the enrichment on/off switch (default on when unset).
+    public static let enrichmentEnabledKey = "mozz.enrichmentEnabled"
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -174,7 +187,30 @@ public final class AppEnvironment: ObservableObject {
         self.downloads = DownloadManager(database: database, fileStore: fileStore)
         self.playback = PlaybackEngine(resolver: resolver)
         self.playEvents = PlayEventStore(database)
-        self.recommendations = RecommendationService(store: RecommendationStore(database))
+        self.recommendations = RecommendationService(
+            store: RecommendationStore(database),
+            isEnrichmentEnabled: {
+                UserDefaults.standard.object(forKey: AppEnvironment.enrichmentEnabledKey) as? Bool ?? true
+            })
+        let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
+        let enrichmentConfig = EnrichmentConfig(
+            userAgent: "Mozz/\(appVersion) ( https://github.com/thatcube/Mozz )")
+        // One shared limiter/client per service so every call across the app
+        // honors one budget. MusicBrainz and ListenBrainz get SEPARATE limiters
+        // (different hosts/policies).
+        let mbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.minRequestInterval)
+        let lbLimiter = AsyncRateLimiter(minInterval: enrichmentConfig.listenBrainzMinInterval)
+        let enrichmentStore = EnrichmentStore(database)
+        self.enrichmentStore = enrichmentStore
+        self.enrichmentAlgorithm = enrichmentConfig.listenBrainzAlgorithm
+        self.enrichment = EnrichmentService(
+            store: enrichmentStore,
+            musicBrainz: MusicBrainzClient.make(config: enrichmentConfig, limiter: mbLimiter),
+            listenBrainz: ListenBrainzClient.make(config: enrichmentConfig, limiter: lbLimiter),
+            config: enrichmentConfig,
+            isEnabled: {
+                UserDefaults.standard.object(forKey: AppEnvironment.enrichmentEnabledKey) as? Bool ?? true
+            })
         self.favorites = FavoritesStore(database)
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
         self.clientInfo = ClientInfo(
@@ -380,11 +416,46 @@ public final class AppEnvironment: ObservableObject {
         // rebuilds (Sync Now / library-selection changes also route through here),
         // which must not kill a live station's auto-extend. `active` still holds
         // the previous server at this point.
-        if connection.id != active?.connection.id { invalidateRadio() }
+        let switchingServer = connection.id != active?.connection.id
+        if switchingServer {
+            invalidateRadio()
+        }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
+        // Resume the enrichment crawl for the now-active server. `enrich` is
+        // server-aware: a same-server rebuild is a single-flight no-op (doesn't
+        // restart the drain), and a switch to a different server cancels the stale
+        // pass and starts fresh — so even a raced concurrent resume can't leave the
+        // previous library crawling. Toggle-gated inside the service.
+        resumeEnrichmentIfNeeded()
+    }
+
+    /// Kick the background enrichment crawl for the active server if one isn't
+    /// already running. Safe to call on every launch/foreground: it's single-flight
+    /// and a no-op when enrichment is disabled or a pass is already in flight. This
+    /// is what lets an already-synced library keep enriching on its own.
+    public func resumeEnrichmentIfNeeded() {
+        guard let serverId = active?.connection.id else { return }
+        let enrichment = self.enrichment
+        Task { await enrichment.enrich(serverId: serverId) }
+    }
+
+    /// React to the enrichment on/off switch. Turning it ON resumes the crawl;
+    /// turning it OFF promptly cancels any in-flight background pass and on-demand
+    /// seed prep so no further MetaBrainz request goes out — honoring the Settings
+    /// promise that off keeps the app fully offline. (Each network call is also
+    /// re-gated inside the service, so this just stops the remaining work early.)
+    public func setEnrichmentEnabled(_ enabled: Bool) {
+        if enabled {
+            resumeEnrichmentIfNeeded()
+        } else {
+            seedPrepTask?.cancel()
+            seedPrepTask = nil
+            let enrichment = self.enrichment
+            Task { await enrichment.cancel() }
+        }
     }
 
     public func signOut() {
@@ -396,6 +467,8 @@ public final class AppEnvironment: ObservableObject {
         canEnterEarly = false
         playback.stop()
         invalidateRadio()
+        let enrichment = self.enrichment
+        Task { await enrichment.cancel() }
         SessionPersistence.clear(credentials)
         active = nil
     }
@@ -685,10 +758,16 @@ public final class AppEnvironment: ObservableObject {
         // (The quick-start slice skips these — the trailing full sync handles them.)
         if plan.prune {
             lastSyncReport = Self.formatSyncReport(summary)
+            // New catalog + listening → refresh the mixes off-main. Non-fatal.
             await regenerateMozzWeekly()
             await regenerateHomeMixes()
+            // Flush any likes/ratings that were made offline.
             await flushFavoriteOutbox()
             startMediaBackfillIfNeeded()
+            // Fill in MBIDs, canonicalize, then fetch ListenBrainz similarity + MB
+            // genres off-main, rate-limited. Fire-and-forget and single-flight inside
+            // the actor, so it never delays this sync.
+            await enrichment.enrich(serverId: active.connection.id)
         }
         return summary
     }
@@ -751,6 +830,16 @@ public final class AppEnvironment: ObservableObject {
     }
 
     // MARK: Recommendations
+
+    /// Enrichment coverage for the active server, for the Settings status line:
+    /// `total` tracks, `matched` (identified in MusicBrainz — unlocks similarity),
+    /// and `genreTagged` (artist genres fetched — feeds the genre engine). Grows as
+    /// the background pass runs. Nil when signed out; a read hiccup returns nil so
+    /// the UI just hides the line.
+    public func enrichmentCoverage() async -> (total: Int, matched: Int, genreTagged: Int)? {
+        guard let serverId = active?.connection.id else { return nil }
+        return try? await enrichmentStore.enrichmentCoverage(serverId: serverId)
+    }
 
     /// Force-regenerate the "Mozz Weekly" set for the active server (e.g. after a
     /// sync). Off-main via the recommendation actor; failures are swallowed so a
@@ -1364,30 +1453,80 @@ public final class AppEnvironment: ObservableObject {
 
     /// Start an endless station seeded from a track (its genres + artist).
     public func startRadio(fromTrack track: Track) {
+        guard let serverId = active?.connection.id else { return }
+        let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
+        // Seed-first: resolve + canonicalize + fetch the seed's ListenBrainz
+        // similarity in the background so radio leads with it (this or the next
+        // batch, as resolution completes). Cancel-and-replace on re-seed.
+        seedPrepTask?.cancel()
+        let enrichment = self.enrichment
+        let durationMs = track.duration > 0 ? track.duration * 1000 : nil
+        seedPrepTask = Task {
+            _ = await enrichment.prepareSeedSimilarity(
+                trackRef: ref, artistName: track.artistName, title: track.title,
+                durationMs: durationMs, artistMBID: track.artistMbid)
+        }
         startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
-                                   artistIds: [track.artistID].compactMap { $0 }),
-                   initialExcluding: [track.id])
+                                   artistIds: [track.artistID].compactMap { $0 }, seedTrackRef: ref),
+                   initialExcluding: [track.id], leadTrack: track)
     }
 
-    /// Start an endless station seeded from an artist.
+    /// Start an endless station seeded from an artist. When enrichment is on, the
+    /// seed genres are resolved to the artist's CANONICAL (normalized + mb_tags-
+    /// merged) genres — symmetric with the candidate pool — which requires an async
+    /// DB read; the caller-provided `genres` are the fallback. To keep last-tap-wins
+    /// across that await, this reserves `radioIntent` synchronously (in tap order)
+    /// and bails if a newer start supersedes it before the seed resolves. With
+    /// enrichment off it forwards synchronously with the caller genres — byte-
+    /// identical to pre-B4.5.
     public func startRadio(artistRemoteId: String, name: String, genres: [String]) {
-        startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
+        let enrichmentOn = UserDefaults.standard.object(forKey: Self.enrichmentEnabledKey) as? Bool ?? true
+        guard enrichmentOn, let serverId = active?.connection.id else {
+            startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
+            return
+        }
+        // Reserve this tap's intent NOW so a later start still wins even though we
+        // must first resolve the enriched seed genres asynchronously.
+        radioIntent += 1
+        let intent = radioIntent
+        let recommendations = self.recommendations
+        Task { [weak self] in
+            let enriched = await recommendations.artistSeedGenres(artistId: artistRemoteId, serverId: serverId)
+            guard let self, intent == self.radioIntent else { return }  // superseded by a newer start
+            self.startRadio(seed: RadioSeed(title: name, genres: enriched.isEmpty ? genres : enriched,
+                                            artistIds: [artistRemoteId]))
+        }
     }
 
     /// Load an initial station batch and keep the queue topped up as it plays.
-    /// Bails if superseded by a newer start, if the user changed playback (via a
-    /// direct play/shuffle/stop) while the batch was fetching, or if the server
-    /// changed — so a slow fetch can never hijack newer playback.
-    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = []) {
+    /// When seeded from a specific track, `leadTrack` is that track — it plays
+    /// FIRST and the generated batch (which excludes it) follows, so "start radio
+    /// from this song" begins with the song itself. Bails if superseded by a newer
+    /// start, if the user changed playback (via a direct play/shuffle/stop) while
+    /// the batch was fetching, or if the server changed — so a slow fetch can never
+    /// hijack newer playback.
+    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = [], leadTrack: Track? = nil) {
         guard let serverId = active?.connection.id else { return }
         radioIntent += 1
         let intent = radioIntent
         let epoch = playback.transportEpoch
         Task { [weak self] in
             guard let self else { return }
+            let similar = await self.similarCandidates(for: seed, serverId: serverId,
+                                                       excluding: initialExcluding, limit: 30)
             let ids = (try? await self.recommendations.radioBatch(
-                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding)) ?? []
-            let tracks = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding,
+                similar: similar)) ?? []
+            let batch = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
+            // The seed track leads; the batch (which excluded it) follows — so the
+            // station starts with the song the user chose. Drop it from the batch
+            // defensively in case it slipped through.
+            let tracks: [Track]
+            if let leadTrack {
+                tracks = [leadTrack] + batch.filter { $0.id != leadTrack.id }
+            } else {
+                tracks = batch
+            }
             // Superseded, playback changed under us, server switched, or empty.
             guard intent == self.radioIntent,
                   epoch == self.playback.transportEpoch,
@@ -1409,12 +1548,34 @@ public final class AppEnvironment: ObservableObject {
     private func nextRadioBatch(station: Int) async -> [Track] {
         guard station == activeStationID, let seed = activeRadioSeed,
               let serverId = active?.connection.id else { return [] }
+        let similar = await similarCandidates(for: seed, serverId: serverId,
+                                              excluding: radioSeenIDs, limit: 20)
         let ids = (try? await recommendations.radioBatch(
-            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs)) ?? []
+            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs,
+            similar: similar)) ?? []
         let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
         guard station == activeStationID else { return [] }
         radioSeenIDs.formUnion(tracks.map(\.id))
         return tracks
+    }
+
+    /// The seed's ListenBrainz-similar owned tracks for the radio precedence tier,
+    /// or `[]` (artist-only seed, unresolved MBID, disabled, or no similarity data)
+    /// — in which case radio falls back to the genre engine. Network-free DB read.
+    private func similarCandidates(for seed: RadioSeed, serverId: ServerID,
+                                   excluding: Set<String>, limit: Int) async -> [ScoredOwnedTrack] {
+        // Respect the on/off toggle for reads too (disabled → genre-only radio).
+        let enabled = UserDefaults.standard.object(forKey: Self.enrichmentEnabledKey) as? Bool ?? true
+        guard enabled, let ref = seed.seedTrackRef,
+              let canonical = try? await enrichmentStore.seedMbid(forTrackRef: ref)?.canonical
+        else { return [] }
+        // Overfetch: the tier-1 per-artist cap discards artist-heavy excess, so a
+        // pool of just `limit` can underfill and hand slots to genre. Pull a wider
+        // pool and let the blender cap it down.
+        let pool = min(max(limit * 5, 50), 250)
+        return (try? await enrichmentStore.similarOwnedTracks(
+            seedCanonicalMbids: [canonical], algorithm: enrichmentAlgorithm,
+            serverId: serverId, excludingRemoteIds: excluding, limit: pool)) ?? []
     }
 
     /// Forget any active radio session (e.g. on sign-out). The engine's own
@@ -1424,6 +1585,8 @@ public final class AppEnvironment: ObservableObject {
         activeStationID += 1
         activeRadioSeed = nil
         radioSeenIDs = []
+        seedPrepTask?.cancel()
+        seedPrepTask = nil
     }
 
     /// `play_event` log, tagged with the active server (to form the durable

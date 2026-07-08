@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import MozzCore
 #if canImport(Darwin)
 import Darwin
@@ -117,14 +118,59 @@ public struct PerformanceHarness: Sendable {
     public func measureCandidateGenerationMs(
         serverId: ServerID,
         genres: [String] = ["Rock", "Jazz", "Electronic"],
-        limit: Int = 2000
+        limit: Int = 2000,
+        enrich: Bool = false
     ) async throws -> Double {
         let store = RecommendationStore(database)
+        let queryGenres = enrich ? GenreNormalizer.keys(genres) : genres
         let notPlayedSince = Date().addingTimeInterval(-30 * 24 * 3600).timeIntervalSince1970
         let start = Date()
-        _ = try await store.candidateTracks(serverId: serverId, genres: genres, artistIds: [],
-                                            notPlayedSince: notPlayedSince, limit: limit)
+        _ = try await store.candidateTracks(serverId: serverId, genres: queryGenres, artistIds: [],
+                                            notPlayedSince: notPlayedSince, limit: limit, enrich: enrich)
         return Date().timeIntervalSince(start) * 1000
+    }
+
+    /// Time the genre-corpus aggregate (`RecommendationStore.genreFrequencies`) —
+    /// the TF-IDF IDF space rebuilt on a TTL. When `enrich`, this is the B4.5
+    /// Swift-folded UNION of `track.genres` + `mb_tags` (the heavier path); measure
+    /// it at scale with `mb_tags` populated so the fold cost has a number.
+    public func measureGenreFrequenciesMs(serverId: ServerID, enrich: Bool = false) async throws -> Double {
+        let store = RecommendationStore(database)
+        let start = Date()
+        _ = try await store.genreFrequencies(serverId: serverId, enrich: enrich)
+        return Date().timeIntervalSince(start) * 1000
+    }
+
+    /// Populate `mb_tags` for a `fraction` of a server's tracks (multi-tag) so the
+    /// enriched corpus/candidate timings reflect realistic `json_each` row
+    /// expansion. Writes `track_features` rows directly (synthetic tracks carry no
+    /// embedded MBIDs, so they have none otherwise). Returns the row count written.
+    @discardableResult
+    public func populateSyntheticMbTags(
+        serverId: ServerID, fraction: Double = 0.9, tagsPerTrack: Int = 4
+    ) async throws -> Int {
+        let pool = ["electronic", "downtempo", "trip hop", "idm", "ambient", "synth pop",
+                    "alternative rock", "indie rock", "shoegaze", "dream pop"]
+        return try await database.write { db in
+            let refs = try String.fetchAll(db, sql: """
+                SELECT track.serverId || ':' || track.remoteId FROM track WHERE track.serverId = ?
+                """, arguments: [serverId])
+            let cutoff = Int(Double(refs.count) * max(0, min(1, fraction)))
+            let now = Date().timeIntervalSince1970
+            var written = 0
+            for (i, ref) in refs.prefix(cutoff).enumerated() {
+                let tags = (0..<tagsPerTrack).map { pool[(i + $0) % pool.count] }
+                let json = String(data: try JSONEncoder().encode(tags), encoding: .utf8) ?? "[]"
+                try db.execute(sql: """
+                    INSERT INTO track_features (track_ref, mb_tags, mb_tags_lookup_at, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(track_ref) DO UPDATE SET mb_tags = excluded.mb_tags,
+                        mb_tags_lookup_at = excluded.mb_tags_lookup_at, updated_at = excluded.updated_at
+                    """, arguments: [ref, json, now, now])
+                written += 1
+            }
+            return written
+        }
     }
 
     private func percentile(_ sorted: [Double], _ p: Double) -> Double {

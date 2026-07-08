@@ -18,6 +18,9 @@
         "duration": 161000,
         "thumb": "/library/metadata/2001/thumb/1600000001",
         "addedAt": 1600000000,
+        "Guid": [
+          { "id": "mbid://b1a9c0e9-d987-4042-ae91-78d6a3267d69" }
+        ],
         "Media": [
           {
             "container": "flac",

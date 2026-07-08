@@ -151,6 +151,20 @@ final class PerformanceHarnessTests: XCTestCase {
         print("[PERF 100k] candidate generation: \(String(format: "%.1f", candGenMs)) ms")
         XCTAssertLessThan(candGenMs, 1_500, "candidate generation regressed badly at 100k: \(candGenMs) ms")
 
+        // B4.5 enriched paths (normalized track.genres ∪ mb_tags). Populate mb_tags
+        // for most tracks so the Swift-folded UNION corpus + widened candidate scan
+        // are measured with realistic json_each expansion, not an empty mb_tags
+        // column. Off the hot path (hourly-TTL corpus, precomputed sets), so the
+        // budgets are generous — this just gives the enriched cost a number.
+        let written = try await harness.populateSyntheticMbTags(serverId: serverId, fraction: 0.9, tagsPerTrack: 4)
+        print("[PERF 100k] populated mb_tags on \(written) tracks")
+        let corpusMs = try await harness.measureGenreFrequenciesMs(serverId: serverId, enrich: true)
+        print("[PERF 100k] enriched genre corpus: \(String(format: "%.1f", corpusMs)) ms")
+        XCTAssertLessThan(corpusMs, 4_000, "enriched corpus fold regressed at 100k: \(corpusMs) ms")
+        let candEnrichMs = try await harness.measureCandidateGenerationMs(serverId: serverId, enrich: true)
+        print("[PERF 100k] enriched candidate generation: \(String(format: "%.1f", candEnrichMs)) ms")
+        XCTAssertLessThan(candEnrichMs, 2_500, "enriched candidate generation regressed at 100k: \(candEnrichMs) ms")
+
         // Regression guard for the as-you-type hang: every synthetic track title
         // contains "the", so a short prefix matches almost the entire FTS index.
         // Ranking that with bm25 forces scoring the whole match set (~60ms at

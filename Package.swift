@@ -38,6 +38,7 @@ let package = Package(
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
         .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
+        .library(name: "MozzEnrichment", targets: ["MozzEnrichment"]),
         .library(name: "MozzApp", targets: ["MozzApp"]),
     ],
     dependencies: [
@@ -104,13 +105,23 @@ let package = Package(
         // docs RECOMMENDATIONS.md + ADR-0004/0005.
         .target(name: "MozzRecommend", dependencies: ["MozzCore", "MozzDatabase"]),
 
+        // MARK: Open metadata enrichment (network + orchestration; ADR-0007)
+        //
+        // Resolves MusicBrainz IDs (from embedded provider metadata, then
+        // rate-limited MusicBrainz search) and, later, ListenBrainz similarity.
+        // Persistence lives in MozzDatabase's `EnrichmentStore`, so this module
+        // holds only clients + the orchestration actor, and `MozzRecommend` stays
+        // network-free. Mirrors the one-client-per-service precedent of
+        // MozzPlex/MozzJellyfin.
+        .target(name: "MozzEnrichment", dependencies: ["MozzCore", "MozzNetworking", "MozzDatabase"]),
+
         // MARK: Composition root + SwiftUI feature layer (iOS)
         .target(
             name: "MozzApp",
             dependencies: [
                 "MozzCore", "MozzNetworking", "MozzDatabase",
                 "MozzPlex", "MozzJellyfin", "MozzSync",
-                "MozzPlayback", "MozzDownloads", "MozzRecommend",
+                "MozzPlayback", "MozzDownloads", "MozzRecommend", "MozzEnrichment",
             ],
             resources: [.process("Resources")]
         ),
@@ -133,6 +144,7 @@ let package = Package(
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
+        .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

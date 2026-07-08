@@ -340,7 +340,7 @@ public struct JellyfinBackend: MusicBackend {
         // server: per-item image work is cheap in-memory, not the bottleneck. So
         // we keep images on to preserve any track's own distinct artwork.)
         let response = try await client.send(
-            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain")),
+            Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain,ProviderIds")),
             as: JFItemsResponse.self
         )
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
@@ -377,7 +377,7 @@ public struct JellyfinBackend: MusicBackend {
                 URLQueryItem(name: "userId", value: userID),
                 URLQueryItem(name: "StartIndex", value: "\(offset)"),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Genres,MediaSources,NormalizationGain"),
+                URLQueryItem(name: "Fields", value: "Genres,MediaSources,NormalizationGain,ProviderIds"),
                 URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
             ]),
             as: JFItemsResponse.self
