@@ -56,24 +56,33 @@ struct SearchView: View {
         NavigationStack(path: $path) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    // Eager VStack (NOT LazyVStack): result/recent counts are
+                    // small (search is capped at 20 per type), so eager rendering
+                    // is cheap — and it removes the lazy cell realization that was
+                    // BLANKING the screen when content changed while scrolled into
+                    // a pinned-section stack.
+                    VStack(spacing: 0) {
                         // Zero-height anchor at the very top so a new search can
                         // jump the list back up (see onChange below).
                         Color.clear.frame(height: 0).id(topAnchor)
                         // Title + avatar are ordinary scroll content, so they
-                        // scroll away exactly 1:1 with the finger — a jump is
-                        // impossible, and they're never removed/collapsed by state,
-                        // so nothing ever shifts. (Per the spec: the title goes away
-                        // by SCROLLING; the ✕ appears on focus.)
+                        // scroll away exactly 1:1 with the finger — no jump, and
+                        // never removed by state, so nothing ever shifts. (Per the
+                        // spec: the title leaves by SCROLLING; the ✕ appears on
+                        // focus.)
                         TightHeader(title: "Search")
-                        // The field is a pinned section header: the system keeps it
-                        // fixed at the top and draws it ABOVE the content that
-                        // scrolls under it (reliable z-order + jitter-free pin).
-                        Section {
-                            resultsContent
-                        } header: {
-                            searchFieldBar
-                        }
+                        // Pin the field with a render-time visualEffect (holds it
+                        // at the top once it would scroll past) + zIndex + an
+                        // opaque background so the content scrolls UNDER it. In an
+                        // eager VStack, zIndex is honored reliably (it was not in
+                        // the LazyVStack, which caused the earlier clipping).
+                        searchFieldBar
+                            .zIndex(1)
+                            .visualEffect { content, proxy in
+                                let minY = proxy.frame(in: .scrollView).minY
+                                return content.offset(y: minY < 0 ? -minY : 0)
+                            }
+                        resultsContent
                     }
                 }
                 .overlay { emptyState }
@@ -85,11 +94,10 @@ struct SearchView: View {
                 .appRouteDestinations()
                 .onChange(of: query) { _, newValue in
                     scheduleSearch(newValue)
-                    // Jump to the top the moment the query changes, BEFORE results
-                    // update. This puts results right under the bar (what you want
-                    // while typing) and — critically — avoids swapping the content
-                    // while scrolled deep into a lazy pinned stack, which was
-                    // blanking the screen.
+                    // Jump to the top the moment the query changes so fresh results
+                    // render right under the search bar (what you want while
+                    // typing) instead of somewhere off-screen below your scroll
+                    // position.
                     if !trimmedQuery.isEmpty {
                         proxy.scrollTo(topAnchor, anchor: .top)
                     }
