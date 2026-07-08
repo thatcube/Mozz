@@ -41,6 +41,11 @@ struct SearchView: View {
     /// `easeInOut`, which felt slightly draggy at the ends.
     private let fieldTransition: Animation = .smooth(duration: 0.4)
 
+    /// Scroll anchor id for the very top, so beginning/refining a search can jump
+    /// the list back up (results under the bar; avoids swapping content while
+    /// scrolled deep, which blanked the lazy pinned stack).
+    private let topAnchor = "search-top-anchor"
+
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
     /// Actively searching — the field is focused or a query has been entered.
     /// Drives the Cancel button and the field's glass; the title is NOT affected
@@ -49,41 +54,48 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    // Title + avatar are ordinary scroll content, so they scroll
-                    // away exactly 1:1 with the finger — a jump is impossible, and
-                    // they're never removed/collapsed by state, so nothing ever
-                    // shifts. (Per the spec: the title goes away by SCROLLING; the
-                    // ✕ appears on focus. Focus does not collapse the title.)
-                    TightHeader(title: "Search")
-                    // The field is a pinned section header: the system keeps it
-                    // fixed at the top and draws it ABOVE the content that scrolls
-                    // under it (reliable z-order + jitter-free pin — a plain
-                    // LazyVStack child with zIndex does neither reliably).
-                    Section {
-                        resultsContent
-                            // Crossfade the recents↔results swap; it happens below
-                            // the pinned field, which stays dead still.
-                            .animation(fieldTransition, value: trimmedQuery.isEmpty)
-                    } header: {
-                        searchFieldBar
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        // Zero-height anchor at the very top so a new search can
+                        // jump the list back up (see onChange below).
+                        Color.clear.frame(height: 0).id(topAnchor)
+                        // Title + avatar are ordinary scroll content, so they
+                        // scroll away exactly 1:1 with the finger — a jump is
+                        // impossible, and they're never removed/collapsed by state,
+                        // so nothing ever shifts. (Per the spec: the title goes away
+                        // by SCROLLING; the ✕ appears on focus.)
+                        TightHeader(title: "Search")
+                        // The field is a pinned section header: the system keeps it
+                        // fixed at the top and draws it ABOVE the content that
+                        // scrolls under it (reliable z-order + jitter-free pin).
+                        Section {
+                            resultsContent
+                        } header: {
+                            searchFieldBar
+                        }
                     }
                 }
-                // Fade the Cancel ✕ in/out as active toggles. Kept on the content
-                // stack (not on the pinned header itself — animating a pinned
-                // section header directly can blank the scroll view).
-                .animation(fieldTransition, value: isActive)
+                .overlay { emptyState }
+                .safeAreaInset(edge: .bottom) { latencyLabel }
+                .tracksScrolled($scrolled)
+                .minimizesBottomBarOnScroll()
+                .scrollsToTopOnSignal()
+                .hideNavigationBar()
+                .appRouteDestinations()
+                .onChange(of: query) { _, newValue in
+                    scheduleSearch(newValue)
+                    // Jump to the top the moment the query changes, BEFORE results
+                    // update. This puts results right under the bar (what you want
+                    // while typing) and — critically — avoids swapping the content
+                    // while scrolled deep into a lazy pinned stack, which was
+                    // blanking the screen.
+                    if !trimmedQuery.isEmpty {
+                        proxy.scrollTo(topAnchor, anchor: .top)
+                    }
+                }
+                .task(id: recents.items) { await resolveRecents() }
             }
-            .overlay { emptyState }
-            .safeAreaInset(edge: .bottom) { latencyLabel }
-            .tracksScrolled($scrolled)
-            .minimizesBottomBarOnScroll()
-            .scrollsToTopOnSignal()
-            .hideNavigationBar()
-            .appRouteDestinations()
-            .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
-            .task(id: recents.items) { await resolveRecents() }
         }
     }
 
@@ -187,10 +199,10 @@ struct SearchView: View {
     @ViewBuilder private var resultsContent: some View {
         if trimmedQuery.isEmpty {
             if !resolvedRecents.isEmpty {
-                recentsList.transition(.opacity)
+                recentsList
             }
         } else {
-            resultSections.transition(.opacity)
+            resultSections
         }
     }
 
