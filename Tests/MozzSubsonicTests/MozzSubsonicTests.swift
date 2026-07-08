@@ -632,6 +632,54 @@ final class SubsonicURLNormalizationTests: XCTestCase {
     }
 }
 
+extension SubsonicAlbumWalkTests {
+    /// If the server omits `songCount` on an album, `expectedTotal` is a
+    /// lower bound, not truth. The enumerator MUST emit `totalCount = nil`
+    /// on every page so `LibrarySyncEngine.phaseCompleted` refuses to
+    /// authorise the destructive prune (encodes "if not provable, DO NOT
+    /// prune" from the spec).
+    func testMissingSongCountEmitsNilTotalSoPruneCannotFire() async throws {
+        final class NoCountTransport: HTTPTransport, @unchecked Sendable {
+            var listCalls = 0
+            let lock = NSLock()
+            func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                let url = request.url!
+                let fixture: String
+                if url.path.contains("getAlbumList2.view") {
+                    lock.lock(); listCalls += 1; let n = listCalls; lock.unlock()
+                    fixture = (n == 1) ? "sub_album_list_nocount" : "sub_album_list_empty"
+                } else if url.path.contains("getAlbum.view") {
+                    fixture = "sub_album_detail_3"
+                } else {
+                    throw URLError(.badURL)
+                }
+                let data = try Data(contentsOf: Bundle.module.url(
+                    forResource: fixture, withExtension: "json", subdirectory: "Fixtures"
+                )!)
+                return (data, HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!)
+            }
+        }
+        let backend = SubsonicBackend(
+            connection: makeConnection(),
+            credentials: stableMD5Creds(),
+            clientInfo: clientInfo,
+            transport: NoCountTransport()
+        )
+        var pages: [CatalogPage<Track>] = []
+        for try await page in backend.enumerateAllTracks(pageSize: 10) {
+            pages.append(page)
+        }
+        XCTAssertFalse(pages.isEmpty, "should still yield the tracks it found")
+        for page in pages {
+            XCTAssertNil(page.totalCount,
+                "unprovable total MUST NOT be reported — engine's prune guard requires a positive reported total")
+        }
+    }
+}
+
 // MARK: - Helpers
 
 func loadFixture(_ name: String) throws -> Data {

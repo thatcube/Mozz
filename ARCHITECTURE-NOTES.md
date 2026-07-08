@@ -156,14 +156,24 @@ winning on name collision. Also added `p`, `t`, `s`, `u` to
 
 None substantive. Two small refinements:
 
-1. **`expectedTotal` is summed per LISTING PAGE, not per-album.** The spec
-   says "sum of album songCount"; naively that could be summed per-album
-   right before fetching, but that leaves a window where `seen == total`
-   after the last song of that album is yielded. Summing the whole listing
-   page up front gives a strict upper bound throughout the walk. Test
-   `testPartialWalkThrowsAndNeverReportsCompleteTotal` locks this in.
+1. **`expectedTotal` is summed per LISTING PAGE, not per-album, AND becomes
+   `nil` if any album's `songCount` is missing.** Summing per-listing-page
+   makes it a strict upper bound on `seen` throughout that page's walk;
+   dropping to `nil` when any album lacks a count makes the total
+   unprovable rather than a floor, which propagates to
+   `LibrarySyncEngine.phaseCompleted` (see next item) so a "songCount
+   missing" server can never authorise prune.
 
-2. **`ServerCapabilities.serverProductType` is a `String?` (raw server
+2. **`LibrarySyncEngine.phaseCompleted` tightened to
+   `guard let total = enumeration.reportedTotal else { return false }`.**
+   The pre-existing fallback `!seen.isEmpty` treated a nil reported total
+   as "complete", which was safe in practice for Plex/Jellyfin (both
+   always populate `totalCount`) but would authorise an unsafe prune for
+   a Subsonic backend that legitimately can't derive a total. All existing
+   Plex/Jellyfin tests still pass; the tracks-prune resync test still
+   fires exactly as before.
+
+3. **`ServerCapabilities.serverProductType` is a `String?` (raw server
    type like `"navidrome"`)** rather than an enum, because new
    OpenSubsonic implementations appear regularly and enums here would
    require app updates for each one. Consumers can `contains` /

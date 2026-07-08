@@ -316,23 +316,28 @@ public struct LibrarySyncEngine: Sendable {
     }
 
     /// Whether a phase enumerated completely, which is the precondition for the
-    /// (all-or-nothing) prune. If the server reported a total record count, we
-    /// must have seen at least that many DISTINCT items; if it reported no total,
-    /// we treat a non-empty result as complete and an empty one as suspect (so an
-    /// unknown-total backend can never wipe a populated type on an empty read).
-    /// This is the guard that stops a flaky/truncated page from deleting rows
-    /// (and cascading into the user's downloads).
+    /// (all-or-nothing) prune. Completeness requires the server (or the
+    /// backend's enumerator) to have reported a total AND for `seen` to cover
+    /// at least that many DISTINCT items. If NO total was reported the phase
+    /// is treated as unverifiable — prune is skipped. This is stricter than
+    /// the previous "non-empty seen ⇒ complete" fallback, which was safe in
+    /// practice for Plex/Jellyfin (both always populate `totalCount`) but
+    /// would authorize an unsafe prune for a Subsonic backend that couldn't
+    /// derive an expected total.
     ///
-    /// DISTINCT is essential: pages can legitimately overlap (e.g. an item added
-    /// server-side mid-sync shifts the window), so counting raw rows could reach
-    /// `total` while real ids were never seen — which would authorize a prune
-    /// that deletes those missed-but-still-present tracks. Comparing unique ids
-    /// makes completeness a true coverage guarantee regardless of page ordering.
+    /// DISTINCT is essential: pages can legitimately overlap (e.g. an item
+    /// added server-side mid-sync shifts the window), so counting raw rows
+    /// could reach `total` while real ids were never seen — which would
+    /// authorize a prune that deletes those missed-but-still-present tracks.
+    /// Comparing unique ids makes completeness a true coverage guarantee
+    /// regardless of page ordering.
     private func phaseCompleted(_ enumeration: PagedEnumeration) -> Bool {
-        if let total = enumeration.reportedTotal {
-            return Set(enumeration.seen).count >= total
-        }
-        return !enumeration.seen.isEmpty
+        // A `nil` reported total means the backend couldn't derive one — the
+        // phase is unverifiable, so we refuse to authorise the destructive
+        // prune (encodes "if not provable, DO NOT prune"). A zero total is
+        // a legitimate "library is empty for this entity type" completion.
+        guard let total = enumeration.reportedTotal else { return false }
+        return Set(enumeration.seen).count >= total
     }
 
     // MARK: Paging

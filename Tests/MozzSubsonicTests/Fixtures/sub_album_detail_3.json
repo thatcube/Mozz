@@ -1,0 +1,16 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "album": {
+      "id": "al-3",
+      "name": "Mystery Album",
+      "artist": "Someone",
+      "coverArt": "al-3",
+      "song": [
+        { "id": "sg-300", "title": "Track A", "albumId": "al-3", "artist": "Someone", "coverArt": "al-3", "contentType": "audio/mpeg", "suffix": "mp3", "duration": 120 },
+        { "id": "sg-301", "title": "Track B", "albumId": "al-3", "artist": "Someone", "coverArt": "al-3", "contentType": "audio/mpeg", "suffix": "mp3", "duration": 180 }
+      ]
+    }
+  }
+}

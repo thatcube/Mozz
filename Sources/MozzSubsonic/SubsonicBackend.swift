@@ -218,6 +218,13 @@ public struct SubsonicBackend: MusicBackend {
                     let albumPageSize = 500
                     var albumOffset = 0
                     var expectedTotal = 0
+                    /// Set to `false` the moment any album on any listing page
+                    /// omits `songCount`. Once unprovable, we STOP emitting a
+                    /// total on yielded pages so LibrarySyncEngine's prune
+                    /// guard (which requires a positive reported total) will
+                    /// correctly refuse to prune — matching the spec's
+                    /// "if not provable, DO NOT prune" invariant.
+                    var totalIsProvable = true
                     var trackBuffer: [Track] = []
 
                     while !Task.isCancelled {
@@ -243,7 +250,16 @@ public struct SubsonicBackend: MusicBackend {
                         // during the last album can never leave the sync
                         // engine with `seen >= total` (which would authorise
                         // deleting unseen tracks + their downloaded files).
-                        for a in albums { expectedTotal += a.songCount ?? 0 }
+                        for a in albums {
+                            if let n = a.songCount {
+                                expectedTotal += n
+                            } else {
+                                // Missing songCount on ANY album means the
+                                // expected total is a floor, not a truth.
+                                totalIsProvable = false
+                            }
+                        }
+                        let reportableTotal: Int? = totalIsProvable ? expectedTotal : nil
 
                         for album in albums {
                             if Task.isCancelled { break }
@@ -257,14 +273,15 @@ public struct SubsonicBackend: MusicBackend {
                             while trackBuffer.count >= pageSize {
                                 let chunk = Array(trackBuffer.prefix(pageSize))
                                 trackBuffer.removeFirst(pageSize)
-                                continuation.yield(CatalogPage(items: chunk, totalCount: expectedTotal))
+                                continuation.yield(CatalogPage(items: chunk, totalCount: reportableTotal))
                             }
                         }
                         albumOffset += albums.count
                     }
 
                     if !trackBuffer.isEmpty {
-                        continuation.yield(CatalogPage(items: trackBuffer, totalCount: expectedTotal))
+                        let finalTotal: Int? = totalIsProvable ? expectedTotal : nil
+                        continuation.yield(CatalogPage(items: trackBuffer, totalCount: finalTotal))
                     }
                     continuation.finish()
                 } catch {
