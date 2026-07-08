@@ -15,14 +15,13 @@ struct SignInBar: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if isBusy {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(Color.mozzProminentLabel)
                 }
                 Text(title).fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .buttonStyle(.mozzProminent)
         .disabled(!isEnabled || isBusy)
         .accessibilityLabel(isBusy ? "Signing in" : title)
         .padding()

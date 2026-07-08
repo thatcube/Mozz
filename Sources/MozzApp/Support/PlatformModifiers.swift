@@ -262,6 +262,19 @@ extension Color {
     /// such as the star rating fill.
     static var mozzBrand: Color { Color(red: 245.0 / 255.0, green: 0.0, blue: 49.0 / 255.0) }
 
+    /// The inverse of `Color.primary` — the label/spinner color that sits on a
+    /// solid `Color.primary` pill (see `MozzProminentButtonStyle`), so text always
+    /// contrasts the fill in both color schemes.
+    static var mozzProminentLabel: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(white: 1)
+        #endif
+    }
+
     /// A subtle, theme-aware neutral fill for artwork placeholders — a quiet gray
     /// box (never a colorful tile) shown while real artwork loads or is missing.
     /// Adapts to light/dark so it reads as a calm empty frame in both.
@@ -363,3 +376,34 @@ extension View {
     @ViewBuilder func enableInteractivePop() -> some View { self }
 }
 #endif
+
+/// A large, solid, high-contrast pill CTA that stays legible in BOTH color
+/// schemes. Fills with `Color.primary` (near-black in light, near-white in dark)
+/// and draws its label in the inverse `Color(.systemBackground)`, so text always
+/// contrasts the fill — the same pattern as "Sign in with Apple".
+///
+/// This replaces `.borderedProminent` for our primary onboarding actions:
+/// `.borderedProminent` renders a white label over the tint color, which became
+/// illegible once the app's accent went to an adaptive near-white in dark mode
+/// (white text on a near-white pill).
+struct MozzProminentButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(Color.mozzProminentLabel)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 20)
+            .background(Capsule().fill(Color.primary))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
+            .contentShape(Capsule())
+    }
+}
+
+extension ButtonStyle where Self == MozzProminentButtonStyle {
+    /// A legible, scheme-proof solid pill for primary CTAs. Use instead of
+    /// `.borderedProminent`, which assumes a colored fill with a white label.
+    static var mozzProminent: MozzProminentButtonStyle { MozzProminentButtonStyle() }
+}

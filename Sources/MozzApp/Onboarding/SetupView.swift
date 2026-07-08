@@ -37,15 +37,15 @@ struct SetupView: View {
 
             if env.setupError != nil {
                 Button("Back to sign in") { env.signOut() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.mozzProminent)
+                    .padding(.horizontal, 40)
             } else if env.canEnterEarly {
                 Button {
                     env.enterAppNow()
                 } label: {
                     Text("Browse now").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(.mozzProminent)
                 .padding(.horizontal, 40)
                 Text("Your library keeps syncing in the background. Keep Mozz open until it finishes.")
                     .font(.caption2).foregroundStyle(.tertiary)
