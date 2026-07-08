@@ -107,9 +107,11 @@ struct OnboardingView: View {
                     Text(brand.name)
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Text(brand.tagline)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let tagline = brand.tagline {
+                        Text(tagline)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.forward")
@@ -118,12 +120,13 @@ struct OnboardingView: View {
             }
             .padding(.vertical, 14)
             .padding(.horizontal, 16)
+            .frame(minHeight: 40)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(brand.name)
-        .accessibilityValue(brand.tagline)
+        .accessibilityValue(brand.tagline ?? "")
         .accessibilityAddTraits(.isButton)
     }
 

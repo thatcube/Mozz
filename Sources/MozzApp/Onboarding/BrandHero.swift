@@ -10,29 +10,31 @@ struct BrandStyle {
     let logo: String
     /// Provider display name (the heading).
     let name: String
-    /// One-line subtitle for the onboarding picker row (quiet, educational).
-    let tagline: String
+    /// One-line subtitle for the onboarding picker row, or `nil` for a single-line
+    /// row. Only shown when it genuinely educates (e.g. Navidrome's Subsonic
+    /// compatibility) — a recognizable name doesn't need a marketing tagline.
+    let tagline: String?
     /// One-line subtitle under the login-screen hero.
     let heroSubtitle: String
 
     static let jellyfin = BrandStyle(
         logo: "JellyfinLogo",
         name: "Jellyfin",
-        tagline: "Open-source media server",
+        tagline: nil,
         heroSubtitle: "Sign in to your Jellyfin server"
     )
 
     static let plex = BrandStyle(
         logo: "PlexLogo",
         name: "Plex",
-        tagline: "Your media, anywhere",
+        tagline: nil,
         heroSubtitle: "Sign in to stream your Plex music"
     )
 
     static let navidrome = BrandStyle(
         logo: "NavidromeLogo",
         name: "Navidrome",
-        tagline: "Self-hosted · Subsonic-compatible",
+        tagline: "Subsonic-compatible",
         heroSubtitle: "Sign in to your Subsonic server"
     )
 }
