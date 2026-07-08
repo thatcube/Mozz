@@ -37,13 +37,13 @@ struct OnboardingView: View {
                         PlexLoginView()
                     } label: {
                         connectLabel(title: "Plex", systemImage: "play.tv",
-                                     colors: Self.plexColors, logo: "PlexLogo")
+                                     colors: Self.plexColors, logo: "PlexLogo", logoSize: 26)
                     }
                     NavigationLink {
                         SubsonicLoginView()
                     } label: {
                         connectLabel(title: "Navidrome (Subsonic)", systemImage: "waveform",
-                                     colors: Self.navidromeColors)
+                                     colors: Self.navidromeColors, logo: "NavidromeLogo")
                     }
 
                     #if targetEnvironment(simulator)
@@ -64,6 +64,7 @@ struct OnboardingView: View {
                     .disabled(isLoadingDemo)
                     #endif
                 }
+                .tint(Color.primary)
                 .padding(.horizontal)
 
                 Text("GPL-3.0 · your library stays on your device")
@@ -83,6 +84,7 @@ struct OnboardingView: View {
         systemImage: String,
         colors: [Color],
         logo: String? = nil,
+        logoSize: CGFloat = 20,
         isLoading: Bool = false
     ) -> some View {
         HStack(spacing: 14) {
@@ -99,7 +101,7 @@ struct OnboardingView: View {
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 20, height: 20)
+                        .frame(width: logoSize, height: logoSize)
                         .foregroundStyle(.white)
                 } else {
                     Image(systemName: systemImage)
