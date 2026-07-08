@@ -56,6 +56,13 @@ struct SongActionsMenu: View {
                 } label: {
                     Label("Download", mozz: "arrow.down.circle")
                 }
+            } else if let internalID = track.id {
+                Divider()
+                Button {
+                    Task { try? await env.downloads.deleteDownload(trackInternalId: internalID) }
+                } label: {
+                    Label("Remove Download", mozz: "trash")
+                }
             }
         } label: {
             Image(mozz: "ellipsis")
