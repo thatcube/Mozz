@@ -85,9 +85,9 @@ struct OnboardingView: View {
         Divider().padding(.leading, 56)
     }
 
-    /// A provider row: monochrome brand glyph · name + one-line tagline · chevron.
-    /// The glyph is a template SVG tinted with the label color (no chip, no
-    /// gradient); the tagline adds quiet, educational content without color.
+    /// A provider row: monochrome brand glyph · name · chevron. Every row is a
+    /// single balanced line; the glyph is a template SVG tinted with the label
+    /// color (no chip, no gradient).
     private func providerRow<Destination: View>(
         brand: BrandStyle,
         @ViewBuilder destination: @escaping () -> Destination
@@ -103,30 +103,21 @@ struct OnboardingView: View {
                     .frame(width: 26, height: 26)
                     .foregroundStyle(.primary)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(brand.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    if let tagline = brand.tagline {
-                        Text(tagline)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(brand.pickerName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.forward")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .padding(.horizontal, 16)
-            .frame(minHeight: 40)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(brand.name)
-        .accessibilityValue(brand.tagline ?? "")
+        .accessibilityLabel(brand.pickerName)
         .accessibilityAddTraits(.isButton)
     }
 

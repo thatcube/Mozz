@@ -8,33 +8,33 @@ import SwiftUI
 struct BrandStyle {
     /// Template-SVG asset name in the module's `Brands.xcassets`.
     let logo: String
-    /// Provider display name (the heading).
+    /// Provider display name (the login-screen heading + nav context).
     let name: String
-    /// One-line subtitle for the onboarding picker row, or `nil` for a single-line
-    /// row. Only shown when it genuinely educates (e.g. Navidrome's Subsonic
-    /// compatibility) — a recognizable name doesn't need a marketing tagline.
-    let tagline: String?
+    /// Name shown in the onboarding picker row — usually `name`, but can carry a
+    /// short clarifier (e.g. Navidrome's "(Subsonic)") so every row stays a single
+    /// balanced line without a subtitle.
+    let pickerName: String
     /// One-line subtitle under the login-screen hero.
     let heroSubtitle: String
 
     static let jellyfin = BrandStyle(
         logo: "JellyfinLogo",
         name: "Jellyfin",
-        tagline: nil,
+        pickerName: "Jellyfin",
         heroSubtitle: "Sign in to your Jellyfin server"
     )
 
     static let plex = BrandStyle(
         logo: "PlexLogo",
         name: "Plex",
-        tagline: nil,
+        pickerName: "Plex",
         heroSubtitle: "Sign in to stream your Plex music"
     )
 
     static let navidrome = BrandStyle(
         logo: "NavidromeLogo",
         name: "Navidrome",
-        tagline: "Subsonic-compatible",
+        pickerName: "Navidrome (Subsonic)",
         heroSubtitle: "Sign in to your Subsonic server"
     )
 }
