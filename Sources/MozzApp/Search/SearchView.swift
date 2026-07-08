@@ -56,47 +56,36 @@ struct SearchView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                     // Title + avatar are ordinary scroll content, so they scroll
-                    // away exactly 1:1 with the finger (a jump is impossible).
-                    // Removed only when active (focus/query) — an animated collapse,
-                    // never a scroll-driven one.
-                    if !isActive {
-                        TightHeader(title: "Search")
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                    // away exactly 1:1 with the finger — a jump is impossible, and
+                    // they're never removed/collapsed by state, so nothing ever
+                    // shifts. (Per the spec: the title goes away by SCROLLING; the
+                    // ✕ appears on focus. Focus does not collapse the title.)
+                    TightHeader(title: "Search")
+                    // The field is a pinned section header: the system keeps it
+                    // fixed at the top and draws it ABOVE the content that scrolls
+                    // under it (reliable z-order + jitter-free pin — a plain
+                    // LazyVStack child with zIndex does neither reliably).
+                    Section {
+                        resultsContent
+                            // Crossfade the recents↔results swap; it happens below
+                            // the pinned field, which stays dead still.
+                            .animation(fieldTransition, value: trimmedQuery.isEmpty)
+                    } header: {
+                        searchFieldBar
                     }
-                    // The field is scroll content too, but a render-time
-                    // visualEffect holds it at the top once it would scroll past —
-                    // a continuous pin with no @State round-trip (so no per-frame
-                    // jitter) and no pinned-section-header machinery (so content
-                    // swaps/focus can't make it recompute/jump). zIndex keeps it
-                    // above the content that scrolls underneath it.
-                    searchFieldBar
-                        .zIndex(1)
-                        .visualEffect { content, proxy in
-                            let minY = proxy.frame(in: .scrollView).minY
-                            return content.offset(y: minY < 0 ? -minY : 0)
-                        }
-                    resultsContent
-                        // Crossfade the recents↔results swap; it happens below the
-                        // pinned field, which stays dead still.
-                        .animation(fieldTransition, value: trimmedQuery.isEmpty)
                 }
-                // Collapse/restore the title + fade the Cancel button as active
-                // toggles. Scoped to the content, not the outer ScrollView, so it
-                // doesn't compound with the keyboard's safe-area animation.
-                .animation(fieldTransition, value: isActive)
             }
             .overlay { emptyState }
             .safeAreaInset(edge: .bottom) { latencyLabel }
             .tracksScrolled($scrolled)
             .minimizesBottomBarOnScroll()
             .scrollsToTopOnSignal()
-            // Scrolling dismisses the keyboard (Apple Music style). This is also
-            // what stops the "fighting" scroll: with a focused field pinned by
-            // visualEffect, its layout frame scrolls up under the bar and the
-            // system tries to scroll it back into view. Dropping focus on scroll
-            // ends that tug-of-war; sticky `searching` keeps the page stable.
+            // Scrolling dismisses the keyboard (Apple Music style) so a focused
+            // field's layout frame moving under the bar can't make the system
+            // fight the user's scroll to keep the first responder visible. Sticky
+            // `searching` keeps the ✕/glass while the keyboard is away.
             .scrollDismissesKeyboard(.immediately)
             .hideNavigationBar()
             .appRouteDestinations()
@@ -135,10 +124,7 @@ struct SearchView: View {
             }
         }
         .padding(.horizontal, 20)
-        // Tighten the top gap only when collapsing from the top (title going
-        // away). When scrolled the field is pinned, so keep it constant —
-        // otherwise focusing would nudge the pinned field up ~4pt.
-        .padding(.top, (isActive && !scrolled) ? 8 : 12)
+        .padding(.top, 12)
         .padding(.bottom, 10)
         // Solid page-colored fill so content scrolling under the pinned bar is
         // occluded (including the padding around the pill), and taps in the whole
@@ -146,6 +132,8 @@ struct SearchView: View {
         .background(Color.mozzBackground)
         .contentShape(Rectangle())
         .onTapGesture { }
+        // Animate the ✕ (Cancel) fading in/out as search mode toggles.
+        .animation(fieldTransition, value: isActive)
     }
 
     /// A custom search field. We can't use the system `.searchable` here because
