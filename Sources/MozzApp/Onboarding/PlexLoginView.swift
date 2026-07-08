@@ -84,7 +84,7 @@ struct PlexLoginView: View {
                     Text("Complete sign-in in the Plex window. Mozz returns here automatically once you're authorized.")
                         .font(.footnote).foregroundStyle(.secondary)
                 case .completing:
-                    Label("Signed in", systemImage: "checkmark.circle.fill")
+                    Label("Signed in", mozz: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.headline)
                 }

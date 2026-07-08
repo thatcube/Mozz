@@ -15,8 +15,9 @@ struct ArtworkPlaceholder: View {
             let side = min(geo.size.width, geo.size.height)
             Color.mozzArtworkPlaceholder
                 .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: side * iconScale, weight: .regular))
+                    Image(mozz: "music.note")
+                        .resizable().scaledToFit()
+                        .frame(width: side * iconScale, height: side * iconScale)
                         .foregroundStyle(.secondary)
                         .opacity(0.35)
                 )
@@ -35,6 +36,9 @@ struct ArtworkView: View {
     let seed: String
     var size: CGFloat = 48
     var cornerRadius: CGFloat = 6
+    /// When true the artwork is clipped to a full circle (artists), regardless of
+    /// `cornerRadius`. Robust at any `size` (unlike passing `size / 2`).
+    var circular: Bool = false
 
     @EnvironmentObject private var env: AppEnvironment
 
@@ -47,7 +51,13 @@ struct ArtworkView: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .clipShape(shape)
+    }
+
+    private var shape: AnyShape {
+        circular
+            ? AnyShape(Circle())
+            : AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     private var resolvedURL: URL? {

@@ -36,17 +36,17 @@ struct SongActionsMenu: View {
             Button {
                 env.playback.playNext([track.toDomain()])
             } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                Label("Play Next", mozz: "text.line.first.and.arrowtriangle.forward")
             }
             Button {
                 env.playback.append([track.toDomain()])
             } label: {
-                Label("Add to Queue", systemImage: "text.append")
+                Label("Add to Queue", mozz: "text.append")
             }
             Button {
                 env.startRadio(fromTrack: track.toDomain())
             } label: {
-                Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
+                Label("Start Station", mozz: "dot.radiowaves.left.and.right")
             }
             if downloadState != .downloaded {
                 Divider()
@@ -54,11 +54,11 @@ struct SongActionsMenu: View {
                     let snapshot = track
                     Task { await env.downloadTrack(snapshot.toDomain()) }
                 } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
+                    Label("Download", mozz: "arrow.down.circle")
                 }
             }
         } label: {
-            Image(systemName: "ellipsis")
+            Image(mozz: "ellipsis")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
@@ -82,7 +82,7 @@ struct SongActionsMenu: View {
             Button {
                 showingRatingPopover = true
             } label: {
-                Label("Rate…", systemImage: (rating ?? 0) > 0 ? "star.fill" : "star")
+                Label("Rate…", mozz: (rating ?? 0) > 0 ? "star.fill" : "star")
             }
         } else {
             Button {
@@ -91,7 +91,7 @@ struct SongActionsMenu: View {
                 isFavorite = next
                 Task { await env.setLiked(next, track: snapshot) }
             } label: {
-                Label(liked ? "Unlike" : "Like", systemImage: liked ? "heart.fill" : "heart")
+                Label(liked ? "Unlike" : "Like", mozz: liked ? "heart.fill" : "heart")
             }
         }
     }

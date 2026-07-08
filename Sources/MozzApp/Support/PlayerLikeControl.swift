@@ -31,7 +31,7 @@ struct PlayerLikeControl: View {
             let liked = isFavorite
             Task { await env.setLiked(liked, track: snapshot) }
         } label: {
-            Image(systemName: isFavorite ? "heart.fill" : "heart")
+            Image(mozz: isFavorite ? "heart.fill" : "heart")
                 .foregroundStyle(isFavorite ? Color.pink : Color.secondary)
         }
         .buttonStyle(.plain)

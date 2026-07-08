@@ -66,6 +66,12 @@ enum ArtworkPalette {
         /// Cap brightness so white title/artist text stays legible over the mid
         /// of the screen (Mozz overlays text directly, unlike a TV).
         static let maxBrightness: CGFloat = 0.58
+        /// How far the two accent colors are pulled toward the dominant color, so
+        /// a phone-sized screen reads as one cohesive wash with gentle accents
+        /// rather than several gradients competing at once (a TV has room for the
+        /// full spread; a phone doesn't). 0 = full-strength distinct accents;
+        /// 1 = a single flat dominant color.
+        static let dominantCohesion: CGFloat = 0.45
 
         // --- Motion ---
         /// Mesh point drift amplitude (fraction of the frame). Large enough to be
@@ -73,6 +79,10 @@ enum ArtworkPalette {
         static let driftAmplitude: Float = 0.16
         /// The center point roams a little further than the edges.
         static let driftCenterBoost: Float = 1.4
+        /// Horizontal drift is scaled DOWN vs vertical: a portrait phone has
+        /// little side-to-side room, so the field should flow top↔bottom, not
+        /// left↔right. 0 = no horizontal motion; 1 = equal to vertical.
+        static let driftHorizontalScale: Float = 0.3
     }
 
     /// Sample the artwork into a color grid, or derive a pleasant deterministic
@@ -106,7 +116,7 @@ enum ArtworkPalette {
     /// Deterministic grid from a seed hue (mirrors `ArtworkView`'s placeholder),
     /// varied across the grid so the art-less fallback still looks intentional.
     static func seedGrid(_ seed: String) -> ArtworkColorGrid {
-        let hue = Double(abs(seed.hashValue) % 360) / 360.0
+        let hue = Double(seed.hashValue.magnitude % 360) / 360.0
         var colors: [Color] = []
         for row in 0..<ArtworkColorGrid.dim {
             for col in 0..<ArtworkColorGrid.dim {
@@ -121,6 +131,30 @@ enum ArtworkPalette {
 
 // MARK: - Backdrop view
 
+/// Observes the system Low Power Mode state and republishes on change, so views
+/// can shed expensive continuous work (e.g. the backdrop's 30fps mesh drift) when
+/// the device is conserving power — the same battery/thermal state where SwiftUI
+/// animations are already CPU/GPU-throttled and most likely to drop frames.
+@MainActor
+final class LowPowerModeObserver: ObservableObject {
+    @Published private(set) var isLowPower: Bool = ProcessInfo.processInfo.isLowPowerModeEnabled
+    private var observer: NSObjectProtocol?
+
+    init() {
+        observer = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.isLowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            }
+        }
+    }
+
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+}
+
 /// The player's background. `adaptive` draws a mesh gradient from the sampled
 /// grid (with a gentle drift + legibility scrim); `oled` is pure black; `theme`
 /// follows the system background. Self-contained so its per-frame drift redraws
@@ -132,6 +166,11 @@ struct PlayerBackdrop: View {
     var animated: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @StateObject private var power = LowPowerModeObserver()
+    /// When the live drift last turned on — used to ease the drift amplitude in
+    /// from zero (driven by the timeline's own clock) so enabling it at settle
+    /// doesn't pop the mesh from centered to full offset.
+    @State private var driftStart: Date?
 
     var body: some View {
         switch style {
@@ -144,24 +183,41 @@ struct PlayerBackdrop: View {
         }
     }
 
-    private var drift: Bool { animated && !reduceMotion }
+    private var drift: Bool { animated && !reduceMotion && !power.isLowPower }
+    /// Seconds over which drift eases in when it turns on.
+    private static let driftRampDuration: TimeInterval = 0.9
+
+    /// Use the live mesh only when the device can afford it. In Low Power Mode (or
+    /// Reduce Motion) fall back to a cheap static gradient so the player's expand
+    /// transition composites less per frame on exactly the throttled devices where
+    /// frames are already tight.
+    private var useMesh: Bool {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            return !power.isLowPower && !reduceMotion
+        }
+        return false
+    }
 
     @ViewBuilder private var adaptive: some View {
         let colors = (grid?.isValid == true ? grid!.colors : ArtworkPalette.seedGrid("mozz").colors)
         ZStack {
-            // Base fill (also the <iOS18 fallback): the darkest sampled color, so
-            // there's never a gap behind the mesh.
+            // Base fill (also the mesh-off fallback): the darkest sampled color, so
+            // there's never a gap behind the gradient.
             (colors.min(by: { $0.mozzLuminance < $1.mozzLuminance }) ?? .black)
                 .ignoresSafeArea()
 
-            if #available(iOS 18.0, *), colors.count == 9 {
+            if useMesh, #available(iOS 18.0, macOS 15.0, *), colors.count == 9 {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !drift)) { ctx in
                     let t = ctx.date.timeIntervalSinceReferenceDate
-                    MeshGradient(width: 3, height: 3, points: meshPoints(t), colors: colors)
+                    MeshGradient(width: 3, height: 3, points: meshPoints(t, ramp: driftRamp(at: ctx.date)), colors: colors)
+                }
+                .onChange(of: drift, initial: true) { _, on in
+                    driftStart = on ? Date() : nil
                 }
             } else {
-                LinearGradient(colors: [colors.first ?? .black, colors.last ?? .black],
-                               startPoint: .top, endPoint: .bottom)
+                // Static, color-faithful top→bottom wash from the grid's vertical
+                // centerline (rows top/mid/bottom) — cheap to composite on resize.
+                staticGradient(colors)
             }
 
             // Legibility scrim: gently darken the very top (status bar / titles)
@@ -177,22 +233,42 @@ struct PlayerBackdrop: View {
         }
     }
 
+    /// Smoothstep ease of the drift amplitude from 0→1 over `driftRampDuration`
+    /// after drift turns on. Continuous (driven by `now`), so no visible jump.
+    private func driftRamp(at now: Date) -> Float {
+        guard drift, let start = driftStart else { return 0 }
+        let x = min(max(now.timeIntervalSince(start) / Self.driftRampDuration, 0), 1)
+        return Float(x * x * (3 - 2 * x))
+    }
+
+    /// Cheap static replacement for the mesh (Low Power Mode / Reduce Motion /
+    /// <iOS18): a top→bottom wash from the grid's vertical centerline so it keeps
+    /// the artwork's colour flow without any per-frame mesh compositing.
+    @ViewBuilder private func staticGradient(_ colors: [Color]) -> some View {
+        let stops: [Color] = colors.count == 9
+            ? [colors[1], colors[4], colors[7]]   // top-center, center, bottom-center
+            : [colors.first ?? .black, colors.last ?? .black]
+        LinearGradient(colors: stops, startPoint: .top, endPoint: .bottom)
+    }
+
     /// 3×3 mesh points. Corners are pinned to the frame; edge-midpoints drift only
     /// ALONG their edge; the center drifts in both axes (a little further) — so the
-    /// field churns like paint in water without ever opening a gap.
-    private func meshPoints(_ t: TimeInterval) -> [SIMD2<Float>] {
-        let a: Float = drift ? ArtworkPalette.Tuning.driftAmplitude : 0
-        let c = a * ArtworkPalette.Tuning.driftCenterBoost
+    /// field churns like paint in water without ever opening a gap. `ramp` eases the
+    /// amplitude in when drift starts.
+    private func meshPoints(_ t: TimeInterval, ramp: Float) -> [SIMD2<Float>] {
+        let ay: Float = (drift ? ArtworkPalette.Tuning.driftAmplitude : 0) * ramp
+        let ax = ay * ArtworkPalette.Tuning.driftHorizontalScale
+        let cy = ay * ArtworkPalette.Tuning.driftCenterBoost
         func s(_ speed: Double, _ phase: Double) -> Float { Float(sin(t * speed + phase)) }
         return [
             SIMD2(0, 0),
-            SIMD2(0.5 + a * s(0.13, 0.0), 0),
+            SIMD2(0.5 + ax * s(0.13, 0.0), 0),
             SIMD2(1, 0),
-            SIMD2(0, 0.5 + a * s(0.11, 1.3)),
-            SIMD2(0.5 + c * s(0.15, 2.0), 0.5 + c * s(0.09, 0.5)),
-            SIMD2(1, 0.5 + a * s(0.12, 3.1)),
+            SIMD2(0, 0.5 + ay * s(0.11, 1.3)),
+            SIMD2(0.5 + ax * s(0.15, 2.0), 0.5 + cy * s(0.09, 0.5)),
+            SIMD2(1, 0.5 + ay * s(0.12, 3.1)),
             SIMD2(0, 1),
-            SIMD2(0.5 + a * s(0.10, 4.2), 1),
+            SIMD2(0.5 + ax * s(0.10, 4.2), 1),
             SIMD2(1, 1),
         ]
     }
@@ -225,15 +301,21 @@ extension UIImage {
         let palette = mozzProminentColors(maxColors: ArtworkPalette.Tuning.maxColors)
         guard !palette.isEmpty else { return nil }
 
-        // Pad to 5 by cycling so the mesh always has variety to morph between.
-        var c = palette
-        var i = 0
-        while c.count < 5 { c.append(palette[i % palette.count]); i += 1 }
-
-        // Prominent color [0] in the center; others spread to the ring.
-        let arranged = [c[1], c[2], c[3],
-                        c[4], c[0], c[1],
-                        c[2], c[3], c[4]]
+        // Phone-calm, VERTICAL layout: color varies top→bottom, not side→side (a
+        // portrait screen has little horizontal room). Each mesh ROW is one tone
+        // — dominant across the middle so the screen reads as mostly one wash,
+        // with the two accents as gentle top/bottom bands pulled partway toward
+        // the dominant so they glow rather than compete.
+        let dominant = palette[0]
+        let k = ArtworkPalette.Tuning.dominantCohesion
+        func accent(_ idx: Int) -> UIColor {
+            let base = idx < palette.count ? palette[idx] : dominant
+            return base.mozzBlended(toward: dominant, amount: k)
+        }
+        let c0 = dominant, cTop = accent(1), cBottom = accent(2)
+        let arranged = [cTop, cTop, cTop,
+                        c0,    c0,    c0,
+                        cBottom, cBottom, cBottom]
         return arranged.map { Color($0.mozzBackdropAdjusted()) }
     }
 
@@ -306,6 +388,18 @@ extension UIImage {
 }
 
 extension UIColor {
+    /// Linear RGB blend toward `other` by `amount` (0 = self, 1 = other). Used to
+    /// pull accent colors partway toward the dominant for a cohesive field.
+    func mozzBlended(toward other: UIColor, amount: CGFloat) -> UIColor {
+        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+        getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+        other.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+        let f = min(max(amount, 0), 1)
+        return UIColor(red: r1 + (r2 - r1) * f, green: g1 + (g2 - g1) * f,
+                       blue: b1 + (b2 - b1) * f, alpha: 1)
+    }
+
     /// Turn a prominent color into a backdrop tone: keep its hue, lift saturation
     /// slightly for richness, and clamp brightness so it's neither crushed to
     /// black nor bright enough to fight the overlaid white text.

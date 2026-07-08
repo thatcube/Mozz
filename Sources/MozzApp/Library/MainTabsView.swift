@@ -21,6 +21,10 @@ struct MainTabsView: View {
     @StateObject private var ui = PlayerUIModel()
 
     @State private var selectedTab: AppTab = .home
+    /// Appearance override (System/Light/Dark) and dark flavor (Dim/Black-OLED).
+    /// Observed here so changes drive `preferredColorScheme` + a token rebuild.
+    @AppStorage(Color.MozzAppearance.storageKey) private var appearanceRaw = Color.MozzAppearance.default.rawValue
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
     /// The last active tab that ISN'T Search. When Search is selected, the left
     /// blob keeps showing this (Search always owns the right blob), so the left
     /// icon stays put instead of Search sliding across the bar.
@@ -151,6 +155,13 @@ struct MainTabsView: View {
         }
         .task { consumePendingDeepLinkIfNeeded() }
         .onChange(of: env.pendingDeepLink) { _, _ in consumePendingDeepLinkIfNeeded() }
+        // Force light/dark (or follow system) per the appearance setting.
+        .preferredColorScheme((Color.MozzAppearance(rawValue: appearanceRaw) ?? .system).colorScheme)
+        // NOTE: `darkStyleRaw` is observed (above) so this view re-renders when the
+        // dark flavor toggles, refreshing the tab-bar chrome token. We deliberately
+        // do NOT `.id()` the tree on it — that resets navigation state and dismisses
+        // the open Settings sheet. Screen backgrounds refresh via the observing
+        // `mozzScreenBackground()` modifier instead.
     }
 
     /// Apply any queued deep-link / Handoff destination now that the tab UI is on
@@ -314,6 +325,17 @@ struct MainTabBar: View {
 
     @Namespace private var glassNS
 
+    /// Same navigation-chrome look as the player: real Liquid Glass by default,
+    /// a solid `mozzChrome` surface when the user turns Liquid Glass off, in Low
+    /// Power Mode, or with Reduce Transparency — so the bar, island, and player
+    /// always match (they read as one continuous navigation surface).
+    @AppStorage("mozz.liquidGlass") private var liquidGlassEnabled = true
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @StateObject private var power = LowPowerModeObserver()
+    private var useGlass: Bool {
+        liquidGlassEnabled && !power.isLowPower && !reduceTransparency
+    }
+
     /// Blobby spring shared by the minimize morph and the selection-blob slide.
     private static let barSpring = Animation.spring(response: 0.5, dampingFraction: 0.8)
 
@@ -458,14 +480,15 @@ struct MainTabBar: View {
             onPressTab(tab)         // switch + pop to root (also expands the bar)
         } label: {
             ZStack {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 23, weight: .medium))
+                Image(mozz: tab.icon)
+                    .resizable().scaledToFit()
+                    .frame(width: 30, height: 30)
                     .offset(y: -8 * labelShown)
                 Text(tab.title)
-                    .font(.system(size: 9.5, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .fixedSize()
                     .opacity(Double(labelShown))
-                    .offset(y: 12)
+                    .offset(y: 14)
             }
             .foregroundStyle(accent ? AnyShapeStyle(Color.accentColor)
                                     : AnyShapeStyle(.secondary))
@@ -579,7 +602,7 @@ struct MainTabBar: View {
     @ViewBuilder
     private func glassLayer(leftCX: CGFloat, rightCX: CGFloat,
                             blobW: CGFloat, blobH: CGFloat, h: CGFloat) -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
+        if useGlass, #available(iOS 26.0, macOS 26.0, *) {
             GlassEffectContainer(spacing: 22) {
                 ZStack(alignment: .topLeading) {
                     Color.clear.frame(width: max(blobW, 1), height: blobH)
@@ -592,9 +615,20 @@ struct MainTabBar: View {
                         .position(x: rightCX, y: h / 2)
                 }
             }
-        } else {
+        } else if useGlass {
             // Pre-26 fallback: a single material capsule (no blob morph).
             Capsule().fill(.ultraThinMaterial).frame(height: h)
+        } else {
+            // Solid chrome (Liquid Glass off / Low Power / Reduce Transparency):
+            // two opaque capsules matching the player + island surface.
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(Color.mozzChrome)
+                    .frame(width: max(blobW, 1), height: blobH)
+                    .position(x: leftCX, y: h / 2)
+                Capsule().fill(Color.mozzChrome)
+                    .frame(width: max(blobW, 1), height: blobH)
+                    .position(x: rightCX, y: h / 2)
+            }
         }
     }
 

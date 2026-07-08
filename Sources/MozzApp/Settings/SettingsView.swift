@@ -26,7 +26,7 @@ struct SettingsView: View {
                             env.startSync()
                         } label: {
                             HStack {
-                                Label(env.isSyncing ? "Syncing…" : "Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                                Label(env.isSyncing ? "Syncing…" : "Sync Now", mozz: "arrow.triangle.2.circlepath")
                                 Spacer()
                                 if env.isSyncing { ProgressView() }
                             }
@@ -36,7 +36,7 @@ struct SettingsView: View {
                             NavigationLink {
                                 PlexLibraryPickerView()
                             } label: {
-                                Label("Server & Libraries", systemImage: "square.stack.3d.up")
+                                Label("Server & Libraries", mozz: "square.stack.3d.up")
                             }
                         }
                         if let text = env.syncStatusText {
@@ -49,7 +49,7 @@ struct SettingsView: View {
 
                     Section("Playback") {
                         Toggle(isOn: $normalizationEnabled) {
-                            Label("Volume Normalization", systemImage: "waveform")
+                            Label("Volume Normalization", mozz: "waveform")
                         }
                         Text("Plays tracks at a consistent loudness using each track's normalization gain, when available.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -57,7 +57,7 @@ struct SettingsView: View {
 
                     Section {
                         Toggle(isOn: $enrichmentEnabled) {
-                            Label("Improve Recommendations", systemImage: "sparkles")
+                            Label("Improve Recommendations", mozz: "sparkles")
                         }
                         .onChange(of: enrichmentEnabled) { _, enabled in
                             // Resume the crawl on ON; on OFF, promptly stop any
@@ -76,9 +76,17 @@ struct SettingsView: View {
 
                     Section {
                         NavigationLink {
+                            AppearanceSettingsView()
+                        } label: {
+                            Label("Appearance", mozz: "paintpalette")
+                        }
+                    }
+
+                    Section {
+                        NavigationLink {
                             DiagnosticsView()
                         } label: {
-                            Label("Diagnostics", systemImage: "stethoscope")
+                            Label("Diagnostics", mozz: "stethoscope")
                         }
                     }
 
@@ -92,23 +100,23 @@ struct SettingsView: View {
 
                 Section {
                     Link(destination: Self.repoURL) {
-                        Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                        Label("Source on GitHub", mozz: "chevron.left.forwardslash.chevron.right")
                     }
                     .accessibilityHint("Opens in Safari")
                     Link(destination: Self.sponsorURL) {
-                        Label("Support Development", systemImage: "heart")
+                        Label("Support Development", mozz: "heart")
                     }
                     .accessibilityHint("Opens in Safari")
                     if let reviewURL = Self.appStoreReviewURL {
                         Link(destination: reviewURL) {
-                            Label("Rate on the App Store", systemImage: "star")
+                            Label("Rate on the App Store", mozz: "star")
                         }
                         .accessibilityHint("Opens the App Store")
                     }
                     LabeledContent {
                         Text(Self.appVersion)
                     } label: {
-                        Label("Version", systemImage: "info.circle")
+                        Label("Version", mozz: "info.circle")
                     }
                 } header: {
                     Text("About")
@@ -177,7 +185,7 @@ private struct EnrichmentCoverageRow: View {
         let done = c.matched >= c.total
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: done ? "checkmark.seal.fill" : "sparkles")
+                Image(mozz: done ? "checkmark.seal.fill" : "sparkles")
                     .font(.footnote)
                     .foregroundStyle(done ? Color.green : Color.accentColor)
                 Text(headline(c, done: done))

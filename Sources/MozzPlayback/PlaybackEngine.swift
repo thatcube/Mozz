@@ -253,6 +253,9 @@ public final class PlaybackEngine: ObservableObject {
     /// history / up-next lists present it) and play it. Mirrors ``next()``: the
     /// outgoing track counts as a skip, then we reload from the new position.
     public func jump(toOrderPosition orderPosition: Int) {
+        // Tapping the currently-playing row is a no-op: don't restart it or log a
+        // phantom skip (which would bias shuffle history).
+        guard orderPosition != queue.position else { return }
         logTerminal(.skipped, position: snapshot.elapsed)
         _ = queue.jump(toOrderPosition: orderPosition)
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
@@ -262,6 +265,9 @@ public final class PlaybackEngine: ObservableObject {
     /// Drop the queue's played history, keeping the current track + up-next.
     public func clearHistory() {
         queue.clearHistory()
+        // Base `tracks`/`order` were rebuilt, so any prefetched pre-roll keyed on
+        // old base indices is stale — refill against the new set.
+        refillLookahead()
         publish()
     }
 

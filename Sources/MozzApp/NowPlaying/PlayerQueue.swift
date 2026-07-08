@@ -260,12 +260,12 @@ struct PlayerQueuePanel: View {
                 }
                 Spacer(minLength: 8)
                 if isCurrent {
-                    Image(systemName: "speaker.wave.2.fill")
+                    Image(mozz: "speaker.wave.2.fill")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else if showsHandle {
                     // Static drag-handle placeholder (reorder deferred).
-                    Image(systemName: "line.3.horizontal")
+                    Image(mozz: "line.3.horizontal")
                         .font(.body)
                         .foregroundStyle(.tertiary)
                 }

@@ -44,7 +44,7 @@ struct ArtistDetailView: View {
                     if !fullAlbums.isEmpty { ArtistAlbumShelf(title: "Albums", albums: fullAlbums) }
                     if !singles.isEmpty { ArtistAlbumShelf(title: "Singles & EPs", albums: singles) }
                     if loaded && songs.isEmpty && albums.isEmpty {
-                        ContentUnavailableView("Nothing Here Yet", systemImage: "music.mic")
+                        ContentUnavailableView { Label("Nothing Here Yet", mozz: "music.mic") }
                             .padding(.top, 40)
                     }
                 }

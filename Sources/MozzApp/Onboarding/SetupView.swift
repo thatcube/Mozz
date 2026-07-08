@@ -14,8 +14,8 @@ struct SetupView: View {
         VStack(spacing: 22) {
             Spacer()
 
-            Image(systemName: "music.note.house.fill")
-                .font(.system(size: 52))
+            Image(mozz: "music.note.house.fill")
+                .resizable().scaledToFit().frame(width: 52, height: 52)
                 .foregroundStyle(.tint)
 
             VStack(spacing: 6) {

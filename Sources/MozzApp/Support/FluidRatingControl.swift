@@ -168,8 +168,9 @@ struct RatingStripView: View {
     var body: some View {
         let strip = HStack(spacing: spacing) {
             ForEach(0..<RatingTuning.starCount, id: \.self) { i in
-                Image(systemName: symbol(for: i))
-                    .font(.system(size: starSize * 0.9))
+                Image(mozz: symbol(for: i))
+                    .resizable()
+                    .scaledToFit()
                     .foregroundStyle(isFilled(i) ? RatingTuning.tint : RatingTuning.inactiveTint)
                     .symbolRenderingMode(.hierarchical)
                     .frame(width: starSize, height: starSize)
@@ -424,7 +425,7 @@ struct FluidRatingControl: View {
     private var collapsedStar: some View {
         let rated = (rating ?? 0) > 0
         return HStack(spacing: 4) {
-            Image(systemName: rated ? "star.fill" : "star")
+            Image(mozz: rated ? "star.fill" : "star")
             if let r = rating, r > 0 {
                 Text(LikeControl.format(r)).monospacedDigit()
             }

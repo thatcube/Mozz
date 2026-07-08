@@ -45,7 +45,7 @@ struct SearchView: View {
                     searchField
                     if isActive {
                         Button { cancelSearch() } label: {
-                            Image(systemName: "xmark")
+                            Image(mozz: "xmark")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .frame(width: fieldHeight, height: fieldHeight)
@@ -66,6 +66,7 @@ struct SearchView: View {
             }
             .animation(.snappy(duration: 0.3), value: isActive)
             .hideNavigationBar()
+            .mozzScreenBackground()
             .appRouteDestinations()
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
@@ -78,14 +79,14 @@ struct SearchView: View {
     /// the field (glass material + focus animation + Cancel) to keep both.
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            Image(mozz: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Artists, albums, songs", text: $query)
                 .focused($focused)
                 .submitLabel(.search)
                 .plainTextFieldStyle()
             if !query.isEmpty {
                 Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Image(mozz: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -129,7 +130,7 @@ struct SearchView: View {
     @ViewBuilder private var emptyState: some View {
         if trimmedQuery.isEmpty {
             if resolvedRecents.isEmpty {
-                ContentUnavailableView("Search Your Library", systemImage: "magnifyingglass")
+                ContentUnavailableView { Label("Search Your Library", mozz: "magnifyingglass") }
             }
         } else if results.isEmpty {
             ContentUnavailableView.search(text: query)
@@ -141,7 +142,7 @@ struct SearchView: View {
             Section("Artists") {
                 ForEach(results.artists) { artist in
                     NavigationLink(value: AppRoute.artist(artist)) {
-                        Label(artist.name, systemImage: "music.mic")
+                        Label(artist.name, mozz: "music.mic")
                     }
                     .simultaneousGesture(TapGesture().onEnded {
                         record(.artist, serverId: artist.serverId, remoteId: artist.remoteId)
@@ -292,7 +293,7 @@ private struct RecentRowLabel: View {
     var body: some View {
         HStack(spacing: 12) {
             ArtworkView(artwork: artworkKey.map(ArtworkRef.init(key:)),
-                        seed: seed, size: 44, cornerRadius: circular ? 22 : 6)
+                        seed: seed, size: 44, cornerRadius: 6, circular: circular)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).lineLimit(1)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)

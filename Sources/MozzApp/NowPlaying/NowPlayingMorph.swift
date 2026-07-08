@@ -58,13 +58,29 @@ struct NowPlayingMorphContainer: View {
     /// Whether the queue panel (Continue Playing + History) is showing in place of
     /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
     @State private var queueOpen = false
+    /// True only once the expand spring has fully settled (and false the moment a
+    /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
+    /// soft shadow and the backdrop's live drift — OFF during the transition, so
+    /// the spring settles without per-frame shadow re-rasterization or a competing
+    /// 30fps mesh tick. That's what removes the "settling feels laggy" hitch.
+    @State private var settled = false
     #if canImport(UIKit)
     /// Live current-output-route (device name + icon) for the AirPlay control.
     @StateObject private var routeMonitor = AudioRouteMonitor()
     #endif
+    /// Live Low Power Mode state — used to keep the cheaper mid-morph surface even
+    /// after settling on throttled devices (see `useGlassSurface`).
+    @StateObject private var power = LowPowerModeObserver()
 
     @AppStorage(PlayerBackgroundStyle.storageKey) private var bgStyleRaw = PlayerBackgroundStyle.default.rawValue
+    /// User setting: use Liquid Glass chrome for the player (default on). When off,
+    /// the player uses a cheaper opaque chrome surface.
+    @AppStorage("mozz.liquidGlass") private var liquidGlassEnabled = true
+    // Observed so the island/player chrome token re-resolves live when the dark
+    // flavor (Dim↔Black) toggles; see `MozzScreenBackground`.
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     /// Colors sampled from the current artwork for the adaptive backdrop.
     @State private var artGrid: ArtworkColorGrid?
 
@@ -293,6 +309,20 @@ struct NowPlayingMorphContainer: View {
 
     // MARK: Surface (Liquid Glass background + fading drawer body)
 
+    /// Whether the player uses real Liquid Glass (blur) vs a cheap opaque chrome
+    /// surface. Decided per MODE and held CONSTANT through the morph (never swapped
+    /// mid-animation — that black↔glass flip was the jarring part). Glass is the
+    /// default; it drops to solid when the user turns it off, in Low Power Mode, or
+    /// with Reduce Transparency on (accessibility) — all cases where a consistent
+    /// opaque surface is smoother / preferred.
+    private var useGlassSurface: Bool {
+        liquidGlassEnabled && !power.isLowPower && !reduceTransparency
+    }
+
+    /// Opaque chrome surface used when glass is off — a theme-aware elevated color
+    /// that matches the surrounding nav, not pure black.
+    private var cheapSurfaceFill: Color { .mozzChrome }
+
     private func surface(_ m: Morph) -> some View {
         ZStack(alignment: .top) {
             // Opaque panel for the expanded drawer. A frosted material base (so
@@ -300,9 +330,9 @@ struct NowPlayingMorphContainer: View {
             // Liquid Glass behind) with the artwork-adaptive backdrop painted on
             // top. Both fade out together via `solidBgOpacity` during the collapse.
             RoundedRectangle(cornerRadius: m.radius, style: .continuous)
-                .fill(.regularMaterial)
+                .fill(useGlassSurface ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(cheapSurfaceFill))
                 .overlay {
-                    PlayerBackdrop(style: bgStyle, grid: artGrid, animated: ui.isFullPresented)
+                    PlayerBackdrop(style: bgStyle, grid: artGrid, animated: settled && useGlassSurface)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
                 .opacity(m.solidBgOpacity)
@@ -318,43 +348,61 @@ struct NowPlayingMorphContainer: View {
         }
         .frame(width: m.surfaceW, height: m.surfaceH, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
-        .liquidGlass(radius: m.radius)
+        .liquidGlass(radius: m.radius, enabled: useGlassSurface, fallbackFill: cheapSurfaceFill)
         .position(x: m.surfaceCenterX, y: m.surfaceCenterY)
     }
 
     // MARK: Traveling artwork (single image, big-center ⇄ small-left)
 
     private func travelingArtwork(_ m: Morph) -> some View {
-        MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
-            .shadow(color: .black.opacity(0.35 * m.bodyOpacity),
-                    radius: 18 * m.p, y: 10 * m.p)
+        // Apple-Music-style paused shrink: at rest the cover sits 25% smaller,
+        // growing to full size while playing. Only in the expanded player (scaled
+        // by `m.p`) so the island/mini art is unaffected.
+        let isPlaying = playback.snapshot.status == .playing || playback.snapshot.status == .buffering
+        let pausedScale = 1 - Self.pausedArtShrink * m.p * (isPlaying ? 0 : 1)
+        // Shadow only once settled, at a CONSTANT blur radius: an animated blur
+        // radius re-rasterizes the shadow every frame (a classic hitch during the
+        // expand). Gated on `settled` + faded via color opacity, the shadow costs
+        // nothing during the transition and rasterizes once at rest.
+        let showShadow = settled && !queueOpen
+        return MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
+            .scaleEffect(pausedScale)
+            .shadow(color: .black.opacity(showShadow ? 0.35 : 0), radius: 16, y: 8)
             .position(x: m.artCenterX, y: m.artCenterY)
             .opacity(queueOpen ? 0 : 1)
             .allowsHitTesting(false)
+            .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.72),
+                       value: isPlaying)
+            .animation(.easeOut(duration: 0.3), value: showShadow)
     }
+
+    /// How much the cover shrinks when paused (fraction), in the expanded player.
+    private static let pausedArtShrink: CGFloat = 0.25
 
     // MARK: Drawer body (everything below the top edge; fades + clips on collapse)
 
     private func drawerBody(_ m: Morph) -> some View {
         VStack(spacing: 0) {
             // Top region: the now-playing hero and the queue occupy the same
-            // space and cross-fade. The hero stays in the layout (opacity only)
-            // so its height is constant and the controls below never shift.
-            ZStack(alignment: .top) {
-                header(m)
-                    .opacity(queueOpen ? 0 : 1)
-                    .allowsHitTesting(!queueOpen)
-                if queueOpen {
-                    queueTop(m)
-                        .transition(.opacity)
+            // space and cross-fade. The queue is an overlay on the hero so it
+            // inherits the hero's fixed height — it never competes with the
+            // trailing Spacer for vertical space, so the controls below never
+            // shift and the queue list isn't squished.
+            header(m)
+                .opacity(queueOpen ? 0 : 1)
+                .allowsHitTesting(!queueOpen)
+                .overlay(alignment: .top) {
+                    if queueOpen {
+                        queueTop(m)
+                            .transition(.opacity)
+                    }
                 }
-            }
 
             scrubber
                 .padding(.horizontal, 32)
                 .padding(.top, 22)
             transport
-                .padding(.top, 14)
+                .padding(.top, 54)
             if let track = playback.currentTrack {
                 formatBadge(track: track).padding(.top, 10)
             }
@@ -423,7 +471,7 @@ struct NowPlayingMorphContainer: View {
             }
             // Dummy overflow — the per-track context menu isn't built yet.
             Button { } label: {
-                Image(systemName: "ellipsis")
+                AppIcon.overflow.styled(size: 22)
                     .foregroundStyle(.secondary)
             }
             .disabled(true)
@@ -501,11 +549,16 @@ struct NowPlayingMorphContainer: View {
     private func animate(to open: Bool) {
         if open {
             receiving = false
+            settled = false
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) {
                 p = 1; dragY = 0
+            } completion: {
+                // Only now (fully at rest) enable the shadow + backdrop drift.
+                settled = true
             }
         } else {
             receiving = true
+            settled = false
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 p = 0; dragY = 0
             } completion: {
@@ -524,15 +577,18 @@ struct NowPlayingMorphContainer: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 44) {
-            Button { playback.previous() } label: { Image(systemName: "backward.fill").font(.title) }
-                .disabled(!playback.snapshot.hasPrevious)
-            Button { playback.togglePlayPause() } label: {
-                Image(systemName: playback.snapshot.status == .playing ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
+        HStack(spacing: 84) {
+            Button { playback.previous() } label: {
+                AppIcon.skipBack.styled(size: 34)
             }
-            Button { playback.next() } label: { Image(systemName: "forward.fill").font(.title) }
-                .disabled(!playback.snapshot.hasNext)
+            .disabled(!playback.snapshot.hasPrevious)
+            Button { playback.togglePlayPause() } label: {
+                (playback.snapshot.status == .playing ? AppIcon.pause : AppIcon.play).styled(size: 56)
+            }
+            Button { playback.next() } label: {
+                AppIcon.skipForward.styled(size: 34)
+            }
+            .disabled(!playback.snapshot.hasNext)
         }
         .tint(.primary)
     }
@@ -549,7 +605,7 @@ struct NowPlayingMorphContainer: View {
     /// lyrics is a disabled placeholder.
     private var bottomButtonRow: some View {
         HStack {
-            Button { } label: { Image(systemName: "quote.bubble") }
+            Button { } label: { AppIcon.lyrics.styled(size: 26) }
                 .disabled(true)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -560,11 +616,10 @@ struct NowPlayingMorphContainer: View {
             Button {
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { queueOpen.toggle() }
             } label: {
-                Image(systemName: "list.bullet")
+                AppIcon.queue.styled(size: 26)
                     .foregroundStyle(queueOpen ? Color.primary : Color.secondary)
             }
         }
-        .font(.title3)
         .tint(.primary)
     }
 
@@ -577,10 +632,11 @@ struct NowPlayingMorphContainer: View {
         ZStack {
             AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
             Image(systemName: routeMonitor.output.icon)
+                .font(.system(size: 26))
                 .foregroundStyle(routeMonitor.output.showsLabel ? Color.accentColor : Color.primary)
                 .allowsHitTesting(false)
         }
-        .frame(width: 40, height: 32)
+        .frame(width: 44, height: 32)
     }
 
     /// The route line under the controls. For external speakers/rooms (AirPlay,
@@ -593,7 +649,7 @@ struct NowPlayingMorphContainer: View {
             HStack(spacing: 5) {
                 if out.showsSourcePrefix {
                     Text("iPhone").foregroundStyle(.secondary)
-                    Image(systemName: "arrow.forward").font(.caption2).foregroundStyle(.secondary)
+                    Image(mozz: "arrow.forward").font(.caption2).foregroundStyle(.secondary)
                 }
                 Text(out.name).foregroundStyle(.primary)
             }
@@ -862,8 +918,9 @@ private struct IslandContent: View {
             .highPriorityGesture(islandGesture)
 
             Button { playback.togglePlayPause() } label: {
-                Image(systemName: playback.snapshot.status == .playing ? "pause.fill" : "play.fill")
-                    .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
+                (playback.snapshot.status == .playing ? AppIcon.pause : AppIcon.play)
+                    .styled(size: 20)
+                    .frame(width: 30, height: 30).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -872,7 +929,7 @@ private struct IslandContent: View {
                 commitTick &+= 1
                 changeTrack(goNext: true, from: 0)
             } label: {
-                Image(systemName: "forward.fill")
+                Image(mozz: "forward.fill")
                     .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1229,14 +1286,13 @@ private struct Morph {
     static let islandBottomGap: CGFloat = BottomBar.islandGap    // gap between island and tab bar
     static let tabBarHeight: CGFloat = BottomBar.tabHeight       // floating tab-bar height
     static let expandedRadius: CGFloat = 24
-    static let expandedArtRadius: CGFloat = 10
+    static let expandedArtRadius: CGFloat = 18
     static let bottomOverhang: CGFloat = 120    // surface runs off-screen at p=1
     static let receiveDepth: CGFloat = 4        // how far the island grows UP on the catch
     static let receiveZone: CGFloat = 0.18      // last fraction of collapse the bounce lives in
     static let miniFadeFull: CGFloat = 0.10     // p at/below which mini controls are fully shown
     static let miniFadeEnd: CGFloat = 0.34      // p at/above which mini controls are hidden
     static let expArtTopGap: CGFloat = 39       // grabber + gap above big artwork
-    static let expArtMaxSide: CGFloat = 340
 
     // Island touch-target slop: the tappable area extends beyond the 56pt visual
     // pill so edge taps don't "fall through" to the page/tab-bar behind (Apple's
@@ -1265,7 +1321,9 @@ private struct Morph {
     var islandTapCenterY: CGFloat { miniCenterY + (Self.islandTapSlopBottom - Self.islandTapSlopTop) / 2 }
 
     // Expanded artwork --------------------------------------------------------
-    var expArtSide: CGFloat { min(width - 90, Self.expArtMaxSide) }
+    // Matches the content width (scrubber / titles / buttons use 32pt side
+    // padding), so the cover lines up flush with the controls below it.
+    var expArtSide: CGFloat { width - 64 }
     var expArtCenterY: CGFloat { safeTop + Self.expArtTopGap + expArtSide / 2 }
 
     // Morphing surface --------------------------------------------------------
@@ -1356,14 +1414,18 @@ private func clamp(_ x: CGFloat, _ lo: CGFloat = 0, _ hi: CGFloat = 1) -> CGFloa
 
 private extension View {
     /// The island's Liquid Glass on iOS/macOS 26+, a material fallback below it.
+    /// When `enabled` is false, a plain opaque `fallbackFill` is used instead —
+    /// cheap to resize during the morph (no backdrop blur) — so the expensive
+    /// glass is only paid at rest / outside Low Power Mode.
     @ViewBuilder
-    func liquidGlass(radius: CGFloat) -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
-            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+    func liquidGlass(radius: CGFloat, enabled: Bool = true, fallbackFill: Color = .black) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if !enabled {
+            self.background(shape.fill(fallbackFill))
+        } else if #available(iOS 26.0, macOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
         } else {
-            self.background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous).fill(.ultraThinMaterial)
-            )
+            self.background(shape.fill(.ultraThinMaterial))
         }
     }
 }

@@ -28,8 +28,11 @@ struct MixDetailView: View {
             actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle) },
             content: {
                 if tracks.isEmpty && loaded {
-                    ContentUnavailableView("Nothing Yet", systemImage: "sparkles",
-                        description: Text("Play more music and this mix will fill in."))
+                    ContentUnavailableView {
+                        Label("Nothing Yet", mozz: "sparkles")
+                    } description: {
+                        Text("Play more music and this mix will fill in.")
+                    }
                         .padding(.top, 40)
                 } else {
                     DetailSongRows(tracks: tracks, showArtist: true) { play(from: $0) }

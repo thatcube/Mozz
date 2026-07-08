@@ -35,7 +35,7 @@ struct AlbumDetailView: View {
                                 await refreshDownloadStates()
                             }
                         } label: {
-                            Label("Download Album", systemImage: "arrow.down.circle")
+                            Label("Download Album", mozz: "arrow.down.circle")
                                 .font(.subheadline)
                                 .frame(maxWidth: .infinity)
                         }
@@ -135,11 +135,11 @@ struct TrackRow: View {
     @ViewBuilder private var downloadIndicator: some View {
         switch downloadState {
         case .downloaded:
-            Image(systemName: "arrow.down.circle.fill").foregroundStyle(.green).font(.caption)
+            Image(mozz: "arrow.down.circle.fill").foregroundStyle(.green).font(.caption)
         case .downloading, .queued:
             ProgressView(value: progress ?? 0).frame(width: 40)
         case .failed:
-            Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).font(.caption)
+            Image(mozz: "exclamationmark.triangle").foregroundStyle(.orange).font(.caption)
         case nil:
             EmptyView()
         }
