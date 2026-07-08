@@ -599,10 +599,12 @@ struct NowPlayingMorphContainer: View {
         return Text(parts.joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary)
     }
 
+    /// The bottom control row: an equalizer button (opens the EQ sheet, tinted
+    /// when the EQ is on), the current-output-route control (shows the real device
     /// The bottom control row: a (dummy) lyrics button, the current-output-route
     /// control (shows the real device icon; tap to open the AirPlay picker), and
     /// the queue toggle. Lyrics + a per-track context menu aren't built yet, so
-    /// lyrics is a disabled placeholder.
+    /// lyrics is a disabled placeholder. (The equalizer lives in Settings for now.)
     private var bottomButtonRow: some View {
         HStack {
             Button { } label: { AppIcon.lyrics.styled(size: 26) }

@@ -122,6 +122,196 @@ final class NormalizationGainTests: XCTestCase {
     }
 }
 
+final class EqualizerSettingsTests: XCTestCase {
+    func testFlatIsNeutral() {
+        let flat = EqualizerSettings.flat
+        XCTAssertTrue(flat.isFlat)
+        XCTAssertEqual(flat.gains.count, EqualizerSettings.bandCount)
+        XCTAssertTrue(flat.gains.allSatisfy { $0 == 0 })
+        XCTAssertEqual(flat.preampDB, 0)
+    }
+
+    func testInitNormalizesGainLength() {
+        // Too few → padded with 0; too many → truncated. Always bandCount long.
+        XCTAssertEqual(EqualizerSettings(gains: [1, 2, 3]).gains.count, EqualizerSettings.bandCount)
+        XCTAssertEqual(EqualizerSettings(gains: Array(repeating: 1, count: 40)).gains.count,
+                       EqualizerSettings.bandCount)
+        let padded = EqualizerSettings(gains: [3, 3]).gains
+        XCTAssertEqual(padded[0], 3)
+        XCTAssertEqual(padded[2], 0)
+    }
+
+    func testGainsAreClampedToRange() {
+        let s = EqualizerSettings(gains: Array(repeating: 999, count: EqualizerSettings.bandCount),
+                                  preampDB: -999)
+        XCTAssertTrue(s.gains.allSatisfy { $0 == EqualizerSettings.gainRange.upperBound })
+        XCTAssertEqual(s.preampDB, EqualizerSettings.gainRange.lowerBound)
+    }
+
+    func testNonFiniteBecomesZero() {
+        var s = EqualizerSettings.flat
+        s.setGain(.nan, forBand: 0)
+        s.setPreamp(.infinity)
+        XCTAssertEqual(s.gains[0], 0)
+        XCTAssertEqual(s.preampDB, 0)
+    }
+
+    func testSetGainOutOfRangeIndexIsIgnored() {
+        var s = EqualizerSettings.flat
+        s.setGain(6, forBand: 999)   // no crash, no change
+        XCTAssertTrue(s.isFlat)
+        s.setGain(6, forBand: -1)
+        XCTAssertTrue(s.isFlat)
+    }
+
+    func testCodableRoundTrip() throws {
+        let original = EqualizerPreset.bassBoost.settings
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(EqualizerSettings.self, from: data)
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testCodableDecodeNormalizesMalformedBlob() throws {
+        // A tampered/legacy blob: too-short gains + out-of-range values. Decode
+        // must pad, clamp, and never crash (the synthesized decoder would not).
+        let json = Data(#"{"gains":[3.0,99.0],"preampDB":-99.0}"#.utf8)
+        let s = try JSONDecoder().decode(EqualizerSettings.self, from: json)
+        XCTAssertEqual(s.gains.count, EqualizerSettings.bandCount)
+        XCTAssertEqual(s.gains[0], 3.0)
+        XCTAssertEqual(s.gains[1], EqualizerSettings.gainRange.upperBound)   // 99 → +12
+        XCTAssertEqual(s.gains[2], 0)                                         // padded
+        XCTAssertEqual(s.preampDB, EqualizerSettings.gainRange.lowerBound)   // -99 → -12
+    }
+
+    func testCodableDecodeMissingFieldsIsFlat() throws {
+        let s = try JSONDecoder().decode(EqualizerSettings.self, from: Data("{}".utf8))
+        XCTAssertTrue(s.isFlat)
+        XCTAssertEqual(s.gains.count, EqualizerSettings.bandCount)
+    }
+
+    func testPresetsAreValidAndDistinct() {
+        for preset in EqualizerPreset.allCases {
+            let s = preset.settings
+            XCTAssertEqual(s.gains.count, EqualizerSettings.bandCount, "\(preset) wrong band count")
+            XCTAssertTrue(s.gains.allSatisfy { EqualizerSettings.gainRange.contains($0) },
+                          "\(preset) has an out-of-range band")
+        }
+        XCTAssertTrue(EqualizerPreset.flat.settings.isFlat)
+        XCTAssertFalse(EqualizerPreset.bassBoost.settings.isFlat)
+    }
+
+    func testMatchingRecognizesPresetsAndCustom() {
+        XCTAssertEqual(EqualizerPreset.matching(EqualizerPreset.vocal.settings), .vocal)
+        XCTAssertEqual(EqualizerPreset.matching(.flat), .flat)
+        var custom = EqualizerSettings.flat
+        custom.setGain(7, forBand: 4)
+        XCTAssertNil(EqualizerPreset.matching(custom))
+    }
+
+    func testFrequencyLabels() {
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(31), "31")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(500), "500")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(1_000), "1k")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(16_000), "16k")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(forBand: 0), "31")
+        XCTAssertEqual(EqualizerSettings.frequencyLabel(forBand: EqualizerSettings.bandCount - 1), "16k")
+    }
+}
+
+final class BiquadFilterTests: XCTestCase {
+    func testZeroGainIsIdentity() {
+        let c = BiquadCoefficients.peakingEQ(frequency: 1_000, gainDB: 0, q: 1.4, sampleRate: 44_100)
+        XCTAssertEqual(c, .identity)
+    }
+
+    func testIdentityPassesSignalThrough() {
+        var filter = Biquad(coefficients: .identity)
+        let input: [Float] = [0, 0.5, -0.5, 1, -1, 0.25]
+        for x in input {
+            XCTAssertEqual(filter.process(x), x, accuracy: 1e-6)
+        }
+    }
+
+    func testResetClearsMemory() {
+        let boost = BiquadCoefficients.peakingEQ(frequency: 1_000, gainDB: 12, q: 1.4, sampleRate: 44_100)
+        var a = Biquad(coefficients: boost)
+        for _ in 0..<64 { _ = a.process(1.0) }   // load up filter state
+        a.reset()
+        var fresh = Biquad(coefficients: boost)
+        // After reset, response to a new impulse matches a fresh filter.
+        XCTAssertEqual(a.process(1.0), fresh.process(1.0), accuracy: 1e-6)
+    }
+
+    func testFlatEqualizerIsTransparent() {
+        // A flat curve → every band identity → a cascade is a perfect passthrough.
+        let coeffs = EqualizerSettings.flat.biquadCoefficients(sampleRate: 48_000)
+        XCTAssertEqual(coeffs.count, EqualizerSettings.bandCount)
+        var filters = coeffs.map { Biquad(coefficients: $0) }
+        let input: [Float] = [0.1, -0.3, 0.7, -0.9, 0.42, -0.1]
+        for x in input {
+            var y = x
+            for i in filters.indices { y = filters[i].process(y) }
+            XCTAssertEqual(y, x, accuracy: 1e-5)
+        }
+    }
+
+    func testBoostRaisesGainAtCenterFrequency() {
+        // Drive a +12 dB / 1 kHz filter with a 1 kHz sine and confirm the output
+        // amplitude grows relative to the input (a boost really boosts).
+        let sampleRate = 48_000.0
+        let freq = 1_000.0
+        let c = BiquadCoefficients.peakingEQ(frequency: freq, gainDB: 12, q: 1.4, sampleRate: sampleRate)
+        var filter = Biquad(coefficients: c)
+        var inPeak: Float = 0
+        var outPeak: Float = 0
+        let n = 4_800   // settle over 0.1s
+        for i in 0..<n {
+            let x = Float(sin(2.0 * Double.pi * freq * Double(i) / sampleRate))
+            let y = filter.process(x)
+            if i > n / 2 {   // measure after transient settles
+                inPeak = max(inPeak, abs(x))
+                outPeak = max(outPeak, abs(y))
+            }
+        }
+        // +12 dB ≈ 4x amplitude; allow slack for band Q. Must clearly exceed input.
+        XCTAssertGreaterThan(outPeak, inPeak * 1.8)
+    }
+
+    func testCutLowersGainAtCenterFrequency() {
+        let sampleRate = 48_000.0
+        let freq = 1_000.0
+        let c = BiquadCoefficients.peakingEQ(frequency: freq, gainDB: -12, q: 1.4, sampleRate: sampleRate)
+        var filter = Biquad(coefficients: c)
+        var inPeak: Float = 0
+        var outPeak: Float = 0
+        let n = 4_800
+        for i in 0..<n {
+            let x = Float(sin(2.0 * Double.pi * freq * Double(i) / sampleRate))
+            let y = filter.process(x)
+            if i > n / 2 {
+                inPeak = max(inPeak, abs(x))
+                outPeak = max(outPeak, abs(y))
+            }
+        }
+        XCTAssertLessThan(outPeak, inPeak * 0.6)
+    }
+
+    func testStabilityAtExtremes() {
+        // Extreme gains across all bands must stay finite (no filter blow-up).
+        let boosted = EqualizerSettings(gains: Array(repeating: 12, count: EqualizerSettings.bandCount))
+        var filters = boosted.biquadCoefficients(sampleRate: 44_100).map { Biquad(coefficients: $0) }
+        var value: Float = 0
+        for i in 0..<44_100 {
+            let x = Float(sin(2.0 * Double.pi * 440.0 * Double(i) / 44_100.0))
+            var y = x
+            for j in filters.indices { y = filters[j].process(y) }
+            value = y
+            XCTAssertTrue(y.isFinite)
+        }
+        XCTAssertTrue(value.isFinite)
+    }
+}
+
 final class MozzErrorTests: XCTestCase {
     func testRetryability() {
         XCTAssertTrue(MozzError.serverUnreachable.isRetryable)

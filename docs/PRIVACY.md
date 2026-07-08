@@ -1,8 +1,7 @@
 # Privacy
 
-Mozz is offline-first. Your library lives on your own Plex or Jellyfin server,
-and the app talks to that server and nothing else — with one exception, spelled
-out below.
+Your music library lives on your own Plex or Jellyfin server, and Mozz talks to
+that server and nothing else — with one exception, spelled out below.
 
 ## What Mozz doesn't do
 

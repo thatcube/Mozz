@@ -38,6 +38,11 @@ public final class SwappableResolver: TrackURLResolver, @unchecked Sendable {
         guard let current = currentDelegate() else { throw MozzError.unsupported("No active server") }
         return try await current.resolve(track)
     }
+
+    public func resolve(_ track: Track, startSeconds: TimeInterval) async throws -> ResolvedTrackURL {
+        guard let current = currentDelegate() else { throw MozzError.unsupported("No active server") }
+        return try await current.resolve(track, startSeconds: startSeconds)
+    }
 }
 
 /// The active server plus everything derived from it.
@@ -88,6 +93,12 @@ public final class AppEnvironment: ObservableObject {
     private var seedPrepTask: Task<Void, Never>?
     /// UserDefaults key for the enrichment on/off switch (default on when unset).
     public static let enrichmentEnabledKey = "mozz.enrichmentEnabled"
+    /// UserDefaults key for the graphic-EQ master on/off (default off when unset).
+    public static let equalizerEnabledKey = "mozz.equalizerEnabled"
+    /// UserDefaults key for the persisted EQ curve (JSON `EqualizerSettings`).
+    public static let equalizerSettingsKey = "mozz.equalizerSettings"
+    /// Debounces EQ persistence so a slider drag doesn't hammer UserDefaults.
+    private var equalizerPersistTask: Task<Void, Never>?
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -223,6 +234,7 @@ public final class AppEnvironment: ObservableObject {
         wireBackgroundDownloads()
         wireNowPlayingArtwork()
         wireNowPlayingWidget()
+        restoreEqualizer()
     }
 
     /// The default on-disk environment (App Support DB + downloads dir + Keychain).
@@ -461,6 +473,50 @@ public final class AppEnvironment: ObservableObject {
             let enrichment = self.enrichment
             Task { await enrichment.cancel() }
         }
+    }
+
+    // MARK: Equalizer
+
+    /// The current EQ master switch / curve, read from the live engine.
+    public var equalizerEnabled: Bool { playback.equalizerEnabled }
+    public var equalizerSettings: EqualizerSettings { playback.equalizerSettings }
+
+    /// Turn the graphic EQ on/off (persisted; the engine rebuilds loaded items so
+    /// the change takes effect immediately while playing).
+    public func setEqualizerEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: Self.equalizerEnabledKey)
+        playback.setEqualizerEnabled(enabled)
+    }
+
+    /// Apply a new EQ curve immediately (live, glitch-free while playing) and
+    /// persist it on a short debounce so a continuous slider drag doesn't write
+    /// UserDefaults on every frame.
+    public func updateEqualizerSettings(_ settings: EqualizerSettings) {
+        playback.updateEqualizer(settings)
+        equalizerPersistTask?.cancel()
+        equalizerPersistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, let self else { return }
+            if let data = try? JSONEncoder().encode(settings) {
+                UserDefaults.standard.set(data, forKey: Self.equalizerSettingsKey)
+            }
+        }
+    }
+
+    /// Load the persisted EQ state into the engine at launch, before any track is
+    /// restored, so the first item is built with the right processing.
+    private func restoreEqualizer() {
+        let settings: EqualizerSettings
+        if let data = UserDefaults.standard.data(forKey: Self.equalizerSettingsKey),
+           let decoded = try? JSONDecoder().decode(EqualizerSettings.self, from: data) {
+            settings = decoded
+        } else {
+            settings = .flat
+        }
+        playback.equalizer.apply(settings)
+        // Default OFF when unset — EQ is opt-in and playback is byte-identical
+        // to before EQ existed until the user turns it on.
+        playback.equalizer.isEnabled = UserDefaults.standard.bool(forKey: Self.equalizerEnabledKey)
     }
 
     public func signOut() {
