@@ -469,12 +469,16 @@ struct NowPlayingMorphContainer: View {
                     PlayerLikeControl(track: track)
                 }
             }
-            // Dummy overflow — the per-track context menu isn't built yet.
-            Button { } label: {
-                AppIcon.overflow.styled(size: 22)
-                    .foregroundStyle(.secondary)
+            // Per-track overflow — shares the row/detail action set (P1 factory).
+            if let track = playback.currentTrack {
+                Menu {
+                    TrackActionButtons(track: track, downloadState: nil, internalId: nil)
+                } label: {
+                    AppIcon.overflow.styled(size: 22)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("More actions")
             }
-            .disabled(true)
         }
         .font(.title3)
     }

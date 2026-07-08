@@ -33,37 +33,11 @@ struct SongActionsMenu: View {
         Menu {
             likeOrRate
             Divider()
-            Button {
-                env.playback.playNext([track.toDomain()])
-            } label: {
-                Label("Play Next", mozz: "text.line.first.and.arrowtriangle.forward")
-            }
-            Button {
-                env.playback.append([track.toDomain()])
-            } label: {
-                Label("Add to Queue", mozz: "text.append")
-            }
-            Button {
-                env.startRadio(fromTrack: track.toDomain())
-            } label: {
-                Label("Start Station", mozz: "dot.radiowaves.left.and.right")
-            }
-            if downloadState != .downloaded {
-                Divider()
-                Button {
-                    let snapshot = track
-                    Task { await env.downloadTrack(snapshot.toDomain()) }
-                } label: {
-                    Label("Download", mozz: "arrow.down.circle")
-                }
-            } else if let internalID = track.id {
-                Divider()
-                Button {
-                    Task { try? await env.downloads.deleteDownload(trackInternalId: internalID) }
-                } label: {
-                    Label("Remove Download", mozz: "trash")
-                }
-            }
+            TrackActionButtons(
+                track: track.toDomain(),
+                downloadState: downloadState,
+                internalId: track.id
+            )
         } label: {
             Image(mozz: "ellipsis")
                 .font(.body)

@@ -312,22 +312,34 @@ struct DetailPlayActions: View {
             .buttonStyle(.borderedProminent)
             .tint(.white)
 
-            Button(action: shuffle) {
-                Label("Shuffle", mozz: "shuffle")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(.white)
-            .contextMenu {
-                if let startRadio {
-                    Button(action: startRadio) {
-                        Label("Start Station", mozz: "dot.radiowaves.left.and.right")
-                    }
-                }
-            }
+            shuffleButton
         }
         .controlSize(.large)
+    }
+
+    /// Shuffle button. The long-press context menu is attached ONLY when there's
+    /// a station action to offer — attaching `.contextMenu` with empty content
+    /// registers a long-press that opens an empty (invisible) menu, which read as
+    /// "the context menu does nothing" on every surface that didn't pass
+    /// `startRadio` (Album, Liked Songs, Playlists, mixes).
+    @ViewBuilder private var shuffleButton: some View {
+        let button = Button(action: shuffle) {
+            Label("Shuffle", mozz: "shuffle")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .tint(.white)
+
+        if let startRadio {
+            button.contextMenu {
+                Button(action: startRadio) {
+                    Label("Start Station", mozz: "dot.radiowaves.left.and.right")
+                }
+            }
+        } else {
+            button
+        }
     }
 }
 
