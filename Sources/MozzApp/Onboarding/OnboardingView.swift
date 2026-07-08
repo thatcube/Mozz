@@ -30,22 +30,25 @@ struct OnboardingView: View {
                     NavigationLink {
                         JellyfinLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Jellyfin", systemImage: "server.rack",
-                                     colors: Self.jellyfinColors)
+                        connectLabel(title: "Jellyfin", systemImage: "server.rack",
+                                     colors: Self.jellyfinColors, logo: "JellyfinLogo")
                     }
                     NavigationLink {
                         PlexLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Plex", systemImage: "play.tv",
-                                     colors: Self.plexColors)
+                        connectLabel(title: "Plex", systemImage: "play.tv",
+                                     colors: Self.plexColors, logo: "PlexLogo")
                     }
                     NavigationLink {
                         SubsonicLoginView()
                     } label: {
-                        connectLabel(title: "Connect to Navidrome (Subsonic)", systemImage: "waveform",
+                        connectLabel(title: "Navidrome (Subsonic)", systemImage: "waveform",
                                      colors: Self.navidromeColors)
                     }
 
+                    #if DEBUG
+                    // Dev/sim only: the offline demo (synthetic catalog + bundled
+                    // clip). Hidden in release builds so real users don't see it.
                     Button {
                         Task {
                             isLoadingDemo = true
@@ -57,6 +60,7 @@ struct OnboardingView: View {
                                      colors: Self.demoColors, isLoading: isLoadingDemo)
                     }
                     .disabled(isLoadingDemo)
+                    #endif
                 }
                 .padding(.horizontal)
 
@@ -76,6 +80,7 @@ struct OnboardingView: View {
         title: String,
         systemImage: String,
         colors: [Color],
+        logo: String? = nil,
         isLoading: Bool = false
     ) -> some View {
         HStack(spacing: 14) {
@@ -85,6 +90,15 @@ struct OnboardingView: View {
                     .frame(width: 38, height: 38)
                 if isLoading {
                     ProgressView().tint(.white)
+                } else if let logo {
+                    // Official brand logo (a monochrome template SVG in the module
+                    // asset catalog), tinted white to sit on the colored chip.
+                    Image(logo, bundle: .module)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .foregroundStyle(.white)
                 } else {
                     Image(systemName: systemImage)
                         .font(.system(size: 18, weight: .semibold))
