@@ -312,6 +312,13 @@ public final class PlaybackEngine: ObservableObject {
         publish()
     }
 
+    /// Drop the queue's up-next, keeping the played history + current track.
+    public func clearUpNext() {
+        queue.clearUpNext()
+        refillLookahead()
+        publish()
+    }
+
     public func seek(to seconds: TimeInterval) {
         let target = max(0, seconds)
         if loggedTrackID != nil, let track = currentTrack {

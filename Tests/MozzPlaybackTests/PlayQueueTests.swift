@@ -322,4 +322,26 @@ final class PlayQueueTests: XCTestCase {
         XCTAssertNotEqual(restored.order, orderBeforeWrap,
                           "first wrap after restore reshuffles (rebuildTransientState primed the cache)")
     }
+
+    // MARK: Clear up-next
+
+    func testClearUpNextDropsTailKeepsHistoryAndCurrent() {
+        var q = PlayQueue()
+        q.setItems(tracks(5), startingAt: 2)          // history t0,t1 · current t2 · up-next t3,t4
+        q.clearUpNext()
+        XCTAssertEqual(q.current?.id, "t2")
+        XCTAssertEqual(q.upNext.map(\.id), [])
+        XCTAssertEqual(q.history.map(\.id), ["t0", "t1"])
+        XCTAssertEqual(q.count, 3)
+        XCTAssertFalse(q.hasNext)
+    }
+
+    func testClearUpNextIsNoOpWhenNothingQueued() {
+        var q = PlayQueue()
+        q.setItems(tracks(3), startingAt: 2)          // current is already last
+        q.clearUpNext()
+        XCTAssertEqual(q.current?.id, "t2")
+        XCTAssertEqual(q.count, 3)
+        XCTAssertEqual(q.history.map(\.id), ["t0", "t1"])
+    }
 }

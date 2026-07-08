@@ -152,56 +152,356 @@ final class AudioRouteMonitor: ObservableObject {
 
 // MARK: - Queue panel
 
-/// The full-player queue: the played "History" (scroll up), the current track,
-/// and the "Continue Playing" up-next list. Tapping any row jumps to & plays it.
-/// Drag-to-reorder is intentionally deferred — rows show a static handle glyph as
-/// a placeholder for that future capability.
+/// Intrinsic height of the History section = the "card at top" snap detent (how
+/// far the content must scroll for the now-playing card to reach the top edge).
+///
+/// This is a **single, scroll-invariant size measurement** — deliberately NOT a
+/// difference of two global-space anchors. Differencing anchors is fragile: if
+/// the two ever coincide (empty History, or a value latched before layout) the
+/// detent silently reads 0 and the snap disables itself. A subview's own height
+/// can't coincide-to-zero by accident: it's 0 only when History is genuinely
+/// empty (in which case there's correctly nothing to snap to).
+struct HistoryHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Height of the History header row (title + Clear) — how tall the pinned header
+/// is, and thus how close the rising card must get before it pushes it off top.
+struct HistoryHeaderHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Height of the now-playing card (song row) — used to place the pinned queue
+/// controls just beneath it and to know when the card has scrolled fully off.
+struct QueueCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Height of the queue-controls block (shuffle/repeat pills + Queue/Clear header)
+/// — the pinned block that sticks to the top as you scroll down into up-next.
+struct QueueControlsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// The full-player queue: the played "History" (scroll up), the now-playing
+/// **card** (injected by the container — artwork + title + star/overflow +
+/// shuffle/repeat pills), and the "Continue Playing" up-next list. The card
+/// scrolls as one unit with the list between two snap detents; tapping any
+/// History / Continue-Playing row jumps to & plays it.
 ///
 /// Order math: the queue's play order is `history + [current] + upNext`, so a
 /// history row at index `i` maps to order position `i`, and an up-next row at
-/// index `j` maps to `history.count + 1 + j` (current sits at `history.count`).
-struct PlayerQueuePanel: View {
+/// index `j` maps to `history.count + 1 + j` (the current track — the card —
+/// sits at `history.count`, but isn't a tappable list row).
+struct PlayerQueuePanel<Card: View, Controls: View>: View {
     @ObservedObject var playback: PlaybackEngine
+    /// Queue-open progress (0…1) — fades the list in alongside the docking card.
+    var queueP: CGFloat
+    /// Bumped by the container on every queue open; each change snaps the scroll
+    /// back to the now-playing card at the top (so a reopen never lingers on
+    /// History or a prior scroll position).
+    var resetToken: Int
     /// Jump to a specific order position and play it.
     var onSelect: (Int) -> Void
     /// Drop the played history.
     var onClearHistory: () -> Void
+    /// Drop the up-next queue.
+    var onClearQueue: () -> Void
+    /// Top-overscroll (≥0) once History is fully revealed and there's nothing left
+    /// to scroll up — the container translates the whole drawer down by this.
+    var onPull: (CGFloat) -> Void = { _ in }
+    /// Finger-lift while overscrolling the top (overscroll amount, downward
+    /// velocity) — the container decides dismiss-vs-settle.
+    var onPullEnd: (CGFloat, CGFloat) -> Void = { _, _ in }
+    /// The now-playing card (song row: artwork + title + star/overflow), injected
+    /// by the container. The shuffle/repeat pills are NOT part of this — they ride
+    /// in the sticky queue-controls block just beneath it.
+    @ViewBuilder var card: () -> Card
+    /// The shuffle/repeat pills, injected by the container. Rendered in the queue-
+    /// controls block (beneath the card) so they can pin to the top as a sticky
+    /// header when scrolling down into up-next.
+    @ViewBuilder var queueControls: () -> Controls
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Intrinsic height of the History section = the "card at top" snap detent,
+    /// measured directly (scroll-invariant; 0 only when History is truly empty).
+    @State private var historyHeight: CGFloat = 0
+    /// Live viewport (scroll container) height — used to guarantee enough scroll
+    /// room below the card for it to dock at the top even when Continue Playing
+    /// is short, and to compute the released (History-full) detent.
+    @State private var viewportH: CGFloat = 0
+    /// Live scroll offset (contentOffset.y, reported by the iOS 18 controller) —
+    /// drives the pinned History header. 0 = History top at the panel top;
+    /// `detentTop` = card docked at the panel top.
+    @State private var scrollY: CGFloat = 0
+    /// Measured height of the History header row (title + Clear), including its
+    /// bottom padding — the pinned overlay copies it, and the card pushes it off
+    /// once its top rises within this distance of the panel top.
+    @State private var historyHeaderH: CGFloat = 0
+    /// Measured height of the now-playing card (song row) — places the pinned
+    /// queue controls just beneath it at the docked position.
+    @State private var cardHeight: CGFloat = 0
+    /// Measured height of the queue-controls block (pills + Queue/Clear header) —
+    /// how tall the sticky block is once it pins to the top.
+    @State private var queueControlsH: CGFloat = 0
+
+    private let nowPlayingID = "queue.nowPlaying"
+
+    /// Whether the sticky pinned-header overlays are in use (iOS 18+, where we get
+    /// the live scroll offset). On iOS 17 the headers render inline instead.
+    private var usesStickyHeaders: Bool {
+        if #available(iOS 18.0, *) { return true } else { return false }
+    }
+
+    /// The "card at top" detent: how far the content must scroll for the card to
+    /// reach the top edge = the History section's height.
+    private var detentTop: CGFloat { max(0, historyHeight) }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                    history
-                    nowPlayingRow
-                    continuePlaying
+        GeometryReader { geo in
+            Group {
+                if #available(iOS 18.0, *) {
+                    // iOS 18+: drive the snap ourselves for a fast, crisp settle we
+                    // fully control (native ScrollTargetBehavior's release
+                    // deceleration is not tunable). Owns its ScrollPosition, snap
+                    // spring, and seal-break haptic; also reports the live offset
+                    // that drives the pinned History header.
+                    scrollBase
+                        .modifier(QueueManualSnap18(detentTop: detentTop,
+                                                    viewportH: viewportH,
+                                                    enabled: !reduceMotion,
+                                                    resetToken: resetToken,
+                                                    onScrollY: { scrollY = $0 }))
+                } else {
+                    // iOS 17 fallback: native ScrollTargetBehavior + ScrollViewReader
+                    // reset (no seal-break haptic — needs onScrollGeometryChange).
+                    ScrollViewReader { proxy in
+                        scrollBase
+                            .modifier(QueueSnapModifier(detentTop: detentTop,
+                                                        enabled: !reduceMotion))
+                            .onAppear { resetToCard(proxy) }
+                            .onChange(of: resetToken) { _, _ in resetToCard(proxy) }
+                    }
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 8)
             }
-            .scrollIndicators(.hidden)
-            .onAppear {
-                // Start anchored on the current track (history sits above, scroll
-                // up to reveal it) — matches Apple's queue.
-                proxy.scrollTo(nowPlayingID, anchor: .top)
-            }
+            .opacity(queueP)
+            .mask(bottomFadeMask)
+            // Pinned History header: stays fixed at the top while its rows scroll
+            // under it, then the rising now-playing card pushes it off. Drawn
+            // OUTSIDE the fade mask so it stays crisp while rows dissolve beneath.
+            // iOS 18 only (needs the live scroll offset); on 17 the header just
+            // scrolls with the list.
+            .overlay(alignment: .top) { pinnedHistoryHeader }
+            .overlay(alignment: .top) { pinnedQueueControls }
+            .clipped()
+            // Top-of-list pull-to-dismiss, classified per gesture by START position.
+            // A non-consuming UIKit pan attached HERE — at the panel container, an
+            // ancestor of the whole scroll + overlays — so it reliably receives the
+            // touches. If the finger was ALREADY at the top when the gesture began,
+            // the whole drawer drags 1:1 with the finger while the scroll is frozen
+            // (content can't move). If the gesture began mid-list, it's a pure scroll
+            // that hard-stops at the top and NEVER pulls the drawer — so scrolling up
+            // to the top can't bleed into an accidental drawer pull. The two are
+            // mutually exclusive within a single touch.
+            .modifier(QueuePullGestureModifier(atTop: scrollY <= 0.5,
+                                               onPull: onPull,
+                                               onEnd: onPullEnd))
+            .onPreferenceChange(HistoryHeightKey.self) { historyHeight = $0 }
+            .onPreferenceChange(HistoryHeaderHeightKey.self) { historyHeaderH = $0 }
+            .onPreferenceChange(QueueCardHeightKey.self) { cardHeight = $0 }
+            .onPreferenceChange(QueueControlsHeightKey.self) { queueControlsH = $0 }
+            .onAppear { viewportH = geo.size.height }
+            .onChange(of: geo.size.height) { _, h in viewportH = h }
         }
     }
 
-    private let nowPlayingID = "queue.nowPlaying"
+    /// A floating copy of the History header (title + Clear) pinned to the panel
+    /// top. `pinnedHeaderY`:
+    ///   • `0` while scrolling through the History rows (rows slide under it),
+    ///   • follows the content down on overscroll bounce,
+    ///   • slides up (negative) as the now-playing card's top rises to meet it,
+    ///     so the card — and only the card — pushes it off the top.
+    @ViewBuilder private var pinnedHistoryHeader: some View {
+        if #available(iOS 18.0, *), detentTop > 1, !playback.history.isEmpty,
+           historyHeaderH > 0 {
+            historyHeaderRow
+                .padding(.horizontal, 24)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(y: pinnedHeaderY)
+                .opacity(queueP)
+        }
+    }
+
+    /// Vertical position of the pinned header (see `pinnedHistoryHeader`).
+    private var pinnedHeaderY: CGFloat {
+        let y = clampedScrollY
+        let pushedByCard = detentTop - y - historyHeaderH
+        return min(max(-y, 0), pushedByCard)
+    }
+
+    /// A floating copy of the queue controls (shuffle/repeat pills + Queue/Clear
+    /// header) pinned to the panel top. Symmetric to the History header but for
+    /// the DOWN direction: it sits just beneath the docked card, and as you scroll
+    /// down the card slides off above it while this block sticks to the top and
+    /// the up-next rows scroll under it. Scrolling back up, the descending card
+    /// pushes it back down to its natural spot.
+    @ViewBuilder private var pinnedQueueControls: some View {
+        if #available(iOS 18.0, *), cardHeight > 0, queueControlsH > 0 {
+            queueControlsBlock
+                .padding(.horizontal, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(y: queueControlsY)
+                .opacity(queueP)
+        }
+    }
+
+    /// Vertical position of the pinned queue controls: their natural spot just
+    /// below the card (`detentTop + cardHeight` in content terms) minus the scroll,
+    /// clamped so they never rise above the panel top — that's the pin.
+    private var queueControlsY: CGFloat {
+        max(0, detentTop + cardHeight - clampedScrollY)
+    }
+
+    /// Scroll offset with the top overscroll removed. During a top pull the raw
+    /// `scrollY` goes negative; the whole drawer translates by that (see `onPull`)
+    /// and the content is counter-offset to stay put, so the pinned overlays and
+    /// fade must ignore the overscroll too — otherwise they'd drift while the rest
+    /// of the panel stays rigid. Clamping to ≥0 freezes them at the top state.
+    private var clampedScrollY: CGFloat { max(0, scrollY) }
+
+    /// How tall a fully-clear band to punch at the TOP of the scroll content so
+    /// the rows dissolve into the real page background behind the pinned header
+    /// (the header then reads as the page color — no frosted band). Ramps from 0
+    /// when the card is docked (nothing pinned, so the card's own top stays crisp)
+    /// up to the pinned block's height once a header is stuck at the top —
+    /// whichever direction is active (History above, or queue controls below).
+    private var topFadeAmount: CGFloat {
+        let historyFade = max(0, min(historyHeaderH, historyHeaderH + pinnedHeaderY))
+        let queueFade = max(0, min(queueControlsH, clampedScrollY - detentTop))
+        return max(historyFade, queueFade)
+    }
+
+    /// The shared scroll content (History → now-playing card → Continue Playing).
+    /// The snap engine (manual on iOS 18, `ScrollTargetBehavior` on 17) is layered
+    /// on by the caller.
+    private var scrollBase: some View {
+        ScrollView {
+            // Eager VStack (NOT lazy): the card is scrolled to mid-content on
+            // open, so History sits off-screen above it. A LazyVStack drops
+            // those off-screen rows and never lays out the full History, which
+            // made the detent measurement read ~0 → the snap silently disabled
+            // itself. The queue is small, so eager layout is cheap and makes the
+            // measurement rock-solid.
+            VStack(alignment: .leading, spacing: 0) {
+                // History wrapped in a container whose intrinsic height is the
+                // snap detent (History empty → 0, otherwise its full height).
+                // Measured as a size, not a global position, so it can't
+                // accidentally coincide-to-zero.
+                VStack(alignment: .leading, spacing: 0) {
+                    history
+                }
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: HistoryHeightKey.self,
+                                           value: g.size.height)
+                })
+                card()
+                    .id(nowPlayingID)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: QueueCardHeightKey.self,
+                                               value: g.size.height)
+                    })
+                // Shuffle/repeat pills + the Queue/Clear header. Reserved here so
+                // it takes up its space and is measured; INVISIBLE on iOS 18 where
+                // the pinned overlay draws the visible, sticky copy. On iOS 17
+                // (no overlay) it renders inline and interactive.
+                queueControlsBlock
+                    .opacity(usesStickyHeaders ? 0 : 1)
+                    .allowsHitTesting(!usesStickyHeaders)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: QueueControlsHeightKey.self,
+                                               value: g.size.height)
+                    })
+                upNextRows
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 8)
+            // Guarantee the card can always scroll to the very top: the
+            // scrollable content must be at least (History height + one
+            // viewport) tall. When Continue Playing is short, this pads empty
+            // space onto the BOTTOM (top-aligned) so the card still docks at the
+            // top instead of floating mid-screen.
+            .frame(minHeight: detentTop + viewportH, alignment: .top)
+            // NOTE: no counter-offset here. A gesture that began mid-list must
+            // rubber-band natively when it reaches the top (the drawer stays put),
+            // so we must NOT cancel the overscroll. During a real drawer pull the
+            // gesture instead freezes the scroll's bounce (see QueuePullGesture), so
+            // the content can't move and no counter-offset is needed.
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Snap the scroll so the now-playing card sits at the very top (iOS 17
+    /// fallback path). Deferred to the next runloop tick so the content has laid
+    /// out first — calling `scrollTo` synchronously in `onAppear` runs before the
+    /// fresh ScrollView knows its content size and silently no-ops.
+    private func resetToCard(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            proxy.scrollTo(nowPlayingID, anchor: .top)
+        }
+    }
+    /// Content fade mask. A soft ~40pt bottom fade (rows dissolve under the lower
+    /// chrome), plus a dynamic TOP fade: a clear band the height of the pinned
+    /// History header so the rows dissolve into the real page background behind
+    /// it — the header reads as the page color, not a frosted band. The top band
+    /// is 0 when the card is docked, so the card's own top never fades.
+    private var bottomFadeMask: some View {
+        let clearH = topFadeAmount
+        let tail = min(16, clearH)
+        return VStack(spacing: 0) {
+            if clearH > 0.5 {
+                Color.clear.frame(height: clearH)
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: tail)
+            }
+            Rectangle().fill(Color.black)
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: 40)
+        }
+    }
 
     // MARK: History
 
     @ViewBuilder private var history: some View {
         let items = playback.history
         if !items.isEmpty {
-            HStack {
-                Text("History").font(.headline)
-                Spacer()
-                Button("Clear", action: onClearHistory)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.bottom, 6)
+            // Reserve the header's vertical space; INVISIBLE on iOS 18 where the
+            // pinned overlay (pinnedHistoryHeader) draws the visible, sticky copy
+            // so it stays stuck to the top while these rows scroll under it. On
+            // iOS 17 (no overlay) it renders inline. Measured either way so the
+            // overlay lines up and knows where the rising card should push it off.
+            historyHeaderRow
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+                .opacity(usesStickyHeaders ? 0 : 1)
+                .allowsHitTesting(!usesStickyHeaders)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: HistoryHeaderHeightKey.self,
+                                           value: g.size.height)
+                })
 
             ForEach(Array(items.enumerated()), id: \.offset) { index, track in
                 row(track: track, orderPosition: index, dimmed: true)
@@ -210,25 +510,53 @@ struct PlayerQueuePanel: View {
         }
     }
 
-    // MARK: Now playing (anchor)
-
-    @ViewBuilder private var nowPlayingRow: some View {
-        if let track = playback.currentTrack {
-            row(track: track, orderPosition: playback.history.count, isCurrent: true)
-                .id(nowPlayingID)
+    /// The History section header: "History" on the left, "Clear" on the right.
+    /// Shared by the invisible reserved slot in the list and the visible pinned
+    /// overlay so the two align exactly.
+    private var historyHeaderRow: some View {
+        HStack {
+            Text("History").font(.headline)
+            Spacer()
+            Button("Clear", action: onClearHistory)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
 
-    // MARK: Continue Playing
+    // MARK: Queue controls + up-next
 
-    @ViewBuilder private var continuePlaying: some View {
+    /// Shuffle/repeat pills plus (when there's an up-next) the "Queue / Clear"
+    /// header. This whole block is what sticks to the top when you scroll down —
+    /// it sits directly beneath the now-playing card and heads the up-next list.
+    private var queueControlsBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            queueControls()
+            if !playback.upNext.isEmpty {
+                queueHeaderRow
+            }
+        }
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    /// The up-next section header: "Queue" on the left, "Clear" on the right —
+    /// mirrors the History header. Shared by the reserved inline slot and the
+    /// pinned overlay so the two align exactly.
+    private var queueHeaderRow: some View {
+        HStack {
+            Text("Queue").font(.headline)
+            Spacer()
+            Button("Clear", action: onClearQueue)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The up-next rows (the "Continue Playing" list). The section header lives in
+    /// `queueControlsBlock` above so it can pin with the pills.
+    @ViewBuilder private var upNextRows: some View {
         let items = playback.upNext
         if !items.isEmpty {
-            Text("Continue Playing")
-                .font(.headline)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
-
             let base = playback.history.count + 1
             ForEach(Array(items.enumerated()), id: \.offset) { index, track in
                 row(track: track, orderPosition: base + index, showsHandle: true)
@@ -239,8 +567,7 @@ struct PlayerQueuePanel: View {
     // MARK: Row
 
     private func row(track: Track, orderPosition: Int,
-                     dimmed: Bool = false, isCurrent: Bool = false,
-                     showsHandle: Bool = false) -> some View {
+                     dimmed: Bool = false, showsHandle: Bool = false) -> some View {
         Button {
             onSelect(orderPosition)
         } label: {
@@ -251,7 +578,6 @@ struct PlayerQueuePanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.title)
                         .font(.body)
-                        .fontWeight(isCurrent ? .semibold : .regular)
                         .lineLimit(1)
                     Text(track.artistName)
                         .font(.subheadline)
@@ -259,11 +585,7 @@ struct PlayerQueuePanel: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                if isCurrent {
-                    Image(mozz: "speaker.wave.2.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else if showsHandle {
+                if showsHandle {
                     // Static drag-handle placeholder (reorder deferred).
                     Image(mozz: "line.3.horizontal")
                         .font(.body)
@@ -277,3 +599,419 @@ struct PlayerQueuePanel: View {
         .buttonStyle(.plain)
     }
 }
+
+// MARK: - Two-detent "stuck to top" snap scroll
+
+/// **iOS 18+ manual snap.** We own the whole thing so the settle is fast and
+/// crisp: the native `ScrollTargetBehavior` uses Apple's fixed release
+/// deceleration, which is not tunable and felt too slow. Instead we track the
+/// live offset, and the instant the user lifts their finger we spring the scroll
+/// to the nearer detent ourselves with a fast, fully-controlled animation. Also
+/// owns the "breaking the seal" haptic (one firm impact when the content peels
+/// off a detent) and the reset-to-top on reopen.
+///
+/// Two resting states (never settles between them):
+///   • **Top (docked):** card pinned to the top edge — card + Continue Playing
+///     fill the screen, History hidden above. Offset = `detentTop`.
+///   • **Released:** card pushed just below the fold — History fills the screen.
+///     Offset = `max(0, detentTop − viewportH)`.
+/// Dragging within the one-viewport band between them snaps in the direction of
+/// the release flick (or, on a still release, to the nearer detent) — symmetric.
+/// Past the card (into Continue Playing) or deep into History, scrolling is free.
+@available(iOS 18.0, *)
+private struct QueueManualSnap18: ViewModifier {
+    var detentTop: CGFloat
+    var viewportH: CGFloat
+    var enabled: Bool
+    var resetToken: Int
+    /// Reports the live content offset so the panel can drive its pinned header.
+    var onScrollY: (CGFloat) -> Void
+
+    @State private var scrollPos = ScrollPosition()
+    @State private var currentY: CGFloat = 0
+    @State private var prevY: CGFloat = 0
+    /// Smoothed per-event offset delta → the release direction/velocity sign.
+    @State private var recentDelta: CGFloat = 0
+    /// True while the scroll rests on (near) a detent — gates the seal-break
+    /// haptic with hysteresis so it can't chatter at the boundary.
+    @State private var isDocked = true
+    /// Suppresses the haptic during the programmatic reset scroll on open.
+    @State private var hapticArmed = false
+    /// Once the user has dragged, stop auto-re-pinning as the detent settles.
+    @State private var hasUserScrolled = false
+    /// True while WE are animating the scroll — so our own motion neither
+    /// re-triggers a snap nor fires the haptic.
+    @State private var programmatic = false
+    @State private var sealTick = 0
+
+    private let sealBreakThreshold: CGFloat = 12
+    private let reSealThreshold: CGFloat = 3
+    private var bottomDetent: CGFloat { max(0, detentTop - viewportH) }
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($scrollPos)
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, y in
+                let d = y - prevY
+                prevY = y
+                recentDelta = recentDelta * 0.4 + d * 0.6
+                currentY = y
+                onScrollY(y)
+                updateSeal(y)
+            }
+            .onScrollPhaseChange { oldPhase, newPhase, _ in
+                if newPhase == .interacting { hasUserScrolled = true }
+                // Fire exactly once, the moment the finger lifts (whether or not
+                // momentum follows) — that's when we take over the settle. The
+                // top-pull-to-dismiss is owned by QueuePullGesture now, so here we
+                // only ever snap to the nearer detent.
+                if oldPhase == .interacting {
+                    snapToNearest()
+                }
+            }
+            .sensoryFeedback(.impact(weight: .heavy, intensity: 1.0), trigger: sealTick)
+            .onAppear { pinToTop() }
+            .onChange(of: resetToken) { _, _ in
+                hasUserScrolled = false
+                pinToTop()
+            }
+            .onChange(of: detentTop) { _, _ in
+                // Detent height can arrive/refine after first layout; keep the
+                // card pinned to the top until the user actually scrolls.
+                if !hasUserScrolled { pinToTop() }
+            }
+    }
+
+    /// Reset to the docked (card-at-top) position, un-animated, and re-arm the
+    /// seal-break haptic once it settles so a reopen never buzzes.
+    private func pinToTop() {
+        programmatic = true
+        isDocked = true
+        hapticArmed = false
+        scrollPos.scrollTo(y: detentTop)
+        // Re-apply next tick: a fresh ScrollView may not know its size yet.
+        DispatchQueue.main.async { scrollPos.scrollTo(y: detentTop) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            programmatic = false
+            hapticArmed = true
+        }
+    }
+
+    /// On finger-lift, spring the scroll to the nearer detent — fast and crisp.
+    private func snapToNearest() {
+        guard enabled, !programmatic else { return }
+        let top = detentTop
+        let bottom = bottomDetent
+        // Need a meaningful gap to snap across.
+        guard top - bottom > 40 else { return }
+        let y = currentY
+        // Only govern the one-viewport band between the two detents; deeper into
+        // History (above) or Continue Playing (below) is free scroll.
+        guard y > bottom - 0.5, y < top + 0.5 else { return }
+        // Honor the release flick's direction (offset ↑ → toward the top detent,
+        // offset ↓ → toward released); a still release falls back to midpoint.
+        let target: CGFloat
+        if recentDelta > 2 { target = top }
+        else if recentDelta < -2 { target = bottom }
+        else { target = (y - bottom) >= (top - bottom) / 2 ? top : bottom }
+        guard abs(target - y) > 0.5 else { return }
+        programmatic = true
+        // Kill any fling momentum FIRST. A fast flick hands the finger-lift off
+        // to the scroll view's deceleration; a spring `scrollTo` issued while it's
+        // still decelerating gets applied instantly (UIKit cancels the running
+        // deceleration and jumps), which reads as a jarring no-animation snap.
+        // Pinning to the current offset un-animated stops the deceleration, then
+        // we animate to the detent on the next runloop tick so the settle spring
+        // ALWAYS plays, regardless of flick speed.
+        scrollPos.scrollTo(y: y)
+        DispatchQueue.main.async {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+                scrollPos.scrollTo(y: target)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { programmatic = false }
+        }
+    }
+
+    /// Fire one firm haptic the instant the content peels off a detent (the
+    /// "breaking the seal" feel); re-arm once it settles back so every unstick
+    /// clicks. Hysteresis (`sealBreakThreshold` > `reSealThreshold`) prevents
+    /// chatter; suppressed while WE animate (`programmatic`).
+    private func updateSeal(_ y: CGFloat) {
+        let top = detentTop
+        let bottom = bottomDetent
+        guard top - bottom > 40 else { return }
+        let nearest = abs(y - top) <= abs(y - bottom) ? top : bottom
+        let dist = abs(y - nearest)
+        if isDocked {
+            if dist > sealBreakThreshold {
+                isDocked = false
+                if hapticArmed && !programmatic { sealTick &+= 1 }
+            }
+        } else if dist < reSealThreshold {
+            isDocked = true
+        }
+    }
+}
+
+// MARK: - Top-of-list pull-to-dismiss (per-gesture, start-position gated)
+
+/// **iOS 18+ pull-to-dismiss.** A non-consuming UIKit pan recognizer bridged into
+/// SwiftUI's gesture system, recognized *simultaneously* with the ScrollView's own
+/// pan (and with `cancelsTouchesInView = false`, so taps/buttons/scrolling are
+/// untouched). It gives the top-pull a true 1:1 finger feel that a SwiftUI
+/// `DragGesture` on a ScrollView cannot (the scroll cancels it).
+///
+/// **Scroll and drawer-pull are mutually exclusive, classified by where the touch
+/// began — never both at once:**
+///   • **Began mid-list** → a pure scroll for its ENTIRE life. Even when it reaches
+///     the top it just rubber-bands natively; the drawer never moves. So scrolling
+///     up to the top can't bleed into an accidental drawer pull — you have to lift
+///     and touch again once it's settled at the top.
+///   • **Began already settled at the top** → a drawer pull. The scroll's overscroll
+///     bounce is frozen so the content can't rubber-band, and the whole drawer drags
+///     1:1 with the finger. (Dragging UP still scrolls down into the list normally —
+///     freezing bounce only kills the past-the-edge rubber-band, not real scrolling.)
+@available(iOS 18.0, *)
+private struct QueuePullGesture: UIGestureRecognizerRepresentable {
+    /// Whether the list is settled at its very top RIGHT NOW. Sampled once, at the
+    /// instant each gesture begins, to classify it as scroll-vs-pull.
+    var atTop: Bool
+    /// Live 1:1 pull distance (points, ≥0). Maps straight to `dragY`. Only ever
+    /// non-zero for a gesture that began settled at the top.
+    var onPull: (CGFloat) -> Void
+    /// Finger-lift: (pull distance, real downward velocity in points/second). The
+    /// container decides dismiss-vs-settle.
+    var onEnd: (CGFloat, CGFloat) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        // Observe only — never steal touches from the scroll view or its rows.
+        pan.cancelsTouchesInView = false
+        pan.delegate = context.coordinator
+        return pan
+    }
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.atTop = atTop
+        context.coordinator.onPull = onPull
+        context.coordinator.onEnd = onEnd
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.handle(recognizer)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        /// Live "is the list settled at the top" flag, kept fresh via
+        /// `updateUIGestureRecognizer`. Read ONCE per gesture (at `.began`).
+        var atTop = true
+        var onPull: (CGFloat) -> Void = { _ in }
+        var onEnd: (CGFloat, CGFloat) -> Void = { _, _ in }
+        /// Whether THIS gesture began while the list was already settled at the very
+        /// top. Only such gestures can pull the drawer; a gesture that began mid-list
+        /// stays a pure scroll for its whole life, even after it reaches the top.
+        private var beganAtTop = false
+        /// The queue's own scroll view, captured so we can freeze its top rubber-band
+        /// for the duration of a drawer pull.
+        private weak var scrollView: UIScrollView?
+        /// Whether WE turned the scroll's bounce off (so we only restore what we took).
+        private var didFreezeBounce = false
+
+        // Ride alongside the scroll's own pan — never compete with it. Also the
+        // reliable place to grab the scroll view: the ScrollView's own pan reports
+        // its UIScrollView as `other.view`.
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            if scrollView == nil, let sv = other.view as? UIScrollView { scrollView = sv }
+            return true
+        }
+
+        // Always allowed to begin; the real gating (scroll-vs-pull) happens in
+        // `handle` off the start position.
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { true }
+
+        // Receive the touch even when it lands on the scroll view / its rows, so a
+        // pull can start from ANYWHERE in the panel (including on a queue row).
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldReceive touch: UITouch) -> Bool { true }
+
+        /// Freeze / restore the scroll's overscroll bounce. Freezing while the drawer
+        /// is being pulled pins the list's `contentOffset` at the top (no rubber-band),
+        /// so the content can NEVER move at the same time as the drawer — the two are
+        /// mutually exclusive. `bounces = false` only kills the past-the-edge
+        /// rubber-band, so scrolling DOWN into the list still works normally.
+        private func setBounceFrozen(_ frozen: Bool) {
+            guard let sv = scrollView else { return }
+            if frozen, !didFreezeBounce {
+                sv.bounces = false
+                didFreezeBounce = true
+            } else if !frozen, didFreezeBounce {
+                sv.bounces = true
+                didFreezeBounce = false
+            }
+        }
+
+        /// Depth-first search for the queue's scroll view under the gesture's view,
+        /// as a fallback if the simultaneity callback never handed it to us.
+        private func findScrollView(_ v: UIView?) -> UIScrollView? {
+            guard let v else { return nil }
+            if let sv = v as? UIScrollView { return sv }
+            for sub in v.subviews {
+                if let found = findScrollView(sub) { return found }
+            }
+            return nil
+        }
+
+        func handle(_ g: UIPanGestureRecognizer) {
+            // Measure in the WINDOW (a fixed space), NOT `g.view`: the gesture is
+            // attached inside the surface that `dragY` translates, so measuring in
+            // the view would move WITH the drawer — the finger's position relative
+            // to it stays constant as we pull, the translation stops growing, and
+            // the drag cancels itself (a feedback lock). The window never moves, so
+            // its translation is the true physical finger delta → real 1:1.
+            let space = g.view?.window
+            let t = g.translation(in: space).y
+            switch g.state {
+            case .began:
+                if scrollView == nil { scrollView = findScrollView(g.view) }
+                // Classify ONCE by start position. If the list was already settled at
+                // the top, this gesture pulls the drawer; freeze the bounce for its
+                // whole life so the content can never rubber-band alongside the pull.
+                // If it began mid-list, it stays a pure scroll — we never touch it, so
+                // reaching the top just rubber-bands natively and the drawer stays put.
+                beganAtTop = atTop
+                if beganAtTop { setBounceFrozen(true) }
+            case .changed:
+                // Only a top-started gesture drives the drawer, and only downward
+                // (max(0,…)): dragging up from the top just scrolls into the list.
+                if beganAtTop { onPull(max(0, t)) }
+            case .ended, .cancelled, .failed:
+                if beganAtTop { onEnd(max(0, t), g.velocity(in: space).y) }
+                beganAtTop = false
+                setBounceFrozen(false)
+            default:
+                break
+            }
+        }
+    }
+}
+
+/// Applies the iOS-18 pull gesture (a no-op on iOS 17, where the whole sticky
+/// overscroll machinery is disabled). Lets the caller attach it with a plain
+/// `.modifier(...)` without an inline `if #available` at the call site.
+private struct QueuePullGestureModifier: ViewModifier {
+    var atTop: Bool
+    var onPull: (CGFloat) -> Void
+    var onEnd: (CGFloat, CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.gesture(QueuePullGesture(atTop: atTop, onPull: onPull, onEnd: onEnd))
+        } else {
+            content
+        }
+    }
+}
+
+/// iOS 17 fallback: native symmetric snap via `ScrollTargetBehavior`, a no-op
+/// under Reduce Motion. (No seal-break haptic here — that needs the iOS 18
+/// `onScrollGeometryChange` offset stream.)
+private struct QueueSnapModifier: ViewModifier {
+    /// Content offset at which the now-playing card is pinned to the TOP of the
+    /// viewport (= the History section's height).
+    var detentTop: CGFloat
+    var enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled, #available(iOS 17.0, *) {
+            content.scrollTargetBehavior(QueueSnapBehavior(detentTop: detentTop))
+        } else {
+            content
+        }
+    }
+}
+
+/// The now-playing card behaves like a header that's **stuck to the top** of the
+/// queue page. There are only two resting states, and you can never settle
+/// between them:
+///   • **Top (stuck):**  card pinned to the top edge — card + Continue Playing
+///     fill the screen, History hidden above. Content offset = `detentTop`.
+///   • **Released:**      card pushed just below the fold (off the bottom edge) —
+///     History fills the whole screen. Content offset = `detentTop − viewportH`.
+/// Dragging within the one-viewport band between them snaps to whichever side the
+/// *predicted* landing is nearer (so a fling completes, a nudge springs back) —
+/// symmetric in both directions. Past the card (into Continue Playing) or deep
+/// into a long History, scrolling is free.
+@available(iOS 17.0, *)
+private struct QueueSnapBehavior: ScrollTargetBehavior {
+    var detentTop: CGFloat
+
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        let top = detentTop
+        let viewportH = context.containerSize.height
+        let bottom = max(0, top - viewportH)
+        let y = target.rect.minY
+        // Need a real History section and a meaningful gap to snap across.
+        guard viewportH > 1, top - bottom > 40 else { return }
+        // Only govern the band between the two states.
+        guard y > bottom, y < top else { return }
+        // `target.rect` is the *predicted* landing (deceleration already folded
+        // in), so a simple midpoint threshold naturally honors fling velocity.
+        let mid = (top + bottom) / 2
+        target.rect.origin.y = y >= mid ? top : bottom
+    }
+}
+
+// MARK: - Shuffle / repeat pill
+
+/// A capsule control for the queue's shuffle / repeat toggles. Deliberately
+/// NEUTRAL (monochrome) — the player floats over arbitrary artwork colors, so a
+/// brand tint would clash. Active reads as a brighter, more opaque capsule; off
+/// is dim. An optional badge (e.g. "1" for repeat-one) rides over the glyph in
+/// the same tint.
+struct QueuePill: View {
+    let glyph: AppIcon
+    let label: String
+    var active: Bool
+    var badge: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                ZStack(alignment: .topTrailing) {
+                    glyph.styled(size: 18)
+                    if let badge {
+                        Text(badge)
+                            .font(.system(size: 9, weight: .heavy))
+                            .offset(x: 7, y: -6)
+                    }
+                }
+                Text(label).font(.subheadline.weight(.medium)).lineLimit(1)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .background(
+                // Flat translucent white — renders uniformly over any artwork
+                // backdrop (a material blurred the gradient unevenly and looked
+                // muddy). Brighter when active.
+                Capsule().fill(Color.white.opacity(active ? 0.20 : 0.09))
+            )
+            .overlay(
+                Capsule().strokeBorder(Color.white.opacity(active ? 0.28 : 0.12),
+                                       lineWidth: 1)
+            )
+            .foregroundStyle(active ? Color.primary : Color.secondary)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+

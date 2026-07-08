@@ -302,6 +302,21 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         refreshWrapCache()
     }
 
+    /// Drop the queued "up next" (everything after the current track), keeping
+    /// the played history and the current track. The current track stays where
+    /// it is (now the last row). Base `tracks` is rebuilt to the surviving set so
+    /// indices stay consistent. No-op when nothing is queued after the current.
+    public mutating func clearUpNext() {
+        guard order.indices.contains(position), position + 1 < order.count else { return }
+        let survivingBase = Array(order[0...position])
+        let newTracks = survivingBase.map { tracks[$0] }
+        tracks = newTracks
+        order = Array(newTracks.indices)
+        position = newTracks.count - 1
+        nextLoopOrder = nil
+        refreshWrapCache()
+    }
+
     // MARK: Repeat
 
     /// Set the repeat mode. Routed through a method (rather than a settable

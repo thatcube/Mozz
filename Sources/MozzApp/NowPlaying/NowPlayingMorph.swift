@@ -36,6 +36,9 @@ struct NowPlayingMorphContainer: View {
     @State private var p: CGFloat = 0
     /// Live drag translation (points) while the open drawer is being pulled down.
     @State private var dragY: CGFloat = 0
+    /// True once a queue top-overscroll has committed to dismissing the drawer, so
+    /// trailing overscroll callbacks during teardown don't re-inflate `dragY`.
+    @State private var dismissingViaPull = false
     /// True only during the collapse, so the downward receive-bounce fires on the
     /// way into the island and never while opening or dragging.
     @State private var receiving = false
@@ -58,6 +61,26 @@ struct NowPlayingMorphContainer: View {
     /// Whether the queue panel (Continue Playing + History) is showing in place of
     /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
     @State private var queueOpen = false
+    /// Queue-open animation progress (0 = hero cover big-center, 1 = cover docked
+    /// into the queue's compact-header thumbnail slot). Driven as a spring alongside
+    /// `queueOpen` so the single traveling artwork *slides* into place instead of the
+    /// big cover cross-fading with a separate thumbnail.
+    @State private var queueP: CGFloat = 0
+    /// True only once the queue-open spring has fully settled (and false the moment
+    /// a close/open starts, and while the queue is closed). Gates the seamless
+    /// hand-off between the traveling artwork/star (shown during the transition)
+    /// and the card's own scrolling artwork/star (shown at rest).
+    @State private var queueSettled = false
+    /// Bumped every time the queue opens, so the panel resets its scroll to the
+    /// now-playing card at the top (never left showing History or scrolled) on
+    /// each reopen — not just the first appearance.
+    @State private var queueOpenNonce = 0
+    /// Measured global-space frames of the hero and card star+overflow reserved
+    /// slots. The single traveling star cluster interpolates between their centers
+    /// by `queueP`, so it lands exactly on either slot regardless of Dynamic Type
+    /// or the rating/like cluster's variable width.
+    @State private var heroStarRect: CGRect = .zero
+    @State private var cardStarRect: CGRect = .zero
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -86,6 +109,16 @@ struct NowPlayingMorphContainer: View {
 
     private var bgStyle: PlayerBackgroundStyle {
         PlayerBackgroundStyle(rawValue: bgStyleRaw) ?? .default
+    }
+    /// The color scheme the player surface presents its content in: forced dark on
+    /// the artwork/OLED backdrops (the surface is dark regardless of the app's
+    /// appearance), or the system scheme in `theme` mode. Applied to the drawer body
+    /// AND the root-level traveling star cluster so the star/overflow keep the same
+    /// on-surface color as they hand off between the two (otherwise the traveling
+    /// cluster — which lives outside the surface — would resolve `.primary` to black
+    /// on a light-appearance device and pop to white the instant the card takes over).
+    private var surfaceColorScheme: ColorScheme {
+        bgStyle == .theme ? systemColorScheme : .dark
     }
     /// Identity for the palette task: re-derive when the artwork changes.
     private var artworkToken: String {
@@ -116,8 +149,9 @@ struct NowPlayingMorphContainer: View {
             GeometryReader { geo in
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
-                              pRaw: p, dragY: dragY, receiving: receiving,
-                              isExpanded: ui.isFullPresented, minimize: minimize)
+                              pRaw: p, receiving: receiving,
+                              isExpanded: ui.isFullPresented, minimize: minimize,
+                              queue: queueP)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     // Enlarged, invisible tap target so edge taps open the player
@@ -165,6 +199,7 @@ struct NowPlayingMorphContainer: View {
                         .opacity(m.miniOpacity)
                         .allowsHitTesting(m.p < 0.5)
                     travelingArtwork(m)
+                    travelingStarOverflow(m)
                     // Instant, whole-island press detection. A UIKit 0-duration
                     // long-press recognizer (installed on the window, so it sits
                     // above the real touch target that SwiftUI draws into a shared
@@ -195,6 +230,15 @@ struct NowPlayingMorphContainer: View {
                         .position(x: m.surfaceCenterX, y: m.islandTapCenterY)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                // Name this (pre-drag-offset) space so the traveling star's slot
+                // rects are measured relative to the drawer itself, NOT the screen.
+                // The whole ZStack is shifted by `DragTranslate(dragY)` further out;
+                // if the slots were read in `.global` they'd move by `dragY` too, and
+                // the traveling cluster — already inside that offset — would travel at
+                // 2× the drag and visibly detach from the content. Measuring here (a
+                // coordinate space INSIDE the offset) makes the rects drag-invariant,
+                // so the single container offset moves the cluster and content as one.
+                .coordinateSpace(.named(Self.morphRootSpace))
                 // Press-scale the WHOLE island as one unit: scale the entire
                 // overlay around the island's centre, so glass, artwork and text
                 // grow together. When docked the rest of the overlay is
@@ -211,6 +255,10 @@ struct NowPlayingMorphContainer: View {
                 .overlayPreferenceValue(PlayerRatingAnchorKey.self) { anchor in
                     ratingPickerOverlay(anchor: anchor, geo: geo)
                 }
+                .onPreferenceChange(StarSlotKey.self) { slots in
+                    if let hero = slots["hero"] { heroStarRect = hero }
+                    if let card = slots["card"] { cardStarRect = card }
+                }
                 .onChange(of: playback.currentTrack?.id) { _, _ in
                     playerRating = playback.currentTrack?.rating
                     ratingPickerOpen = false
@@ -218,7 +266,6 @@ struct NowPlayingMorphContainer: View {
                 .onChange(of: ui.isFullPresented) { _, open in
                     if !open {
                         ratingPickerOpen = false
-                        queueOpen = false
                     }
                 }
                 .onAppear { playerRating = playback.currentTrack?.rating }
@@ -239,6 +286,14 @@ struct NowPlayingMorphContainer: View {
                 .onChange(of: prefetchToken, initial: true) { _, _ in
                     prefetchNearbyArtwork()
                 }
+                // Live finger translation for drag-to-dismiss, applied as ONE
+                // container offset here — isolated behind a binding so reading
+                // `dragY` re-runs only this modifier, never the parent body. The
+                // morph geometry above is dragY-free, so a drag no longer rebuilds
+                // the surface + the whole queue subtree every frame (which read as
+                // stutter). `$dragY` is a binding, so the parent body takes no
+                // dependency on the value and isn't invalidated as it changes.
+                .modifier(DragTranslate(dragY: $dragY))
             }
             .ignoresSafeArea()
         }
@@ -339,12 +394,24 @@ struct NowPlayingMorphContainer: View {
 
             drawerBody(m)
                 .frame(width: m.width, height: m.surfaceHExpanded, alignment: .top)
+                // Drag-to-dismiss anywhere the content doesn't claim the touch:
+                // a clear, hit-testable layer directly behind the body. Interactive
+                // children (buttons, scrubber, the queue scroll) sit in front and
+                // consume their own gestures, so only the non-interactive gaps fall
+                // through to this dismiss drag. (The queue's own top-overscroll →
+                // dismiss is handled separately via onPull.)
+                .background(
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(dragGesture)
+                        .allowsHitTesting(m.p > 0.5)
+                )
                 .opacity(m.bodyOpacity)
                 .allowsHitTesting(m.p > 0.5)
                 // On the adaptive/OLED backdrop the surface is dark-colored, so
                 // render the drawer content light (matches the detail pages). In
                 // `theme` mode it follows the system scheme.
-                .environment(\.colorScheme, bgStyle == .theme ? systemColorScheme : .dark)
+                .environment(\.colorScheme, surfaceColorScheme)
         }
         .frame(width: m.surfaceW, height: m.surfaceH, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
@@ -357,23 +424,110 @@ struct NowPlayingMorphContainer: View {
     private func travelingArtwork(_ m: Morph) -> some View {
         // Apple-Music-style paused shrink: at rest the cover sits 25% smaller,
         // growing to full size while playing. Only in the expanded player (scaled
-        // by `m.p`) so the island/mini art is unaffected.
+        // by `m.p`) so the island/mini art is unaffected — and unwound (×(1−q)) as
+        // the cover docks into the fixed-size queue thumbnail slot, so it fills that
+        // slot exactly instead of sitting under-sized.
         let isPlaying = playback.snapshot.status == .playing || playback.snapshot.status == .buffering
-        let pausedScale = 1 - Self.pausedArtShrink * m.p * (isPlaying ? 0 : 1)
+        let pausedScale = 1 - Self.pausedArtShrink * m.p * (1 - m.q) * (isPlaying ? 0 : 1)
         // Shadow only once settled, at a CONSTANT blur radius: an animated blur
         // radius re-rasterizes the shadow every frame (a classic hitch during the
         // expand). Gated on `settled` + faded via color opacity, the shadow costs
-        // nothing during the transition and rasterizes once at rest.
+        // nothing during the transition and rasterizes once at rest. Dropped while
+        // the queue is open — the compact thumbnail carries no drop shadow.
         let showShadow = settled && !queueOpen
         return MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
             .scaleEffect(pausedScale)
             .shadow(color: .black.opacity(showShadow ? 0.35 : 0), radius: 16, y: 8)
             .position(x: m.artCenterX, y: m.artCenterY)
-            .opacity(queueOpen ? 0 : 1)
+            // Hidden once the queue settles: the card's own (scrolling) artwork
+            // takes over at the identical slot, so it can scroll & clip with the
+            // list. Instant swap at a coincident position → no pop.
+            .opacity(queueSettled ? 0 : 1)
             .allowsHitTesting(false)
             .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.72),
                        value: isPlaying)
             .animation(.easeOut(duration: 0.3), value: showShadow)
+    }
+
+    // MARK: Traveling star + overflow (single cluster, hero ⇄ queue card slot)
+
+    /// The one star + overflow cluster that physically travels between the hero
+    /// title row and the queue card's trailing slot, driven by `queueP`. It's the
+    /// real interactive rating/like control while the queue is closed or mid-
+    /// transition; once the queue settles it hands off to the card's own scrolling
+    /// cluster (so the star scrolls & clips with the list). Trailing-aligned in
+    /// both states, so the cluster's variable width never shifts the landing.
+    @ViewBuilder
+    private func travelingStarOverflow(_ m: Morph) -> some View {
+        // Position is a function of the QUEUE progress only (hero ⇄ card). Stay
+        // MOUNTED across every drawer present/dismiss — hidden only by opacity
+        // while docked — so the cluster is never re-inserted mid-present. (It used
+        // to unmount below p=0.5; re-mounting inside the present spring made
+        // SwiftUI interpolate `.position` from its last queue-open slot, so the
+        // star flew UP from the card position on every re-open.) The only travel is
+        // now driven by `queueP` when the queue button is pressed. Still unmounts at
+        // `queueSettled` (the card cluster takes over) — but that flips outside any
+        // animation, so it never animates the position.
+        let center = lerpPoint(heroStarRect.isEmpty ? nil : CGPoint(x: heroStarRect.midX, y: heroStarRect.midY),
+                               cardStarRect.isEmpty ? nil : CGPoint(x: cardStarRect.midX, y: cardStarRect.midY),
+                               m.q)
+        if let center, !queueSettled {
+            // Only the expanded player's cluster is interactive and owns the rating
+            // anchor; the docked (invisible) one must not publish an anchor or steal
+            // touches, so exactly one anchor is ever published.
+            let active = m.p > 0.5
+            starOverflowCluster(interactive: active, emitsAnchor: active)
+                .position(x: center.x, y: center.y)
+                .opacity(clamp(m.bodyOpacity))
+                // Match the drawer's on-surface color scheme so the star/overflow are
+                // the same white here as in the settled card — no color pop at hand-off.
+                .environment(\.colorScheme, surfaceColorScheme)
+        }
+    }
+
+    /// Interpolate between two optional points; if one is missing, use the other
+    /// (so the cluster still has a home before both slots have been measured).
+    private func lerpPoint(_ a: CGPoint?, _ b: CGPoint?, _ t: CGFloat) -> CGPoint? {
+        switch (a, b) {
+        case let (a?, b?): return CGPoint(x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t))
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        default: return nil
+        }
+    }
+
+    /// The star (rating on Plex / like on Jellyfin) + overflow cluster, shared by
+    /// the traveling instance and the two reserved measuring slots.
+    @ViewBuilder
+    private func starOverflowCluster(interactive: Bool, emitsAnchor: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let track = playback.currentTrack {
+                if env.usesRatings {
+                    FluidRatingControl(
+                        rating: $playerRating,
+                        onSet: { setPlayerRating($0, track: track) },
+                        onRequestPicker: {
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
+                        },
+                        emitsAnchor: emitsAnchor
+                    )
+                } else {
+                    PlayerLikeControl(track: track)
+                }
+            }
+            // Per-track overflow — shares the row/detail action set (P1 factory).
+            if let track = playback.currentTrack {
+                Menu {
+                    TrackActionButtons(track: track, downloadState: nil, internalId: nil, surface: .player)
+                } label: {
+                    AppIcon.overflow.styled(size: 22)
+                        .foregroundStyle(.primary)
+                }
+                .accessibilityLabel("More actions")
+            }
+        }
+        .font(.title3)
+        .allowsHitTesting(interactive)
     }
 
     /// How much the cover shrinks when paused (fraction), in the expanded player.
@@ -389,7 +543,6 @@ struct NowPlayingMorphContainer: View {
             // trailing Spacer for vertical space, so the controls below never
             // shift and the queue list isn't squished.
             header(m)
-                .opacity(queueOpen ? 0 : 1)
                 .allowsHitTesting(!queueOpen)
                 .overlay(alignment: .top) {
                     if queueOpen {
@@ -436,7 +589,7 @@ struct NowPlayingMorphContainer: View {
                 .frame(width: m.expArtSide, height: m.expArtSide)
                 .padding(.top, 26)
 
-            titleRow
+            titleRow(m)
                 .padding(.top, 22)
                 .padding(.horizontal, 32)
         }
@@ -445,9 +598,12 @@ struct NowPlayingMorphContainer: View {
         .gesture(dragGesture)
     }
 
-    /// Left-aligned title/artist with the rating star and a (dummy) overflow menu
-    /// on the right — the Apple-Music now-playing header.
-    private var titleRow: some View {
+    /// Left-aligned title/artist with a reserved trailing slot for the traveling
+    /// star + overflow cluster (which is drawn at the morph root). On queue-open
+    /// the title/artist slide toward the card's title anchor and fade out (a
+    /// directional cross-fade — the card's smaller title fades in at rest); the
+    /// star + overflow travel as a single moving cluster.
+    private func titleRow(_ m: Morph) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(playback.currentTrack?.title ?? "")
@@ -455,69 +611,136 @@ struct NowPlayingMorphContainer: View {
                 Text(playback.currentTrack?.artistName ?? "")
                     .font(.title3).foregroundStyle(.secondary).lineLimit(1)
             }
+            .offset(heroTitleTravel(m))
+            // Fade out on a per-frame curve (EarlyFade is Animatable — a plain
+            // `.opacity(1 - m.q * k)` only interpolates its 1→0 endpoints, so `k`
+            // has no visible effect). Steepness 2 ⇒ gone by ~q=0.5, i.e. a graceful
+            // fade that clears the hero titles by about the halfway point of the
+            // upward travel, instead of vanishing so early it reads as no animation.
+            .modifier(EarlyFade(progress: m.q, steepness: 2))
             Spacer(minLength: 8)
-            if let track = playback.currentTrack {
-                if env.usesRatings {
-                    FluidRatingControl(
-                        rating: $playerRating,
-                        onSet: { setPlayerRating($0, track: track) },
-                        onRequestPicker: {
-                            withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
-                        }
-                    )
-                } else {
-                    PlayerLikeControl(track: track)
-                }
-            }
-            // Per-track overflow — shares the row/detail action set (P1 factory).
-            if let track = playback.currentTrack {
-                Menu {
-                    TrackActionButtons(track: track, downloadState: nil, internalId: nil, surface: .player)
-                } label: {
-                    AppIcon.overflow.styled(size: 22)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel("More actions")
-            }
+            // Reserved (invisible, non-interactive) cluster: holds the trailing
+            // space so the title doesn't stretch under the traveling star, and
+            // publishes its center so the traveling cluster lands here at rest.
+            starOverflowCluster(interactive: false, emitsAnchor: false)
+                .opacity(0)
+                .background(starSlotReader("hero"))
         }
         .font(.title3)
     }
 
-    /// The queue view shown in place of the hero when `queueOpen`: a compact
-    /// now-playing header (drag to dismiss) over the scrollable History /
-    /// Continue-Playing list.
+    /// Offset that slides the hero title/artist toward the card's title anchor as
+    /// the queue opens (leading-shifted past the artwork; vertical from the hero
+    /// row center to the measured card row center). Purely directional — it fades
+    /// out via `opacity(1 - q)` well before reaching the card.
+    private func heroTitleTravel(_ m: Morph) -> CGSize {
+        let dy = (heroStarRect.isEmpty || cardStarRect.isEmpty)
+            ? 0 : (cardStarRect.midY - heroStarRect.midY)
+        return CGSize(width: 56 * m.q, height: dy * m.q)
+    }
+
+    /// Named coordinate space for measuring the traveling star's slot rects,
+    /// declared on the ZStack that lives INSIDE `DragTranslate`. Reading the slots
+    /// here (rather than `.global`) keeps them invariant to the drag offset, so the
+    /// cluster doesn't double-count `dragY` and detach from the content.
+    private static let morphRootSpace = "morphRoot"
+
+    /// Measures a named star slot's frame in the drawer-local coordinate space (see
+    /// `morphRootSpace`) for the traveling cluster.
+    private func starSlotReader(_ key: String) -> some View {
+        GeometryReader { g in
+            Color.clear.preference(key: StarSlotKey.self,
+                                   value: [key: g.frame(in: .named(Self.morphRootSpace))])
+        }
+    }
+
+    /// The queue view shown in place of the hero when `queueOpen`: a pinned
+    /// grabber over the scrollable History / now-playing card / Continue-Playing
+    /// list. The card scrolls as one unit with the list (see `PlayerQueuePanel`).
     private func queueTop(_ m: Morph) -> some View {
         VStack(spacing: 0) {
             Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
                 .padding(.top, m.safeTop + 8)
-
-            queueCompactHeader
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 10)
                 .contentShape(Rectangle())
                 .gesture(dragGesture)
 
             PlayerQueuePanel(
                 playback: playback,
+                queueP: m.q,
+                resetToken: queueOpenNonce,
                 onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
-                onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } }
+                onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } },
+                onClearQueue: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearUpNext() } },
+                onPull: { raw in handleQueuePull(raw) },
+                onPullEnd: { raw, velocity in handleQueuePullEnd(raw, velocity) },
+                card: { nowPlayingCard(m) },
+                queueControls: { shuffleRepeatPills }
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// Compact now-playing row at the top of the queue: thumbnail + title/artist.
-    private var queueCompactHeader: some View {
+    /// The now-playing card at the center of the queue: artwork + title/artist +
+    /// star/overflow. (The shuffle/repeat pills sit just below it in the queue's
+    /// sticky controls block, not in this card.) The artwork and star are reserved
+    /// (empty) slots during the open transition — the traveling artwork/star cover
+    /// them — and become the card's own scrolling copies once the queue settles.
+    private func nowPlayingCard(_ m: Morph) -> some View {
         HStack(spacing: 12) {
-            MorphArtwork(track: playback.currentTrack, side: 52, cornerRadius: 8)
+            // Card's own artwork — visible once settled so it scrolls & clips
+            // with the list; hidden during the transition (the traveling
+            // artwork covers this exact slot). Tapping it (once settled) closes
+            // the queue and returns to the now-playing hero.
+            MorphArtwork(track: playback.currentTrack,
+                         side: Morph.queueArtSide, cornerRadius: Morph.queueArtRadius)
+                .opacity(queueSettled ? 1 : 0)
+                .contentShape(Rectangle())
+                .onTapGesture { if queueSettled { setQueue(open: false) } }
+                .allowsHitTesting(queueSettled)
             VStack(alignment: .leading, spacing: 2) {
                 Text(playback.currentTrack?.title ?? "")
                     .font(.headline).lineLimit(1)
                 Text(playback.currentTrack?.artistName ?? "")
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer(minLength: 0)
+            // Rise into place from a little below as the queue opens, so the
+            // card titles appear to "catch" the hero titles fading out above
+            // them — a directional cross-fade, not a plain fade.
+            .offset(y: (1 - m.q) * 14)
+            .opacity(Double(min(1, m.q * 1.5)))
+            Spacer(minLength: 8)
+            // Card's own star + overflow at its final resting slot. Hidden during
+            // the open transition (the traveling cluster covers this slot and lands
+            // here); revealed the instant the queue settles. Interactive + owns the
+            // rating anchor only once settled (the hero cluster owns it during the
+            // open, so exactly one anchor is ever published).
+            starOverflowCluster(interactive: queueSettled, emitsAnchor: queueSettled)
+                .opacity(queueSettled ? 1 : 0)
+                .background(starSlotReader("card"))
+        }
+        .padding(.top, 8)
+    }
+
+    /// Shuffle + repeat pills directly beneath the current song.
+    private var shuffleRepeatPills: some View {
+        let snapshot = playback.snapshot
+        return HStack(spacing: 12) {
+            QueuePill(glyph: AppIcon.shuffle, label: "Shuffle",
+                      active: snapshot.isShuffled) {
+                playback.toggleShuffle()
+                // Toggling shuffle rewrites the play order (enabling pins the
+                // current track to the front so history empties; disabling
+                // restores it), which swings `detentTop`. Re-dock so the current
+                // song snaps back to the top with the fresh order instead of
+                // leaving the user stranded mid-list.
+                queueOpenNonce &+= 1
+            }
+            QueuePill(glyph: AppIcon.repeatTracks,
+                      label: snapshot.repeatMode == .one ? "Repeat One" : "Repeat",
+                      active: snapshot.repeatMode != .off,
+                      badge: snapshot.repeatMode == .one ? "1" : nil) {
+                playback.cycleRepeatMode()
+            }
         }
     }
 
@@ -543,6 +766,28 @@ struct NowPlayingMorphContainer: View {
             }
     }
 
+    /// Live top-pull from the queue: once the list is at its very top and the
+    /// finger keeps dragging down, the whole player drawer follows the finger 1:1
+    /// (the queue cancels its own rubber-band so the content stays rigid and only
+    /// the drawer moves), toward dismissal.
+    private func handleQueuePull(_ pull: CGFloat) {
+        guard p > 0.5, !dismissingViaPull else { return }
+        dragY = pull
+    }
+
+    /// Finger-lift while pulling the queue's top down: dismiss if pulled far or
+    /// flung down hard (real velocity, points/second); otherwise spring the drawer
+    /// back to rest.
+    private func handleQueuePullEnd(_ pull: CGFloat, _ velocity: CGFloat) {
+        guard p > 0.5, !dismissingViaPull else { return }
+        if pull > 120 || velocity > 800 {
+            dismissingViaPull = true
+            ui.isFullPresented = false
+        } else {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { dragY = 0 }
+        }
+    }
+
     /// The single animator.
     /// - `open`  grows the drawer.
     /// - `!open` collapses it into the island. The spring itself is unchanged
@@ -552,6 +797,9 @@ struct NowPlayingMorphContainer: View {
     ///   deliberate downward one.
     private func animate(to open: Bool) {
         if open {
+            // Clear the pull-dismiss latch on (re)present; it stays set through the
+            // whole collapse so trailing overscroll callbacks can't re-inflate dragY.
+            dismissingViaPull = false
             receiving = false
             settled = false
             withAnimation(.spring(response: 0.5, dampingFraction: 0.82)) {
@@ -563,10 +811,43 @@ struct NowPlayingMorphContainer: View {
         } else {
             receiving = true
             settled = false
+            // Keep `queueSettled` TRUE through the collapse: the card's own in-flow
+            // star + artwork then ride down and fade WITH the drawer body (which is
+            // clipped to the surface). Flipping it false here would revive the
+            // root-level traveling star and, as `queueP`→0, send it flying UP toward
+            // the hero slot — off the top of the screen, since the traveling cluster
+            // sits OUTSIDE the surface clip. Reset once fully collapsed instead.
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                p = 0; dragY = 0
+                p = 0; dragY = 0; queueP = 0
             } completion: {
                 receiving = false
+                // Fully collapsed now (body faded out): reset the queue flags so a
+                // fresh present starts from the hero header with the traveling star,
+                // without any flash.
+                queueOpen = false
+                queueSettled = false
+            }
+        }
+    }
+
+    /// Open/close the queue, driving `queueP` as a spring and managing
+    /// `queueSettled` (the traveling ⇄ card artwork/star hand-off flag).
+    private func setQueue(open: Bool) {
+        if open {
+            queueOpen = true
+            queueSettled = false
+            queueOpenNonce &+= 1
+            withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                queueP = 1
+            } completion: {
+                queueSettled = true
+            }
+        } else {
+            queueSettled = false
+            withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                queueP = 0
+            } completion: {
+                queueOpen = false
             }
         }
     }
@@ -620,7 +901,7 @@ struct NowPlayingMorphContainer: View {
             #endif
             Spacer()
             Button {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { queueOpen.toggle() }
+                setQueue(open: !queueOpen)
             } label: {
                 AppIcon.queue.styled(size: 26)
                     .foregroundStyle(queueOpen ? Color.primary : Color.secondary)
@@ -1259,8 +1540,43 @@ private struct IslandSlideText: View {
 
 // MARK: - Geometry
 
-/// All frames and opacities are pure functions of `(p, dragY)` and the screen
-/// metrics, so the whole morph is deterministic and reversible.
+/// Applies the live drag-to-dismiss translation as a single `.offset`, reading
+/// `dragY` through a binding. Because the parent passes `$dragY` (a binding, not
+/// the value), the parent body registers NO dependency on `dragY`, so a drag
+/// re-runs only this modifier and re-applies the offset to the already-built
+/// drawer — it never re-executes the morph geometry or the heavy queue subtree.
+/// This is the same re-render isolation the island glow/content already rely on.
+private struct DragTranslate: ViewModifier {
+    @Binding var dragY: CGFloat
+    func body(content: Content) -> some View {
+        content.offset(y: max(0, dragY))
+    }
+}
+
+/// Fades a view out on an animated `progress` (0 → 1) with a front-loaded curve
+/// that reaches zero EARLY — at `1/steepness` of the progress — instead of at the
+/// end. Implemented as an `Animatable` modifier so SwiftUI samples the curve every
+/// frame: a plain `.opacity(1 - progress * k)` computed from animated state only
+/// interpolates its start/end opacity along the spring, so `k` has no visible
+/// effect and the fade stays locked to the travel. Driving `animatableData` with
+/// `progress` forces the non-linear opacity to be evaluated per interpolated step.
+private struct EarlyFade: ViewModifier, Animatable {
+    var progress: CGFloat
+    var steepness: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.opacity(Double(max(0, 1 - progress * steepness)))
+    }
+}
+
+/// All frames and opacities are pure functions of `p` (and `queue`) and the
+/// screen metrics, so the whole morph is deterministic and reversible. The live
+/// finger translation (`dragY`) is applied OUTSIDE this geometry as a single
+/// container offset (see `DragTranslate`) so a drag never re-derives the morph or
+/// rebuilds the heavy queue subtree.
 private struct Morph {
     let width: CGFloat
     let height: CGFloat
@@ -1269,7 +1585,6 @@ private struct Morph {
     /// Raw spring value; may briefly leave [0,1]. Everything below uses the
     /// clamped `p`, so the spring's overshoot can't wobble the surface.
     let pRaw: CGFloat
-    let dragY: CGFloat
     /// True during the collapse — enables the upward receive-bounce.
     let receiving: Bool
     /// Target state: `true` while expanded/opening, `false` while docked/collapsing.
@@ -1279,8 +1594,12 @@ private struct Morph {
     /// Tab-bar minimize progress (0…1). While docked, the island slides DOWN into
     /// the tab bar's centre pill as this →1. Unwound as the drawer expands.
     let minimize: CGFloat
+    /// Queue-open progress (0 = hero cover big-center, 1 = cover docked into the
+    /// queue's compact-header thumbnail slot). Only meaningful while fully expanded.
+    let queue: CGFloat
 
     var p: CGFloat { min(max(pRaw, 0), 1) }
+    var q: CGFloat { min(max(queue, 0), 1) }
 
     // MARK: tunables
     static let islandHeight: CGFloat = BottomBar.islandHeight
@@ -1363,7 +1682,7 @@ private struct Morph {
     // p-only ("natural") surface frame, before the scroll-minimize drop.
     private var baseH_p: CGFloat { lerp(Self.islandHeight, surfaceHExpanded, p) }
     private var surfaceH_p: CGFloat { baseH_p + receiveGrow }
-    private var bottomEdge_p: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) + baseH_p }
+    private var bottomEdge_p: CGFloat { lerp(islandTop, 0, p) + baseH_p }
     private var centerY_p: CGFloat { bottomEdge_p - surfaceH_p / 2 }
 
     var surfaceW: CGFloat { lerp(lerp(islandW, width, p), centerPillW, dropT) }
@@ -1375,7 +1694,7 @@ private struct Morph {
     /// The surface's top edge WITHOUT the receive-grow. The mini controls ride
     /// this down into the island, so the grow can raise the glass above them
     /// without carrying them up.
-    var baseTop: CGFloat { lerp(islandTop, 0, p) + max(0, dragY) }
+    var baseTop: CGFloat { lerp(islandTop, 0, p) }
     /// Center of the mini-control row: rides the top edge down (resting centered
     /// in the island at p=0), and drops to the bar centre when minimized.
     var miniCenterY: CGFloat { lerp(baseTop + Self.islandHeight / 2, barCenterY, dropT) }
@@ -1384,15 +1703,31 @@ private struct Morph {
     var islandDropH: CGFloat { lerp(Self.islandHeight, BottomBar.minElementH, dropT) }
 
     // Traveling artwork -------------------------------------------------------
-    var artSide: CGFloat { lerp(Self.islandArtSide, expArtSide, p) }
-    var artRadius: CGFloat { lerp(Self.islandArtRadius, Self.expandedArtRadius, p) }
+    // Queue-card slot — the now-playing card's artwork position the cover travels
+    // INTO when the queue opens. Constants MIRROR the `queueTop` + `nowPlayingCard`
+    // layout so the traveling cover lands exactly on the card's (reserved) slot at
+    // Detent A: down by grabber pad (safeTop + 8) + capsule (5) + card top pad (8);
+    // in by the scroll content leading pad (24); 72pt square, 11pt radius. Keep in
+    // sync with `nowPlayingCard`.
+    static let queueArtSide: CGFloat = 72
+    static let queueArtRadius: CGFloat = 11
+    static let queueArtLeading: CGFloat = 24
+    static let queueArtTopGap: CGFloat = 8 + 5 + 8
+    var queueArtCenterX: CGFloat { Self.queueArtLeading + Self.queueArtSide / 2 }
+    var queueArtCenterY: CGFloat { safeTop + Self.queueArtTopGap + Self.queueArtSide / 2 }
+
+    // The p-blend runs island⇄big-center; the q-blend then docks big-center⇄queue
+    // slot. Because q is only ≠0 at p≈1 (and unwinds with p on collapse), the two
+    // stages compose cleanly without a jump.
+    var artSide: CGFloat { lerp(lerp(Self.islandArtSide, expArtSide, p), Self.queueArtSide, q) }
+    var artRadius: CGFloat { lerp(lerp(Self.islandArtRadius, Self.expandedArtRadius, p), Self.queueArtRadius, q) }
     /// Artwork is left-aligned in the pill; when dropped it follows the centre
     /// pill's left edge.
     private var dropArtCenterX: CGFloat {
         (centerPillCenterX - centerPillW / 2) + Self.islandArtLeading + Self.islandArtSide / 2
     }
-    var artCenterX: CGFloat { lerp(lerp(islandArtCenterX, width / 2, p), dropArtCenterX, dropT) }
-    var artCenterY: CGFloat { lerp(lerp(islandCenterY, expArtCenterY, p), barCenterY, dropT) + max(0, dragY) }
+    var artCenterX: CGFloat { lerp(lerp(lerp(islandArtCenterX, width / 2, p), dropArtCenterX, dropT), queueArtCenterX, q) }
+    var artCenterY: CGFloat { lerp(lerp(lerp(islandCenterY, expArtCenterY, p), barCenterY, dropT), queueArtCenterY, q) }
 
     // Opacities ---------------------------------------------------------------
     // While a finger is down `p` is pinned at 1, so anything keyed purely on `p`
@@ -1415,6 +1750,15 @@ private struct Morph {
 
 private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
 private func clamp(_ x: CGFloat, _ lo: CGFloat = 0, _ hi: CGFloat = 1) -> CGFloat { min(max(x, lo), hi) }
+
+/// Publishes a named star+overflow slot's global-space frame so the morph root
+/// can position the single traveling cluster onto it. Keyed `"hero"` / `"card"`.
+struct StarSlotKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
 
 // MARK: - Liquid Glass background
 

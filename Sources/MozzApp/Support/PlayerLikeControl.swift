@@ -32,7 +32,7 @@ struct PlayerLikeControl: View {
             Task { await env.setLiked(liked, track: snapshot) }
         } label: {
             Image(mozz: isFavorite ? "heart.fill" : "heart")
-                .foregroundStyle(isFavorite ? Color.pink : Color.secondary)
+                .foregroundStyle(isFavorite ? Color.pink : Color.primary)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isFavorite ? "Unlike" : "Like")

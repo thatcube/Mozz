@@ -380,6 +380,11 @@ struct FluidRatingControl: View {
     @Binding var rating: Double?
     let onSet: (Double?) -> Void
     var onRequestPicker: () -> Void
+    /// Whether this instance publishes the sticky-bubble anchor. The player hosts
+    /// more than one star (the traveling hero/queue cluster + the card's own
+    /// scrolling star); only the currently-active one should emit the anchor so
+    /// the bubble stays unambiguous. Defaults to `true` for standalone use.
+    var emitsAnchor: Bool = true
 
     @State private var preview: Double?
     @State private var isDragging = false
@@ -394,7 +399,8 @@ struct FluidRatingControl: View {
 
     var body: some View {
         surface
-            .anchorPreference(key: PlayerRatingAnchorKey.self, value: .bounds) { $0 }
+            .anchorPreference(key: PlayerRatingAnchorKey.self,
+                              value: .bounds) { emitsAnchor ? $0 : nil }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
             .accessibilityValue(rating.map { "\(LikeControl.format($0)) stars" } ?? "No rating")
@@ -430,7 +436,10 @@ struct FluidRatingControl: View {
                 Text(LikeControl.format(r)).monospacedDigit()
             }
         }
-        .foregroundStyle(rated ? RatingTuning.tint : RatingTuning.inactiveTint)
+        // Unrated shows a white outline star (rated fills it + shows the number);
+        // full-contrast on the player surface, not a dim gray. The 5-star reveal
+        // strip keeps its dimmer unfilled stars so the fill level stays legible.
+        .foregroundStyle(rated ? RatingTuning.tint : .primary)
     }
 
     // MARK: Hold-drag reveal (self-contained overlay; non-interactive)
