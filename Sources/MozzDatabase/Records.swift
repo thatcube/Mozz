@@ -58,6 +58,8 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
     public var supportsNormalizationGain: Bool
     public var supportsProgressReporting: Bool
     public var hasPlexPass: Bool?
+    public var serverProduct: String?
+    public var isOpenSubsonic: Bool
     public var detectedAt: Double
 
     public init(serverId: String, capabilities: ServerCapabilities) {
@@ -73,6 +75,8 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
         self.supportsNormalizationGain = capabilities.supportsNormalizationGain
         self.supportsProgressReporting = capabilities.supportsProgressReporting
         self.hasPlexPass = capabilities.hasPlexPass
+        self.serverProduct = capabilities.serverProduct
+        self.isOpenSubsonic = capabilities.isOpenSubsonic
         self.detectedAt = capabilities.detectedAt.timeIntervalSince1970
     }
 
@@ -90,6 +94,8 @@ public struct CapabilitiesRecord: Codable, FetchableRecord, PersistableRecord, S
             supportsNormalizationGain: supportsNormalizationGain,
             supportsProgressReporting: supportsProgressReporting,
             hasPlexPass: hasPlexPass,
+            serverProduct: serverProduct,
+            isOpenSubsonic: isOpenSubsonic,
             detectedAt: Date(timeIntervalSince1970: detectedAt)
         )
     }

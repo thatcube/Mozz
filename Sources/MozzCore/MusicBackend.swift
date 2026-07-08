@@ -126,6 +126,26 @@ public protocol MusicBackend: Sendable {
     /// carries full format needs no backfill.
     func fetchTrackDetails(ids: [String]) async throws -> [Track]
 
+    /// Authoritative, prune-safe enumeration of *every* track in the catalog.
+    ///
+    /// Some backends can enumerate their whole library in a stable order with a
+    /// derivable expected total (e.g. Subsonic walks its album list and sums the
+    /// per-album song counts). When a backend can do this it should return a
+    /// stream here; the sync engine prefers it over the flat
+    /// ``fetchTracks(offset:limit:)`` pager for the unbounded tracks phase and,
+    /// crucially, only authorizes a destructive prune when a page reports a
+    /// `totalCount` the run can prove it reached. Returning `nil` (the default)
+    /// means "I have no better enumeration than the flat pager" — the engine
+    /// falls back to ``fetchTracks(offset:limit:)`` and Plex/Jellyfin are
+    /// entirely unaffected.
+    ///
+    /// The stream must yield deduplicated tracks in a stable order. A page's
+    /// `totalCount`, when non-nil, is a *provable expected total*: the engine
+    /// treats "distinct tracks seen ≥ totalCount" as completeness for prune
+    /// authorization, so a backend must only populate it when it is a real,
+    /// reached-by-exhaustion count (never an estimate).
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>?
+
     // MARK: Playback & downloads
 
     /// Resolve a playable stream URL for a track.
@@ -162,4 +182,8 @@ public extension MusicBackend {
 
     /// Default: no backfill needed (the bulk sync already carries full details).
     func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }
+
+    /// Default: no specialized bulk enumeration; the sync engine uses the flat
+    /// ``fetchTracks(offset:limit:)`` pager instead.
+    func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>? { nil }
 }

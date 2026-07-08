@@ -32,6 +32,11 @@ struct OnboardingView: View {
                     } label: {
                         connectLabel(title: "Connect to Plex", systemImage: "play.tv")
                     }
+                    NavigationLink {
+                        SubsonicLoginView()
+                    } label: {
+                        connectLabel(title: "Connect to Subsonic", systemImage: "waveform")
+                    }
 
                     Button {
                         Task {

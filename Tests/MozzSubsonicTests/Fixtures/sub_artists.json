@@ -1,0 +1,24 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "artists": {
+      "index": [
+        {
+          "name": "M",
+          "artist": [
+            {
+              "id": "ar-50",
+              "name": "Miles Davis",
+              "coverArt": "ar-50",
+              "albumCount": 10,
+              "starred": "2024-01-01T00:00:00.000Z",
+              "musicBrainzId": "561d854a-6a28-4aa7-8c99-323e6ce46c2a",
+              "sortName": "Davis, Miles"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

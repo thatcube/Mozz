@@ -1,0 +1,21 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "playlists": {
+      "playlist": [
+        {
+          "id": "pl-1",
+          "name": "Chill",
+          "comment": "Evening set",
+          "owner": "brandon",
+          "songCount": 3,
+          "duration": 900,
+          "public": true,
+          "created": "2024-02-01T00:00:00.000Z",
+          "coverArt": "pl-1"
+        }
+      ]
+    }
+  }
+}

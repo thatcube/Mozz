@@ -10,6 +10,7 @@ import MozzEnrichment
 import MozzSync
 import MozzPlex
 import MozzJellyfin
+import MozzSubsonic
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -1196,6 +1197,14 @@ public final class AppEnvironment: ObservableObject {
             return PlexBackend(connection: active.connection, token: stored.token,
                                clientInfo: clientInfo, transport: bulk,
                                musicSectionIDs: sectionIDs)
+        case .subsonic:
+            // Totals for Subsonic come from the album-walk enumerator's expected
+            // total (Σ album songCount), not a query param — so `requestTotals`
+            // and the Jellyfin-only `musicLibraryId` don't apply. musicFolder
+            // scoping flows in via connection.musicSectionID.
+            guard let credential = SubsonicCredential.decode(stored.token) else { return nil }
+            return SubsonicBackend(connection: active.connection, credential: credential,
+                                   clientInfo: clientInfo, transport: bulk)
         }
     }
 
@@ -1240,6 +1249,20 @@ public final class AppEnvironment: ObservableObject {
                     if let updated { SessionPersistence.save(updated, to: credentials) }
                 }
             }
+            return (connection, backend)
+        case .subsonic:
+            // Decode the credential envelope from the keychain "token" slot
+            // (spec item 5 — no StoredSession schema change).
+            guard let credential = SubsonicCredential.decode(stored.token) else {
+                throw MozzError.unauthorized
+            }
+            let connection = ServerConnection(
+                id: Self.serverId(kind: .subsonic, baseURL: stored.baseURL, username: stored.userID),
+                kind: .subsonic, name: stored.serverName, baseURL: stored.baseURL,
+                userID: stored.userID, clientIdentifier: stored.clientIdentifier,
+                musicSectionID: stored.musicSectionID
+            )
+            let backend = SubsonicBackend(connection: connection, credential: credential, clientInfo: clientInfo)
             return (connection, backend)
         }
     }
@@ -1624,8 +1647,14 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Helpers
 
-    public static func serverId(kind: BackendKind, baseURL: URL) -> String {
-        "\(kind.rawValue)-\(baseURL.absoluteString)"
+    /// A stable per-server identity. For Subsonic we fold in the normalized
+    /// username so two accounts on the *same* server don't collide (spec item 9);
+    /// Plex/Jellyfin keep the historical `kind-baseURL` form.
+    public static func serverId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
+        if kind == .subsonic, let username, !username.isEmpty {
+            return "\(kind.rawValue)-\(username.lowercased())-\(baseURL.absoluteString)"
+        }
+        return "\(kind.rawValue)-\(baseURL.absoluteString)"
     }
 
     static func demoClipURL() throws -> URL {
