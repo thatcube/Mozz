@@ -35,6 +35,9 @@ struct SearchView: View {
     /// scroll-to-top one — so re-tapping OTHER tabs can't focus us in the
     /// background.)
     @Environment(\.searchReselectSignal) private var searchReselectSignal
+    /// Bumped when the user leaves the Search tab; drop focus so the keyboard
+    /// doesn't stay open over another tab (all tabs remain mounted).
+    @Environment(\.searchBlurSignal) private var searchBlurSignal
 
     /// Shared height for the search field and the cancel ✕ so they line up.
     private let fieldHeight: CGFloat = 44
@@ -112,6 +115,9 @@ struct SearchView: View {
                 // Re-tapping the Search tab while already on it focuses the field
                 // and opens the keyboard, so you can start typing immediately.
                 .onChange(of: searchReselectSignal) { _, _ in focused = true }
+                // Leaving the Search tab drops focus so the keyboard doesn't stay
+                // open over another tab.
+                .onChange(of: searchBlurSignal) { _, _ in focused = false }
                 .task(id: recents.items) { await resolveRecents() }
             }
         }

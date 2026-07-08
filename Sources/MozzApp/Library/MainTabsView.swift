@@ -49,6 +49,11 @@ struct MainTabsView: View {
     /// Search view watches `\.searchReselectSignal` and focuses the field.
     @State private var searchReselectToken = 0
 
+    /// Bumped when the user leaves the Search tab; the Search view watches
+    /// `\.searchBlurSignal` and drops focus so the keyboard doesn't linger over
+    /// another tab.
+    @State private var searchBlurToken = 0
+
     /// Generation guard so that when several deep links arrive in quick
     /// succession, only the most-recent one applies (older, slower DB lookups
     /// can't win a race — see `consumePendingDeepLinkIfNeeded`).
@@ -146,11 +151,17 @@ struct MainTabsView: View {
             SyncStatusBar()
                 .animation(.spring(response: 0.4, dampingFraction: 0.9), value: env.isSyncing)
         }
-        .onChange(of: selectedTab) { _, tab in
+        .onChange(of: selectedTab) { old, tab in
             loadedTabs.insert(tab)
             if tab != .search {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                     lastNonSearchTab = tab
+                }
+                // Leaving Search: blur its field so the keyboard doesn't stay open
+                // over the new tab (all tabs remain mounted, so nothing else
+                // dismisses it).
+                if old == .search {
+                    searchBlurToken &+= 1
                 }
             }
         }
@@ -213,6 +224,7 @@ struct MainTabsView: View {
                         .environment(\.bottomBarMinimize, tab == selectedTab ? scrollMinimizeBinding : nil)
                         .environment(\.scrollToTopSignal, scrollToTopToken)
                         .environment(\.searchReselectSignal, searchReselectToken)
+                        .environment(\.searchBlurSignal, searchBlurToken)
                         .opacity(tab == selectedTab ? 1 : 0)
                         .allowsHitTesting(tab == selectedTab)
                         .zIndex(tab == selectedTab ? 1 : 0)
@@ -781,6 +793,20 @@ extension EnvironmentValues {
     var searchReselectSignal: Int {
         get { self[SearchReselectSignalKey.self] }
         set { self[SearchReselectSignalKey.self] = newValue }
+    }
+}
+
+private struct SearchBlurSignalKey: EnvironmentKey {
+    static let defaultValue: Int = 0
+}
+
+extension EnvironmentValues {
+    /// A monotonically-increasing token bumped by `MainTabsView` when the user
+    /// leaves the Search tab. `SearchView` watches it to drop focus so the
+    /// keyboard doesn't stay open over another tab (all tabs stay mounted).
+    var searchBlurSignal: Int {
+        get { self[SearchBlurSignalKey.self] }
+        set { self[SearchBlurSignalKey.self] = newValue }
     }
 }
 
