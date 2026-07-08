@@ -32,8 +32,11 @@ struct ArtistsView: View {
         .navigationTitle(navTitle)
         .overlay {
             if list.items.isEmpty && !list.isLoading {
-                ContentUnavailableView("No Music", systemImage: "music.note",
-                    description: Text("Sync your library from Settings."))
+                ContentUnavailableView {
+                    Label("No Music", mozz: "music.note")
+                } description: {
+                    Text("Sync your library from Settings.")
+                }
             }
         }
         .task { await bootstrap() }
@@ -62,7 +65,7 @@ private struct ArtistRow: View {
     let artist: ArtistRecord
     var body: some View {
         HStack(spacing: 12) {
-            ArtworkView(artwork: artist.artworkKey.map(ArtworkRef.init(key:)), seed: artist.name, size: 44, cornerRadius: 22)
+            ArtworkView(artwork: artist.artworkKey.map(ArtworkRef.init(key:)), seed: artist.name, size: 44, circular: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(artist.name).font(.body)
                 if let count = artist.albumCount {

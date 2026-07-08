@@ -1,43 +1,27 @@
 import SwiftUI
 import MozzCore
 
-/// The now-playing screen's like/rate affordance, working from the engine's
-/// domain ``Track``. Backend-aware like ``LikeControl`` (heart for favorites
-/// backends, a star + half-star popover for ratings backends), but sized for the
-/// full player and reseeded whenever the current track changes.
+/// The now-playing screen's **favorites** (heart) affordance for backends that
+/// use favorites (Jellyfin). The ratings (Plex) path is handled directly by the
+/// morph container so its sticky picker can be hosted at the player root; see
+/// `FluidRatingControl` + `PlayerRatingAnchorKey`.
 struct PlayerLikeControl: View {
     @EnvironmentObject private var env: AppEnvironment
     let track: Track
 
     @State private var isFavorite: Bool
-    @State private var rating: Double?
-    @State private var showingPicker = false
 
     init(track: Track) {
         self.track = track
         _isFavorite = State(initialValue: track.isFavorite)
-        _rating = State(initialValue: track.rating)
     }
 
-    private var liked: Bool { LikePolicy.isLiked(isFavorite: isFavorite, rating: rating) }
-
     var body: some View {
-        Group {
-            if env.usesRatings {
-                ratingButton
-            } else {
-                heart
-            }
-        }
-        // The view is reused across track changes (same position in the drawer),
-        // so reseed when the current song changes; also reconcile if the record's
-        // like/rating value changes in place.
-        .onChange(of: track.id) { _, _ in
-            isFavorite = track.isFavorite
-            rating = track.rating
-        }
-        .onChange(of: track.isFavorite) { _, new in isFavorite = new }
-        .onChange(of: track.rating) { _, new in rating = new }
+        heart
+            // Reused across track changes (same drawer slot) — reseed the favorite
+            // when the song changes or its value updates in place.
+            .onChange(of: track.id) { _, _ in isFavorite = track.isFavorite }
+            .onChange(of: track.isFavorite) { _, new in isFavorite = new }
     }
 
     private var heart: some View {
@@ -47,29 +31,10 @@ struct PlayerLikeControl: View {
             let liked = isFavorite
             Task { await env.setLiked(liked, track: snapshot) }
         } label: {
-            Image(systemName: liked ? "heart.fill" : "heart")
-                .foregroundStyle(liked ? Color.pink : Color.secondary)
+            Image(mozz: isFavorite ? "heart.fill" : "heart")
+                .foregroundStyle(isFavorite ? Color.pink : Color.secondary)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(liked ? "Unlike" : "Like")
-    }
-
-    private var ratingButton: some View {
-        Button { showingPicker = true } label: {
-            Image(systemName: (rating ?? 0) > 0 ? "star.fill" : "star")
-                .foregroundStyle((rating ?? 0) > 0 ? Color.yellow : Color.secondary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(rating.map { "Rated \(LikeControl.format($0)) stars" } ?? "Rate")
-        .popover(isPresented: $showingPicker) {
-            RatingStarsPicker(rating: rating) { newValue in
-                rating = newValue
-                showingPicker = false
-                let snapshot = track
-                Task { await env.setRating(newValue, track: snapshot) }
-            }
-            .padding(16)
-            .presentationCompactAdaptation(.popover)
-        }
+        .accessibilityLabel(isFavorite ? "Unlike" : "Like")
     }
 }

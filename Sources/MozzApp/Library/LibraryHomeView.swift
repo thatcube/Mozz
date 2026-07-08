@@ -54,6 +54,7 @@ struct LibraryHomeView: View {
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()
             .scrollsToTopOnSignal()
+            .mozzScreenBackground()
             .appRouteDestinations()
             .task { await loadRecent() }
         }
@@ -84,13 +85,13 @@ struct LibraryCategoryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage)
+            Image(mozz: systemImage)
                 .font(.title3)
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 32)
             Text(title).font(.title3)
             Spacer()
-            Image(systemName: "chevron.right")
+            Image(mozz: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }

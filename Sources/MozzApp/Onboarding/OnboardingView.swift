@@ -62,7 +62,7 @@ struct OnboardingView: View {
     }
 
     private func connectLabel(title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
+        Label(title, mozz: systemImage)
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding()

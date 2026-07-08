@@ -83,7 +83,7 @@ struct JellyfinLoginView: View {
             select(server)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "server.rack")
+                Image(mozz: "server.rack")
                     .foregroundStyle(.secondary)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
@@ -95,7 +95,7 @@ struct JellyfinLoginView: View {
                 }
                 Spacer()
                 if selectedServer?.id == server.id {
-                    Image(systemName: "checkmark")
+                    Image(mozz: "checkmark")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.tint)
                 }

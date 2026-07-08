@@ -91,10 +91,15 @@ private extension Image {
 struct CachedArtworkImage<Placeholder: View>: View {
     private let url: URL
     private let placeholder: Placeholder
+    /// When true, a URL change keeps the previously loaded image on screen until
+    /// the new one is ready (instead of clearing to the placeholder). Used by the
+    /// player so skipping cross-fades cover→cover and never flashes a placeholder.
+    private let retainWhileLoading: Bool
     @State private var image: PlatformImage?
 
-    init(url: URL, @ViewBuilder placeholder: () -> Placeholder) {
+    init(url: URL, retainWhileLoading: Bool = false, @ViewBuilder placeholder: () -> Placeholder) {
         self.url = url
+        self.retainWhileLoading = retainWhileLoading
         self.placeholder = placeholder()
         _image = State(initialValue: ArtworkImageLoader.shared.cached(url))
     }
@@ -118,8 +123,9 @@ struct CachedArtworkImage<Placeholder: View>: View {
             return
         }
         // Clear any stale image from a previous URL so we never show the wrong
-        // artwork while the new one loads.
-        image = nil
+        // artwork while the new one loads — unless the caller opts to retain it
+        // (the player keeps the old cover so a skip never flashes a placeholder).
+        if !retainWhileLoading { image = nil }
         // Fetch + decode happen off the main thread inside the loader actor;
         // duplicate requests for the same URL are coalesced.
         let loaded = await ArtworkImageLoader.shared.image(for: url)

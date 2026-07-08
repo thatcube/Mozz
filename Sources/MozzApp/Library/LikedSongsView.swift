@@ -24,8 +24,11 @@ struct LikedSongsView: View {
             actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle) },
             content: {
                 if tracks.isEmpty && loaded {
-                    ContentUnavailableView("No Liked Songs", systemImage: "heart",
-                        description: Text("Tap the heart on a song to add it here."))
+                    ContentUnavailableView {
+                        Label("No Liked Songs", mozz: "heart")
+                    } description: {
+                        Text("Tap the heart on a song to add it here.")
+                    }
                         .padding(.top, 40)
                 } else {
                     DetailSongRows(tracks: tracks, showArtist: true) { play(from: $0) }

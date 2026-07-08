@@ -32,7 +32,7 @@ struct PlaylistsView: View {
         .navigationTitle("Playlists")
         .overlay {
             if playlists.isEmpty && loaded {
-                ContentUnavailableView("No Playlists", systemImage: "music.note.list")
+                ContentUnavailableView { Label("No Playlists", mozz: "music.note.list") }
             }
         }
         .task { await load() }
@@ -65,7 +65,7 @@ struct PlaylistDetailView: View {
             actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle) },
             content: {
                 if tracks.isEmpty && loaded {
-                    ContentUnavailableView("Empty Playlist", systemImage: "music.note.list")
+                    ContentUnavailableView { Label("Empty Playlist", mozz: "music.note.list") }
                         .padding(.top, 40)
                 } else {
                     DetailSongRows(tracks: tracks) { play(from: $0) }

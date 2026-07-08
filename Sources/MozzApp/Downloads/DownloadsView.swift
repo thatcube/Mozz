@@ -14,7 +14,7 @@ struct DownloadsView: View {
         List {
             Section {
                 HStack {
-                    Label("Storage Used", systemImage: "internaldrive")
+                    Label("Storage Used", mozz: "internaldrive")
                     Spacer()
                     Text(Format.bytes(usage.totalBytes)).foregroundStyle(.secondary)
                 }
@@ -37,8 +37,11 @@ struct DownloadsView: View {
         .navigationTitle("Downloads")
         .overlay {
             if tracks.isEmpty {
-                ContentUnavailableView("No Downloads", systemImage: "arrow.down.circle",
-                    description: Text("Download albums to play them offline."))
+                ContentUnavailableView {
+                    Label("No Downloads", mozz: "arrow.down.circle")
+                } description: {
+                    Text("Download albums to play them offline.")
+                }
             }
         }
         .task { await refresh() }

@@ -40,7 +40,7 @@ struct AlbumsView: View {
         .navigationTitle("Albums")
         .overlay {
             if list.items.isEmpty && !list.isLoading {
-                ContentUnavailableView("No Albums", systemImage: "square.stack")
+                ContentUnavailableView { Label("No Albums", mozz: "square.stack") }
             }
         }
         .task { await bootstrap() }

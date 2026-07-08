@@ -21,7 +21,7 @@ struct GenresView: View {
         .navigationTitle("Genres")
         .overlay {
             if genres.isEmpty && loaded {
-                ContentUnavailableView("No Genres", systemImage: "guitars")
+                ContentUnavailableView { Label("No Genres", mozz: "guitars") }
             }
         }
         .task { await load() }
@@ -61,7 +61,7 @@ struct GenreDetailView: View {
         .minimizesBottomBarOnScroll()
         .overlay {
             if albums.isEmpty && loaded {
-                ContentUnavailableView("No Albums", systemImage: "square.stack")
+                ContentUnavailableView { Label("No Albums", mozz: "square.stack") }
             }
         }
         .task { await load() }
