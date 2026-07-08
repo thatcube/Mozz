@@ -249,6 +249,11 @@ private final class EqualizerAudioUnit {
         else { return false }
         for i in 0..<EqualizerSettings.bandCount {
             let band = AudioUnitParameterID(i)
+            // AUNBandEQ bands default to BYPASSED — without this every per-band gain
+            // is inaudible while only the global preamp works. 0 = band active.
+            AudioUnitSetParameter(unit, AudioUnitParameterID(kAUNBandEQParam_BypassBand) + band,
+                                  kAudioUnitScope_Global, 0,
+                                  AudioUnitParameterValue(0), 0)
             AudioUnitSetParameter(unit, AudioUnitParameterID(kAUNBandEQParam_FilterType) + band,
                                   kAudioUnitScope_Global, 0,
                                   AudioUnitParameterValue(kAUNBandEQFilterType_Parametric), 0)
