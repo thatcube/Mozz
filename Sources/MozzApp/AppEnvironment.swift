@@ -92,6 +92,8 @@ public final class AppEnvironment: ObservableObject {
     public static let equalizerEnabledKey = "mozz.equalizerEnabled"
     /// UserDefaults key for the persisted EQ curve (JSON `EqualizerSettings`).
     public static let equalizerSettingsKey = "mozz.equalizerSettings"
+    /// Debounces EQ persistence so a slider drag doesn't hammer UserDefaults.
+    private var equalizerPersistTask: Task<Void, Never>?
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -481,12 +483,19 @@ public final class AppEnvironment: ObservableObject {
         playback.setEqualizerEnabled(enabled)
     }
 
-    /// Apply + persist a new EQ curve. Live and glitch-free while playing.
+    /// Apply a new EQ curve immediately (live, glitch-free while playing) and
+    /// persist it on a short debounce so a continuous slider drag doesn't write
+    /// UserDefaults on every frame.
     public func updateEqualizerSettings(_ settings: EqualizerSettings) {
-        if let data = try? JSONEncoder().encode(settings) {
-            UserDefaults.standard.set(data, forKey: Self.equalizerSettingsKey)
-        }
         playback.updateEqualizer(settings)
+        equalizerPersistTask?.cancel()
+        equalizerPersistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, let self else { return }
+            if let data = try? JSONEncoder().encode(settings) {
+                UserDefaults.standard.set(data, forKey: Self.equalizerSettingsKey)
+            }
+        }
     }
 
     /// Load the persisted EQ state into the engine at launch, before any track is

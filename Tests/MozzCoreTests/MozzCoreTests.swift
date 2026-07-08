@@ -218,6 +218,100 @@ final class EqualizerSettingsTests: XCTestCase {
     }
 }
 
+final class BiquadFilterTests: XCTestCase {
+    func testZeroGainIsIdentity() {
+        let c = BiquadCoefficients.peakingEQ(frequency: 1_000, gainDB: 0, q: 1.4, sampleRate: 44_100)
+        XCTAssertEqual(c, .identity)
+    }
+
+    func testIdentityPassesSignalThrough() {
+        var filter = Biquad(coefficients: .identity)
+        let input: [Float] = [0, 0.5, -0.5, 1, -1, 0.25]
+        for x in input {
+            XCTAssertEqual(filter.process(x), x, accuracy: 1e-6)
+        }
+    }
+
+    func testResetClearsMemory() {
+        let boost = BiquadCoefficients.peakingEQ(frequency: 1_000, gainDB: 12, q: 1.4, sampleRate: 44_100)
+        var a = Biquad(coefficients: boost)
+        for _ in 0..<64 { _ = a.process(1.0) }   // load up filter state
+        a.reset()
+        var fresh = Biquad(coefficients: boost)
+        // After reset, response to a new impulse matches a fresh filter.
+        XCTAssertEqual(a.process(1.0), fresh.process(1.0), accuracy: 1e-6)
+    }
+
+    func testFlatEqualizerIsTransparent() {
+        // A flat curve → every band identity → a cascade is a perfect passthrough.
+        let coeffs = EqualizerSettings.flat.biquadCoefficients(sampleRate: 48_000)
+        XCTAssertEqual(coeffs.count, EqualizerSettings.bandCount)
+        var filters = coeffs.map { Biquad(coefficients: $0) }
+        let input: [Float] = [0.1, -0.3, 0.7, -0.9, 0.42, -0.1]
+        for x in input {
+            var y = x
+            for i in filters.indices { y = filters[i].process(y) }
+            XCTAssertEqual(y, x, accuracy: 1e-5)
+        }
+    }
+
+    func testBoostRaisesGainAtCenterFrequency() {
+        // Drive a +12 dB / 1 kHz filter with a 1 kHz sine and confirm the output
+        // amplitude grows relative to the input (a boost really boosts).
+        let sampleRate = 48_000.0
+        let freq = 1_000.0
+        let c = BiquadCoefficients.peakingEQ(frequency: freq, gainDB: 12, q: 1.4, sampleRate: sampleRate)
+        var filter = Biquad(coefficients: c)
+        var inPeak: Float = 0
+        var outPeak: Float = 0
+        let n = 4_800   // settle over 0.1s
+        for i in 0..<n {
+            let x = Float(sin(2.0 * Double.pi * freq * Double(i) / sampleRate))
+            let y = filter.process(x)
+            if i > n / 2 {   // measure after transient settles
+                inPeak = max(inPeak, abs(x))
+                outPeak = max(outPeak, abs(y))
+            }
+        }
+        // +12 dB ≈ 4x amplitude; allow slack for band Q. Must clearly exceed input.
+        XCTAssertGreaterThan(outPeak, inPeak * 1.8)
+    }
+
+    func testCutLowersGainAtCenterFrequency() {
+        let sampleRate = 48_000.0
+        let freq = 1_000.0
+        let c = BiquadCoefficients.peakingEQ(frequency: freq, gainDB: -12, q: 1.4, sampleRate: sampleRate)
+        var filter = Biquad(coefficients: c)
+        var inPeak: Float = 0
+        var outPeak: Float = 0
+        let n = 4_800
+        for i in 0..<n {
+            let x = Float(sin(2.0 * Double.pi * freq * Double(i) / sampleRate))
+            let y = filter.process(x)
+            if i > n / 2 {
+                inPeak = max(inPeak, abs(x))
+                outPeak = max(outPeak, abs(y))
+            }
+        }
+        XCTAssertLessThan(outPeak, inPeak * 0.6)
+    }
+
+    func testStabilityAtExtremes() {
+        // Extreme gains across all bands must stay finite (no filter blow-up).
+        let boosted = EqualizerSettings(gains: Array(repeating: 12, count: EqualizerSettings.bandCount))
+        var filters = boosted.biquadCoefficients(sampleRate: 44_100).map { Biquad(coefficients: $0) }
+        var value: Float = 0
+        for i in 0..<44_100 {
+            let x = Float(sin(2.0 * Double.pi * 440.0 * Double(i) / 44_100.0))
+            var y = x
+            for j in filters.indices { y = filters[j].process(y) }
+            value = y
+            XCTAssertTrue(y.isFinite)
+        }
+        XCTAssertTrue(value.isFinite)
+    }
+}
+
 final class MozzErrorTests: XCTestCase {
     func testRetryability() {
         XCTAssertTrue(MozzError.serverUnreachable.isRetryable)
