@@ -151,6 +151,23 @@ public protocol MusicBackend: Sendable {
     /// Resolve a playable stream URL for a track.
     func streamSource(for track: Track, options: StreamOptions) async throws -> StreamSource
 
+    /// Resolve a playable stream URL that begins `startSeconds` into the track.
+    ///
+    /// For direct-play (and any range-seekable stream) the offset is irrelevant —
+    /// the player seeks natively — so the default implementation ignores it. It
+    /// matters only for **progressive transcodes**, which are not byte-range
+    /// seekable (e.g. Jellyfin serves them `Accept-Ranges: none`): those seek by
+    /// re-requesting the stream with a server-side start offset that restarts the
+    /// transcoder. Backends that support this set ``supportsTranscodeSeek`` and
+    /// override this method.
+    func streamSource(for track: Track, options: StreamOptions, startSeconds: TimeInterval) async throws -> StreamSource
+
+    /// Whether the backend can seek a **transcoded** stream by re-requesting it
+    /// with a server-side start offset (see ``streamSource(for:options:startSeconds:)``).
+    /// `false` backends fall back to native player seeking, which only works on
+    /// range-seekable (direct-play / downloaded) content.
+    var supportsTranscodeSeek: Bool { get }
+
     /// The URL of the untouched original file, for offline download. Throws
     /// ``MozzError/unsupported(_:)`` if the server cannot serve originals.
     func originalFileURL(for track: Track) throws -> URL
@@ -176,6 +193,16 @@ public protocol MusicBackend: Sendable {
 
 public extension MusicBackend {
     var kind: BackendKind { connection.kind }
+
+    /// Default: no server-side transcode seeking; native player seeking is used.
+    var supportsTranscodeSeek: Bool { false }
+
+    /// Default: ignore the offset and resolve the normal stream URL. Correct for
+    /// range-seekable content (direct play / downloads), which the player seeks
+    /// natively. Backends with a non-seekable progressive transcode override this.
+    func streamSource(for track: Track, options: StreamOptions, startSeconds: TimeInterval) async throws -> StreamSource {
+        try await streamSource(for: track, options: options)
+    }
 
     /// Default: progress reporting is optional and silently ignored.
     func reportPlayback(_ report: PlaybackReport) async throws {}

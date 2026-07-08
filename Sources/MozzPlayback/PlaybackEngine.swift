@@ -93,11 +93,41 @@ public final class PlaybackEngine: ObservableObject {
     private let nowPlaying = NowPlayingCenter()
 
     private var queue = PlayQueue()
+    /// One entry in the player's small (≤2) window of loaded items.
+    private struct LoadedItem {
+        let item: AVPlayerItem
+        let track: Track
+        let sessionID: String?
+        /// Absolute seconds into the track at which this item's playhead 0 sits.
+        /// Non-zero only for a server-side-seeked/recovered progressive transcode
+        /// (which is re-requested at an offset); `tick()` adds it back so the UI
+        /// position stays absolute.
+        var startOffset: TimeInterval = 0
+        /// This item is a non-range-seekable transcode: seek/recovery must
+        /// re-resolve the URL with a server offset rather than seek natively.
+        var requiresServerSeek: Bool = false
+        /// Streamed (not a local file) — eligible for network-drop recovery.
+        var isStreamed: Bool = false
+    }
+
     /// Tracks currently loaded into the player, aligned with `player.items()`.
-    private var loaded: [(item: AVPlayerItem, track: Track, sessionID: String?)] = []
+    private var loaded: [LoadedItem] = []
     private var loadGeneration = 0
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    /// Belt-and-suspenders failure signal alongside the item-status KVO: some
+    /// mid-stream drops surface as this notification. Routed to the same recovery.
+    private var failedObserver: NSObjectProtocol?
+    /// KVO on the current item's `status`, to detect a terminal `.failed` (a
+    /// dropped stream) and recover. Re-pointed whenever the current item changes.
+    private var currentItemStatusObserver: AnyCancellable?
+    /// A pending backoff before a recovery re-load; cancelled if the track changes.
+    private var recoveryTask: Task<Void, Never>?
+    /// Consecutive recovery attempts for the current item; reset once an item
+    /// reaches `.readyToPlay` (so a stream that plays then drops later gets a
+    /// fresh budget), capped by ``maxRecoveryRetries``.
+    private var recoveryRetryCount = 0
+    private static let maxRecoveryRetries = 5
     private var wasPlayingBeforeInterruption = false
     /// A position to seek to once the (paused) current item finishes loading —
     /// used to restore a saved session at the right spot.
@@ -117,6 +147,9 @@ public final class PlaybackEngine: ObservableObject {
     deinit {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        if let failedObserver { NotificationCenter.default.removeObserver(failedObserver) }
+        currentItemStatusObserver?.cancel()
+        recoveryTask?.cancel()
     }
 
     // MARK: Public transport
@@ -280,11 +313,19 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     public func seek(to seconds: TimeInterval) {
+        let target = max(0, seconds)
         if loggedTrackID != nil, let track = currentTrack {
             onPlayEvent?(PlayEvent(trackID: track.id, kind: .seek,
-                                   positionSeconds: seconds, durationSeconds: track.duration))
+                                   positionSeconds: target, durationSeconds: track.duration))
         }
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
+        // A progressive transcode isn't byte-range seekable (Jellyfin serves it
+        // `Accept-Ranges: none`); the only way to move the playhead is to
+        // re-request the stream at a server-side offset and rebuild the item.
+        if loaded.first?.requiresServerSeek == true {
+            reloadCurrent(atElapsed: target, reason: .seek)
+            return
+        }
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600)) { [weak self] _ in
             Task { @MainActor in self?.publish() }
         }
     }
@@ -324,9 +365,11 @@ public final class PlaybackEngine: ObservableObject {
         // end of the queue, `handleNaturalFinish` has already logged `.completed`
         // and cleared the pending track, so this no-ops — no double count.)
         logTerminal(.skipped, position: snapshot.elapsed)
+        cancelRecovery()
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
+        currentItemStatusObserver = nil
         invalidateStation()   // stopping ends any active station
         report(.stopped)
         currentTrack = nil
@@ -339,13 +382,10 @@ public final class PlaybackEngine: ObservableObject {
     // MARK: Loading
 
     /// Rebuild the player from the queue's current track (+ lookahead).
-    ///
-    /// `logStartOnLoad` is `false` only for an in-place rebuild (e.g. toggling the
-    /// equalizer) where the same track keeps playing and must not emit a fresh
-    /// `.started` listening event.
-    private func reload(autoplay: Bool, logStartOnLoad: Bool = true) {
+    private func reload(autoplay: Bool) {
         loadGeneration += 1
         let generation = loadGeneration
+        cancelRecovery()          // a fresh load abandons any in-flight recovery
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
@@ -361,22 +401,28 @@ public final class PlaybackEngine: ObservableObject {
         // Emit `.started` on intent (synchronously), so it's paired correctly
         // with the terminal event even if the async URL resolve below is slow
         // or fails. A paused load (autoplay == false) logs its start on resume.
-        if autoplay && logStartOnLoad { logStart(track) }
+        if autoplay { logStart(track) }
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                let resolved = try await resolver.resolve(track)
+                let loadedItem = try await self.makeLoadedItem(for: track, startSeconds: 0)
                 guard generation == self.loadGeneration else { return }
-                let item = AVPlayerItem(url: resolved.url)
-                await self.installAudioProcessing(on: item, gainDB: track.normalizationGainDB)
-                guard generation == self.loadGeneration else { return }
-                self.player.insert(item, after: nil)
-                self.loaded = [(item, track, resolved.sessionID)]
-                if let seek = self.pendingSeek {
+                self.player.insert(loadedItem.item, after: nil)
+                self.loaded = [loadedItem]
+                self.observeCurrentItemStatus()
+                if let seek = self.pendingSeek, seek > 0 {
                     self.pendingSeek = nil
+                    // A saved transcode session can't be range-seeked to the
+                    // resume point; re-request it at the server offset instead.
+                    if loadedItem.requiresServerSeek {
+                        self.reloadCurrent(atElapsed: seek, reason: .seek, autoplay: autoplay)
+                        return
+                    }
                     self.player.seek(to: CMTime(seconds: seek, preferredTimescale: 600),
                                      completionHandler: { _ in })
+                } else {
+                    self.pendingSeek = nil
                 }
                 if autoplay {
                     self.player.play()
@@ -391,6 +437,170 @@ public final class PlaybackEngine: ObservableObject {
                 self.publish(status: .paused)
             }
         }
+    }
+
+    // MARK: Item construction & network-drop recovery
+
+    /// Resolve `track` (at an optional server-side offset) and build a normalized
+    /// player item plus the metadata the engine needs to seek/recover it.
+    private func makeLoadedItem(for track: Track, startSeconds: TimeInterval) async throws -> LoadedItem {
+        let resolved = try await resolver.resolve(track, startSeconds: startSeconds)
+        let item = AVPlayerItem(url: resolved.url)
+        // Attach normalization (+ the EQ tap when enabled). When EQ is on this
+        // awaits the audio-track load and builds the mix BEFORE the caller enqueues
+        // the item, so the tap fires on AVQueuePlayer's pre-rolled item.
+        await installAudioProcessing(on: item, gainDB: track.normalizationGainDB)
+        return LoadedItem(
+            item: item,
+            track: track,
+            sessionID: resolved.sessionID,
+            // The offset only "took" if this is a server-seek transcode; otherwise
+            // the URL is unchanged and we seek natively (base offset stays 0).
+            startOffset: resolved.requiresServerSeek ? startSeconds : 0,
+            requiresServerSeek: resolved.requiresServerSeek,
+            isStreamed: !resolved.isLocal
+        )
+    }
+
+    /// Observe the current item's `status` so a terminal `.failed` (a dropped
+    /// stream) triggers recovery, and a `.readyToPlay` refreshes the retry budget.
+    /// Only streamed items are watched — a local file failing isn't worth retrying.
+    private func observeCurrentItemStatus() {
+        currentItemStatusObserver = nil
+        guard let entry = loaded.first, entry.isStreamed else { return }
+        let item = entry.item
+        currentItemStatusObserver = item.publisher(for: \.status)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    switch status {
+                    case .failed: self.handleItemFailure(item)
+                    case .readyToPlay: self.recoveryRetryCount = 0
+                    default: break
+                    }
+                }
+            }
+    }
+
+    /// Cancel any pending recovery backoff (called when the track changes).
+    private func cancelRecovery() {
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveryRetryCount = 0
+    }
+
+    /// The current item hit a terminal `.failed`. If it's a transient network
+    /// error and we're under the retry cap, rebuild the item (at the last
+    /// position) after an exponential backoff; otherwise skip to the next track.
+    private func handleItemFailure(_ item: AVPlayerItem) {
+        guard loaded.first?.item === item else { return }   // stale / lookahead item
+        guard recoveryTask == nil else { return }           // a retry is already scheduled
+        guard let nsError = item.error as NSError?,
+              Self.isTransientNetworkError(nsError),
+              recoveryRetryCount < Self.maxRecoveryRetries else {
+            advanceAfterUnrecoverableFailure()
+            return
+        }
+        recoveryRetryCount += 1
+        let delay = min(pow(2.0, Double(recoveryRetryCount - 1)), 30.0)  // 1,2,4,8,16s (cap 30)
+        let targetElapsed = snapshot.elapsed
+        let generation = loadGeneration
+        publish(status: .buffering)
+        recoveryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, !Task.isCancelled, generation == self.loadGeneration else { return }
+            self.recoveryTask = nil
+            self.reloadCurrent(atElapsed: targetElapsed, reason: .recovery)
+        }
+    }
+
+    /// Recovery is exhausted (or the error isn't a transient network blip): treat
+    /// the track as un-completable and advance, so playback doesn't dead-end.
+    private func advanceAfterUnrecoverableFailure() {
+        cancelRecovery()
+        logTerminal(.skipped, position: snapshot.elapsed)
+        guard queue.advance() != nil else { stop(); return }
+        reload(autoplay: true)
+        maybeExtendQueue()
+    }
+
+    private enum ReloadReason { case seek, recovery }
+
+    /// Rebuild only the current item, keeping the queue position — used to seek a
+    /// non-range-seekable transcode (`.seek`) and to recover a dropped stream
+    /// (`.recovery`). A server-seek transcode is re-requested at `elapsed`; a
+    /// range-seekable stream is rebuilt and native-seeked to `elapsed`. `autoplay`
+    /// overrides the derived play state (used by a paused saved-session restore).
+    private func reloadCurrent(atElapsed elapsed: TimeInterval, reason: ReloadReason, autoplay: Bool? = nil) {
+        guard let track = currentTrack, let existing = loaded.first else { return }
+        let useServerSeek = existing.requiresServerSeek
+        let wasPlaying = autoplay ?? (snapshot.status == .playing || snapshot.status == .buffering)
+        loadGeneration += 1
+        let generation = loadGeneration
+        recoveryTask?.cancel(); recoveryTask = nil
+        currentItemStatusObserver = nil
+        player.pause()
+        player.removeAllItems()
+        loaded.removeAll()
+        // Reflect the target position immediately so the scrubber jumps now (not
+        // on the first tick after the rebuild) and a failure before playback
+        // recovers at the right spot rather than the stale pre-seek position.
+        snapshot.elapsed = elapsed
+        publish(status: .buffering)
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let loadedItem = try await self.makeLoadedItem(
+                    for: track,
+                    startSeconds: useServerSeek ? elapsed : 0
+                )
+                guard generation == self.loadGeneration else { return }
+                self.player.insert(loadedItem.item, after: nil)
+                self.loaded = [loadedItem]
+                self.observeCurrentItemStatus()
+                if !useServerSeek, elapsed > 0 {
+                    self.player.seek(to: CMTime(seconds: elapsed, preferredTimescale: 600),
+                                     completionHandler: { _ in })
+                }
+                if wasPlaying {
+                    self.player.play()
+                    self.publish(status: .playing)
+                    self.report(.playing)
+                } else {
+                    self.publish(status: .paused)
+                }
+                await self.refillLookaheadAsync(generation: generation)
+            } catch {
+                guard generation == self.loadGeneration else { return }
+                // Resolving is pure URL-building (or a local DB lookup) for every
+                // backend — it doesn't hit the network — so a throw here isn't the
+                // stream outage and retrying wouldn't help; just settle paused.
+                self.publish(status: .paused)
+            }
+        }
+    }
+
+    /// NSURLError codes worth an automatic retry — transient connectivity, not a
+    /// 4xx/decoding/fatal error. Unwraps AVFoundation's wrapper error if present.
+    private static func isTransientNetworkError(_ error: NSError) -> Bool {
+        if error.domain == NSURLErrorDomain {
+            return [
+                NSURLErrorTimedOut,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorCannotFindHost,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorResourceUnavailable,
+                NSURLErrorBadServerResponse,
+            ].contains(error.code)
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isTransientNetworkError(underlying)
+        }
+        return false
     }
 
     /// Ensure the player holds the next track for gapless advance.
@@ -438,7 +648,7 @@ public final class PlaybackEngine: ObservableObject {
         guard loaded.count == 1, let nextTrack = queue.peekNext else { return }
         // Don't double-load the same track object unless repeat-one intends it.
         do {
-            let resolved = try await resolver.resolve(nextTrack)
+            let loadedItem = try await makeLoadedItem(for: nextTrack, startSeconds: 0)
             // Re-validate after the await: another mutation (or a second refill)
             // may have changed the next track while we were resolving. Only
             // insert if this resolve still matches the queue's next track and
@@ -447,16 +657,9 @@ public final class PlaybackEngine: ObservableObject {
             guard generation == loadGeneration,
                   loaded.count == 1,
                   queue.peekNext?.id == nextTrack.id else { return }
-            let item = AVPlayerItem(url: resolved.url)
-            await installAudioProcessing(on: item, gainDB: nextTrack.normalizationGainDB)
-            // Re-validate again: the audio-processing build may await a track load,
-            // during which the queue could have changed or a newer refill run.
-            guard generation == loadGeneration,
-                  loaded.count == 1,
-                  queue.peekNext?.id == nextTrack.id else { return }
-            if player.canInsert(item, after: loaded.last?.item) {
-                player.insert(item, after: loaded.last?.item)
-                loaded.append((item, nextTrack, resolved.sessionID))
+            if player.canInsert(loadedItem.item, after: loaded.last?.item) {
+                player.insert(loadedItem.item, after: loaded.last?.item)
+                loaded.append(loadedItem)
             }
         } catch {
             // Leave the lookahead empty; we'll rebuild on the boundary instead.
@@ -484,71 +687,6 @@ public final class PlaybackEngine: ObservableObject {
         return true
     }
 
-    /// Attach the per-item audio mix that carries loudness normalization
-    /// (ReplayGain / Sound Check) and, when the equalizer is on, the EQ tap —
-    /// consolidated into ONE mix because an input-parameters block has a single
-    /// tap slot.
-    ///
-    /// Two paths, chosen by whether the EQ is enabled:
-    ///  - **EQ off** (the default — behaves exactly as before EQ existed): the
-    ///    normalization volume is attached asynchronously *after* enqueue so it
-    ///    never delays time-to-first-audio. This returns immediately.
-    ///  - **EQ on**: the tap must be installed *before* the item is enqueued (or it
-    ///    won't fire on `AVQueuePlayer`'s pre-rolled item), so this awaits the
-    ///    audio-track load and builds the combined mix synchronously with respect
-    ///    to the caller (which re-checks its generation guard afterward).
-    ///
-    /// Either way it silently no-ops for assets with no accessible audio track
-    /// (HLS), leaving playback untouched.
-    private func installAudioProcessing(on item: AVPlayerItem, gainDB: Double?) async {
-        if equalizer.isEnabled {
-            await buildCombinedMix(on: item, gainDB: gainDB)
-        } else {
-            applyNormalization(to: item, gainDB: gainDB)
-        }
-    }
-
-    /// The EQ-on path: load the audio track, then build a single mix with the
-    /// normalization volume ramp and the EQ tap, and attach it before enqueue.
-    ///
-    /// The track load is bounded by a timeout: with EQ off the item is enqueued
-    /// immediately and `AVPlayer` handles buffering, but here we must load the
-    /// track before enqueue, so a stalled/broken remote asset could otherwise wedge
-    /// playback in `.buffering` forever. On timeout (or no track — HLS) we simply
-    /// enqueue unequalized.
-    ///
-    /// Homogeneity note: while EQ is on, every item goes through here, so a normal
-    /// same-source queue stays uniformly tapped (gapless preserved). A queue that
-    /// mixes a no-track item (e.g. HLS) with a direct item would tap only some
-    /// items and could reconfigure the pipeline at that boundary — not reachable
-    /// today (nothing transcodes), but worth knowing if HLS playback is added.
-    private func buildCombinedMix(on item: AVPlayerItem, gainDB: Double?) async {
-        guard let track = await loadAudioTrack(from: item.asset, timeout: 4) else { return }
-        let params = AVMutableAudioMixInputParameters(track: track)
-        if normalizationEnabled, let gainDB {
-            params.setVolume(NormalizationGain.linearScalar(gainDB: gainDB, preampDB: normalizationPreampDB), at: .zero)
-        }
-        equalizer.attach(to: params)
-        let mix = AVMutableAudioMix()
-        mix.inputParameters = [params]
-        item.audioMix = mix
-    }
-
-    /// Load the first audio track of an asset, giving up after `timeout` seconds
-    /// so a slow/broken asset can't block enqueue indefinitely.
-    private func loadAudioTrack(from asset: AVAsset, timeout: TimeInterval) async -> AVAssetTrack? {
-        await withTaskGroup(of: AVAssetTrack?.self) { group in
-            group.addTask { try? await asset.loadTracks(withMediaType: .audio).first }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
-    }
-
     /// Attach an audio mix that applies the track's loudness-normalization gain
     /// (ReplayGain / Sound Check), so tracks play at a consistent level.
     ///
@@ -571,54 +709,85 @@ public final class PlaybackEngine: ObservableObject {
         }
     }
 
-    // MARK: Equalizer control
+    // MARK: Equalizer
 
-    /// Whether the graphic EQ is on. The engine-owned setter side-effect rebuilds
-    /// the loaded items so all queued items are homogeneously tapped/untapped
-    /// (required for gapless); the underlying flag lives on ``equalizer``.
+    /// Attach the per-item audio mix carrying loudness normalization and, when the
+    /// EQ is on, the EQ tap — consolidated into ONE mix (an input-parameters block
+    /// has a single tap slot).
+    ///
+    ///  - **EQ off** (default; behaves exactly as before EQ existed): normalization
+    ///    is attached asynchronously *after* enqueue; returns immediately.
+    ///  - **EQ on**: the tap must be installed *before* the item is enqueued (or it
+    ///    won't fire on the pre-rolled item), so this awaits the audio-track load
+    ///    and builds the combined mix. `makeLoadedItem` awaits this before its
+    ///    caller inserts.
+    ///
+    /// Silently no-ops for assets with no accessible audio track (HLS).
+    private func installAudioProcessing(on item: AVPlayerItem, gainDB: Double?) async {
+        if equalizer.isEnabled {
+            await buildCombinedMix(on: item, gainDB: gainDB)
+        } else {
+            applyNormalization(to: item, gainDB: gainDB)
+        }
+    }
+
+    /// The EQ-on path: load the audio track (bounded by a timeout so a stalled
+    /// asset can't wedge enqueue), then build a single mix with the normalization
+    /// volume ramp and the EQ tap.
+    private func buildCombinedMix(on item: AVPlayerItem, gainDB: Double?) async {
+        guard let track = await loadAudioTrack(from: item.asset, timeout: 4) else { return }
+        let params = AVMutableAudioMixInputParameters(track: track)
+        if normalizationEnabled, let gainDB {
+            params.setVolume(NormalizationGain.linearScalar(gainDB: gainDB, preampDB: normalizationPreampDB), at: .zero)
+        }
+        equalizer.attach(to: params)
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [params]
+        item.audioMix = mix
+    }
+
+    /// Load the first audio track of an asset, giving up after `timeout` seconds so
+    /// a slow/broken asset can't block enqueue indefinitely.
+    private func loadAudioTrack(from asset: AVAsset, timeout: TimeInterval) async -> AVAssetTrack? {
+        await withTaskGroup(of: AVAssetTrack?.self) { group in
+            group.addTask { try? await asset.loadTracks(withMediaType: .audio).first }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// Whether the graphic EQ is on / the current curve.
     public var equalizerEnabled: Bool { equalizer.isEnabled }
-
-    /// The current EQ curve (bands + preamp).
     public var equalizerSettings: EqualizerSettings { equalizer.settings }
 
-    /// Turn the EQ on or off. Rebuilds the currently-loaded item(s) in place —
-    /// preserving position and play/pause — so the tap is added to / removed from
-    /// every queued item consistently. A brief re-buffer on this explicit toggle
-    /// is acceptable; ordinary track-to-track playback stays gapless.
+    /// Turn the EQ on or off. Rebuilds the loaded item(s) in place — preserving
+    /// track, position, and play/pause — so the tap is added to / removed from
+    /// every queued item consistently (homogeneous taps keep gapless intact). A
+    /// brief re-buffer on this explicit toggle is fine; ordinary playback stays
+    /// gapless.
     public func setEqualizerEnabled(_ enabled: Bool) {
         guard equalizer.isEnabled != enabled else { return }
         equalizer.isEnabled = enabled
         rebuildAudioProcessing()
     }
 
-    /// Apply a new EQ curve. While playing this is a live, glitch-free update
-    /// pushed straight to the active tap(s) — no reload, no gap.
+    /// Apply a new EQ curve — a live, glitch-free update pushed straight to the
+    /// active tap(s), no reload.
     public func updateEqualizer(_ settings: EqualizerSettings) {
         equalizer.apply(settings)
     }
 
-    /// Rebuild the loaded item(s) so a master EQ on/off change takes effect while
-    /// keeping the same track and position. No new listening event is emitted.
+    /// Rebuild the current item (and its lookahead) so a master EQ on/off change
+    /// takes effect while keeping the same track and position. Reuses the seek
+    /// rebuild path, which refills the lookahead and emits no new listening event.
     private func rebuildAudioProcessing() {
-        guard currentTrack != nil else { return }
-        // If the player already auto-advanced into the pre-rolled next item but
-        // `handleNaturalFinish` hasn't run yet, reconcile first so we rebuild the
-        // new current track instead of restarting the one that just finished.
-        if loaded.count == 2,
-           loaded.first?.item !== player.currentItem,
-           loaded[1].item === player.currentItem {
-            handleNaturalFinish()
-            guard currentTrack != nil else { return }
-        }
-        // Treat `.buffering` as "should keep playing" — the user may toggle EQ
-        // during the initial load, and we must not silently drop autoplay.
-        let wasPlaying = snapshot.status == .playing || snapshot.status == .buffering
-        // Preserve position across rapid toggles: while a prior rebuild is still in
-        // flight the player can momentarily read 0 elapsed, so keep the larger of
-        // the live position and any pending seek.
-        let position = max(snapshot.elapsed, pendingSeek ?? 0)
-        pendingSeek = position > 1 ? position : nil
-        reload(autoplay: wasPlaying, logStartOnLoad: false)
+        guard currentTrack != nil, loaded.first != nil else { return }
+        reloadCurrent(atElapsed: snapshot.elapsed, reason: .seek)
     }
 
     // MARK: Observers
@@ -632,6 +801,14 @@ public final class PlaybackEngine: ObservableObject {
             forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main
         ) { [weak self] note in
             MainActor.assumeIsolated { self?.itemDidFinish(note.object as? AVPlayerItem) }
+        }
+        failedObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let item = note.object as? AVPlayerItem else { return }
+                self.handleItemFailure(item)
+            }
         }
 
         session.onInterruptionBegan = { [weak self] in
@@ -681,6 +858,10 @@ public final class PlaybackEngine: ObservableObject {
         }
         // The player already advanced to the pre-rolled next item.
         currentTrack = queue.current
+        // Re-point failure recovery at the newly-current item (the old one is
+        // gone). A fresh item also resets the retry budget once it plays.
+        cancelRecovery()
+        observeCurrentItemStatus()
         if let track = currentTrack {
             onNeedsArtwork?(track)
             logStart(track)
@@ -692,9 +873,21 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     private func tick() {
-        let elapsed = player.currentTime().seconds
+        // A server-seeked/recovered transcode's playhead 0 is `startOffset` into
+        // the track, so add it back to keep the reported position absolute.
+        let base = loaded.first?.startOffset ?? 0
+        let raw = player.currentTime().seconds
+        let elapsed = (raw.isFinite ? raw : 0) + base
         var duration = player.currentItem?.duration.seconds ?? 0
-        if !duration.isFinite || duration <= 0 { duration = currentTrack?.duration ?? 0 }
+        // A server-seeked transcode's item spans only the remainder (the server
+        // restarts ffmpeg at the offset), so its finite duration is
+        // `total − startOffset`. Use the track's absolute duration so `elapsed`
+        // (which is absolute) never exceeds it.
+        if base > 0, let trackDuration = currentTrack?.duration, trackDuration > 0 {
+            duration = trackDuration
+        } else if !duration.isFinite || duration <= 0 {
+            duration = currentTrack?.duration ?? 0
+        }
         snapshot.elapsed = elapsed.isFinite ? elapsed : 0
         snapshot.duration = duration
         if let track = currentTrack {

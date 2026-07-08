@@ -147,6 +147,20 @@ public struct PlexBackend: MusicBackend {
     public func streamSource(for track: Track, options: StreamOptions) async throws -> StreamSource {
         // Transcode when asked to (metered / bitrate cap); otherwise direct-play
         // the original Part.
+        //
+        // NOTE (progressive transcode deferred): unlike Jellyfin/Subsonic, Plex
+        // transcodes stay on HLS here on purpose. Plex's progressive endpoint
+        // (`.../transcode/universal/start.mp3`) returns `Transfer-Encoding:
+        // chunked` with no `Content-Length`, `Accept-Ranges: none` and
+        // `Connection: close`. AVPlayer's CoreMedia HTTP stack can't stream that
+        // (CFHTTP error -16845 surfacing as NSURLError -1008), so making Plex
+        // EQ-able on transcode would require downloading the transcode to a temp
+        // file (with XING VBR-header injection) or a localhost re-serving proxy
+        // — both real UX regressions. Since Plex transcodes are rare (most Plex
+        // playback is direct-play, which already exposes an AVAssetTrack and is
+        // EQ-able) and nothing in the app forces a transcode today, we keep the
+        // working HLS path rather than ship a half-working progressive one. See
+        // docs/adr/ADR-0009-progressive-audio-transcoding.md.
         if options.forceTranscode || options.maxBitrateKbps != nil {
             let sessionID = UUID().uuidString
             var query: [URLQueryItem] = [

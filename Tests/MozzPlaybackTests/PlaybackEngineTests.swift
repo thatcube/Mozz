@@ -239,3 +239,55 @@ final class PlayEventEmissionTests: XCTestCase {
         XCTAssertEqual(log.trace, ["started:a", "skipped:a", "started:b"])
     }
 }
+
+/// A resolver that records the `startSeconds` it's asked for and reports whether
+/// its URLs are non-range-seekable transcodes, so the engine's seek path can be
+/// exercised on the host without a real server.
+private final class RecordingResolver: TrackURLResolver, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [TimeInterval] = []
+    private let serverSeek: Bool
+    init(requiresServerSeek: Bool) { self.serverSeek = requiresServerSeek }
+    var startSecondsLog: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return recorded }
+    func resolve(_ track: Track) async throws -> ResolvedTrackURL {
+        try await resolve(track, startSeconds: 0)
+    }
+    func resolve(_ track: Track, startSeconds: TimeInterval) async throws -> ResolvedTrackURL {
+        lock.lock(); recorded.append(startSeconds); lock.unlock()
+        return ResolvedTrackURL(url: URL(fileURLWithPath: "/dev/null/\(track.id).mp3"),
+                                isLocal: false, sessionID: "s", requiresServerSeek: serverSeek)
+    }
+}
+
+/// Seeking a non-range-seekable transcode must re-request the stream at the
+/// offset (server-side seek), whereas a range-seekable stream seeks natively
+/// without re-resolving.
+@MainActor
+final class PlaybackSeekTests: XCTestCase {
+    private func oneTrack() -> [Track] {
+        [Track(id: "t0", title: "T", artistName: "A", duration: 200)]
+    }
+
+    func testServerSeekReResolvesStreamAtOffset() async {
+        let resolver = RecordingResolver(requiresServerSeek: true)
+        let engine = PlaybackEngine(resolver: resolver)
+        engine.play(tracks: oneTrack())
+        await engine.awaitPendingLoadsForTesting()
+        engine.seek(to: 42)
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertTrue(resolver.startSecondsLog.contains(42),
+                      "a server-seek transcode must re-resolve the stream at the seek offset")
+    }
+
+    func testNativeSeekDoesNotReResolve() async {
+        let resolver = RecordingResolver(requiresServerSeek: false)
+        let engine = PlaybackEngine(resolver: resolver)
+        engine.play(tracks: oneTrack())
+        await engine.awaitPendingLoadsForTesting()
+        let before = resolver.startSecondsLog.count
+        engine.seek(to: 42)
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(resolver.startSecondsLog.count, before,
+                       "a range-seekable stream must seek natively, without re-resolving")
+    }
+}
