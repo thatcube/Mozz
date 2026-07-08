@@ -532,6 +532,46 @@ final class SchemaAndWriteTests: XCTestCase {
         let recent = try await store.recentlyPlayedTrackRefs()
         XCTAssertTrue(recent.contains(ref))
     }
+
+    func testSuppressedItemsDetailedResolvesNames() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let store = RecommendationStore(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertArtists([
+            Artist(id: "ar1", name: "Nine Inch Nails", sortName: "Nine Inch Nails"),
+        ], serverId: server.id)
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "Hurt", artistName: "Nine Inch Nails", artistID: "ar1"),
+        ], serverId: server.id)
+
+        try await store.suppress(serverId: server.id, scope: "track", ref: "t1", at: 100)
+        try await store.suppress(serverId: server.id, scope: "artist", ref: "ar1", at: 200)
+        // A suppression whose catalog row is gone (suppressed then removed) → falls
+        // back to the raw ref rather than dropping out of the list.
+        try await store.suppress(serverId: server.id, scope: "track", ref: "ghost", at: 50)
+
+        let items = try await store.suppressedItemsDetailed(serverId: server.id)
+        // Newest first by createdAt.
+        XCTAssertEqual(items.map(\.createdAt), [200, 100, 50])
+
+        let artist = items.first { $0.scope == "artist" }
+        XCTAssertEqual(artist?.title, "Nine Inch Nails")
+        XCTAssertNil(artist?.subtitle)
+
+        let track = items.first { $0.scope == "track" && $0.ref == "t1" }
+        XCTAssertEqual(track?.title, "Hurt")
+        XCTAssertEqual(track?.subtitle, "Nine Inch Nails")
+
+        let ghost = items.first { $0.ref == "ghost" }
+        XCTAssertEqual(ghost?.title, "ghost", "missing catalog row falls back to the ref")
+
+        // Un-suppress drops it from the list.
+        try await store.unsuppress(serverId: server.id, scope: "track", ref: "t1")
+        let after = try await store.suppressedItemsDetailed(serverId: server.id)
+        XCTAssertFalse(after.contains { $0.ref == "t1" })
+    }
 }
 
 final class UpsertIdentityTests: XCTestCase {

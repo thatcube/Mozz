@@ -29,6 +29,7 @@ enum TrackActionSurface {
 /// ```
 struct TrackActionButtons: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var toasts: ToastCenter
 
     /// The domain track the actions operate on (queue/station/download all take
     /// a ``Track``). Rows convert their `TrackRecord` via `toDomain()`; the player
@@ -50,11 +51,13 @@ struct TrackActionButtons: View {
     var body: some View {
         Button {
             env.playback.playNext([track])
+            toasts.confirm("Playing next", icon: "text.line.first.and.arrowtriangle.forward")
         } label: {
             Label("Play Next", mozz: "text.line.first.and.arrowtriangle.forward")
         }
         Button {
             env.playback.append([track])
+            toasts.confirm("Added to queue", icon: "text.append")
         } label: {
             Label("Add to Queue", mozz: "text.append")
         }
@@ -99,7 +102,13 @@ struct TrackActionButtons: View {
         if downloadState == .downloaded {
             if let internalId {
                 Button(role: .destructive) {
-                    Task { try? await env.downloads.deleteDownload(trackInternalId: internalId) }
+                    let snapshot = track
+                    Task {
+                        try? await env.downloads.deleteDownload(trackInternalId: internalId)
+                        toasts.undoable("Download removed", icon: "trash") {
+                            Task { await env.downloadTrack(snapshot) }
+                        }
+                    }
                 } label: {
                     Label("Remove Download", mozz: "trash")
                 }
@@ -107,7 +116,10 @@ struct TrackActionButtons: View {
         } else {
             Button {
                 let snapshot = track
-                Task { await env.downloadTrack(snapshot) }
+                Task {
+                    await env.downloadTrack(snapshot)
+                    toasts.confirm("Downloading", icon: "arrow.down.circle")
+                }
             } label: {
                 Label("Download", mozz: "arrow.down.circle")
             }

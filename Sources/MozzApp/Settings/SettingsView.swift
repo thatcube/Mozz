@@ -75,6 +75,11 @@ struct SettingsView: View {
                         if enrichmentEnabled, let c = recCoverage, c.total > 0 {
                             EnrichmentCoverageRow(coverage: c)
                         }
+                        NavigationLink {
+                            SuppressedItemsView()
+                        } label: {
+                            Label("Not Recommended", mozz: "hand.thumbsdown")
+                        }
                     } header: {
                         Text("Recommendations")
                     }

@@ -146,6 +146,8 @@ struct MainTabsView: View {
                 NowPlayingMorphContainer(playback: playback, ui: ui, minimize: minimize)
                     .zIndex(100)
             }
+            ToastOverlayView(hasTrack: hasTrack)
+                .zIndex(110)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             SyncStatusBar()

@@ -19,6 +19,7 @@ public struct MozzRootScene: Scene {
                 .environmentObject(env)
                 .environmentObject(env.playback)
                 .environmentObject(env.downloads)
+                .environmentObject(env.toasts)
                 .task {
                     await env.restoreSession()
                     await env.runLaunchAutomationIfNeeded()

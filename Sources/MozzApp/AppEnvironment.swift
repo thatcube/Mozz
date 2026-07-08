@@ -105,6 +105,10 @@ public final class AppEnvironment: ObservableObject {
     public let clientInfo: ClientInfo
     public let clientIdentifier: String
 
+    /// Transient toast/undo feedback surface (see ``ToastCenter``). Injected as
+    /// its own `environmentObject` at the root so any view can raise a toast.
+    public let toasts = ToastCenter()
+
     private let resolver = SwappableResolver()
 
     /// The active server, or `nil` when the user needs to sign in.
@@ -949,12 +953,17 @@ public final class AppEnvironment: ObservableObject {
 
     /// "Don't recommend" a track: persist a hard suppression, then regenerate the
     /// home shelves so it disappears immediately (a running station picks it up on
-    /// its next batch). Reversible from a future Settings list.
+    /// its next batch). Raises an Undo toast; also reversible from Settings.
     public func suppressTrack(_ track: Track) async {
         guard let serverId = active?.connection.id else { return }
         try? await recommendations.suppressTrack(remoteId: track.id, serverId: serverId)
         await regenerateMozzWeekly()
         await regenerateHomeMixes()
+        let title = track.title
+        let remoteId = track.id
+        toasts.undoable("Won't recommend \(title)", icon: "hand.thumbsdown") { [weak self] in
+            Task { await self?.unsuppressTrack(remoteId: remoteId, serverId: serverId) }
+        }
     }
 
     /// "Don't recommend" the artist of `track` (suppresses all their tracks).
@@ -963,6 +972,42 @@ public final class AppEnvironment: ObservableObject {
         try? await recommendations.suppressArtist(remoteId: artistId, serverId: serverId)
         await regenerateMozzWeekly()
         await regenerateHomeMixes()
+        let name = track.artistName
+        toasts.undoable("Won't recommend \(name)", icon: "hand.thumbsdown") { [weak self] in
+            Task { await self?.unsuppressArtist(remoteId: artistId, serverId: serverId) }
+        }
+    }
+
+    /// Reverse a track suppression (from Undo or the Settings list), then refresh
+    /// the shelves. Silent — the track reappearing is the feedback.
+    public func unsuppressTrack(remoteId: String, serverId: ServerID) async {
+        try? await recommendations.unsuppressTrack(remoteId: remoteId, serverId: serverId)
+        await regenerateMozzWeekly()
+        await regenerateHomeMixes()
+    }
+
+    /// Reverse an artist suppression, then refresh the shelves.
+    public func unsuppressArtist(remoteId: String, serverId: ServerID) async {
+        try? await recommendations.unsuppressArtist(remoteId: remoteId, serverId: serverId)
+        await regenerateMozzWeekly()
+        await regenerateHomeMixes()
+    }
+
+    /// The active suppressions for the current server, resolved to display names
+    /// for the Settings "Not Recommended" list (newest first).
+    public func suppressedItems() async -> [RecommendationStore.SuppressedItem] {
+        guard let serverId = active?.connection.id else { return [] }
+        return (try? await recommendations.suppressedItems(serverId: serverId)) ?? []
+    }
+
+    /// Un-suppress a resolved Settings-list item by scope, then refresh shelves.
+    public func unsuppress(_ item: RecommendationStore.SuppressedItem) async {
+        guard let serverId = active?.connection.id else { return }
+        if item.scope == "artist" {
+            await unsuppressArtist(remoteId: item.ref, serverId: serverId)
+        } else {
+            await unsuppressTrack(remoteId: item.ref, serverId: serverId)
+        }
     }
 
     /// The Home mix tiles (daily batch + Mozz Weekly), ordered for display.

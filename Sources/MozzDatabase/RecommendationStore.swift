@@ -458,6 +458,55 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// A suppression resolved to a human-readable label for the Settings list.
+    public struct SuppressedItem: Identifiable, Sendable, Hashable {
+        /// `"track"` or `"artist"`.
+        public let scope: String
+        /// The suppressed remoteId (track.remoteId or artist.remoteId).
+        public let ref: String
+        /// Primary label — track title or artist name (falls back to the ref when
+        /// the catalog row is missing, e.g. suppressed then removed from library).
+        public let title: String
+        /// Secondary label — the artist name for tracks; nil for artists.
+        public let subtitle: String?
+        public let createdAt: Double
+        public var id: String { "\(scope):\(ref)" }
+    }
+
+    /// Suppressions resolved to display names by LEFT JOINing the catalog, newest
+    /// first, for the Settings "Not Recommended" management list.
+    public func suppressedItemsDetailed(serverId: ServerID) async throws -> [SuppressedItem] {
+        try await database.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT s.scope AS scope, s.ref AS ref, s.createdAt AS createdAt,
+                       t.title AS trackTitle, t.artistName AS trackArtist,
+                       a.name AS artistName
+                FROM suppressed_ref s
+                LEFT JOIN track t ON s.scope = 'track' AND t.serverId = s.serverId AND t.remoteId = s.ref
+                LEFT JOIN artist a ON s.scope = 'artist' AND a.serverId = s.serverId AND a.remoteId = s.ref
+                WHERE s.serverId = ?
+                ORDER BY s.createdAt DESC
+                """, arguments: [serverId]).map { row in
+                let scope: String = row["scope"]
+                let ref: String = row["ref"]
+                let trackTitle: String? = row["trackTitle"]
+                let trackArtist: String? = row["trackArtist"]
+                let artistName: String? = row["artistName"]
+                let title: String
+                let subtitle: String?
+                if scope == "track" {
+                    title = trackTitle ?? ref
+                    subtitle = trackArtist
+                } else {
+                    title = artistName ?? ref
+                    subtitle = nil
+                }
+                return SuppressedItem(scope: scope, ref: ref, title: title,
+                                      subtitle: subtitle, createdAt: row["createdAt"])
+            }
+        }
+    }
+
     /// Cold-start pool for a thin/empty history: most-recently-added tracks not
     /// played since `notPlayedSince`. (Popularity would also feed cold start, but
     /// with little history "recently added" is the reliable signal.)

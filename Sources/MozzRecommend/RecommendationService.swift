@@ -526,6 +526,12 @@ public actor RecommendationService {
         try await store.suppressions(serverId: serverId)
     }
 
+    /// Suppressions resolved to display names for the Settings "Not Recommended"
+    /// list, newest first.
+    public func suppressedItems(serverId: ServerID) async throws -> [RecommendationStore.SuppressedItem] {
+        try await store.suppressedItemsDetailed(serverId: serverId)
+    }
+
     // MARK: - Home mix helpers
 
     /// Content-score a pool and blend it; nil if the result is too thin to ship.
