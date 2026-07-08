@@ -29,6 +29,12 @@ struct SearchView: View {
     /// pins, matching the system search bar.
     @State private var scrolled = false
     @FocusState private var focused: Bool
+    /// Bumped when the user re-taps the Search tab while already on it. We use it
+    /// to focus the field + open the keyboard, so tapping Search when you're
+    /// already there starts a search. (A dedicated signal — not the shared
+    /// scroll-to-top one — so re-tapping OTHER tabs can't focus us in the
+    /// background.)
+    @Environment(\.searchReselectSignal) private var searchReselectSignal
 
     /// Shared height for the search field and the cancel ✕ so they line up.
     private let fieldHeight: CGFloat = 44
@@ -102,6 +108,9 @@ struct SearchView: View {
                         proxy.scrollTo(topAnchor, anchor: .top)
                     }
                 }
+                // Re-tapping the Search tab while already on it focuses the field
+                // and opens the keyboard, so you can start typing immediately.
+                .onChange(of: searchReselectSignal) { _, _ in focused = true }
                 .task(id: recents.items) { await resolveRecents() }
             }
         }
