@@ -36,6 +36,14 @@ struct JellyfinLoginView: View {
                 Section { Text(status).foregroundStyle(.secondary).font(.footnote) }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if baseURL != nil {
+                SignInBar(title: "Sign In", isBusy: isBusy,
+                          isEnabled: !username.isEmpty && !password.isEmpty) {
+                    signInWithPassword()
+                }
+            }
+        }
         .navigationTitle("Jellyfin")
         .inlineNavigationTitle()
         .task { await runDiscovery() }
@@ -86,6 +94,7 @@ struct JellyfinLoginView: View {
                 Image(systemName: "server.rack")
                     .foregroundStyle(.secondary)
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(server.name)
                         .foregroundStyle(.primary)
@@ -98,11 +107,19 @@ struct JellyfinLoginView: View {
                     Image(systemName: "checkmark")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // One VoiceOver element: the name + address, with a Selected trait to
+        // convey the checkmark (which is hidden above) semantically.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(server.name)
+        .accessibilityValue(server.baseURL.absoluteString)
+        .accessibilityHint("Selects this server to sign in to")
+        .accessibilityAddTraits(selectedServer?.id == server.id ? [.isButton, .isSelected] : .isButton)
     }
 
     // MARK: Manual entry
@@ -111,6 +128,8 @@ struct JellyfinLoginView: View {
         Section {
             TextField("192.168.1.10  or  https://jellyfin.example.com", text: $manualURL)
                 .urlFieldStyle()
+                .accessibilityLabel("Server address")
+                .accessibilityHint("For example, 192.168.1.10 or https://jellyfin.example.com")
                 .onChange(of: manualURL) { _, new in
                     // Typing means the user is going manual — drop any list
                     // selection so there's a single source of truth.
@@ -134,6 +153,8 @@ struct JellyfinLoginView: View {
                     Text("Enter this code in Jellyfin \u{25B8} Quick Connect:")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text(code).font(.system(.title, design: .monospaced).bold())
+                        .accessibilityLabel("Quick Connect code")
+                        .accessibilityValue(code.map(String.init).joined(separator: " "))
                 }
             } else {
                 Button("Start Quick Connect") { startQuickConnect() }
@@ -144,9 +165,11 @@ struct JellyfinLoginView: View {
         Section {
             TextField("Username", text: $username)
                 .plainTextFieldStyle()
+                .usernameContentType()
+                .accessibilityLabel("Username")
             SecureField("Password", text: $password)
-            Button("Sign In") { signInWithPassword() }
-                .disabled(username.isEmpty || isBusy)
+                .passwordContentType()
+                .accessibilityLabel("Password")
         } header: {
             Text("Sign in to \(targetName)")
         }

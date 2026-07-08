@@ -44,6 +44,7 @@ struct SubsonicLoginView: View {
                 TextField("Username", text: $username)
                     .plainTextFieldStyle()
                     .usernameContentType()
+                    .accessibilityLabel("Username")
                 Picker("Sign in with", selection: $method) {
                     ForEach(Method.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -52,12 +53,11 @@ struct SubsonicLoginView: View {
                 case .password:
                     SecureField("Password", text: $password)
                         .passwordContentType()
+                        .accessibilityLabel("Password")
                 case .apiKey:
                     SecureField("API key", text: $apiKey)
                         .accessibilityLabel("API key")
                 }
-                Button("Sign In") { signIn() }
-                    .disabled(!canSubmit || isBusy)
             } header: {
                 Text("Sign in to \(targetName)")
             } footer: {
@@ -71,6 +71,9 @@ struct SubsonicLoginView: View {
             if let status {
                 Section { Text(status).foregroundStyle(.secondary).font(.footnote) }
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            SignInBar(title: "Sign In", isBusy: isBusy, isEnabled: canSubmit) { signIn() }
         }
         .navigationTitle("Navidrome")
         .inlineNavigationTitle()
