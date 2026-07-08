@@ -28,6 +28,13 @@ struct SearchView: View {
     /// at-rest gray fill → Liquid Glass swap so content shows through it as it
     /// pins, matching the system search bar.
     @State private var scrolled = false
+    /// Sticky "search mode": entered when the field first gains focus, left only
+    /// via Cancel. Kept independent of live focus so that scrolling can dismiss
+    /// the keyboard (like Apple Music) WITHOUT dropping search mode — the title
+    /// stays collapsed and the results/recents page stays put (no content shift,
+    /// no scroll fight from the system trying to keep the first responder
+    /// visible).
+    @State private var searching = false
     @FocusState private var focused: Bool
 
     /// Shared height for the search field and the cancel ✕ so they line up.
@@ -42,9 +49,9 @@ struct SearchView: View {
     private let fieldTransition: Animation = .smooth(duration: 0.4)
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
-    /// Actively searching — the field is focused or a query has been entered.
-    /// Drives the collapse of the title header and the Cancel button.
-    private var isActive: Bool { focused || !trimmedQuery.isEmpty }
+    /// Actively searching — in sticky search mode or a query has been entered.
+    /// Drives the collapse of the title header, the Cancel button, and the glass.
+    private var isActive: Bool { searching || !trimmedQuery.isEmpty }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -85,8 +92,17 @@ struct SearchView: View {
             .tracksScrolled($scrolled)
             .minimizesBottomBarOnScroll()
             .scrollsToTopOnSignal()
+            // Scrolling dismisses the keyboard (Apple Music style). This is also
+            // what stops the "fighting" scroll: with a focused field pinned by
+            // visualEffect, its layout frame scrolls up under the bar and the
+            // system tries to scroll it back into view. Dropping focus on scroll
+            // ends that tug-of-war; sticky `searching` keeps the page stable.
+            .scrollDismissesKeyboard(.immediately)
             .hideNavigationBar()
             .appRouteDestinations()
+            .onChange(of: focused) { _, isFocused in
+                if isFocused { searching = true }
+            }
             .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
             .task(id: recents.items) { await resolveRecents() }
         }
@@ -354,6 +370,7 @@ struct SearchView: View {
     private func cancelSearch() {
         query = ""
         focused = false
+        searching = false
         results = SearchResults(artists: [], albums: [], tracks: [])
         lastLatencyMs = nil
     }
