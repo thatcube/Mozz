@@ -106,7 +106,7 @@ struct SearchView: View {
                     // typing) instead of somewhere off-screen below your scroll
                     // position.
                     if !trimmedQuery.isEmpty {
-                        proxy.scrollTo(topAnchor, anchor: .top)
+                        jumpToTop(proxy)
                     }
                 }
                 // Re-tapping the Search tab while already on it focuses the field
@@ -377,6 +377,20 @@ struct SearchView: View {
     }
 
     // MARK: Actions
+
+    /// Scroll the list back to the top when a search changes. Issued both
+    /// immediately and again on the next runloop tick: a `scrollTo` fired
+    /// synchronously while the scroll view is mid-fling / decelerating is often
+    /// swallowed, so the deferred, animated re-issue reliably overrides the
+    /// momentum (a no-op if we're already at the top).
+    private func jumpToTop(_ proxy: ScrollViewProxy) {
+        proxy.scrollTo(topAnchor, anchor: .top)
+        DispatchQueue.main.async {
+            withAnimation(fieldTransition) {
+                proxy.scrollTo(topAnchor, anchor: .top)
+            }
+        }
+    }
 
     private func cancelSearch() {
         query = ""
