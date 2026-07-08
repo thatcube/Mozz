@@ -19,7 +19,7 @@ struct OnboardingView: View {
                         .scaledToFit()
                         .frame(width: 112, height: 112)
                     Text("Mozz").font(.largeTitle.bold())
-                    Text("Offline-first music for Plex, Jellyfin & Navidrome")
+                    Text("One app for your music, wherever it lives")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
