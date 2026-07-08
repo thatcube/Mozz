@@ -424,6 +424,42 @@ final class SubsonicEnumerationTests: XCTestCase {
         for page in pages { XCTAssertNil(page.totalCount, "unprovable total must be nil") }
     }
 
+    /// Regression: an empty-id album inside a FULL album-list window must not
+    /// truncate the walk. Page 1 (offset 0) is a full window of 2 albums, one of
+    /// which has an empty id; after filtering it yields a single id. Driving
+    /// termination off that post-filter count (the original bug) would break the
+    /// loop before ever requesting offset 2, dropping every later album — and,
+    /// because the derived total would then match the truncated set, authorize a
+    /// prune that deletes unseen tracks and their offline downloads. Termination
+    /// must instead use the RAW window length, so the tail page IS fetched.
+    func testEmptyIdAlbumInFullWindowDoesNotTruncateWalk() async throws {
+        let transport = FixtureTransport([
+            .init(contains: "offset=2", fixture: "sub_albumlist2_page2_tail"),
+            .init(contains: "getAlbumList2", fixture: "sub_albumlist2_page1_full"),
+            .init(contains: "id=al-1", fixture: "sub_album_a1"),
+            .init(contains: "id=al-2", fixture: "sub_album_a2"),
+        ])
+        // albumWindow == 2 so page 1's raw length (2) fills the window and the walk
+        // must continue to offset 2; the tail's raw length (1) is the real terminal.
+        let stream = try XCTUnwrap(
+            backend(transport).enumerateAllTracks(pageSize: 50, albumWindow: 2))
+        var pages: [CatalogPage<Track>] = []
+        for try await page in stream { pages.append(page) }
+
+        let allTracks = pages.flatMap(\.items)
+        // Both real albums walked — the empty-id album did not end enumeration.
+        XCTAssertEqual(Set(allTracks.map(\.id)), ["tr-a1", "tr-a2"])
+        // Expected total = Σ songCount over the two VALID albums (the empty-id
+        // album is filtered and excluded), and it is reached → prune is safe.
+        for page in pages { XCTAssertEqual(page.totalCount, 2) }
+        // The tail page at offset 2 was actually requested (offset advanced by the
+        // raw window length, not the filtered id count).
+        let hitOffset2 = transport.requests.contains {
+            ($0.url?.absoluteString ?? "").contains("offset=2")
+        }
+        XCTAssertTrue(hitOffset2, "walk must page past the empty-id full window")
+    }
+
     /// The engine-side guard: an enumerator page-set with a nil reported total
     /// must NOT authorize a prune, while a reached total must.
     func testPruneGuardRefusesToPruneWithoutProvableTotal() {

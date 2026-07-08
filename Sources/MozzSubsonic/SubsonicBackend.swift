@@ -182,23 +182,37 @@ public struct SubsonicBackend: MusicBackend {
     /// before it will prune (protecting offline downloads); when it can't be
     /// derived, pages carry `totalCount == nil` and the engine will NOT prune.
     public func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>? {
+        enumerateAllTracks(pageSize: pageSize, albumWindow: 500)
+    }
+
+    /// Testable core of the album-walk enumerator. `albumWindow` is the
+    /// getAlbumList2 page size (500 in production); exposing it internally lets
+    /// tests drive multi-page pagination with small fixtures and prove that an
+    /// empty-id album inside a *full* window never truncates the walk.
+    func enumerateAllTracks(pageSize: Int, albumWindow: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>? {
         AsyncThrowingStream { continuation in
             let producer = Task {
                 do {
                     // Phase 1: enumerate every album (id + songCount).
-                    let listSize = 500
+                    let listSize = albumWindow
                     var albumIDs: [String] = []
                     var songCounts: [Int?] = []
                     var offset = 0
                     while true {
                         try Task.checkCancellation()
-                        let (ids, counts) = try await albumListPage(size: listSize, offset: offset)
-                        albumIDs.append(contentsOf: ids)
-                        songCounts.append(contentsOf: counts)
-                        offset += ids.count
-                        // getAlbumList2 returns a full window until the end, so a
-                        // short/empty page is genuinely terminal.
-                        if ids.count < listSize { break }
+                        let page = try await albumListPage(size: listSize, offset: offset)
+                        albumIDs.append(contentsOf: page.ids)
+                        songCounts.append(contentsOf: page.counts)
+                        // Advance offset and decide termination by the RAW server
+                        // count, never the post-filter id count. A full window that
+                        // happens to contain an empty-id album still filters shorter,
+                        // and treating that as terminal would silently drop every
+                        // later page — and, because the derived expected total would
+                        // then match the truncated set, green-light a prune that
+                        // deletes unseen tracks and their offline downloads. Only a
+                        // genuinely short/empty server window is terminal.
+                        offset += page.rawCount
+                        if page.rawCount < listSize { break }
                     }
 
                     // Expected total = Σ songCount, but ONLY when every album
@@ -334,15 +348,19 @@ public struct SubsonicBackend: MusicBackend {
         return [URLQueryItem(name: "musicFolderId", value: musicFolderId)]
     }
 
-    /// Fetch one album-list window; returns parallel (ids, songCounts) arrays.
-    private func albumListPage(size: Int, offset: Int) async throws -> ([String], [Int?]) {
+    /// Fetch one album-list window. Returns the filtered (id, songCount) arrays
+    /// for enumeration plus the RAW pre-filter page length, which the caller
+    /// MUST use for offset advancement and terminal detection so an empty-id
+    /// album inside a full window cannot truncate the walk (see enumerateAllTracks).
+    private func albumListPage(size: Int, offset: Int) async throws -> (ids: [String], counts: [Int?], rawCount: Int) {
         let body = try await client.send("getAlbumList2", query: [
             URLQueryItem(name: "type", value: "alphabeticalByArtist"),
             URLQueryItem(name: "size", value: "\(size)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
         ] + musicFolderQuery(), as: SubsonicAlbumList2Payload.self)
-        let albums = (body.payload.albumList2?.album ?? []).filter { ($0.id?.value ?? "").isEmpty == false }
-        return (albums.map { $0.id?.value ?? "" }, albums.map { $0.songCount })
+        let raw = body.payload.albumList2?.album ?? []
+        let albums = raw.filter { ($0.id?.value ?? "").isEmpty == false }
+        return (albums.map { $0.id?.value ?? "" }, albums.map { $0.songCount }, raw.count)
     }
 
     private func albumSongs(albumID: String) async throws -> [SubsonicChild] {

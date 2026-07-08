@@ -1,0 +1,17 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "albumList2": {
+      "album": [
+        {
+          "id": "al-2",
+          "name": "Second",
+          "artist": "Artist Two",
+          "artistId": "ar-2",
+          "songCount": 1
+        }
+      ]
+    }
+  }
+}

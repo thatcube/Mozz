@@ -1,0 +1,24 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "albumList2": {
+      "album": [
+        {
+          "id": "al-1",
+          "name": "First",
+          "artist": "Artist One",
+          "artistId": "ar-1",
+          "songCount": 1
+        },
+        {
+          "id": "",
+          "name": "Malformed Empty-Id Album",
+          "artist": "Artist Zero",
+          "artistId": "ar-0",
+          "songCount": 1
+        }
+      ]
+    }
+  }
+}

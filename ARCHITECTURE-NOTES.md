@@ -32,7 +32,14 @@ Gonic/Ampache/LMS best-effort). Mirrors the `MozzJellyfin` module's shape.
    engine requires before pruning. `search3(query="")` is a **quick-start
    fast-path only**: `fetchTracks` always returns `totalCount == nil`, so it can
    never authorize a prune (a prune deletes unseen tracks *and their downloaded
-   files*).
+   files*). **Pagination is driven off the RAW server window length, never the
+   post-filter id count.** `albumListPage` filters malformed empty-id albums, but
+   the Phase-1 loop advances `offset` and decides termination using the raw page
+   length so that an empty-id album inside a *full* window can never truncate the
+   walk — which would otherwise drop every later album and, because the derived
+   total would then match the truncated set, green-light exactly the destructive
+   prune this design exists to prevent. (Mirrors the flat pager's "only a
+   genuinely empty page is terminal" rule; regression-tested.)
 
 3. **Additive optional bulk enumerator on `MusicBackend`.**
    `enumerateAllTracks(pageSize:) -> AsyncThrowingStream<CatalogPage<Track>, any
