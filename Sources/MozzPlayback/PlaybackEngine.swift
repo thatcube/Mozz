@@ -85,11 +85,41 @@ public final class PlaybackEngine: ObservableObject {
     private let nowPlaying = NowPlayingCenter()
 
     private var queue = PlayQueue()
+    /// One entry in the player's small (≤2) window of loaded items.
+    private struct LoadedItem {
+        let item: AVPlayerItem
+        let track: Track
+        let sessionID: String?
+        /// Absolute seconds into the track at which this item's playhead 0 sits.
+        /// Non-zero only for a server-side-seeked/recovered progressive transcode
+        /// (which is re-requested at an offset); `tick()` adds it back so the UI
+        /// position stays absolute.
+        var startOffset: TimeInterval = 0
+        /// This item is a non-range-seekable transcode: seek/recovery must
+        /// re-resolve the URL with a server offset rather than seek natively.
+        var requiresServerSeek: Bool = false
+        /// Streamed (not a local file) — eligible for network-drop recovery.
+        var isStreamed: Bool = false
+    }
+
     /// Tracks currently loaded into the player, aligned with `player.items()`.
-    private var loaded: [(item: AVPlayerItem, track: Track, sessionID: String?)] = []
+    private var loaded: [LoadedItem] = []
     private var loadGeneration = 0
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    /// Belt-and-suspenders failure signal alongside the item-status KVO: some
+    /// mid-stream drops surface as this notification. Routed to the same recovery.
+    private var failedObserver: NSObjectProtocol?
+    /// KVO on the current item's `status`, to detect a terminal `.failed` (a
+    /// dropped stream) and recover. Re-pointed whenever the current item changes.
+    private var currentItemStatusObserver: AnyCancellable?
+    /// A pending backoff before a recovery re-load; cancelled if the track changes.
+    private var recoveryTask: Task<Void, Never>?
+    /// Consecutive recovery attempts for the current item; reset once an item
+    /// reaches `.readyToPlay` (so a stream that plays then drops later gets a
+    /// fresh budget), capped by ``maxRecoveryRetries``.
+    private var recoveryRetryCount = 0
+    private static let maxRecoveryRetries = 5
     private var wasPlayingBeforeInterruption = false
     /// A position to seek to once the (paused) current item finishes loading —
     /// used to restore a saved session at the right spot.
@@ -109,6 +139,9 @@ public final class PlaybackEngine: ObservableObject {
     deinit {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        if let failedObserver { NotificationCenter.default.removeObserver(failedObserver) }
+        currentItemStatusObserver?.cancel()
+        recoveryTask?.cancel()
     }
 
     // MARK: Public transport
@@ -272,11 +305,19 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     public func seek(to seconds: TimeInterval) {
+        let target = max(0, seconds)
         if loggedTrackID != nil, let track = currentTrack {
             onPlayEvent?(PlayEvent(trackID: track.id, kind: .seek,
-                                   positionSeconds: seconds, durationSeconds: track.duration))
+                                   positionSeconds: target, durationSeconds: track.duration))
         }
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
+        // A progressive transcode isn't byte-range seekable (Jellyfin serves it
+        // `Accept-Ranges: none`); the only way to move the playhead is to
+        // re-request the stream at a server-side offset and rebuild the item.
+        if loaded.first?.requiresServerSeek == true {
+            reloadCurrent(atElapsed: target, reason: .seek)
+            return
+        }
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600)) { [weak self] _ in
             Task { @MainActor in self?.publish() }
         }
     }
@@ -316,9 +357,11 @@ public final class PlaybackEngine: ObservableObject {
         // end of the queue, `handleNaturalFinish` has already logged `.completed`
         // and cleared the pending track, so this no-ops — no double count.)
         logTerminal(.skipped, position: snapshot.elapsed)
+        cancelRecovery()
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
+        currentItemStatusObserver = nil
         invalidateStation()   // stopping ends any active station
         report(.stopped)
         currentTrack = nil
@@ -334,6 +377,7 @@ public final class PlaybackEngine: ObservableObject {
     private func reload(autoplay: Bool) {
         loadGeneration += 1
         let generation = loadGeneration
+        cancelRecovery()          // a fresh load abandons any in-flight recovery
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
@@ -354,16 +398,23 @@ public final class PlaybackEngine: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let resolved = try await resolver.resolve(track)
+                let loadedItem = try await self.makeLoadedItem(for: track, startSeconds: 0)
                 guard generation == self.loadGeneration else { return }
-                let item = AVPlayerItem(url: resolved.url)
-                self.applyNormalization(to: item, gainDB: track.normalizationGainDB)
-                self.player.insert(item, after: nil)
-                self.loaded = [(item, track, resolved.sessionID)]
-                if let seek = self.pendingSeek {
+                self.player.insert(loadedItem.item, after: nil)
+                self.loaded = [loadedItem]
+                self.observeCurrentItemStatus()
+                if let seek = self.pendingSeek, seek > 0 {
                     self.pendingSeek = nil
+                    // A saved transcode session can't be range-seeked to the
+                    // resume point; re-request it at the server offset instead.
+                    if loadedItem.requiresServerSeek {
+                        self.reloadCurrent(atElapsed: seek, reason: .seek, autoplay: autoplay)
+                        return
+                    }
                     self.player.seek(to: CMTime(seconds: seek, preferredTimescale: 600),
                                      completionHandler: { _ in })
+                } else {
+                    self.pendingSeek = nil
                 }
                 if autoplay {
                     self.player.play()
@@ -378,6 +429,167 @@ public final class PlaybackEngine: ObservableObject {
                 self.publish(status: .paused)
             }
         }
+    }
+
+    // MARK: Item construction & network-drop recovery
+
+    /// Resolve `track` (at an optional server-side offset) and build a normalized
+    /// player item plus the metadata the engine needs to seek/recover it.
+    private func makeLoadedItem(for track: Track, startSeconds: TimeInterval) async throws -> LoadedItem {
+        let resolved = try await resolver.resolve(track, startSeconds: startSeconds)
+        let item = AVPlayerItem(url: resolved.url)
+        applyNormalization(to: item, gainDB: track.normalizationGainDB)
+        return LoadedItem(
+            item: item,
+            track: track,
+            sessionID: resolved.sessionID,
+            // The offset only "took" if this is a server-seek transcode; otherwise
+            // the URL is unchanged and we seek natively (base offset stays 0).
+            startOffset: resolved.requiresServerSeek ? startSeconds : 0,
+            requiresServerSeek: resolved.requiresServerSeek,
+            isStreamed: !resolved.isLocal
+        )
+    }
+
+    /// Observe the current item's `status` so a terminal `.failed` (a dropped
+    /// stream) triggers recovery, and a `.readyToPlay` refreshes the retry budget.
+    /// Only streamed items are watched — a local file failing isn't worth retrying.
+    private func observeCurrentItemStatus() {
+        currentItemStatusObserver = nil
+        guard let entry = loaded.first, entry.isStreamed else { return }
+        let item = entry.item
+        currentItemStatusObserver = item.publisher(for: \.status)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    switch status {
+                    case .failed: self.handleItemFailure(item)
+                    case .readyToPlay: self.recoveryRetryCount = 0
+                    default: break
+                    }
+                }
+            }
+    }
+
+    /// Cancel any pending recovery backoff (called when the track changes).
+    private func cancelRecovery() {
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveryRetryCount = 0
+    }
+
+    /// The current item hit a terminal `.failed`. If it's a transient network
+    /// error and we're under the retry cap, rebuild the item (at the last
+    /// position) after an exponential backoff; otherwise skip to the next track.
+    private func handleItemFailure(_ item: AVPlayerItem) {
+        guard loaded.first?.item === item else { return }   // stale / lookahead item
+        guard recoveryTask == nil else { return }           // a retry is already scheduled
+        guard let nsError = item.error as NSError?,
+              Self.isTransientNetworkError(nsError),
+              recoveryRetryCount < Self.maxRecoveryRetries else {
+            advanceAfterUnrecoverableFailure()
+            return
+        }
+        recoveryRetryCount += 1
+        let delay = min(pow(2.0, Double(recoveryRetryCount - 1)), 30.0)  // 1,2,4,8,16s (cap 30)
+        let targetElapsed = snapshot.elapsed
+        let generation = loadGeneration
+        publish(status: .buffering)
+        recoveryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, !Task.isCancelled, generation == self.loadGeneration else { return }
+            self.recoveryTask = nil
+            self.reloadCurrent(atElapsed: targetElapsed, reason: .recovery)
+        }
+    }
+
+    /// Recovery is exhausted (or the error isn't a transient network blip): treat
+    /// the track as un-completable and advance, so playback doesn't dead-end.
+    private func advanceAfterUnrecoverableFailure() {
+        cancelRecovery()
+        logTerminal(.skipped, position: snapshot.elapsed)
+        guard queue.advance() != nil else { stop(); return }
+        reload(autoplay: true)
+        maybeExtendQueue()
+    }
+
+    private enum ReloadReason { case seek, recovery }
+
+    /// Rebuild only the current item, keeping the queue position — used to seek a
+    /// non-range-seekable transcode (`.seek`) and to recover a dropped stream
+    /// (`.recovery`). A server-seek transcode is re-requested at `elapsed`; a
+    /// range-seekable stream is rebuilt and native-seeked to `elapsed`. `autoplay`
+    /// overrides the derived play state (used by a paused saved-session restore).
+    private func reloadCurrent(atElapsed elapsed: TimeInterval, reason: ReloadReason, autoplay: Bool? = nil) {
+        guard let track = currentTrack, let existing = loaded.first else { return }
+        let useServerSeek = existing.requiresServerSeek
+        let wasPlaying = autoplay ?? (snapshot.status == .playing || snapshot.status == .buffering)
+        loadGeneration += 1
+        let generation = loadGeneration
+        recoveryTask?.cancel(); recoveryTask = nil
+        currentItemStatusObserver = nil
+        player.pause()
+        player.removeAllItems()
+        loaded.removeAll()
+        // Reflect the target position immediately so the scrubber jumps now (not
+        // on the first tick after the rebuild) and a failure before playback
+        // recovers at the right spot rather than the stale pre-seek position.
+        snapshot.elapsed = elapsed
+        publish(status: .buffering)
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let loadedItem = try await self.makeLoadedItem(
+                    for: track,
+                    startSeconds: useServerSeek ? elapsed : 0
+                )
+                guard generation == self.loadGeneration else { return }
+                self.player.insert(loadedItem.item, after: nil)
+                self.loaded = [loadedItem]
+                self.observeCurrentItemStatus()
+                if !useServerSeek, elapsed > 0 {
+                    self.player.seek(to: CMTime(seconds: elapsed, preferredTimescale: 600),
+                                     completionHandler: { _ in })
+                }
+                if wasPlaying {
+                    self.player.play()
+                    self.publish(status: .playing)
+                    self.report(.playing)
+                } else {
+                    self.publish(status: .paused)
+                }
+                await self.refillLookaheadAsync(generation: generation)
+            } catch {
+                guard generation == self.loadGeneration else { return }
+                // Resolving is pure URL-building (or a local DB lookup) for every
+                // backend — it doesn't hit the network — so a throw here isn't the
+                // stream outage and retrying wouldn't help; just settle paused.
+                self.publish(status: .paused)
+            }
+        }
+    }
+
+    /// NSURLError codes worth an automatic retry — transient connectivity, not a
+    /// 4xx/decoding/fatal error. Unwraps AVFoundation's wrapper error if present.
+    private static func isTransientNetworkError(_ error: NSError) -> Bool {
+        if error.domain == NSURLErrorDomain {
+            return [
+                NSURLErrorTimedOut,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorCannotFindHost,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorResourceUnavailable,
+                NSURLErrorBadServerResponse,
+            ].contains(error.code)
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isTransientNetworkError(underlying)
+        }
+        return false
     }
 
     /// Ensure the player holds the next track for gapless advance.
@@ -425,7 +637,7 @@ public final class PlaybackEngine: ObservableObject {
         guard loaded.count == 1, let nextTrack = queue.peekNext else { return }
         // Don't double-load the same track object unless repeat-one intends it.
         do {
-            let resolved = try await resolver.resolve(nextTrack)
+            let loadedItem = try await makeLoadedItem(for: nextTrack, startSeconds: 0)
             // Re-validate after the await: another mutation (or a second refill)
             // may have changed the next track while we were resolving. Only
             // insert if this resolve still matches the queue's next track and
@@ -434,11 +646,9 @@ public final class PlaybackEngine: ObservableObject {
             guard generation == loadGeneration,
                   loaded.count == 1,
                   queue.peekNext?.id == nextTrack.id else { return }
-            let item = AVPlayerItem(url: resolved.url)
-            applyNormalization(to: item, gainDB: nextTrack.normalizationGainDB)
-            if player.canInsert(item, after: loaded.last?.item) {
-                player.insert(item, after: loaded.last?.item)
-                loaded.append((item, nextTrack, resolved.sessionID))
+            if player.canInsert(loadedItem.item, after: loaded.last?.item) {
+                player.insert(loadedItem.item, after: loaded.last?.item)
+                loaded.append(loadedItem)
             }
         } catch {
             // Leave the lookahead empty; we'll rebuild on the boundary instead.
@@ -500,6 +710,14 @@ public final class PlaybackEngine: ObservableObject {
         ) { [weak self] note in
             MainActor.assumeIsolated { self?.itemDidFinish(note.object as? AVPlayerItem) }
         }
+        failedObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let item = note.object as? AVPlayerItem else { return }
+                self.handleItemFailure(item)
+            }
+        }
 
         session.onInterruptionBegan = { [weak self] in
             guard let self else { return }
@@ -548,6 +766,10 @@ public final class PlaybackEngine: ObservableObject {
         }
         // The player already advanced to the pre-rolled next item.
         currentTrack = queue.current
+        // Re-point failure recovery at the newly-current item (the old one is
+        // gone). A fresh item also resets the retry budget once it plays.
+        cancelRecovery()
+        observeCurrentItemStatus()
         if let track = currentTrack {
             onNeedsArtwork?(track)
             logStart(track)
@@ -559,9 +781,21 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     private func tick() {
-        let elapsed = player.currentTime().seconds
+        // A server-seeked/recovered transcode's playhead 0 is `startOffset` into
+        // the track, so add it back to keep the reported position absolute.
+        let base = loaded.first?.startOffset ?? 0
+        let raw = player.currentTime().seconds
+        let elapsed = (raw.isFinite ? raw : 0) + base
         var duration = player.currentItem?.duration.seconds ?? 0
-        if !duration.isFinite || duration <= 0 { duration = currentTrack?.duration ?? 0 }
+        // A server-seeked transcode's item spans only the remainder (the server
+        // restarts ffmpeg at the offset), so its finite duration is
+        // `total − startOffset`. Use the track's absolute duration so `elapsed`
+        // (which is absolute) never exceeds it.
+        if base > 0, let trackDuration = currentTrack?.duration, trackDuration > 0 {
+            duration = trackDuration
+        } else if !duration.isFinite || duration <= 0 {
+            duration = currentTrack?.duration ?? 0
+        }
         snapshot.elapsed = elapsed.isFinite ? elapsed : 0
         snapshot.duration = duration
         if let track = currentTrack {

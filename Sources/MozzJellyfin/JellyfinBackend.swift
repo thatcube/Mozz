@@ -387,7 +387,13 @@ public struct JellyfinBackend: MusicBackend {
 
     // MARK: Playback & downloads
 
+    public var supportsTranscodeSeek: Bool { true }
+
     public func streamSource(for track: Track, options: StreamOptions) async throws -> StreamSource {
+        try await streamSource(for: track, options: options, startSeconds: 0)
+    }
+
+    public func streamSource(for track: Track, options: StreamOptions, startSeconds: TimeInterval) async throws -> StreamSource {
         let sessionID = UUID().uuidString
         var query: [URLQueryItem] = [
             URLQueryItem(name: "UserId", value: userID),
@@ -410,6 +416,16 @@ public struct JellyfinBackend: MusicBackend {
         if let maxBitrate = options.maxBitrateKbps {
             query.append(URLQueryItem(name: "MaxStreamingBitrate", value: "\(maxBitrate * 1000)"))
             transcoded = true
+        }
+        // Progressive transcodes aren't byte-range seekable (Jellyfin serves them
+        // `Accept-Ranges: none`); seeking is done by re-requesting the stream with
+        // a server-side start offset in ticks (1 tick = 100ns), which restarts
+        // ffmpeg from that point. Gate on `transcoded`: a direct-play request is
+        // range-seekable (seeks natively) and StartTimeTicks would needlessly
+        // force it to transcode.
+        if transcoded, startSeconds > 0 {
+            let ticks = Int64((startSeconds * 10_000_000).rounded())
+            query.append(URLQueryItem(name: "StartTimeTicks", value: "\(ticks)"))
         }
         guard let url = mediaURL(path: "Audio/\(track.id)/universal", query: query) else {
             throw MozzError.invalidResponse

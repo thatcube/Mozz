@@ -38,6 +38,11 @@ public final class SwappableResolver: TrackURLResolver, @unchecked Sendable {
         guard let current = currentDelegate() else { throw MozzError.unsupported("No active server") }
         return try await current.resolve(track)
     }
+
+    public func resolve(_ track: Track, startSeconds: TimeInterval) async throws -> ResolvedTrackURL {
+        guard let current = currentDelegate() else { throw MozzError.unsupported("No active server") }
+        return try await current.resolve(track, startSeconds: startSeconds)
+    }
 }
 
 /// The active server plus everything derived from it.

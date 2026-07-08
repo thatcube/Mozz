@@ -188,6 +188,39 @@ final class JellyfinURLTests: XCTestCase {
         XCTAssertTrue(string.contains("AudioCodec=mp3"))
     }
 
+    func testTranscodeSeekAppendsStartTimeTicks() async throws {
+        let backend = makeBackend()
+        XCTAssertTrue(backend.supportsTranscodeSeek)
+        // Progressive transcodes aren't range-seekable; a seek re-requests the
+        // stream at a server-side offset in ticks (1s = 10_000_000 ticks).
+        let source = try await backend.streamSource(
+            for: track, options: StreamOptions(maxBitrateKbps: 192), startSeconds: 30)
+        XCTAssertTrue(source.isTranscoded)
+        XCTAssertTrue(source.url.absoluteString.contains("StartTimeTicks=300000000"))
+    }
+
+    func testStartSecondsZeroOmitsStartTimeTicks() async throws {
+        // The initial (offset 0) request must be byte-identical in intent to the
+        // plain 2-arg path — no StartTimeTicks — so it isn't a needless re-seek.
+        let source = try await makeBackend().streamSource(
+            for: track, options: StreamOptions(maxBitrateKbps: 192), startSeconds: 0)
+        XCTAssertFalse(source.url.absoluteString.contains("StartTimeTicks"))
+    }
+
+    func testStreamingResolverFlagsTranscodeAsServerSeek() async throws {
+        let backend = makeBackend()
+        // A transcode on a server-seek-capable backend must be flagged so the
+        // engine re-resolves (rather than natively seeks) it — and carry the offset.
+        let transcode = StreamingTrackURLResolver(backend: backend, options: StreamOptions(maxBitrateKbps: 192))
+        let seeked = try await transcode.resolve(track, startSeconds: 15)
+        XCTAssertTrue(seeked.requiresServerSeek)
+        XCTAssertTrue(seeked.url.absoluteString.contains("StartTimeTicks=150000000"))
+        // Direct play is range-seekable → native seek, never flagged.
+        let direct = try await StreamingTrackURLResolver(backend: backend).resolve(track, startSeconds: 15)
+        XCTAssertFalse(direct.requiresServerSeek)
+        XCTAssertFalse(direct.url.absoluteString.contains("StartTimeTicks"))
+    }
+
     func testOriginalFileURL() throws {
         let url = try makeBackend().originalFileURL(for: track)
         let string = url.absoluteString

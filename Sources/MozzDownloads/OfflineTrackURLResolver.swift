@@ -35,6 +35,16 @@ public struct OfflineTrackURLResolver: TrackURLResolver {
         return try await fallback.resolve(track)
     }
 
+    public func resolve(_ track: Track, startSeconds: TimeInterval) async throws -> ResolvedTrackURL {
+        // A downloaded file is a local, range-seekable file — the player seeks it
+        // natively, so the offset is irrelevant here. Only the streaming fallback
+        // (a possible progressive transcode) needs the server-side offset.
+        if let localURL = try await localFileURL(for: track) {
+            return ResolvedTrackURL(url: localURL, isLocal: true)
+        }
+        return try await fallback.resolve(track, startSeconds: startSeconds)
+    }
+
     /// The absolute file URL for a downloaded track, or `nil` if it isn't
     /// downloaded (or the file has gone missing).
     public func localFileURL(for track: Track) async throws -> URL? {

@@ -84,3 +84,46 @@ work above. A code comment in `PlexBackend.streamSource` records the constraint.
 - No behavior change for today's direct-play-only usage on any backend.
 - AVQueuePlayer-side buffering tuning for progressive streams is owned by the
   playback engine (EQ branch) and is out of scope for this ADR.
+
+## Follow-up: transcode-path hardening (seek + drop recovery)
+
+Verifying the progressive transcode against primary sources surfaced two real
+gaps beyond "does it play", now addressed in the playback engine and backends:
+
+### Seeking a progressive transcode (StartTimeTicks)
+
+A Jellyfin progressive transcode is served `Accept-Ranges: none` from a live
+ffmpeg-fed `ProgressiveFileStream` (unknown length, chunked), so `AVPlayer` can't
+byte-range seek it. Jellyfin's seek model is to re-request the stream with a
+server-side `StartTimeTicks` offset that restarts ffmpeg from that point.
+
+- `MusicBackend` gained `streamSource(for:options:startSeconds:)` (default ignores
+  the offset — correct for range-seekable content) and `supportsTranscodeSeek`
+  (default `false`). `JellyfinBackend` overrides both, appending `StartTimeTicks`
+  (`seconds × 10_000_000`) **only when actually transcoding** (a direct-play
+  request stays range-seekable and would be needlessly forced to transcode).
+- `ResolvedTrackURL.requiresServerSeek` (= `isTranscoded && supportsTranscodeSeek`)
+  tells the engine which items can't seek natively.
+- `PlaybackEngine` seeks such items by re-resolving at the offset and rebuilding
+  the current item; it tracks a per-item `startOffset` so the reported position
+  (and duration) stays absolute. Direct play still seeks natively (unchanged).
+
+### Network-drop recovery
+
+A progressive stream that drops mid-play ends in a **terminal**
+`AVPlayerItem.status == .failed` (per Apple docs; `AVPlayer` does not auto-retry a
+progressive HTTP download). Transient buffer dips still self-heal via
+`automaticallyWaitsToMinimizeStalling = true`, so recovery deliberately triggers
+only on a terminal failure — it does not fight the OS's own stall waiting.
+
+- `PlaybackEngine` observes the current (streamed-only) item's `status` and the
+  `AVPlayerItemFailedToPlayToEndTime` notification. On a **transient** `NSURLError`
+  it rebuilds the item at the last position with exponential backoff (1/2/4/8/16s,
+  cap 30s, max 5 tries), resetting the budget once an item reaches `.readyToPlay`.
+  A non-transient error or exhausted retries advances to the next track rather
+  than dead-ending. Local/downloaded files are excluded (not worth retrying).
+- This benefits direct-play streaming too, not just transcodes.
+
+`preferredForwardBufferDuration` / `preferredPeakBitRate` were intentionally not
+set: both are HLS-only and no-ops for progressive audio.
+
