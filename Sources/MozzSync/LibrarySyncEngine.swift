@@ -255,13 +255,23 @@ public struct LibrarySyncEngine: Sendable {
                 report: report
             )
             await complete(albumIDs)
-            trackIDs = try await syncPages(
-                phase: .tracks, maxPages: plan.maxTrackPages,
-                fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
-                write: { try await writer.upsertTracks($0, serverId: serverId) },
-                id: \.id,
-                report: report
-            )
+            // Tracks: prefer a backend-provided prune-safe bulk enumerator
+            // (Subsonic's album-walk) for an UNBOUNDED tracks phase. It yields a
+            // stable, deduplicated enumeration with a provable expected total that
+            // gates pruning. A bounded plan (quick start, maxTrackPages != nil)
+            // always uses the flat pager — it deliberately wants just a slice.
+            if plan.maxTrackPages == nil,
+               let stream = backend.enumerateAllTracks(pageSize: pageSize) {
+                trackIDs = try await syncTracksViaEnumerator(stream: stream, report: report)
+            } else {
+                trackIDs = try await syncPages(
+                    phase: .tracks, maxPages: plan.maxTrackPages,
+                    fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
+                    write: { try await writer.upsertTracks($0, serverId: serverId) },
+                    id: \.id,
+                    report: report
+                )
+            }
             await complete(trackIDs)
             artistIDs = try await artistsTask
             await complete(artistIDs)
@@ -292,7 +302,7 @@ public struct LibrarySyncEngine: Sendable {
         // the user's offline downloads (and orphan the files on disk).
         progress?(SyncProgress(phase: .pruning, itemsSynced: 0))
         var deleted = 0
-        let allPhasesComplete = [artistIDs, albumIDs, trackIDs, playlistIDs].allSatisfy(phaseCompleted)
+        let allPhasesComplete = [artistIDs, albumIDs, trackIDs, playlistIDs].allSatisfy(Self.phaseCompleted)
         if plan.prune && allPhasesComplete {
             deleted += try await writer.pruneTracks(serverId: serverId, keeping: trackIDs.seen)
             deleted += try await writer.pruneAlbums(serverId: serverId, keeping: albumIDs.seen)
@@ -334,9 +344,18 @@ public struct LibrarySyncEngine: Sendable {
     /// `total` while real ids were never seen — which would authorize a prune
     /// that deletes those missed-but-still-present tracks. Comparing unique ids
     /// makes completeness a true coverage guarantee regardless of page ordering.
-    private func phaseCompleted(_ enumeration: PagedEnumeration) -> Bool {
+    static func phaseCompleted(_ enumeration: PagedEnumeration) -> Bool {
         if let total = enumeration.reportedTotal {
             return Set(enumeration.seen).count >= total
+        }
+        // A backend that enumerates via a prune-safe bulk stream (Subsonic's
+        // album-walk) only authorizes a prune when it can PROVE completeness with
+        // a reached expected total. Absent that total, refuse to prune — deleting
+        // unseen tracks would cascade into the user's offline downloads. This is
+        // stricter than the flat-pager default (non-empty ⇒ complete), which is
+        // safe for Plex/Jellyfin whose full enumeration is authoritative.
+        if enumeration.requiresReportedTotalForPrune {
+            return false
         }
         return !enumeration.seen.isEmpty
     }
@@ -345,11 +364,17 @@ public struct LibrarySyncEngine: Sendable {
 
     /// The outcome of enumerating one entity type: the remote ids seen (for
     /// pruning) and the server's reported total (the completeness signal).
-    private struct PagedEnumeration {
+    struct PagedEnumeration {
         var seen: [String]
         var reportedTotal: Int?
         var phase: SyncProgress.Phase = .syncing
         var elapsed: TimeInterval = 0
+        /// When true, the prune guard requires a reached ``reportedTotal`` to
+        /// authorize pruning this phase; a nil total means "not provably
+        /// complete → do not prune" (see ``phaseCompleted``). Set by the bulk
+        /// enumerator path, which must protect offline downloads from an
+        /// unverifiable enumeration.
+        var requiresReportedTotalForPrune: Bool = false
     }
 
     /// Page one entity type to exhaustion, writing each batch and collecting the
@@ -445,7 +470,47 @@ public struct LibrarySyncEngine: Sendable {
         return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: phase, elapsed: elapsed)
     }
 
-    /// Playlists need a second pass to sync their ordered items.
+    /// Consume a backend's prune-safe bulk track enumeration (see
+    /// ``MusicBackend/enumerateAllTracks(pageSize:)``). Mirrors ``syncPages``'s
+    /// write/report/collect loop, but over a stream that yields deduplicated
+    /// tracks in a stable order with a provable expected total. The returned
+    /// enumeration flags ``PagedEnumeration/requiresReportedTotalForPrune`` so a
+    /// run that can't prove it reached the total will NOT prune — protecting
+    /// offline downloads from an unverifiable enumeration.
+    private func syncTracksViaEnumerator(
+        stream: AsyncThrowingStream<CatalogPage<Track>, any Error>,
+        report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
+    ) async throws -> PagedEnumeration {
+        let phase = SyncProgress.Phase.tracks
+        let started = Date()
+        var seen: [String] = []
+        var reportedTotal: Int?
+        diag?("\(phase.rawValue): enumerator phase start")
+        do {
+            for try await page in stream {
+                try Task.checkCancellation()
+                if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
+                if page.items.isEmpty { continue }
+                try await write(page.items)
+                seen.append(contentsOf: page.items.map(\.id))
+                await report(phase, seen.count, reportedTotal)
+            }
+        } catch {
+            diag?("\(phase.rawValue): enumerator ERROR after \(seen.count) items: \(error)")
+            throw error
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
+        syncLog.notice("phase \(phase.rawValue, privacy: .public) (enumerator): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s), total \(reportedTotal.map(String.init) ?? "?", privacy: .public)")
+        return PagedEnumeration(
+            seen: seen, reportedTotal: reportedTotal, phase: phase,
+            elapsed: elapsed, requiresReportedTotalForPrune: true
+        )
+    }
+
+    private func write(_ tracks: [Track]) async throws {
+        try await writer.upsertTracks(tracks, serverId: serverId)
+    }
     private func syncPlaylists(report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void) async throws -> PagedEnumeration {
         let started = Date()
         var offset = 0

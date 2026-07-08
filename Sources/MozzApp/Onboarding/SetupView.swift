@@ -86,6 +86,8 @@ struct SetupView: View {
             return "Getting your library ready — this is usually quick with Plex."
         case .jellyfin:
             return "Getting your library ready. A large Jellyfin library can take a few minutes — you'll be able to browse in a moment while the rest loads."
+        case .subsonic:
+            return "Getting your library ready. Mozz walks your albums to sync safely — a large library can take a few minutes while the rest loads in the background."
         default:
             return "Getting your library ready — larger libraries take longer."
         }

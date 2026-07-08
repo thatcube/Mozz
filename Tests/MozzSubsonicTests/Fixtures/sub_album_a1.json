@@ -1,0 +1,27 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "album": {
+      "id": "al-1",
+      "name": "First",
+      "artist": "Artist One",
+      "artistId": "ar-1",
+      "songCount": 1,
+      "song": [
+        {
+          "id": "tr-a1",
+          "parent": "al-1",
+          "title": "Song A1",
+          "album": "First",
+          "albumId": "al-1",
+          "artistId": "ar-1",
+          "track": 1,
+          "duration": 100,
+          "suffix": "mp3",
+          "contentType": "audio/mpeg"
+        }
+      ]
+    }
+  }
+}

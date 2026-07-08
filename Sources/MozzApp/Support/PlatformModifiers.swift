@@ -38,6 +38,26 @@ extension View {
         #endif
     }
 
+    /// Marks a field as the account username, so iOS/password-manager AutoFill
+    /// can offer to fill it. iOS only; no-op on the macOS test host.
+    @ViewBuilder func usernameContentType() -> some View {
+        #if os(iOS)
+        self.textContentType(.username)
+        #else
+        self
+        #endif
+    }
+
+    /// Marks a field as the account password for AutoFill / keychain save. iOS
+    /// only; no-op on the macOS test host.
+    @ViewBuilder func passwordContentType() -> some View {
+        #if os(iOS)
+        self.textContentType(.password)
+        #else
+        self
+        #endif
+    }
+
     /// Hides the navigation bar on iOS so a custom scroll-away header (title +
     /// avatar, tight to the top like Apple Music) can stand in for it — the
     /// native SwiftUI large title can't be pulled that high (its top inset is
@@ -262,6 +282,19 @@ extension Color {
     static var mozzChrome: Color {
         #if canImport(UIKit)
         mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x2C2C2E, darkOLED: 0x1C1C1E)
+        #elseif canImport(AppKit)
+        Color(nsColor: .underPageBackgroundColor)
+        #else
+        Color(white: 0.12)
+        #endif
+    }
+
+    /// A secondary grouped-surface background (for cards/rows) that works on both
+    /// iOS and the macOS test host. `Color(.secondarySystemBackground)` is
+    /// UIKit-only and won't compile for the macOS host used by `swift test`.
+    static var mozzSecondaryBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .secondarySystemBackground)
         #elseif canImport(AppKit)
         Color(nsColor: .underPageBackgroundColor)
         #else

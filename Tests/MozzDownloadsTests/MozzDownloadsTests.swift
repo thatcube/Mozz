@@ -206,3 +206,59 @@ extension XCTestCase {
         XCTFail("Condition not met within \(timeout)s", file: file, line: line)
     }
 }
+
+/// Verifies the cross-backend guard that stops an HTTP error body (which
+/// Subsonic servers return over HTTP 200, and which any 4xx/5xx delivers as the
+/// "downloaded file") from being saved into the offline store as audio.
+final class DownloadResponseValidationTests: XCTestCase {
+    private func response(status: Int, contentType: String?) -> HTTPURLResponse {
+        var headers: [String: String] = [:]
+        if let contentType { headers["Content-Type"] = contentType }
+        return HTTPURLResponse(
+            url: URL(string: "https://s.example.com/rest/download.view")!,
+            statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
+        )!
+    }
+
+    func testRejectsSubsonicErrorBodyOverHTTP200() {
+        // The exact corruption case: a Subsonic error is HTTP 200 + a JSON/XML
+        // `subsonic-response` body. Both shapes must be rejected.
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: "application/json")))
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: "text/xml; charset=utf-8")))
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: "application/xml")))
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: "text/html")))
+    }
+
+    func testRejectsErrorStatusRegardlessOfContentType() {
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 404, contentType: "audio/mpeg")))
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 401, contentType: nil)))
+        XCTAssertNotNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 500, contentType: "application/octet-stream")))
+    }
+
+    func testAcceptsRealMedia() {
+        // audio/*, octet-stream, and an unknown/absent content-type must pass so
+        // a genuine download is never wrongly discarded.
+        XCTAssertNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: "audio/mpeg")))
+        XCTAssertNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: "audio/flac")))
+        XCTAssertNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 206, contentType: "application/octet-stream")))
+        XCTAssertNil(DownloadManager.downloadRejectionReason(
+            for: response(status: 200, contentType: nil)))
+    }
+
+    func testNonHTTPResponseIsNotRejected() {
+        XCTAssertNil(DownloadManager.downloadRejectionReason(for: nil))
+        XCTAssertNil(DownloadManager.downloadRejectionReason(
+            for: URLResponse(url: URL(string: "https://s.example.com")!,
+                             mimeType: nil, expectedContentLength: 0, textEncodingName: nil)))
+    }
+}
