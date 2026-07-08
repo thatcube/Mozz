@@ -13,7 +13,11 @@ struct OnboardingView: View {
             VStack(spacing: 24) {
                 Spacer()
                 VStack(spacing: 8) {
-                    Image(systemName: "music.note.list").font(.system(size: 56))
+                    Image("MozzLogo")
+                        .interpolation(.none) // preserve crisp pixel-art edges
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 112, height: 112)
                     Text("Mozz").font(.largeTitle.bold())
                     Text("Offline-first music for Plex & Jellyfin")
                         .font(.subheadline).foregroundStyle(.secondary)
