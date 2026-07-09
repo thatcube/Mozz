@@ -911,7 +911,7 @@ struct NowPlayingMorphContainer: View {
     /// the WHOLE sequence proportionally — the relative timing of each phase is
     /// preserved, just stretched out so it can be observed and tuned. Set back to `1`
     /// for production feel.
-    private static let queueTimeScale: CGFloat = 6
+    private static let queueTimeScale: CGFloat = 1
 
     /// Shared open/close spring for the queue transition (× `queueTimeScale`).
     private static let queueSpring = Animation.spring(response: 0.42 * queueTimeScale,
