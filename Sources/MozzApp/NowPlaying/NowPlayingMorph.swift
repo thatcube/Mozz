@@ -633,8 +633,9 @@ struct NowPlayingMorphContainer: View {
     /// [`heroLiftStart`, `heroLiftEnd`] — a delayed rise so the row sits a beat before
     /// travelling. Keep below `heroFadeEnd` or the climb happens after the row has
     /// already faded out (and so is never seen). Gated via the `HeroLift` Animatable
-    /// modifier so the hold corner is sampled per frame.
-    private static let heroLiftStart: CGFloat = 0.2
+    /// modifier so the hold corner is sampled per frame. `0` = no delay (lift from the
+    /// start).
+    private static let heroLiftStart: CGFloat = 0
 
     /// How far the hero title/star row lifts as the queue opens (points). Large on
     /// purpose: the row should visibly climb toward the card row, not just fade in
