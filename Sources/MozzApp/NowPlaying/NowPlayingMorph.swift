@@ -638,10 +638,12 @@ struct NowPlayingMorphContainer: View {
     /// larger rise-from-the-scrubber lives in `PlayerQueuePanel`.
     private static let cardRowRise: CGFloat = 80
 
-    /// Where the card's title/star begin fading in along the open progress (0…1) —
-    /// so they "catch" the hero row after it's mostly cleared, overlapping rather
-    /// than waiting for it to finish.
-    private static let cardFadeStart: CGFloat = 0.45
+    /// Where the card's title/star begin their entrance along the open progress
+    /// (0…1) — now gates BOTH the rise (`GatedRise`) and the fade (`LateFade`), so the
+    /// row holds down + invisible until here, then rises + fades in together after the
+    /// hero row has mostly cleared (a delayed hand-off rather than a slide already
+    /// underway).
+    private static let cardFadeStart: CGFloat = 0.55
 
     /// The queue view shown in place of the hero when `queueOpen`: a pinned
     /// grabber over the scrollable History / now-playing card / Continue-Playing
@@ -717,7 +719,7 @@ struct NowPlayingMorphContainer: View {
             // them — a directional cross-fade, not a plain fade. The fade-in is
             // DELAYED (LateFade) so it starts around the time the hero row has
             // mostly cleared, overlapping rather than waiting for it to finish.
-            .offset(y: (1 - m.q) * Self.cardRowRise)
+            .modifier(GatedRise(progress: m.q, start: Self.cardFadeStart, distance: Self.cardRowRise))
             .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
             Spacer(minLength: 8)
             // Card's own star + overflow at its final resting slot. Rises + fades
@@ -728,7 +730,7 @@ struct NowPlayingMorphContainer: View {
             // settled (the hero cluster owns it while the queue is closed, so
             // exactly one anchor is ever published).
             starOverflowCluster(interactive: queueSettled, emitsAnchor: queueSettled)
-                .offset(y: (1 - m.q) * Self.cardRowRise)
+                .modifier(GatedRise(progress: m.q, start: Self.cardFadeStart, distance: Self.cardRowRise))
                 .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
         }
         .padding(.top, 8)
@@ -1685,6 +1687,27 @@ private struct HeroLift: ViewModifier, Animatable {
         let span = max(0.0001, end)
         let t = min(1, max(0, progress / span))
         return content.offset(y: -distance * t)
+    }
+}
+
+/// Holds a view pushed DOWN by `distance` until `progress` (0 → 1) passes `start`,
+/// then rises it to rest by `progress = 1` — the delayed-entrance rise used by the
+/// card row so its climb *and* fade (`LateFade`, same `start`) begin together, giving
+/// a deliberate "comes in" rather than a slide that's already underway. `Animatable`
+/// so the hold corner is sampled per frame: a plain `.offset(y:)` from animated state
+/// would interpolate only the endpoints and linearize the hold away.
+private struct GatedRise: ViewModifier, Animatable {
+    var progress: CGFloat
+    var start: CGFloat
+    var distance: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let span = max(0.0001, 1 - start)
+        let t = min(1, max(0, (progress - start) / span))
+        return content.offset(y: (1 - t) * distance)
     }
 }
 
