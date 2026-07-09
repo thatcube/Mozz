@@ -400,7 +400,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// very start before the hero has moved. Applied via the `BodyRise` modifier so
     /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
     /// would linearize the hold away).
-    private let bodyRiseStart: CGFloat = 0.4
+    private let bodyRiseStart: CGFloat = 0.6
 
     /// Ease-out strength for the body's rise into place (exponent on the remaining
     /// distance): the body covers most of its travel quickly, then decelerates into
@@ -414,7 +414,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// from the card row's own `LateFade` (`cardFadeStart`) so the body's fade-in can
     /// be timed independently of the title/star hand-off above it. Applied via the
     /// `BodyFade` modifier (per-frame sampling of the delayed ramp).
-    private let bodyFadeStart: CGFloat = 0.5
+    private let bodyFadeStart: CGFloat = 0.25
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
     /// the rows dissolve into the real page background behind the pinned header
