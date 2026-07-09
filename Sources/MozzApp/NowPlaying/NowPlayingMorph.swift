@@ -969,6 +969,7 @@ struct NowPlayingMorphContainer: View {
             #endif
             Spacer()
             PlayerIconButton(glyph: .queue, tint: queueWantsOpen ? .primary : .secondary,
+                             haptics: false,
                              label: "Queue") { setQueue(open: !queueWantsOpen) }
         }
     }

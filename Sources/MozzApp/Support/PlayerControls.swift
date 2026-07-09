@@ -43,6 +43,7 @@ struct PlayerIconButton: View {
     var hitSize: CGFloat = PlayerControlMetrics.minHit
     var tint: Color = .primary
     var isEnabled: Bool = true
+    var haptics: Bool = true
     let label: LocalizedStringKey
     let action: () -> Void
 
@@ -51,7 +52,7 @@ struct PlayerIconButton: View {
             glyph.styled(size: glyphSize)
                 .playerHitTarget(hitSize)
         }
-        .buttonStyle(PlayerButtonStyle())
+        .buttonStyle(PlayerButtonStyle(haptic: haptics))
         .foregroundStyle(tint)
         .opacity(isEnabled ? 1 : 0.35)
         .disabled(!isEnabled)
@@ -62,7 +63,10 @@ struct PlayerIconButton: View {
 /// A tactile press style shared by every player button: a firm scale-down and
 /// fade while the finger is held, plus a haptic tap on press-down, springing
 /// back on release. Deliberately crisp — enough to feel responsive, never bouncy.
+/// `haptic` can be turned off per-button (e.g. the queue toggle, whose big morph
+/// animation is feedback enough) without losing the press animation.
 struct PlayerButtonStyle: ButtonStyle {
+    var haptic: Bool = true
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.8 : 1)
@@ -72,7 +76,7 @@ struct PlayerButtonStyle: ButtonStyle {
             // Fire only on press-down (nil on release), so the tap lands the
             // instant the finger makes contact.
             .sensoryFeedback(trigger: configuration.isPressed) { _, pressed in
-                pressed ? .impact(weight: .medium, intensity: 0.9) : nil
+                (haptic && pressed) ? .impact(weight: .medium, intensity: 0.9) : nil
             }
     }
 }
