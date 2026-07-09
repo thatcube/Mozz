@@ -643,7 +643,7 @@ struct NowPlayingMorphContainer: View {
     /// row holds down + invisible until here, then rises + fades in together after the
     /// hero row has mostly cleared (a delayed hand-off rather than a slide already
     /// underway).
-    private static let cardFadeStart: CGFloat = 0.55
+    private static let cardFadeStart: CGFloat = 0.7
 
     /// The queue view shown in place of the hero when `queueOpen`: a pinned
     /// grabber over the scrollable History / now-playing card / Continue-Playing
