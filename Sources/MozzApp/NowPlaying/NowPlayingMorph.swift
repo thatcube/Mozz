@@ -81,6 +81,16 @@ struct NowPlayingMorphContainer: View {
     /// or the rating/like cluster's variable width.
     @State private var heroStarRect: CGRect = .zero
     @State private var cardStarRect: CGRect = .zero
+    /// The card star's vertical center (in `morphRootSpace`) captured the moment the
+    /// queue settles docked at the top. Used to tell whether the card is still at its
+    /// docked slot at close time, so a close after scrolling into History doesn't fly
+    /// the star/title up from far down the list.
+    @State private var dockedCardStarMidY: CGFloat = 0
+    /// Set on close when the card has scrolled away from its docked slot: the traveling
+    /// star just appears at the hero (no card→hero fly) and the hero title doesn't
+    /// slide from the scrolled card position — they "appear" instead of animating in
+    /// from way down the list.
+    @State private var suppressStarTravel = false
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -457,20 +467,23 @@ struct NowPlayingMorphContainer: View {
     /// transition; once the queue settles it hands off to the card's own scrolling
     /// cluster (so the star scrolls & clips with the list). Trailing-aligned in
     /// both states, so the cluster's variable width never shifts the landing.
+    /// Whether the now-playing card is still parked at its docked (top) slot. True
+    /// until we have a docked reference; false once the card has scrolled more than a
+    /// row away (into History or up-next). Drives `suppressStarTravel` on close.
+    private var cardIsDocked: Bool {
+        guard dockedCardStarMidY != 0, !cardStarRect.isEmpty else { return true }
+        return abs(cardStarRect.midY - dockedCardStarMidY) < 44
+    }
+
     @ViewBuilder
     private func travelingStarOverflow(_ m: Morph) -> some View {
-        // Position is a function of the QUEUE progress only (hero ⇄ card). Stay
-        // MOUNTED across every drawer present/dismiss — hidden only by opacity
-        // while docked — so the cluster is never re-inserted mid-present. (It used
-        // to unmount below p=0.5; re-mounting inside the present spring made
-        // SwiftUI interpolate `.position` from its last queue-open slot, so the
-        // star flew UP from the card position on every re-open.) The only travel is
-        // now driven by `queueP` when the queue button is pressed. Still unmounts at
-        // `queueSettled` (the card cluster takes over) — but that flips outside any
-        // animation, so it never animates the position.
-        let center = lerpPoint(heroStarRect.isEmpty ? nil : CGPoint(x: heroStarRect.midX, y: heroStarRect.midY),
-                               cardStarRect.isEmpty ? nil : CGPoint(x: cardStarRect.midX, y: cardStarRect.midY),
-                               m.q)
+        // When closing after the card has scrolled away, don't fly the star up from
+        // the card's far-off position — pin it at the hero so it simply appears there.
+        let center = suppressStarTravel
+            ? (heroStarRect.isEmpty ? nil : CGPoint(x: heroStarRect.midX, y: heroStarRect.midY))
+            : lerpPoint(heroStarRect.isEmpty ? nil : CGPoint(x: heroStarRect.midX, y: heroStarRect.midY),
+                        cardStarRect.isEmpty ? nil : CGPoint(x: cardStarRect.midX, y: cardStarRect.midY),
+                        m.q)
         if let center, !queueSettled {
             // Only the expanded player's cluster is interactive and owns the rating
             // anchor; the docked (invisible) one must not publish an anchor or steal
@@ -634,6 +647,9 @@ struct NowPlayingMorphContainer: View {
     /// row center to the measured card row center). Purely directional — it fades
     /// out via `opacity(1 - q)` well before reaching the card.
     private func heroTitleTravel(_ m: Morph) -> CGSize {
+        // Closing after a scroll: don't slide the hero title from the card's far-off
+        // position — let it fade in at home.
+        if suppressStarTravel { return .zero }
         let dy = (heroStarRect.isEmpty || cardStarRect.isEmpty)
             ? 0 : (cardStarRect.midY - heroStarRect.midY)
         return CGSize(width: 56 * m.q, height: dy * m.q)
@@ -836,18 +852,28 @@ struct NowPlayingMorphContainer: View {
         if open {
             queueOpen = true
             queueSettled = false
+            suppressStarTravel = false
             queueOpenNonce &+= 1
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
                 queueP = 1
             } completion: {
                 queueSettled = true
+                // The card is docked at the top now (scroll was reset on open); record
+                // its star Y as the docked reference so a later close can tell whether
+                // the card has since scrolled away.
+                if !cardStarRect.isEmpty { dockedCardStarMidY = cardStarRect.midY }
             }
         } else {
+            // If the card has scrolled away from its docked slot, the star/title would
+            // otherwise fly up from far down the list — suppress that so they just
+            // appear at the hero.
+            suppressStarTravel = !cardIsDocked
             queueSettled = false
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
                 queueP = 0
             } completion: {
                 queueOpen = false
+                suppressStarTravel = false
             }
         }
     }
