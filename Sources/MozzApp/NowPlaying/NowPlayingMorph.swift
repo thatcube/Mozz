@@ -905,8 +905,17 @@ struct NowPlayingMorphContainer: View {
         }
     }
 
-    /// Shared open/close spring for the queue transition.
-    private static let queueSpring = Animation.spring(response: 0.42, dampingFraction: 0.86)
+    /// DEBUG slow-motion knob for the queue open/close transition. Every phase of the
+    /// hand-off (hero lift + `RangeFadeOut`, card rise + `LateFade`, `BodyRise`) is
+    /// keyed on `queueP` (0→1), so scaling the one spring that drives `queueP` slows
+    /// the WHOLE sequence proportionally — the relative timing of each phase is
+    /// preserved, just stretched out so it can be observed and tuned. Set back to `1`
+    /// for production feel.
+    private static let queueTimeScale: CGFloat = 6
+
+    /// Shared open/close spring for the queue transition (× `queueTimeScale`).
+    private static let queueSpring = Animation.spring(response: 0.42 * queueTimeScale,
+                                                      dampingFraction: 0.86)
 
     // MARK: Drawer controls
 
