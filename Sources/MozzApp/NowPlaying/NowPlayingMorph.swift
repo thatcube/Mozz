@@ -610,6 +610,7 @@ struct NowPlayingMorphContainer: View {
         // across a back-loaded window (RangeFadeOut) so you actually see it move
         // before it hands off to the card row catching below it.
         .modifier(HeroLift(progress: queueHeroP,
+                           start: Self.heroLiftStart,
                            end: Self.heroLiftEnd,
                            distance: Self.heroRowLift))
         .modifier(RangeFadeOut(progress: queueHeroP,
@@ -626,6 +627,14 @@ struct NowPlayingMorphContainer: View {
     /// Animatable modifier so SwiftUI samples the clamped ramp per frame (a plain
     /// offset from animated state would linearize the endpoints and skip the corner).
     private static let heroLiftEnd: CGFloat = 0.5
+
+    /// Progress (in `queueHeroP`, 0…1) at which the hero row BEGINS its upward lift.
+    /// Below this it holds in place (still at full opacity), then climbs over
+    /// [`heroLiftStart`, `heroLiftEnd`] — a delayed rise so the row sits a beat before
+    /// travelling. Keep below `heroFadeEnd` or the climb happens after the row has
+    /// already faded out (and so is never seen). Gated via the `HeroLift` Animatable
+    /// modifier so the hold corner is sampled per frame.
+    private static let heroLiftStart: CGFloat = 0.2
 
     /// How far the hero title/star row lifts as the queue opens (points). Large on
     /// purpose: the row should visibly climb toward the card row, not just fade in
@@ -1701,6 +1710,7 @@ private struct RangeFadeOut: ViewModifier, Animatable {
 /// -distance endpoints along the spring, linearizing the `end` clamp away.
 private struct HeroLift: ViewModifier, Animatable {
     var progress: CGFloat
+    var start: CGFloat
     var end: CGFloat
     var distance: CGFloat
     var animatableData: CGFloat {
@@ -1708,8 +1718,8 @@ private struct HeroLift: ViewModifier, Animatable {
         set { progress = newValue }
     }
     func body(content: Content) -> some View {
-        let span = max(0.0001, end)
-        let t = min(1, max(0, progress / span))
+        let span = max(0.0001, end - start)
+        let t = min(1, max(0, (progress - start) / span))
         return content.offset(y: -distance * t)
     }
 }
