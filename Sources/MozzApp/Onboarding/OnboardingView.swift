@@ -54,7 +54,7 @@ struct OnboardingView: View {
                 .frame(width: 104, height: 104)
                 .accessibilityHidden(true)
             Text("Mozz").font(.largeTitle.bold())
-            Text("One app for your music, wherever it lives. Free forever. Open source.")
+            Text("One app for your music, wherever it lives.\nFree forever and open source.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
