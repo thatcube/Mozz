@@ -364,7 +364,9 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             queueControlsBlock
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .offset(y: queueControlsY)
+                // Rise up from below the scrub bar as the queue opens (bodyEntranceY),
+                // on top of the normal sticky-pin position.
+                .offset(y: queueControlsY + bodyEntranceY)
                 .opacity(queueP)
         }
     }
@@ -382,6 +384,17 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// fade must ignore the overscroll too — otherwise they'd drift while the rest
     /// of the panel stays rigid. Clamping to ≥0 freezes them at the top state.
     private var clampedScrollY: CGFloat { max(0, scrollY) }
+
+    /// How far the queue BODY — the shuffle/repeat pills, the "Queue" header, and
+    /// the Continue-Playing list — is pushed DOWN from its resting spot as the
+    /// queue opens, so it rises up into place from below the scrub bar. `bodyRise`
+    /// is the gap between the pills' docked position (just under the card, at
+    /// `cardHeight` from the panel top) and the scrub-bar line (the panel's bottom
+    /// edge, `viewportH`), so at q=0 the body sits at the scrubber and travels up
+    /// to rest at q=1. The now-playing card is deliberately EXCLUDED — it docks via
+    /// the traveling artwork and its own short title/star cross-fade rise.
+    private var bodyRise: CGFloat { max(0, viewportH - cardHeight) }
+    private var bodyEntranceY: CGFloat { (1 - queueP) * bodyRise }
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
     /// the rows dissolve into the real page background behind the pinned header
@@ -427,15 +440,20 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 // Shuffle/repeat pills + the Queue/Clear header. Reserved here so
                 // it takes up its space and is measured; INVISIBLE on iOS 18 where
                 // the pinned overlay draws the visible, sticky copy. On iOS 17
-                // (no overlay) it renders inline and interactive.
+                // (no overlay) it renders inline and interactive — so it carries the
+                // rise-from-below-the-scrubber entrance itself there.
                 queueControlsBlock
                     .opacity(usesStickyHeaders ? 0 : 1)
                     .allowsHitTesting(!usesStickyHeaders)
+                    .offset(y: bodyEntranceY)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: QueueControlsHeightKey.self,
                                                value: g.size.height)
                     })
                 upNextRows
+                    // Rise up from below the scrub bar with the pills/header as one
+                    // unit as the queue opens.
+                    .offset(y: bodyEntranceY)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)

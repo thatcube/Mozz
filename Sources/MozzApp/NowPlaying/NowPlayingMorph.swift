@@ -489,8 +489,14 @@ struct NowPlayingMorphContainer: View {
                 .allowsHitTesting(!queueOpen)
                 .overlay(alignment: .top) {
                     if queueOpen {
+                        // No `.transition` here: the entrance is driven entirely
+                        // by the internal `q`-modifiers (the card title/star
+                        // cross-fade rise and the body's rise-from-below-the-
+                        // scrubber). `setQueue(open:)` mounts this at q=0 — where
+                        // those are already offset-below and faded to zero — then
+                        // springs q→1 on the next runloop so they interpolate in
+                        // rather than snapping to their resting state.
                         queueTop(m)
-                            .transition(.opacity)
                     }
                 }
 
@@ -580,8 +586,12 @@ struct NowPlayingMorphContainer: View {
     /// How far the hero title/star row lifts as the queue opens (points).
     private static let heroRowLift: CGFloat = 28
 
-    /// How far the queue body slides up from below as it opens (points).
-    private static let queueEntranceSlide: CGFloat = 64
+    /// How far the card's title/artist + star rise into place from just below their
+    /// own final spot as the queue opens (points). Short, directional cross-fade —
+    /// they "catch" the hero row fading out above them. The card artwork does NOT
+    /// use this (it docks via the traveling artwork), and the queue body's much
+    /// larger rise-from-the-scrubber lives in `PlayerQueuePanel`.
+    private static let cardRowRise: CGFloat = 14
 
     /// Where the card's title/star begin fading in along the open progress (0…1) —
     /// so they "catch" the hero row after it's mostly cleared, overlapping rather
@@ -610,12 +620,6 @@ struct NowPlayingMorphContainer: View {
                 card: { nowPlayingCard(m) },
                 queueControls: { shuffleRepeatPills }
             )
-            // Slide the whole queue (pills + card + list) up from below the scrub
-            // bar as it opens, overlapping the hero row's upward fade. Zero at q=1
-            // so the docked card-art slot lands exactly on the traveling artwork's
-            // fixed dock for a seamless handoff. The pinned grabber above is NOT
-            // offset — only the queue body rises.
-            .offset(y: (1 - m.q) * Self.queueEntranceSlide)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -648,15 +652,18 @@ struct NowPlayingMorphContainer: View {
             // them — a directional cross-fade, not a plain fade. The fade-in is
             // DELAYED (LateFade) so it starts around the time the hero row has
             // mostly cleared, overlapping rather than waiting for it to finish.
-            .offset(y: (1 - m.q) * 14)
+            .offset(y: (1 - m.q) * Self.cardRowRise)
             .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
             Spacer(minLength: 8)
-            // Card's own star + overflow at its final resting slot. Fades in on the
-            // same delayed curve as the card title (directional cross-fade with the
-            // hero cluster lifting away above). Interactive + owns the rating anchor
-            // only once settled (the hero cluster owns it while the queue is closed,
-            // so exactly one anchor is ever published).
+            // Card's own star + overflow at its final resting slot. Rises + fades
+            // in on the SAME delayed curve and SAME upward offset as the card
+            // title, so the title/artist + star move up and fade in as ONE row —
+            // the top half of the directional cross-fade with the hero cluster
+            // lifting away above. Interactive + owns the rating anchor only once
+            // settled (the hero cluster owns it while the queue is closed, so
+            // exactly one anchor is ever published).
             starOverflowCluster(interactive: queueSettled, emitsAnchor: queueSettled)
+                .offset(y: (1 - m.q) * Self.cardRowRise)
                 .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
         }
         .padding(.top, 8)
@@ -784,14 +791,30 @@ struct NowPlayingMorphContainer: View {
         queueTransition &+= 1
         let token = queueTransition
         if open {
+            // Mount the queue subtree at q=0 FIRST (in this render pass, with queueP
+            // still 0), so its internal q-driven modifiers — the card title/star
+            // cross-fade rise and the body's rise-from-below-the-scrubber — have a
+            // real "from" value to interpolate out of. A subtree inserted inside the
+            // SAME transaction that sets queueP=1 has no prior rendered value, so
+            // those modifiers would render at their FINAL state (snap). Deferring the
+            // spring to the next runloop lets the freshly-mounted subtree animate
+            // 0→1 and the hand-off actually plays.
             queueOpen = true
             queueSettled = false
             queueOpenNonce &+= 1
-            withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+            if reduceMotion {
                 queueP = 1
-            } completion: {
-                guard token == queueTransition else { return }
                 queueSettled = true
+                return
+            }
+            DispatchQueue.main.async {
+                guard token == queueTransition else { return }
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                    queueP = 1
+                } completion: {
+                    guard token == queueTransition else { return }
+                    queueSettled = true
+                }
             }
         } else {
             queueSettled = false
