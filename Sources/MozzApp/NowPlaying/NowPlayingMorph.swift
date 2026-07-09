@@ -520,13 +520,13 @@ struct NowPlayingMorphContainer: View {
                 Menu {
                     TrackActionButtons(track: track, downloadState: nil, internalId: nil, surface: .player)
                 } label: {
-                    AppIcon.overflow.styled(size: 22)
+                    AppIcon.overflow.styled(size: PlayerControlMetrics.utilityGlyph)
                         .foregroundStyle(.primary)
+                        .playerHitTarget()
                 }
                 .accessibilityLabel("More actions")
             }
         }
-        .font(.title3)
         .allowsHitTesting(interactive)
     }
 
@@ -862,20 +862,23 @@ struct NowPlayingMorphContainer: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 84) {
-            Button { playback.previous() } label: {
-                AppIcon.skipBack.styled(size: 34)
-            }
-            .disabled(!playback.snapshot.hasPrevious)
-            Button { playback.togglePlayPause() } label: {
-                (playback.snapshot.status == .playing ? AppIcon.pause : AppIcon.play).styled(size: 56)
-            }
-            Button { playback.next() } label: {
-                AppIcon.skipForward.styled(size: 34)
-            }
-            .disabled(!playback.snapshot.hasNext)
+        let playing = playback.snapshot.status == .playing
+        return HStack(spacing: 44) {
+            PlayerIconButton(glyph: .skipBack,
+                             glyphSize: PlayerControlMetrics.skipGlyph,
+                             hitSize: PlayerControlMetrics.skipHit,
+                             isEnabled: playback.snapshot.hasPrevious,
+                             label: "Previous") { playback.previous() }
+            PlayerIconButton(glyph: playing ? .pause : .play,
+                             glyphSize: PlayerControlMetrics.playGlyph,
+                             hitSize: PlayerControlMetrics.playHit,
+                             label: playing ? "Pause" : "Play") { playback.togglePlayPause() }
+            PlayerIconButton(glyph: .skipForward,
+                             glyphSize: PlayerControlMetrics.skipGlyph,
+                             hitSize: PlayerControlMetrics.skipHit,
+                             isEnabled: playback.snapshot.hasNext,
+                             label: "Next") { playback.next() }
         }
-        .tint(.primary)
     }
 
     private func formatBadge(track: Track) -> some View {
@@ -892,22 +895,16 @@ struct NowPlayingMorphContainer: View {
     /// lyrics is a disabled placeholder. (The equalizer lives in Settings for now.)
     private var bottomButtonRow: some View {
         HStack {
-            Button { } label: { AppIcon.lyrics.styled(size: 26) }
-                .disabled(true)
-                .foregroundStyle(.secondary)
+            PlayerIconButton(glyph: .lyrics, tint: .secondary, isEnabled: false,
+                             label: "Lyrics") { }
             Spacer()
             #if canImport(UIKit)
             routeControl
             #endif
             Spacer()
-            Button {
-                setQueue(open: !queueOpen)
-            } label: {
-                AppIcon.queue.styled(size: 26)
-                    .foregroundStyle(queueOpen ? Color.primary : Color.secondary)
-            }
+            PlayerIconButton(glyph: .queue, tint: queueOpen ? .primary : .secondary,
+                             label: "Queue") { setQueue(open: !queueOpen) }
         }
-        .tint(.primary)
     }
 
     #if canImport(UIKit)
@@ -919,11 +916,11 @@ struct NowPlayingMorphContainer: View {
         ZStack {
             AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
             Image(systemName: routeMonitor.output.icon)
-                .font(.system(size: 26))
+                .font(.system(size: PlayerControlMetrics.utilityGlyph))
                 .foregroundStyle(routeMonitor.output.showsLabel ? Color.primary : Color.secondary)
                 .allowsHitTesting(false)
         }
-        .frame(width: 44, height: 32)
+        .frame(width: PlayerControlMetrics.minHit, height: PlayerControlMetrics.minHit)
     }
 
     /// The route line under the controls. For external speakers/rooms (AirPlay,

@@ -385,6 +385,9 @@ struct FluidRatingControl: View {
     /// scrolling star); only the currently-active one should emit the anchor so
     /// the bubble stays unambiguous. Defaults to `true` for standalone use.
     var emitsAnchor: Bool = true
+    /// Glyph size for the collapsed player star, shared with the other player
+    /// controls so they read at a consistent size.
+    var glyphSize: CGFloat = PlayerControlMetrics.utilityGlyph
 
     @State private var preview: Double?
     @State private var isDragging = false
@@ -413,13 +416,14 @@ struct FluidRatingControl: View {
     @ViewBuilder private var surface: some View {
         if reduceMotion {
             collapsedStar
-                .contentShape(Rectangle())
+                .playerHitTarget()
                 .onTapGesture { onRequestPicker() }
         } else {
             collapsedStar
                 .overlay(alignment: .center) {
                     if isDragging { revealStrip.offset(y: RatingTuning.revealYOffset) }
                 }
+                .frame(minWidth: PlayerControlMetrics.minHit, minHeight: PlayerControlMetrics.minHit)
                 .coordinateSpace(name: space)
                 .contentShape(Rectangle())
                 .gesture(rateGesture)
@@ -432,8 +436,10 @@ struct FluidRatingControl: View {
         let rated = (rating ?? 0) > 0
         return HStack(spacing: 4) {
             Image(mozz: rated ? "star.fill" : "star")
+                .resizable().scaledToFit()
+                .frame(width: glyphSize, height: glyphSize)
             if let r = rating, r > 0 {
-                Text(LikeControl.format(r)).monospacedDigit()
+                Text(LikeControl.format(r)).font(.title3).monospacedDigit()
             }
         }
         // Unrated shows a white outline star (rated fills it + shows the number);
