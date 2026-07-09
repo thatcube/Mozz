@@ -400,14 +400,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// very start before the hero has moved. Applied via the `BodyRise` modifier so
     /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
     /// would linearize the hold away).
-    private let bodyRiseStart: CGFloat = 0.6
+    private let bodyRiseStart: CGFloat = 0.25
 
     /// Ease-out strength for the body's rise into place (exponent on the remaining
     /// distance): the body covers most of its travel quickly, then decelerates into
     /// the final spot — `distance * (1 - t)^bodyRiseEase`. `1` is a plain linear remap
     /// of the spring; higher values "get there faster but settle in more slowly" for a
     /// softer landing. Only shapes the rise motion, not the fade.
-    private let bodyRiseEase: CGFloat = 10
+    private let bodyRiseEase: CGFloat = 2
 
     /// When (in q, 0 → 1) the queue body starts fading IN. Before this the pills /
     /// header / list are fully transparent, then they ramp 0 → 1 by q=1 — decoupled
