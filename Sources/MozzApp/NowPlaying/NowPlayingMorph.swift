@@ -66,6 +66,13 @@ struct NowPlayingMorphContainer: View {
     /// `queueOpen` so the single traveling artwork *slides* into place instead of the
     /// big cover cross-fading with a separate thumbnail.
     @State private var queueP: CGFloat = 0
+    /// A SECOND, slower open/close progress that drives ONLY the queue body's rise +
+    /// fade (see `PlayerQueuePanel.bodyP`). Animated alongside `queueP` in
+    /// `driveQueue()` but on `queueBodySpring` (a gentler, longer response) for the
+    /// OPEN so the body glides into place after the fast artwork/card hand-off; the
+    /// CLOSE reuses the fast `queueSpring` so it retracts in lock-step with `queueP`
+    /// and the existing unmount-on-completion stays correct.
+    @State private var queueBodyP: CGFloat = 0
     /// True only once the queue-open spring has fully settled (and false the moment
     /// a close/open starts, and while the queue is closed). Gates the seamless
     /// hand-off between the traveling artwork/star (shown during the transition)
@@ -649,6 +656,7 @@ struct NowPlayingMorphContainer: View {
             PlayerQueuePanel(
                 playback: playback,
                 queueP: m.q,
+                bodyP: queueBodyP,
                 bodyRise: queueBodyRise(m),
                 resetToken: queueOpenNonce,
                 onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
@@ -876,6 +884,7 @@ struct NowPlayingMorphContainer: View {
         queueWantsOpen = open
         if reduceMotion {
             queueP = open ? 1 : 0
+            queueBodyP = open ? 1 : 0
             queueSettled = open
             if !open { queueOpen = false }
         }
@@ -897,14 +906,24 @@ struct NowPlayingMorphContainer: View {
                 guard token == queueTransition else { return }
                 queueSettled = true
             }
+            // Body climbs on its own gentler, longer spring so it settles into place
+            // after the fast hand-off above — not tied to the queueP completion.
+            withAnimation(Self.queueBodySpring) {
+                queueBodyP = 1
+            }
         } else {
             // Already collapsed: nothing to animate, just drop the mount.
-            guard queueP > 0 else { queueOpen = false; return }
+            guard queueP > 0 else { queueOpen = false; queueBodyP = 0; return }
             withAnimation(Self.queueSpring) {
                 queueP = 0
             } completion: {
                 guard token == queueTransition else { return }
                 queueOpen = false
+            }
+            // Retract the body in lock-step with queueP (fast spring) so it finishes
+            // together and the unmount-on-queueP-completion above stays clean.
+            withAnimation(Self.queueSpring) {
+                queueBodyP = 0
             }
         }
     }
@@ -920,6 +939,14 @@ struct NowPlayingMorphContainer: View {
     /// Shared open/close spring for the queue transition (× `queueTimeScale`).
     private static let queueSpring = Animation.spring(response: 0.42 * queueTimeScale,
                                                       dampingFraction: 0.86)
+
+    /// Gentler, longer spring for the queue BODY's rise/fade on OPEN only, so its
+    /// climb visibly takes longer than the fast `queueSpring` hand-off (artwork dock +
+    /// hero→card title cross-fade) above it. Higher `response` = slower climb; high
+    /// damping keeps it from overshooting on the long travel. The close still uses
+    /// `queueSpring` (see `driveQueue`), so this only stretches the entrance.
+    private static let queueBodySpring = Animation.spring(response: 0.85 * queueTimeScale,
+                                                          dampingFraction: 0.92)
 
     // MARK: Drawer controls
 

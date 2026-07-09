@@ -209,6 +209,12 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     var playback: PlaybackEngine
     /// Queue-open progress (0…1) — fades the list in alongside the docking card.
     var queueP: CGFloat
+    /// A SEPARATE, slower progress (0…1) that drives ONLY the body's rise + fade
+    /// (`BodyRise` / `BodyFade`). Decoupled from `queueP` so the body's climb into
+    /// place can take longer than the fast artwork/card hand-off above it — the panel
+    /// container animates this on its own gentler spring. Everything else (the panel
+    /// container fade, pinned History header) stays on the fast `queueP`.
+    var bodyP: CGFloat
     /// How far (points) the queue BODY — shuffle/repeat pills, "Queue" header, and
     /// Continue-Playing list — is pushed DOWN at q=0 so it rises up into place from
     /// below the scrub bar as the queue opens. Supplied by the container from the
@@ -375,8 +381,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 .offset(y: queueControlsY)
                 // Rise up from below the scrub bar as the queue opens, on top of the
                 // normal sticky-pin position.
-                .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
-                .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
+                .modifier(BodyRise(progress: bodyP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
+                .modifier(BodyFade(progress: bodyP, start: bodyFadeStart))
         }
     }
 
@@ -465,8 +471,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 queueControlsBlock
                     .opacity(usesStickyHeaders ? 0 : 1)
                     .allowsHitTesting(!usesStickyHeaders)
-                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
-                    .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
+                    .modifier(BodyRise(progress: bodyP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
+                    .modifier(BodyFade(progress: bodyP, start: bodyFadeStart))
                     .background(GeometryReader { g in
                         Color.clear.preference(key: QueueControlsHeightKey.self,
                                                value: g.size.height)
@@ -474,8 +480,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 upNextRows
                     // Rise up from below the scrub bar with the pills/header as one
                     // unit as the queue opens.
-                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
-                    .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
+                    .modifier(BodyRise(progress: bodyP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
+                    .modifier(BodyFade(progress: bodyP, start: bodyFadeStart))
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
