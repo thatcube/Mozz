@@ -73,6 +73,13 @@ struct NowPlayingMorphContainer: View {
     /// CLOSE reuses the fast `queueSpring` so it retracts in lock-step with `queueP`
     /// and the existing unmount-on-completion stays correct.
     @State private var queueBodyP: CGFloat = 0
+    /// A THIRD open/close progress that drives ONLY the hero row's lift + fade
+    /// (`HeroLift` / `RangeFadeOut` in `titleRow`). Animated alongside `queueP` in
+    /// `driveQueue()` but on `queueHeroSpring` (a slower response) for the OPEN so the
+    /// hero title/artist visibly *travels* up and out at its own gentler pace, decoupled
+    /// from the fast artwork dock. The CLOSE reuses the fast `queueSpring` so the hero
+    /// snaps back in lock-step with the rest.
+    @State private var queueHeroP: CGFloat = 0
     /// True only once the queue-open spring has fully settled (and false the moment
     /// a close/open starts, and while the queue is closed). Gates the seamless
     /// hand-off between the traveling artwork/star (shown during the transition)
@@ -602,10 +609,10 @@ struct NowPlayingMorphContainer: View {
         // nudge. It stays fully visible through the early climb, then fades out
         // across a back-loaded window (RangeFadeOut) so you actually see it move
         // before it hands off to the card row catching below it.
-        .modifier(HeroLift(progress: m.q,
+        .modifier(HeroLift(progress: queueHeroP,
                            end: Self.heroLiftEnd,
                            distance: Self.heroRowLift))
-        .modifier(RangeFadeOut(progress: m.q,
+        .modifier(RangeFadeOut(progress: queueHeroP,
                                start: Self.heroFadeStart,
                                end: Self.heroFadeEnd))
     }
@@ -887,6 +894,7 @@ struct NowPlayingMorphContainer: View {
         if reduceMotion {
             queueP = open ? 1 : 0
             queueBodyP = open ? 1 : 0
+            queueHeroP = open ? 1 : 0
             queueSettled = open
             if !open { queueOpen = false }
         }
@@ -913,9 +921,14 @@ struct NowPlayingMorphContainer: View {
             withAnimation(Self.queueBodySpring) {
                 queueBodyP = 1
             }
+            // Hero lifts + fades on its own slower spring so its travel reads as a
+            // deliberate hand-off rather than a quick snap, decoupled from the artwork.
+            withAnimation(Self.queueHeroSpring) {
+                queueHeroP = 1
+            }
         } else {
             // Already collapsed: nothing to animate, just drop the mount.
-            guard queueP > 0 else { queueOpen = false; queueBodyP = 0; return }
+            guard queueP > 0 else { queueOpen = false; queueBodyP = 0; queueHeroP = 0; return }
             withAnimation(Self.queueSpring) {
                 queueP = 0
             } completion: {
@@ -926,6 +939,10 @@ struct NowPlayingMorphContainer: View {
             // together and the unmount-on-queueP-completion above stays clean.
             withAnimation(Self.queueSpring) {
                 queueBodyP = 0
+            }
+            // Hero snaps back with the fast spring too — no reason to linger on close.
+            withAnimation(Self.queueSpring) {
+                queueHeroP = 0
             }
         }
     }
@@ -949,6 +966,13 @@ struct NowPlayingMorphContainer: View {
     /// `queueSpring` (see `driveQueue`), so this only stretches the entrance.
     private static let queueBodySpring = Animation.spring(response: 0.85 * queueTimeScale,
                                                           dampingFraction: 0.92)
+
+    /// Slower spring for the hero row's lift/fade on OPEN only, so the title/artist
+    /// visibly travel up and out at a gentler pace than the fast artwork dock instead
+    /// of snapping away. Higher `response` = slower; the close reuses `queueSpring`
+    /// (see `driveQueue`) so retract stays snappy.
+    private static let queueHeroSpring = Animation.spring(response: 0.72 * queueTimeScale,
+                                                          dampingFraction: 0.88)
 
     // MARK: Drawer controls
 
