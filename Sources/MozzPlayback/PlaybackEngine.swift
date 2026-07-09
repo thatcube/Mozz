@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import Observation
 import MozzCore
 
 /// A serializable snapshot of what's playing — the queue (order/shuffle/repeat/
@@ -32,12 +33,55 @@ public struct PlaybackPersistentState: Codable, Sendable {
 /// URL resolution is `async` (it may hit the network or disk) and guarded by a
 /// generation counter so rapid skips can't race stale loads onto the player.
 @MainActor
-public final class PlaybackEngine: ObservableObject {
-    @Published public private(set) var snapshot = PlaybackSnapshot()
-    @Published public private(set) var currentTrack: Track?
-    @Published public private(set) var upNext: [Track] = []
+@Observable
+public final class PlaybackEngine {
+    public private(set) var snapshot = PlaybackSnapshot()
+    public private(set) var currentTrack: Track?
+    public private(set) var upNext: [Track] = []
     /// Tracks played before the current one (oldest first) — the queue's history.
-    @Published public private(set) var history: [Track] = []
+    public private(set) var history: [Track] = []
+
+    // MARK: Combine bridge (for non-SwiftUI observers)
+
+    /// `AppEnvironment`'s now-playing-widget + session-persistence pipeline is
+    /// Combine-based. The `@Observable` migration drops the `$`-projected publishers
+    /// `@Published` used to synthesize, so we bridge just the two properties that
+    /// pipeline reads back into Combine. SwiftUI keeps observing the stored
+    /// properties *directly* and per-property — so the 0.5s elapsed tick only
+    /// re-renders views that actually read `snapshot` (the seek bar), not the whole
+    /// player + queue list. That narrowing is the entire point of the migration.
+    @ObservationIgnored
+    public private(set) lazy var currentTrackPublisher: AnyPublisher<Track?, Never> =
+        makeChangePublisher(\.currentTrack)
+    @ObservationIgnored
+    public private(set) lazy var snapshotPublisher: AnyPublisher<PlaybackSnapshot, Never> =
+        makeChangePublisher(\.snapshot)
+
+    /// Bridge an `@Observable` property to a Combine publisher: seed a subject with
+    /// the current value, then re-arm `withObservationTracking` after every change to
+    /// forward the settled value. `onChange` fires just *before* the store mutates,
+    /// so we hop to the next main-queue turn to read the new value and re-arm. Several
+    /// mutations in one turn coalesce to a single (latest) emission — exactly what the
+    /// throttled widget/persistence sinks want. The engine lives for the whole app
+    /// session, so the re-arming closure never meaningfully outlives it.
+    private func makeChangePublisher<Value>(_ keyPath: KeyPath<PlaybackEngine, Value>) -> AnyPublisher<Value, Never> {
+        let subject = CurrentValueSubject<Value, Never>(self[keyPath: keyPath])
+        func arm(_ engine: PlaybackEngine) {
+            withObservationTracking {
+                _ = engine[keyPath: keyPath]
+            } onChange: { [weak engine] in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let engine else { return }
+                        subject.send(engine[keyPath: keyPath])
+                        arm(engine)
+                    }
+                }
+            }
+        }
+        arm(self)
+        return subject.eraseToAnyPublisher()
+    }
 
     /// The track a user "next" / "previous" would land on, without mutating —
     /// used by the island's swipe to decide whether a title/artist line will
@@ -49,25 +93,31 @@ public final class PlaybackEngine: ObservableObject {
 
     /// Optional scrobble / progress hook. The app wires this to
     /// `MusicBackend.reportPlayback`. Never blocks playback.
+    @ObservationIgnored
     public var onReport: (@Sendable (PlaybackReport) -> Void)?
     /// Listening-history hook. The app wires this to append to the on-device
     /// `play_event` log. Fires `started` when a track begins, then exactly one
     /// terminal event per track — `completed` (natural end) or `skipped` (the
     /// user left before the end). Never blocks playback.
+    @ObservationIgnored
     public var onPlayEvent: (@Sendable (PlayEvent) -> Void)?
     /// Called when artwork should be fetched for the lock screen.
+    @ObservationIgnored
     public var onNeedsArtwork: ((Track) -> Void)?
 
     /// Radio hook: when set, the engine calls this as the queue nears its end to
     /// fetch more tracks (an endless "station"), then appends them. Return an
     /// empty array to stop extending. Cleared to end radio mode.
+    @ObservationIgnored
     public var onQueueNearEnd: (@Sendable () async -> [Track])?
     /// Guards against firing overlapping extend requests.
+    @ObservationIgnored
     private var isExtendingQueue = false
     /// Bumped whenever loaded content is replaced (play / playShuffled /
     /// startStation / stop). Doubles as the station-staleness guard AND a public
     /// "transport epoch" the app captures to detect that the user changed what's
     /// playing while an async radio fetch was in flight.
+    @ObservationIgnored
     public private(set) var transportEpoch = 0
     /// Extend the queue once this few tracks remain after the current one.
     private static let radioRefillThreshold = 3
@@ -75,8 +125,10 @@ public final class PlaybackEngine: ObservableObject {
     /// Whether per-track loudness normalization (ReplayGain / Sound Check) is
     /// applied. When on, a track's `normalizationGainDB` is turned into an audio
     /// mix so tracks play at a consistent level. Default on.
+    @ObservationIgnored
     public var normalizationEnabled: Bool = true
     /// Global preamp (dB) added on top of each track's gain.
+    @ObservationIgnored
     public var normalizationPreampDB: Double = 0
 
     /// The in-app graphic equalizer. Off by default (identical playback to before
@@ -92,6 +144,7 @@ public final class PlaybackEngine: ObservableObject {
     private let session = AudioSessionController()
     private let nowPlaying = NowPlayingCenter()
 
+    @ObservationIgnored
     private var queue = PlayQueue()
     /// One entry in the player's small (≤2) window of loaded items.
     private struct LoadedItem {
@@ -111,29 +164,40 @@ public final class PlaybackEngine: ObservableObject {
     }
 
     /// Tracks currently loaded into the player, aligned with `player.items()`.
+    @ObservationIgnored
     private var loaded: [LoadedItem] = []
+    @ObservationIgnored
     private var loadGeneration = 0
+    @ObservationIgnored
     private var timeObserver: Any?
+    @ObservationIgnored
     private var endObserver: NSObjectProtocol?
     /// Belt-and-suspenders failure signal alongside the item-status KVO: some
     /// mid-stream drops surface as this notification. Routed to the same recovery.
+    @ObservationIgnored
     private var failedObserver: NSObjectProtocol?
     /// KVO on the current item's `status`, to detect a terminal `.failed` (a
     /// dropped stream) and recover. Re-pointed whenever the current item changes.
+    @ObservationIgnored
     private var currentItemStatusObserver: AnyCancellable?
     /// A pending backoff before a recovery re-load; cancelled if the track changes.
+    @ObservationIgnored
     private var recoveryTask: Task<Void, Never>?
     /// Consecutive recovery attempts for the current item; reset once an item
     /// reaches `.readyToPlay` (so a stream that plays then drops later gets a
     /// fresh budget), capped by ``maxRecoveryRetries``.
+    @ObservationIgnored
     private var recoveryRetryCount = 0
     private static let maxRecoveryRetries = 5
+    @ObservationIgnored
     private var wasPlayingBeforeInterruption = false
     /// A position to seek to once the (paused) current item finishes loading —
     /// used to restore a saved session at the right spot.
+    @ObservationIgnored
     private var pendingSeek: TimeInterval?
     /// The id of the track we've emitted `.started` for and not yet terminated,
     /// so every start is paired with exactly one `completed`/`skipped`.
+    @ObservationIgnored
     private var loggedTrackID: String?
 
     public init(resolver: TrackURLResolver) {

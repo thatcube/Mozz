@@ -206,7 +206,7 @@ struct QueueControlsHeightKey: PreferenceKey {
 /// index `j` maps to `history.count + 1 + j` (the current track — the card —
 /// sits at `history.count`, but isn't a tappable list row).
 struct PlayerQueuePanel<Card: View, Controls: View>: View {
-    @ObservedObject var playback: PlaybackEngine
+    var playback: PlaybackEngine
     /// Queue-open progress (0…1) — fades the list in alongside the docking card.
     var queueP: CGFloat
     /// Bumped by the container on every queue open; each change snaps the scroll

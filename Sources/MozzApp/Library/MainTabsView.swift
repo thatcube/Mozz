@@ -17,7 +17,7 @@ import MozzPlayback
 /// loading lazily on first visit.
 struct MainTabsView: View {
     @EnvironmentObject private var env: AppEnvironment
-    @EnvironmentObject private var playback: PlaybackEngine
+    @Environment(PlaybackEngine.self) private var playback
     @StateObject private var ui = PlayerUIModel()
 
     @State private var selectedTab: AppTab = .home

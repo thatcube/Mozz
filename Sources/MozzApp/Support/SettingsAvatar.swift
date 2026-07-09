@@ -30,7 +30,7 @@ struct SettingsAvatar: View {
             // the sheet doesn't inherit the presenter's environment.
             SettingsView()
                 .environmentObject(env)
-                .environmentObject(env.playback)
+                .environment(env.playback)
                 .environmentObject(env.downloads)
         }
     }

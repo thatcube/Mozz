@@ -26,7 +26,7 @@ import UIKit
 // fades the body out, fades the mini controls in, dissolves the frost into
 // Liquid Glass and lands the artwork in the slot.
 struct NowPlayingMorphContainer: View {
-    @ObservedObject var playback: PlaybackEngine
+    var playback: PlaybackEngine
     @ObservedObject var ui: PlayerUIModel
     /// Tab-bar minimize progress (0 = docked island above the bar, 1 = island
     /// dropped into the bar's centre pill between the split blobs). Scroll-driven.
@@ -1101,7 +1101,7 @@ private struct IslandGlow: View {
 /// auto-advance, the buttons) swaps instantly. The traveling artwork is owned by
 /// the parent, so this only reserves its slot.
 private struct IslandContent: View {
-    @ObservedObject var playback: PlaybackEngine
+    var playback: PlaybackEngine
     var onExpand: () -> Void
     /// How far the island has dropped into the tab bar's centre pill (0…1). At 1
     /// the skip/next button is gone (Apple's minimized island keeps only

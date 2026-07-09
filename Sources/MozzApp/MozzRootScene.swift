@@ -17,7 +17,7 @@ public struct MozzRootScene: Scene {
         WindowGroup {
             RootView()
                 .environmentObject(env)
-                .environmentObject(env.playback)
+                .environment(env.playback)
                 .environmentObject(env.downloads)
                 .environmentObject(env.toasts)
                 .task {
