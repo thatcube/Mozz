@@ -75,6 +75,13 @@ struct NowPlayingMorphContainer: View {
     /// now-playing card at the top (never left showing History or scrolled) on
     /// each reopen — not just the first appearance.
     @State private var queueOpenNonce = 0
+    /// Monotonic id bumped on every `setQueue` call. Each open/close spring's
+    /// `completion:` captures the id and only applies its terminal state if it's still
+    /// current — so when you toggle the queue faster than the spring settles, a stale
+    /// completion from the superseded transition can't fire out of order and strand
+    /// the view in a corrupt state (e.g. `queueSettled == true` while `queueOpen ==
+    /// false`, which hides both the traveling AND the card artwork → blank drawer).
+    @State private var queueTransition = 0
     /// Measured global-space frames of the hero and card star+overflow reserved
     /// slots. The single traveling star cluster interpolates between their centers
     /// by `queueP`, so it lands exactly on either slot regardless of Dynamic Type
@@ -827,6 +834,11 @@ struct NowPlayingMorphContainer: View {
         } else {
             receiving = true
             settled = false
+            // Invalidate any in-flight queue open/close completion: the collapse below
+            // drives `queueP` to 0 and its own completion resets the queue flags, so a
+            // stale queue completion firing afterwards must not flip `queueSettled`
+            // back on (which would blank the drawer on the next expand).
+            queueTransition &+= 1
             // Keep `queueSettled` TRUE through the collapse: the card's own in-flow
             // star + artwork then ride down and fade WITH the drawer body (which is
             // clipped to the surface). Flipping it false here would revive the
@@ -849,6 +861,10 @@ struct NowPlayingMorphContainer: View {
     /// Open/close the queue, driving `queueP` as a spring and managing
     /// `queueSettled` (the traveling ⇄ card artwork/star hand-off flag).
     private func setQueue(open: Bool) {
+        // Supersede any in-flight transition: a stale completion (from a toggle that
+        // hasn't settled yet) must not apply its terminal flags after a newer toggle.
+        queueTransition &+= 1
+        let token = queueTransition
         if open {
             queueOpen = true
             queueSettled = false
@@ -857,6 +873,7 @@ struct NowPlayingMorphContainer: View {
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
                 queueP = 1
             } completion: {
+                guard token == queueTransition else { return }
                 queueSettled = true
                 // The card is docked at the top now (scroll was reset on open); record
                 // its star Y as the docked reference so a later close can tell whether
@@ -872,6 +889,7 @@ struct NowPlayingMorphContainer: View {
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
                 queueP = 0
             } completion: {
+                guard token == queueTransition else { return }
                 queueOpen = false
                 suppressStarTravel = false
             }
