@@ -595,19 +595,23 @@ struct NowPlayingMorphContainer: View {
         // nudge. It stays fully visible through the early climb, then fades out
         // across a back-loaded window (RangeFadeOut) so you actually see it move
         // before it hands off to the card row catching below it.
-        .offset(heroRowTravel(m))
+        .modifier(HeroLift(progress: m.q,
+                           end: Self.heroLiftEnd,
+                           distance: Self.heroRowLift))
         .modifier(RangeFadeOut(progress: m.q,
                                start: Self.heroFadeStart,
                                end: Self.heroFadeEnd))
     }
 
-    /// Fixed upward lift applied to the whole hero row as the queue opens. Purely
-    /// directional — the row fades out (RangeFadeOut) before the lift completes, so
-    /// it never needs to land on a measured target; a constant read is robust and has
-    /// no layout-measurement coupling.
-    private func heroRowTravel(_ m: Morph) -> CGSize {
-        CGSize(width: 0, height: -Self.heroRowLift * m.q)
-    }
+    /// Progress (in q, 0…1) by which the hero row completes its full upward lift.
+    /// Below this it climbs `heroRowLift * (q / heroLiftEnd)`; past it the row holds
+    /// at full lift — invisible by then anyway, since it has faded out. This makes the
+    /// *duration* of the visible climb tunable independently of the whole transition:
+    /// with the old `q`-linear travel the row only reached ~half its lift before
+    /// fading, so most of the climb was never seen. Applied via the `HeroLift`
+    /// Animatable modifier so SwiftUI samples the clamped ramp per frame (a plain
+    /// offset from animated state would linearize the endpoints and skip the corner).
+    private static let heroLiftEnd: CGFloat = 0.5
 
     /// How far the hero title/star row lifts as the queue opens (points). Large on
     /// purpose: the row should visibly climb toward the card row, not just fade in
@@ -1633,6 +1637,26 @@ private struct RangeFadeOut: ViewModifier, Animatable {
         let span = max(0.0001, end - start)
         let t = min(1, max(0, (progress - start) / span))
         return content.opacity(Double(1 - t))
+    }
+}
+
+/// Lifts the hero row UP by `distance`, completing the full climb by `end` (in
+/// progress, 0 → 1) and holding there after — so the climb's duration is decoupled
+/// from the whole transition. `Animatable` so SwiftUI samples the clamped ramp every
+/// frame: a plain `.offset(y:)` from animated state would interpolate only the 0 and
+/// -distance endpoints along the spring, linearizing the `end` clamp away.
+private struct HeroLift: ViewModifier, Animatable {
+    var progress: CGFloat
+    var end: CGFloat
+    var distance: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let span = max(0.0001, end)
+        let t = min(1, max(0, progress / span))
+        return content.offset(y: -distance * t)
     }
 }
 
