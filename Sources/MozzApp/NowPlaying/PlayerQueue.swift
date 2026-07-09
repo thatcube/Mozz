@@ -376,7 +376,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 // Rise up from below the scrub bar as the queue opens, on top of the
                 // normal sticky-pin position.
                 .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
-                .opacity(queueP)
+                .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
         }
     }
 
@@ -401,6 +401,13 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
     /// would linearize the hold away).
     private let bodyRiseStart: CGFloat = 0.7
+
+    /// When (in q, 0 → 1) the queue body starts fading IN. Before this the pills /
+    /// header / list are fully transparent, then they ramp 0 → 1 by q=1 — decoupled
+    /// from the card row's own `LateFade` (`cardFadeStart`) so the body's fade-in can
+    /// be timed independently of the title/star hand-off above it. Applied via the
+    /// `BodyFade` modifier (per-frame sampling of the delayed ramp).
+    private let bodyFadeStart: CGFloat = 0.5
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
     /// the rows dissolve into the real page background behind the pinned header
@@ -452,6 +459,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     .opacity(usesStickyHeaders ? 0 : 1)
                     .allowsHitTesting(!usesStickyHeaders)
                     .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
+                    .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
                     .background(GeometryReader { g in
                         Color.clear.preference(key: QueueControlsHeightKey.self,
                                                value: g.size.height)
@@ -460,6 +468,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     // Rise up from below the scrub bar with the pills/header as one
                     // unit as the queue opens.
                     .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
+                    .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
@@ -644,6 +653,28 @@ private struct BodyRise: ViewModifier, Animatable {
         let span = max(0.0001, 1 - start)
         let t = min(1, max(0, (progress - start) / span))
         return content.offset(y: (1 - t) * distance)
+    }
+}
+
+/// Fades the queue body (pills + "Queue" header + Continue-Playing list) IN, but
+/// only after `progress` (q, 0 → 1) passes `start`; before that it stays fully
+/// transparent, then ramps 0 → 1 over the remaining `start…1` range. The fade
+/// counterpart to `BodyRise` — same delayed schedule so the body fades in and
+/// rises up as one unit, decoupled from the card row's own `LateFade` hand-off
+/// above it. `Animatable` for the same reason as `BodyRise`: a computed
+/// `.opacity(...)` from animated state only interpolates its endpoints and skips
+/// the delay curve, so it must sample `animatableData` per frame.
+private struct BodyFade: ViewModifier, Animatable {
+    var progress: CGFloat
+    var start: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let span = max(0.0001, 1 - start)
+        let o = min(1, max(0, (progress - start) / span))
+        return content.opacity(Double(o))
     }
 }
 
