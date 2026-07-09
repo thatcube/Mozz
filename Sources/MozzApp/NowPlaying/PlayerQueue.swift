@@ -406,7 +406,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// very start before the hero has moved. Applied via the `BodyRise` modifier so
     /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
     /// would linearize the hold away).
-    private let bodyRiseStart: CGFloat = 0.35
+    private let bodyRiseStart: CGFloat = 0.45
 
     /// Ease-out strength for the body's rise into place (exponent on the remaining
     /// distance): the body covers most of its travel quickly, then decelerates into
