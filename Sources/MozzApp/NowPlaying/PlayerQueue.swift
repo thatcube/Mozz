@@ -209,6 +209,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     var playback: PlaybackEngine
     /// Queue-open progress (0…1) — fades the list in alongside the docking card.
     var queueP: CGFloat
+    /// How far (points) the queue BODY — shuffle/repeat pills, "Queue" header, and
+    /// Continue-Playing list — is pushed DOWN at q=0 so it rises up into place from
+    /// below the scrub bar as the queue opens. Supplied by the container from the
+    /// drawer's own (synchronously-known) geometry rather than measured here: the
+    /// panel's measured viewport reads 0 on a fresh open (the panel remounts every
+    /// time), which collapsed the rise to nothing. The now-playing card is excluded
+    /// — it docks via the traveling artwork and its own short title/star cross-fade.
+    var bodyRise: CGFloat = 0
     /// Bumped by the container on every queue open; each change snaps the scroll
     /// back to the now-playing card at the top (so a reopen never lingers on
     /// History or a prior scroll position).
@@ -364,9 +372,10 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             queueControlsBlock
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // Rise up from below the scrub bar as the queue opens (bodyEntranceY),
-                // on top of the normal sticky-pin position.
-                .offset(y: queueControlsY + bodyEntranceY)
+                .offset(y: queueControlsY)
+                // Rise up from below the scrub bar as the queue opens, on top of the
+                // normal sticky-pin position.
+                .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
                 .opacity(queueP)
         }
     }
@@ -385,23 +394,12 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// of the panel stays rigid. Clamping to ≥0 freezes them at the top state.
     private var clampedScrollY: CGFloat { max(0, scrollY) }
 
-    /// How far the queue BODY — the shuffle/repeat pills, the "Queue" header, and
-    /// the Continue-Playing list — is pushed DOWN from its resting spot as the
-    /// queue opens, so it rises up into place from below the scrub bar. `bodyRise`
-    /// is the gap between the pills' docked position (just under the card, at
-    /// `cardHeight` from the panel top) and the scrub-bar line (the panel's bottom
-    /// edge, `viewportH`), so at q=0 the body sits at the scrubber and travels up
-    /// to rest at q=1. The now-playing card is deliberately EXCLUDED — it docks via
-    /// the traveling artwork and its own short title/star cross-fade rise.
-    private var bodyRise: CGFloat { max(0, viewportH - cardHeight) }
-    /// The body holds at the scrub-bar line through the first slice of the open
+    /// The body holds down at the scrub-bar line through the first slice of the open
     /// (`bodyRiseStart`), then rises to rest by q=1 — so it travels up *as the hero
     /// row is fading out* above it (the hand-off), rather than creeping up from the
-    /// very start before the hero has moved.
-    private var bodyEntranceY: CGFloat {
-        let t = min(1, max(0, (queueP - bodyRiseStart) / (1 - bodyRiseStart)))
-        return (1 - t) * bodyRise
-    }
+    /// very start before the hero has moved. Applied via the `BodyRise` modifier so
+    /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
+    /// would linearize the hold away).
     private let bodyRiseStart: CGFloat = 0.3
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
@@ -453,7 +451,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 queueControlsBlock
                     .opacity(usesStickyHeaders ? 0 : 1)
                     .allowsHitTesting(!usesStickyHeaders)
-                    .offset(y: bodyEntranceY)
+                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
                     .background(GeometryReader { g in
                         Color.clear.preference(key: QueueControlsHeightKey.self,
                                                value: g.size.height)
@@ -461,7 +459,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 upNextRows
                     // Rise up from below the scrub bar with the pills/header as one
                     // unit as the queue opens.
-                    .offset(y: bodyEntranceY)
+                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
@@ -623,6 +621,29 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .opacity(dimmed ? 0.6 : 1)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Slides the queue body (pills + "Queue" header + Continue-Playing list) DOWN by
+/// `distance` at q=0 so it rises up from below the scrub bar into place by q=1,
+/// holding at the bottom until `start` so it travels up AS the hero row fades out
+/// above it (the hand-off). `Animatable` so SwiftUI samples the delayed ramp every
+/// frame — a plain `.offset(y:)` computed from animated state would only interpolate
+/// its endpoints and linearize the hold away. Crucially, `distance` is a constant
+/// (device-scaled, passed by the container) so the motion never depends on measured
+/// geometry that reads 0 on a fresh open — the bug that pinned the body in place.
+private struct BodyRise: ViewModifier, Animatable {
+    var progress: CGFloat
+    var start: CGFloat
+    var distance: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let span = max(0.0001, 1 - start)
+        let t = min(1, max(0, (progress - start) / span))
+        return content.offset(y: (1 - t) * distance)
     }
 }
 

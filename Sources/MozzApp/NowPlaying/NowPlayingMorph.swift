@@ -621,6 +621,7 @@ struct NowPlayingMorphContainer: View {
             PlayerQueuePanel(
                 playback: playback,
                 queueP: m.q,
+                bodyRise: queueBodyRise(m),
                 resetToken: queueOpenNonce,
                 onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
                 onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } },
@@ -636,6 +637,19 @@ struct NowPlayingMorphContainer: View {
         // q=0, so the whole entrance (artwork dock, card cross-fade, body rise)
         // animates in on every open — including the first.
         .onAppear { animateQueueOpen() }
+    }
+
+    /// How far the queue body (pills + "Queue" header + Continue-Playing list) drops
+    /// below its resting spot at q=0, so it rises up from below the scrub bar as the
+    /// queue opens. Derived from the drawer's own geometry — the header is dominated
+    /// by the big artwork, and the scrubber sits just beneath it — so this is a solid
+    /// device-scaled proxy for "the panel's height" that's known SYNCHRONOUSLY at
+    /// mount. (The panel can't measure its own viewport in time: it remounts on every
+    /// open and its GeometryReader reads 0 for the first frames, which is exactly what
+    /// left the body pinned in place.) Overshoot is harmless — the panel is clipped,
+    /// so a body that starts a little past the scrubber just rises in from off-screen.
+    private func queueBodyRise(_ m: Morph) -> CGFloat {
+        m.safeTop + 45 + m.expArtSide
     }
 
     /// The now-playing card at the center of the queue: artwork + title/artist +
