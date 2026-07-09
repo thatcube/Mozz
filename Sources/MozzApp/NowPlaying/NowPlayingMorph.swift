@@ -82,6 +82,15 @@ struct NowPlayingMorphContainer: View {
     /// the view in a corrupt state (e.g. `queueSettled == true` while `queueOpen ==
     /// false`, which hides both the traveling AND the card artwork → blank drawer).
     @State private var queueTransition = 0
+    /// The user's *latest* queue intent (true = open, false = close), set
+    /// synchronously in `setQueue`. Distinct from `queueOpen` (the mount flag,
+    /// which lingers true through a close until its spring completes): the open
+    /// spring is kicked from `queueTop.onAppear`, which can fire *after* a fast
+    /// follow-up close. Without this flag that late `onAppear` would resurrect the
+    /// superseded open and strand `queueP` at 1 (hero row stuck at the top, queue
+    /// logically closed → next open teleports). `animateQueueOpen` bails unless
+    /// this is still `true`.
+    @State private var queueWantsOpen = false
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -792,6 +801,7 @@ struct NowPlayingMorphContainer: View {
             // stale queue completion firing afterwards must not flip `queueSettled`
             // back on (which would blank the drawer on the next expand).
             queueTransition &+= 1
+            queueWantsOpen = false
             // Keep `queueSettled` TRUE through the collapse: the card's own in-flow
             // star + artwork then ride down and fade WITH the drawer body (which is
             // clipped to the surface). Flipping it false here would revive the
@@ -818,24 +828,31 @@ struct NowPlayingMorphContainer: View {
         // hasn't settled yet) must not apply its terminal flags after a newer toggle.
         queueTransition &+= 1
         let token = queueTransition
+        // Record the latest intent synchronously so a late `queueTop.onAppear` (which
+        // may fire *after* this call, and after a follow-up toggle) can tell whether
+        // the open it was scheduled for is still wanted.
+        queueWantsOpen = open
         if open {
-            // Mount the queue subtree at q=0 FIRST. We do NOT spring queueP here —
-            // driving it in the same event that inserts `queueTop` gives the freshly
-            // mounted subtree (card row, body) AND the completion no committed q=0
-            // frame to interpolate from, so on the very first open the artwork
-            // snapped straight to its docked slot. Instead, `queueTop.onAppear`
-            // calls `animateQueueOpen()` once it has actually mounted + laid out at
-            // q=0, so everything interpolates 0→1 every time (see below).
+            // Was the panel already mounted? On a *fresh* open we rely on
+            // `queueTop.onAppear` to kick the spring (it fires once the subtree has
+            // committed a q=0 frame, so the artwork/card cross-fade interpolate 0→1
+            // instead of snapping — the first-open fix). But on a re-open *during a
+            // close* the panel never unmounted, so `onAppear` won't fire again — and
+            // there's no first-open snap risk because it's already laid out — so we
+            // must spring here directly.
+            let alreadyMounted = queueOpen
             queueOpen = true
             queueSettled = false
             queueOpenNonce &+= 1
             if reduceMotion {
                 queueP = 1
                 queueSettled = true
+            } else if alreadyMounted {
+                springQueueOpen(token: token)
             }
         } else {
             queueSettled = false
-            withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+            withAnimation(reduceMotion ? nil : Self.queueSpring) {
                 queueP = 0
             } completion: {
                 guard token == queueTransition else { return }
@@ -850,15 +867,28 @@ struct NowPlayingMorphContainer: View {
     /// card title/star cross-fade, and the body-rise all interpolate 0→1 on EVERY
     /// open, including the first (when the subtree is mounting for the first time).
     private func animateQueueOpen() {
-        guard queueOpen, !reduceMotion, queueP < 1 else { return }
-        let token = queueTransition
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+        // Only honor this if the *latest* intent is still "open". A fast open→close
+        // can leave this `onAppear` to fire after the close has already superseded
+        // the open; without this guard we'd spring `queueP`→1 anyway and strand the
+        // hero row at the top while the state closes underneath it.
+        guard queueWantsOpen, queueOpen, !reduceMotion, queueP < 1 else { return }
+        springQueueOpen(token: queueTransition)
+    }
+
+    /// The single place `queueP` is sprung open. `token` is the transition id that
+    /// owns this open; the completion only commits `queueSettled` if it's still the
+    /// current transition, so a superseded open can't flip the hand-off flag late.
+    private func springQueueOpen(token: Int) {
+        withAnimation(Self.queueSpring) {
             queueP = 1
         } completion: {
             guard token == queueTransition else { return }
             queueSettled = true
         }
     }
+
+    /// Shared open/close spring for the queue transition.
+    private static let queueSpring = Animation.spring(response: 0.42, dampingFraction: 0.86)
 
     // MARK: Drawer controls
 
