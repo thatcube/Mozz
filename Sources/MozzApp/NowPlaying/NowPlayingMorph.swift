@@ -869,10 +869,7 @@ struct NowPlayingMorphContainer: View {
                              hitSize: PlayerControlMetrics.skipHit,
                              isEnabled: playback.snapshot.hasPrevious,
                              label: "Previous") { playback.previous() }
-            PlayerIconButton(glyph: playing ? .pause : .play,
-                             glyphSize: PlayerControlMetrics.playGlyph,
-                             hitSize: PlayerControlMetrics.playHit,
-                             label: playing ? "Pause" : "Play") { playback.togglePlayPause() }
+            PlayPauseButton(playing: playing) { playback.togglePlayPause() }
             PlayerIconButton(glyph: .skipForward,
                              glyphSize: PlayerControlMetrics.skipGlyph,
                              hitSize: PlayerControlMetrics.skipHit,

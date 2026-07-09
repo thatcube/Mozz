@@ -51,10 +51,50 @@ struct PlayerIconButton: View {
             glyph.styled(size: glyphSize)
                 .playerHitTarget(hitSize)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerButtonStyle())
         .foregroundStyle(tint)
         .opacity(isEnabled ? 1 : 0.35)
         .disabled(!isEnabled)
         .accessibilityLabel(label)
+    }
+}
+
+/// A tactile press style shared by every player button: a subtle scale-down and
+/// fade while the finger is held, springing back on release. Deliberately gentle
+/// — enough to feel responsive, never bouncy.
+struct PlayerButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.7),
+                       value: configuration.isPressed)
+    }
+}
+
+/// The primary play / pause button. The two glyphs cross-fade and scale into one
+/// another on every toggle (a clean morph rather than an instant icon swap),
+/// while `PlayerButtonStyle` adds the press-down feedback. Custom template glyphs
+/// can't use `.symbolEffect(.replace)`, so the morph is built from a stacked pair.
+struct PlayPauseButton: View {
+    let playing: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                AppIcon.play.styled(size: PlayerControlMetrics.playGlyph)
+                    .opacity(playing ? 0 : 1)
+                    .scaleEffect(playing ? 0.7 : 1)
+                AppIcon.pause.styled(size: PlayerControlMetrics.playGlyph)
+                    .opacity(playing ? 1 : 0)
+                    .scaleEffect(playing ? 1 : 0.7)
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.72), value: playing)
+            .playerHitTarget(PlayerControlMetrics.playHit)
+        }
+        .buttonStyle(PlayerButtonStyle())
+        .foregroundStyle(.primary)
+        .accessibilityLabel(playing ? "Pause" : "Play")
     }
 }
