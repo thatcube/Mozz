@@ -646,7 +646,7 @@ struct NowPlayingMorphContainer: View {
     /// `heroFadeEnd` — a back-loaded fade so it climbs (staying visible) before
     /// dissolving, handing off to the card row + the queue body rising up beneath.
     private static let heroFadeStart: CGFloat = 0.2
-    private static let heroFadeEnd: CGFloat = 0.5
+    private static let heroFadeEnd: CGFloat = 0.68
 
     /// How far the card's title/artist + star rise into place from just below their
     /// own final spot as the queue opens (points). Short, directional cross-fade —
