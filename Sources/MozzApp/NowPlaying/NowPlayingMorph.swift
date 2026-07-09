@@ -566,25 +566,35 @@ struct NowPlayingMorphContainer: View {
             starOverflowCluster(interactive: !queueOpen, emitsAnchor: !queueOpen)
         }
         .font(.title3)
-        // Lift the whole row up as one unit …
+        // Lift the whole row UP a long way as the queue opens — it should travel
+        // toward the card row (roughly halfway or more up the screen), not just
+        // nudge. It stays fully visible through the early climb, then fades out
+        // across a back-loaded window (RangeFadeOut) so you actually see it move
+        // before it hands off to the card row catching below it.
         .offset(heroRowTravel(m))
-        // … and fade it out on a per-frame curve (EarlyFade is Animatable — a plain
-        // `.opacity(1 - m.q * k)` computed from animated state only interpolates its
-        // 1→0 endpoints, so `k` has no visible effect). Steepness 2 ⇒ gone by ~q=0.5,
-        // so the hero row has cleared by the time the card title/star fade in.
-        .modifier(EarlyFade(progress: m.q, steepness: 2))
+        .modifier(RangeFadeOut(progress: m.q,
+                               start: Self.heroFadeStart,
+                               end: Self.heroFadeEnd))
     }
 
     /// Fixed upward lift applied to the whole hero row as the queue opens. Purely
-    /// directional — the row fades out (EarlyFade) well before the lift completes, so
+    /// directional — the row fades out (RangeFadeOut) before the lift completes, so
     /// it never needs to land on a measured target; a constant read is robust and has
     /// no layout-measurement coupling.
     private func heroRowTravel(_ m: Morph) -> CGSize {
         CGSize(width: 0, height: -Self.heroRowLift * m.q)
     }
 
-    /// How far the hero title/star row lifts as the queue opens (points).
-    private static let heroRowLift: CGFloat = 28
+    /// How far the hero title/star row lifts as the queue opens (points). Large on
+    /// purpose: the row should visibly climb toward the card row, not just fade in
+    /// place. It fades out (see `heroFadeEnd`) before reaching the full lift.
+    private static let heroRowLift: CGFloat = 280
+
+    /// The hero row holds full opacity until `heroFadeStart`, then fades 1→0 by
+    /// `heroFadeEnd` — a back-loaded fade so it climbs (staying visible) before
+    /// dissolving, handing off to the card row + the queue body rising up beneath.
+    private static let heroFadeStart: CGFloat = 0.33
+    private static let heroFadeEnd: CGFloat = 0.72
 
     /// How far the card's title/artist + star rise into place from just below their
     /// own final spot as the queue opens (points). Short, directional cross-fade —
@@ -622,6 +632,10 @@ struct NowPlayingMorphContainer: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Drive the open spring here, AFTER this subtree has mounted + laid out at
+        // q=0, so the whole entrance (artwork dock, card cross-fade, body rise)
+        // animates in on every open — including the first.
+        .onAppear { animateQueueOpen() }
     }
 
     /// The now-playing card at the center of the queue: artwork + title/artist +
@@ -791,30 +805,19 @@ struct NowPlayingMorphContainer: View {
         queueTransition &+= 1
         let token = queueTransition
         if open {
-            // Mount the queue subtree at q=0 FIRST (in this render pass, with queueP
-            // still 0), so its internal q-driven modifiers — the card title/star
-            // cross-fade rise and the body's rise-from-below-the-scrubber — have a
-            // real "from" value to interpolate out of. A subtree inserted inside the
-            // SAME transaction that sets queueP=1 has no prior rendered value, so
-            // those modifiers would render at their FINAL state (snap). Deferring the
-            // spring to the next runloop lets the freshly-mounted subtree animate
-            // 0→1 and the hand-off actually plays.
+            // Mount the queue subtree at q=0 FIRST. We do NOT spring queueP here —
+            // driving it in the same event that inserts `queueTop` gives the freshly
+            // mounted subtree (card row, body) AND the completion no committed q=0
+            // frame to interpolate from, so on the very first open the artwork
+            // snapped straight to its docked slot. Instead, `queueTop.onAppear`
+            // calls `animateQueueOpen()` once it has actually mounted + laid out at
+            // q=0, so everything interpolates 0→1 every time (see below).
             queueOpen = true
             queueSettled = false
             queueOpenNonce &+= 1
             if reduceMotion {
                 queueP = 1
                 queueSettled = true
-                return
-            }
-            DispatchQueue.main.async {
-                guard token == queueTransition else { return }
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                    queueP = 1
-                } completion: {
-                    guard token == queueTransition else { return }
-                    queueSettled = true
-                }
             }
         } else {
             queueSettled = false
@@ -824,6 +827,22 @@ struct NowPlayingMorphContainer: View {
                 guard token == queueTransition else { return }
                 queueOpen = false
             }
+        }
+    }
+
+    /// Springs the queue open once `queueTop` has appeared (mounted + laid out at
+    /// q=0). Driven from `queueTop.onAppear` rather than `setQueue(open:)` so the
+    /// q=0 frame is committed first — that guarantees the traveling artwork, the
+    /// card title/star cross-fade, and the body-rise all interpolate 0→1 on EVERY
+    /// open, including the first (when the subtree is mounting for the first time).
+    private func animateQueueOpen() {
+        guard queueOpen, !reduceMotion, queueP < 1 else { return }
+        let token = queueTransition
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+            queueP = 1
+        } completion: {
+            guard token == queueTransition else { return }
+            queueSettled = true
         }
     }
 
@@ -1522,30 +1541,35 @@ private struct DragTranslate: ViewModifier {
     }
 }
 
-/// Fades a view out on an animated `progress` (0 → 1) with a front-loaded curve
-/// that reaches zero EARLY — at `1/steepness` of the progress — instead of at the
-/// end. Implemented as an `Animatable` modifier so SwiftUI samples the curve every
-/// frame: a plain `.opacity(1 - progress * k)` computed from animated state only
-/// interpolates its start/end opacity along the spring, so `k` has no visible
-/// effect and the fade stays locked to the travel. Driving `animatableData` with
-/// `progress` forces the non-linear opacity to be evaluated per interpolated step.
-private struct EarlyFade: ViewModifier, Animatable {
+/// Fades a view OUT across a window `[start, end]` of an animated `progress`
+/// (0 → 1): fully opaque before `start`, ramps 1 → 0 across the window, gone
+/// after `end`. Back-loaded on purpose — the hero row uses it to climb (staying
+/// visible) through the early part of the open, then dissolve as it hands off to
+/// the card row + rising queue body. Implemented as an `Animatable` modifier so
+/// SwiftUI samples the curve every frame: a plain `.opacity(...)` computed from
+/// animated state only interpolates its start/end opacity along the spring, so
+/// the window has no visible effect. Driving `animatableData` with `progress`
+/// forces the windowed opacity to be evaluated per interpolated step.
+private struct RangeFadeOut: ViewModifier, Animatable {
     var progress: CGFloat
-    var steepness: CGFloat
+    var start: CGFloat
+    var end: CGFloat
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }
     func body(content: Content) -> some View {
-        content.opacity(Double(max(0, 1 - progress * steepness)))
+        let span = max(0.0001, end - start)
+        let t = min(1, max(0, (progress - start) / span))
+        return content.opacity(Double(1 - t))
     }
 }
 
 /// Fades a view IN, but only after `progress` (0 → 1) passes `start`; before that
 /// it stays fully transparent, then ramps 0 → 1 over the remaining `start…1` range.
-/// The delayed-fade counterpart to `EarlyFade`, used for the queue card's title +
-/// star so they "catch" the hero row after it has mostly lifted away. Must be
-/// `Animatable` for the same reason as `EarlyFade`: a computed `.opacity` from
+/// The delayed-fade counterpart to `RangeFadeOut`, used for the queue card's title
+/// + star so they "catch" the hero row after it has mostly lifted away. Must be
+/// `Animatable` for the same reason as `RangeFadeOut`: a computed `.opacity` from
 /// animated state would only interpolate its endpoints and skip the delay curve;
 /// driving `animatableData` forces per-frame sampling of the delayed ramp.
 private struct LateFade: ViewModifier, Animatable {

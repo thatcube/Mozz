@@ -394,7 +394,15 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// to rest at q=1. The now-playing card is deliberately EXCLUDED — it docks via
     /// the traveling artwork and its own short title/star cross-fade rise.
     private var bodyRise: CGFloat { max(0, viewportH - cardHeight) }
-    private var bodyEntranceY: CGFloat { (1 - queueP) * bodyRise }
+    /// The body holds at the scrub-bar line through the first slice of the open
+    /// (`bodyRiseStart`), then rises to rest by q=1 — so it travels up *as the hero
+    /// row is fading out* above it (the hand-off), rather than creeping up from the
+    /// very start before the hero has moved.
+    private var bodyEntranceY: CGFloat {
+        let t = min(1, max(0, (queueP - bodyRiseStart) / (1 - bodyRiseStart)))
+        return (1 - t) * bodyRise
+    }
+    private let bodyRiseStart: CGFloat = 0.3
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
     /// the rows dissolve into the real page background behind the pinned header
