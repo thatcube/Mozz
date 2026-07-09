@@ -375,7 +375,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 .offset(y: queueControlsY)
                 // Rise up from below the scrub bar as the queue opens, on top of the
                 // normal sticky-pin position.
-                .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
+                .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
                 .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
         }
     }
@@ -401,6 +401,13 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
     /// would linearize the hold away).
     private let bodyRiseStart: CGFloat = 0.7
+
+    /// Ease-out strength for the body's rise into place (exponent on the remaining
+    /// distance): the body covers most of its travel quickly, then decelerates into
+    /// the final spot — `distance * (1 - t)^bodyRiseEase`. `1` is a plain linear remap
+    /// of the spring; higher values "get there faster but settle in more slowly" for a
+    /// softer landing. Only shapes the rise motion, not the fade.
+    private let bodyRiseEase: CGFloat = 3
 
     /// When (in q, 0 → 1) the queue body starts fading IN. Before this the pills /
     /// header / list are fully transparent, then they ramp 0 → 1 by q=1 — decoupled
@@ -458,7 +465,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 queueControlsBlock
                     .opacity(usesStickyHeaders ? 0 : 1)
                     .allowsHitTesting(!usesStickyHeaders)
-                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
+                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
                     .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
                     .background(GeometryReader { g in
                         Color.clear.preference(key: QueueControlsHeightKey.self,
@@ -467,7 +474,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 upNextRows
                     // Rise up from below the scrub bar with the pills/header as one
                     // unit as the queue opens.
-                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise))
+                    .modifier(BodyRise(progress: queueP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
                     .modifier(BodyFade(progress: queueP, start: bodyFadeStart))
             }
             .padding(.horizontal, 24)
@@ -645,6 +652,7 @@ private struct BodyRise: ViewModifier, Animatable {
     var progress: CGFloat
     var start: CGFloat
     var distance: CGFloat
+    var ease: CGFloat = 1
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
@@ -652,7 +660,9 @@ private struct BodyRise: ViewModifier, Animatable {
     func body(content: Content) -> some View {
         let span = max(0.0001, 1 - start)
         let t = min(1, max(0, (progress - start) / span))
-        return content.offset(y: (1 - t) * distance)
+        // Ease-out on the remaining distance: quick departure, gentle settle.
+        let remaining = CGFloat(pow(Double(1 - t), Double(ease)))
+        return content.offset(y: remaining * distance)
     }
 }
 
