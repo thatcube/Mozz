@@ -626,7 +626,7 @@ struct NowPlayingMorphContainer: View {
     /// fading, so most of the climb was never seen. Applied via the `HeroLift`
     /// Animatable modifier so SwiftUI samples the clamped ramp per frame (a plain
     /// offset from animated state would linearize the endpoints and skip the corner).
-    private static let heroLiftEnd: CGFloat = 0.5
+    private static let heroLiftEnd: CGFloat = 0.9
 
     /// Progress (in `queueHeroP`, 0…1) at which the hero row BEGINS its upward lift.
     /// Below this it holds in place (still at full opacity), then climbs over
@@ -645,8 +645,8 @@ struct NowPlayingMorphContainer: View {
     /// The hero row holds full opacity until `heroFadeStart`, then fades 1→0 by
     /// `heroFadeEnd` — a back-loaded fade so it climbs (staying visible) before
     /// dissolving, handing off to the card row + the queue body rising up beneath.
-    private static let heroFadeStart: CGFloat = 0.3
-    private static let heroFadeEnd: CGFloat = 0.85
+    private static let heroFadeStart: CGFloat = 0.5
+    private static let heroFadeEnd: CGFloat = 0.72
 
     /// How far the card's title/artist + star rise into place from just below their
     /// own final spot as the queue opens (points). Short, directional cross-fade —
@@ -981,7 +981,7 @@ struct NowPlayingMorphContainer: View {
     /// visibly travel up and out at a gentler pace than the fast artwork dock instead
     /// of snapping away. Higher `response` = slower; the close reuses `queueSpring`
     /// (see `driveQueue`) so retract stays snappy.
-    private static let queueHeroSpring = Animation.spring(response: 0.9 * queueTimeScale,
+    private static let queueHeroSpring = Animation.spring(response: 0.75 * queueTimeScale,
                                                           dampingFraction: 0.88)
 
     // MARK: Drawer controls
