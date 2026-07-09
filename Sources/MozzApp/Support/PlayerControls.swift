@@ -59,16 +59,21 @@ struct PlayerIconButton: View {
     }
 }
 
-/// A tactile press style shared by every player button: a subtle scale-down and
-/// fade while the finger is held, springing back on release. Deliberately gentle
-/// — enough to feel responsive, never bouncy.
+/// A tactile press style shared by every player button: a firm scale-down and
+/// fade while the finger is held, plus a haptic tap on press-down, springing
+/// back on release. Deliberately crisp — enough to feel responsive, never bouncy.
 struct PlayerButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.88 : 1)
-            .opacity(configuration.isPressed ? 0.6 : 1)
-            .animation(.spring(response: 0.24, dampingFraction: 0.7),
+            .scaleEffect(configuration.isPressed ? 0.8 : 1)
+            .opacity(configuration.isPressed ? 0.45 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.62),
                        value: configuration.isPressed)
+            // Fire only on press-down (nil on release), so the tap lands the
+            // instant the finger makes contact.
+            .sensoryFeedback(trigger: configuration.isPressed) { _, pressed in
+                pressed ? .impact(weight: .medium, intensity: 0.9) : nil
+            }
     }
 }
 
