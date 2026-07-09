@@ -14,14 +14,17 @@ struct BrandStyle {
     /// short clarifier (e.g. Navidrome's "(Subsonic)") so every row stays a single
     /// balanced line without a subtitle.
     let pickerName: String
-    /// One-line subtitle under the login-screen hero.
-    let heroSubtitle: String
+    /// One-line subtitle under the login-screen hero, or `nil` to show just the
+    /// logo + name. Used only where the screen has no other explanatory text
+    /// (Plex's bare screen) — screens with descriptive content below (Jellyfin,
+    /// Navidrome) stay name-only to avoid restating it.
+    let heroSubtitle: String?
 
     static let jellyfin = BrandStyle(
         logo: "JellyfinLogo",
         name: "Jellyfin",
         pickerName: "Jellyfin",
-        heroSubtitle: "Sign in to your Jellyfin server"
+        heroSubtitle: nil
     )
 
     static let plex = BrandStyle(
@@ -35,7 +38,7 @@ struct BrandStyle {
         logo: "NavidromeLogo",
         name: "Navidrome",
         pickerName: "Navidrome (Subsonic)",
-        heroSubtitle: "Sign into any Subsonic server"
+        heroSubtitle: nil
     )
 }
 
@@ -64,10 +67,12 @@ struct BrandHero: View {
                 Text(brand.name)
                     .font(.largeTitle.bold())
                     .foregroundStyle(.primary)
-                Text(brand.heroSubtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                if let heroSubtitle = brand.heroSubtitle {
+                    Text(heroSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
         .frame(maxWidth: .infinity)
