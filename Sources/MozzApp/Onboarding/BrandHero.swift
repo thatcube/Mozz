@@ -35,7 +35,7 @@ struct BrandStyle {
         logo: "NavidromeLogo",
         name: "Navidrome",
         pickerName: "Navidrome (Subsonic)",
-        heroSubtitle: "Sign in to your Subsonic server"
+        heroSubtitle: "Sign into any Subsonic server"
     )
 }
 
