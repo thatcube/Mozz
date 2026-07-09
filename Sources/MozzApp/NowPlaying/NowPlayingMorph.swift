@@ -82,22 +82,6 @@ struct NowPlayingMorphContainer: View {
     /// the view in a corrupt state (e.g. `queueSettled == true` while `queueOpen ==
     /// false`, which hides both the traveling AND the card artwork → blank drawer).
     @State private var queueTransition = 0
-    /// Measured global-space frames of the hero and card star+overflow reserved
-    /// slots. The single traveling star cluster interpolates between their centers
-    /// by `queueP`, so it lands exactly on either slot regardless of Dynamic Type
-    /// or the rating/like cluster's variable width.
-    @State private var heroStarRect: CGRect = .zero
-    @State private var cardStarRect: CGRect = .zero
-    /// The card star's vertical center (in `morphRootSpace`) captured the moment the
-    /// queue settles docked at the top. Used to tell whether the card is still at its
-    /// docked slot at close time, so a close after scrolling into History doesn't fly
-    /// the star/title up from far down the list.
-    @State private var dockedCardStarMidY: CGFloat = 0
-    /// Set on close when the card has scrolled away from its docked slot: the traveling
-    /// star just appears at the hero (no card→hero fly) and the hero title doesn't
-    /// slide from the scrolled card position — they "appear" instead of animating in
-    /// from way down the list.
-    @State private var suppressStarTravel = false
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -216,7 +200,6 @@ struct NowPlayingMorphContainer: View {
                         .opacity(m.miniOpacity)
                         .allowsHitTesting(m.p < 0.5)
                     travelingArtwork(m)
-                    travelingStarOverflow(m)
                     // Instant, whole-island press detection. A UIKit 0-duration
                     // long-press recognizer (installed on the window, so it sits
                     // above the real touch target that SwiftUI draws into a shared
@@ -247,15 +230,6 @@ struct NowPlayingMorphContainer: View {
                         .position(x: m.surfaceCenterX, y: m.islandTapCenterY)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-                // Name this (pre-drag-offset) space so the traveling star's slot
-                // rects are measured relative to the drawer itself, NOT the screen.
-                // The whole ZStack is shifted by `DragTranslate(dragY)` further out;
-                // if the slots were read in `.global` they'd move by `dragY` too, and
-                // the traveling cluster — already inside that offset — would travel at
-                // 2× the drag and visibly detach from the content. Measuring here (a
-                // coordinate space INSIDE the offset) makes the rects drag-invariant,
-                // so the single container offset moves the cluster and content as one.
-                .coordinateSpace(.named(Self.morphRootSpace))
                 // Press-scale the WHOLE island as one unit: scale the entire
                 // overlay around the island's centre, so glass, artwork and text
                 // grow together. When docked the rest of the overlay is
@@ -271,10 +245,6 @@ struct NowPlayingMorphContainer: View {
                 // outside taps and animate its own height (a system popover can't).
                 .overlayPreferenceValue(PlayerRatingAnchorKey.self) { anchor in
                     ratingPickerOverlay(anchor: anchor, geo: geo)
-                }
-                .onPreferenceChange(StarSlotKey.self) { slots in
-                    if let hero = slots["hero"] { heroStarRect = hero }
-                    if let card = slots["card"] { cardStarRect = card }
                 }
                 .onChange(of: playback.currentTrack?.id) { _, _ in
                     playerRating = playback.currentTrack?.rating
@@ -466,58 +436,11 @@ struct NowPlayingMorphContainer: View {
             .animation(.easeOut(duration: 0.3), value: showShadow)
     }
 
-    // MARK: Traveling star + overflow (single cluster, hero ⇄ queue card slot)
+    // MARK: Star + overflow cluster (rating/like + per-track menu)
 
-    /// The one star + overflow cluster that physically travels between the hero
-    /// title row and the queue card's trailing slot, driven by `queueP`. It's the
-    /// real interactive rating/like control while the queue is closed or mid-
-    /// transition; once the queue settles it hands off to the card's own scrolling
-    /// cluster (so the star scrolls & clips with the list). Trailing-aligned in
-    /// both states, so the cluster's variable width never shifts the landing.
-    /// Whether the now-playing card is still parked at its docked (top) slot. True
-    /// until we have a docked reference; false once the card has scrolled more than a
-    /// row away (into History or up-next). Drives `suppressStarTravel` on close.
-    private var cardIsDocked: Bool {
-        guard dockedCardStarMidY != 0, !cardStarRect.isEmpty else { return true }
-        return abs(cardStarRect.midY - dockedCardStarMidY) < 44
-    }
-
-    @ViewBuilder
-    private func travelingStarOverflow(_ m: Morph) -> some View {
-        // When closing after the card has scrolled away, don't fly the star up from
-        // the card's far-off position — pin it at the hero so it simply appears there.
-        let center = suppressStarTravel
-            ? (heroStarRect.isEmpty ? nil : CGPoint(x: heroStarRect.midX, y: heroStarRect.midY))
-            : lerpPoint(heroStarRect.isEmpty ? nil : CGPoint(x: heroStarRect.midX, y: heroStarRect.midY),
-                        cardStarRect.isEmpty ? nil : CGPoint(x: cardStarRect.midX, y: cardStarRect.midY),
-                        m.q)
-        if let center, !queueSettled {
-            // Only the expanded player's cluster is interactive and owns the rating
-            // anchor; the docked (invisible) one must not publish an anchor or steal
-            // touches, so exactly one anchor is ever published.
-            let active = m.p > 0.5
-            starOverflowCluster(interactive: active, emitsAnchor: active)
-                .position(x: center.x, y: center.y)
-                .opacity(clamp(m.bodyOpacity))
-                // Match the drawer's on-surface color scheme so the star/overflow are
-                // the same white here as in the settled card — no color pop at hand-off.
-                .environment(\.colorScheme, surfaceColorScheme)
-        }
-    }
-
-    /// Interpolate between two optional points; if one is missing, use the other
-    /// (so the cluster still has a home before both slots have been measured).
-    private func lerpPoint(_ a: CGPoint?, _ b: CGPoint?, _ t: CGFloat) -> CGPoint? {
-        switch (a, b) {
-        case let (a?, b?): return CGPoint(x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t))
-        case let (a?, nil): return a
-        case let (nil, b?): return b
-        default: return nil
-        }
-    }
-
-    /// The star (rating on Plex / like on Jellyfin) + overflow cluster, shared by
-    /// the traveling instance and the two reserved measuring slots.
+    /// The star (rating on Plex / like on Jellyfin) + overflow cluster. Rendered in
+    /// two places — the hero title row and the queue card's trailing slot — with a
+    /// directional move-up + cross-fade between them (no single traveling copy).
     @ViewBuilder
     private func starOverflowCluster(interactive: Bool, emitsAnchor: Bool) -> some View {
         HStack(alignment: .center, spacing: 12) {
@@ -618,11 +541,11 @@ struct NowPlayingMorphContainer: View {
         .gesture(dragGesture)
     }
 
-    /// Left-aligned title/artist with a reserved trailing slot for the traveling
-    /// star + overflow cluster (which is drawn at the morph root). On queue-open
-    /// the title/artist slide toward the card's title anchor and fade out (a
-    /// directional cross-fade — the card's smaller title fades in at rest); the
-    /// star + overflow travel as a single moving cluster.
+    /// The hero's now-playing metadata: title/artist on the left, the interactive
+    /// star + overflow cluster on the right. On queue-open the WHOLE row lifts up and
+    /// fades out early as one unit (Apple-style), while the card's own title + star
+    /// fade in below by the docked artwork — a directional cross-fade, no single
+    /// traveling copy.
     private func titleRow(_ m: Morph) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
@@ -631,51 +554,39 @@ struct NowPlayingMorphContainer: View {
                 Text(playback.currentTrack?.artistName ?? "")
                     .font(.title3).foregroundStyle(.secondary).lineLimit(1)
             }
-            .offset(heroTitleTravel(m))
-            // Fade out on a per-frame curve (EarlyFade is Animatable — a plain
-            // `.opacity(1 - m.q * k)` only interpolates its 1→0 endpoints, so `k`
-            // has no visible effect). Steepness 2 ⇒ gone by ~q=0.5, i.e. a graceful
-            // fade that clears the hero titles by about the halfway point of the
-            // upward travel, instead of vanishing so early it reads as no animation.
-            .modifier(EarlyFade(progress: m.q, steepness: 2))
             Spacer(minLength: 8)
-            // Reserved (invisible, non-interactive) cluster: holds the trailing
-            // space so the title doesn't stretch under the traveling star, and
-            // publishes its center so the traveling cluster lands here at rest.
-            starOverflowCluster(interactive: false, emitsAnchor: false)
-                .opacity(0)
-                .background(starSlotReader("hero"))
+            // The real interactive star/like + overflow while the queue is closed.
+            // Handed off (by cross-fade) to the card's own cluster once open.
+            starOverflowCluster(interactive: !queueOpen, emitsAnchor: !queueOpen)
         }
         .font(.title3)
+        // Lift the whole row up as one unit …
+        .offset(heroRowTravel(m))
+        // … and fade it out on a per-frame curve (EarlyFade is Animatable — a plain
+        // `.opacity(1 - m.q * k)` computed from animated state only interpolates its
+        // 1→0 endpoints, so `k` has no visible effect). Steepness 2 ⇒ gone by ~q=0.5,
+        // so the hero row has cleared by the time the card title/star fade in.
+        .modifier(EarlyFade(progress: m.q, steepness: 2))
     }
 
-    /// Offset that slides the hero title/artist toward the card's title anchor as
-    /// the queue opens (leading-shifted past the artwork; vertical from the hero
-    /// row center to the measured card row center). Purely directional — it fades
-    /// out via `opacity(1 - q)` well before reaching the card.
-    private func heroTitleTravel(_ m: Morph) -> CGSize {
-        // Closing after a scroll: don't slide the hero title from the card's far-off
-        // position — let it fade in at home.
-        if suppressStarTravel { return .zero }
-        let dy = (heroStarRect.isEmpty || cardStarRect.isEmpty)
-            ? 0 : (cardStarRect.midY - heroStarRect.midY)
-        return CGSize(width: 56 * m.q, height: dy * m.q)
+    /// Fixed upward lift applied to the whole hero row as the queue opens. Purely
+    /// directional — the row fades out (EarlyFade) well before the lift completes, so
+    /// it never needs to land on a measured target; a constant read is robust and has
+    /// no layout-measurement coupling.
+    private func heroRowTravel(_ m: Morph) -> CGSize {
+        CGSize(width: 0, height: -Self.heroRowLift * m.q)
     }
 
-    /// Named coordinate space for measuring the traveling star's slot rects,
-    /// declared on the ZStack that lives INSIDE `DragTranslate`. Reading the slots
-    /// here (rather than `.global`) keeps them invariant to the drag offset, so the
-    /// cluster doesn't double-count `dragY` and detach from the content.
-    private static let morphRootSpace = "morphRoot"
+    /// How far the hero title/star row lifts as the queue opens (points).
+    private static let heroRowLift: CGFloat = 28
 
-    /// Measures a named star slot's frame in the drawer-local coordinate space (see
-    /// `morphRootSpace`) for the traveling cluster.
-    private func starSlotReader(_ key: String) -> some View {
-        GeometryReader { g in
-            Color.clear.preference(key: StarSlotKey.self,
-                                   value: [key: g.frame(in: .named(Self.morphRootSpace))])
-        }
-    }
+    /// How far the queue body slides up from below as it opens (points).
+    private static let queueEntranceSlide: CGFloat = 64
+
+    /// Where the card's title/star begin fading in along the open progress (0…1) —
+    /// so they "catch" the hero row after it's mostly cleared, overlapping rather
+    /// than waiting for it to finish.
+    private static let cardFadeStart: CGFloat = 0.45
 
     /// The queue view shown in place of the hero when `queueOpen`: a pinned
     /// grabber over the scrollable History / now-playing card / Continue-Playing
@@ -699,6 +610,12 @@ struct NowPlayingMorphContainer: View {
                 card: { nowPlayingCard(m) },
                 queueControls: { shuffleRepeatPills }
             )
+            // Slide the whole queue (pills + card + list) up from below the scrub
+            // bar as it opens, overlapping the hero row's upward fade. Zero at q=1
+            // so the docked card-art slot lands exactly on the traveling artwork's
+            // fixed dock for a seamless handoff. The pinned grabber above is NOT
+            // offset — only the queue body rises.
+            .offset(y: (1 - m.q) * Self.queueEntranceSlide)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -728,18 +645,19 @@ struct NowPlayingMorphContainer: View {
             }
             // Rise into place from a little below as the queue opens, so the
             // card titles appear to "catch" the hero titles fading out above
-            // them — a directional cross-fade, not a plain fade.
+            // them — a directional cross-fade, not a plain fade. The fade-in is
+            // DELAYED (LateFade) so it starts around the time the hero row has
+            // mostly cleared, overlapping rather than waiting for it to finish.
             .offset(y: (1 - m.q) * 14)
-            .opacity(Double(min(1, m.q * 1.5)))
+            .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
             Spacer(minLength: 8)
-            // Card's own star + overflow at its final resting slot. Hidden during
-            // the open transition (the traveling cluster covers this slot and lands
-            // here); revealed the instant the queue settles. Interactive + owns the
-            // rating anchor only once settled (the hero cluster owns it during the
-            // open, so exactly one anchor is ever published).
+            // Card's own star + overflow at its final resting slot. Fades in on the
+            // same delayed curve as the card title (directional cross-fade with the
+            // hero cluster lifting away above). Interactive + owns the rating anchor
+            // only once settled (the hero cluster owns it while the queue is closed,
+            // so exactly one anchor is ever published).
             starOverflowCluster(interactive: queueSettled, emitsAnchor: queueSettled)
-                .opacity(queueSettled ? 1 : 0)
-                .background(starSlotReader("card"))
+                .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
         }
         .padding(.top, 8)
     }
@@ -868,30 +786,20 @@ struct NowPlayingMorphContainer: View {
         if open {
             queueOpen = true
             queueSettled = false
-            suppressStarTravel = false
             queueOpenNonce &+= 1
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
                 queueP = 1
             } completion: {
                 guard token == queueTransition else { return }
                 queueSettled = true
-                // The card is docked at the top now (scroll was reset on open); record
-                // its star Y as the docked reference so a later close can tell whether
-                // the card has since scrolled away.
-                if !cardStarRect.isEmpty { dockedCardStarMidY = cardStarRect.midY }
             }
         } else {
-            // If the card has scrolled away from its docked slot, the star/title would
-            // otherwise fly up from far down the list — suppress that so they just
-            // appear at the hero.
-            suppressStarTravel = !cardIsDocked
             queueSettled = false
             withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
                 queueP = 0
             } completion: {
                 guard token == queueTransition else { return }
                 queueOpen = false
-                suppressStarTravel = false
             }
         }
     }
@@ -1610,6 +1518,27 @@ private struct EarlyFade: ViewModifier, Animatable {
     }
 }
 
+/// Fades a view IN, but only after `progress` (0 → 1) passes `start`; before that
+/// it stays fully transparent, then ramps 0 → 1 over the remaining `start…1` range.
+/// The delayed-fade counterpart to `EarlyFade`, used for the queue card's title +
+/// star so they "catch" the hero row after it has mostly lifted away. Must be
+/// `Animatable` for the same reason as `EarlyFade`: a computed `.opacity` from
+/// animated state would only interpolate its endpoints and skip the delay curve;
+/// driving `animatableData` forces per-frame sampling of the delayed ramp.
+private struct LateFade: ViewModifier, Animatable {
+    var progress: CGFloat
+    var start: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        let span = max(0.0001, 1 - start)
+        let o = min(1, max(0, (progress - start) / span))
+        return content.opacity(Double(o))
+    }
+}
+
 /// All frames and opacities are pure functions of `p` (and `queue`) and the
 /// screen metrics, so the whole morph is deterministic and reversible. The live
 /// finger translation (`dragY`) is applied OUTSIDE this geometry as a single
@@ -1788,15 +1717,6 @@ private struct Morph {
 
 private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
 private func clamp(_ x: CGFloat, _ lo: CGFloat = 0, _ hi: CGFloat = 1) -> CGFloat { min(max(x, lo), hi) }
-
-/// Publishes a named star+overflow slot's global-space frame so the morph root
-/// can position the single traveling cluster onto it. Keyed `"hero"` / `"card"`.
-struct StarSlotKey: PreferenceKey {
-    static let defaultValue: [String: CGRect] = [:]
-    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        value.merge(nextValue()) { _, new in new }
-    }
-}
 
 // MARK: - Liquid Glass background
 
