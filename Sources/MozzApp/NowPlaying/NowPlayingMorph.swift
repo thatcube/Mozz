@@ -640,13 +640,13 @@ struct NowPlayingMorphContainer: View {
     /// How far the hero title/star row lifts as the queue opens (points). Large on
     /// purpose: the row should visibly climb toward the card row, not just fade in
     /// place. It fades out (see `heroFadeEnd`) before reaching the full lift.
-    private static let heroRowLift: CGFloat = 280
+    private static let heroRowLift: CGFloat = 360
 
     /// The hero row holds full opacity until `heroFadeStart`, then fades 1→0 by
     /// `heroFadeEnd` — a back-loaded fade so it climbs (staying visible) before
     /// dissolving, handing off to the card row + the queue body rising up beneath.
     private static let heroFadeStart: CGFloat = 0.56
-    private static let heroFadeEnd: CGFloat = 0.8
+    private static let heroFadeEnd: CGFloat = 0.92
 
     /// How far the card's title/artist + star rise into place from just below their
     /// own final spot as the queue opens (points). Short, directional cross-fade —

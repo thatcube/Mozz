@@ -420,7 +420,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// from the card row's own `LateFade` (`cardFadeStart`) so the body's fade-in can
     /// be timed independently of the title/star hand-off above it. Applied via the
     /// `BodyFade` modifier (per-frame sampling of the delayed ramp).
-    private let bodyFadeStart: CGFloat = 0.32
+    private let bodyFadeStart: CGFloat = 0.6
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
     /// the rows dissolve into the real page background behind the pinned header
