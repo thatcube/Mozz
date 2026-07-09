@@ -937,7 +937,7 @@ struct NowPlayingMorphContainer: View {
     private static let queueTimeScale: CGFloat = 1
 
     /// Shared open/close spring for the queue transition (× `queueTimeScale`).
-    private static let queueSpring = Animation.spring(response: 0.42 * queueTimeScale,
+    private static let queueSpring = Animation.spring(response: 0.56 * queueTimeScale,
                                                       dampingFraction: 0.86)
 
     /// Gentler, longer spring for the queue BODY's rise/fade on OPEN only, so its
