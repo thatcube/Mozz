@@ -400,7 +400,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// very start before the hero has moved. Applied via the `BodyRise` modifier so
     /// SwiftUI samples the delayed ramp per frame (a plain offset from animated state
     /// would linearize the hold away).
-    private let bodyRiseStart: CGFloat = 0.3
+    private let bodyRiseStart: CGFloat = 0.7
 
     /// How tall a fully-clear band to punch at the TOP of the scroll content so
     /// the rows dissolve into the real page background behind the pinned header
