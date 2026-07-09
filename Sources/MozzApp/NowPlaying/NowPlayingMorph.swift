@@ -980,7 +980,7 @@ struct NowPlayingMorphContainer: View {
     /// visibly travel up and out at a gentler pace than the fast artwork dock instead
     /// of snapping away. Higher `response` = slower; the close reuses `queueSpring`
     /// (see `driveQueue`) so retract stays snappy.
-    private static let queueHeroSpring = Animation.spring(response: 0.72 * queueTimeScale,
+    private static let queueHeroSpring = Animation.spring(response: 1.15 * queueTimeScale,
                                                           dampingFraction: 0.88)
 
     // MARK: Drawer controls
