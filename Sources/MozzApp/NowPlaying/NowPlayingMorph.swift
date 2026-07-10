@@ -294,19 +294,15 @@ struct NowPlayingMorphContainer: View {
                     }
                 }
                 // Mirror the active star's live hold-drag reveal up to the root so
-                // the bubble draws above the traveling artwork. Split presence from
-                // the previewed value: the value updates plainly on every finger
-                // move, while presence toggles inside a single `withAnimation` only
-                // when it actually flips — otherwise each rapid per-move update would
-                // restart (and so swallow) the bubble's appear transition.
+                // the bubble draws above the traveling artwork. Set BOTH values
+                // plainly — the appear/disappear is driven by an `.animation(value:)`
+                // keyed to `ratingRevealActive` on the overlay itself. (Wrapping
+                // these sets in `withAnimation` here didn't reliably fire the
+                // transition, since the preference update and the resulting view are
+                // computed in the same pass.)
                 .onPreferenceChange(RatingRevealKey.self) { reveal in
                     if let reveal { ratingRevealPreview = reveal.preview }
-                    let active = reveal != nil
-                    if active != ratingRevealActive {
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.20)) {
-                            ratingRevealActive = active
-                        }
-                    }
+                    ratingRevealActive = (reveal != nil)
                 }
                 .onChange(of: playback.currentTrack?.id) { _, _ in
                     playerRating = playback.currentTrack?.rating
@@ -396,6 +392,11 @@ struct NowPlayingMorphContainer: View {
                 .allowsHitTesting(false)
             }
         }
+        // Drives the bubble's insertion/removal transition. Keyed to presence only,
+        // so the live per-move preview updates re-render the strip instantly without
+        // spawning a new animation transaction that would restart (and swallow) the
+        // appear transition.
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: ratingRevealActive)
     }
 
     /// Shared layout for both root rating bubbles: bottom-pin the bubble just above

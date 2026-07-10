@@ -491,10 +491,7 @@ struct FluidRatingControl: View {
                 .resizable().scaledToFit()
                 .frame(width: glyphSize, height: glyphSize)
             if let r = rating, r > 0 {
-                // Always one decimal ("3.0"/"3.5") with monospaced digits, so every
-                // rating renders the exact same width — the star (and the bubble
-                // anchored to it) never shifts between values, with no padded gap.
-                Text(String(format: "%.1f", r))
+                Text(LikeControl.format(r))
                     .font(.title3).monospacedDigit()
             }
         }
