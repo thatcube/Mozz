@@ -414,11 +414,6 @@ struct FluidRatingControl: View {
     /// controls so they read at a consistent size.
     var glyphSize: CGFloat = PlayerControlMetrics.utilityGlyph
 
-    /// Fixed-width slot for the rating number so the star's position — and thus the
-    /// sticky bubble's anchor — never shifts as the number's character count changes
-    /// (e.g. "3" → "3.5"). Scales with Dynamic Type so it won't clip larger text.
-    @ScaledMetric(relativeTo: .title3) private var numberSlotWidth: CGFloat = 34
-
     @State private var preview: Double?
     @State private var isDragging = false
     @State private var stripFrame: CGRect = .zero
@@ -496,11 +491,11 @@ struct FluidRatingControl: View {
                 .resizable().scaledToFit()
                 .frame(width: glyphSize, height: glyphSize)
             if let r = rating, r > 0 {
-                Text(LikeControl.format(r))
+                // Always one decimal ("3.0"/"3.5") with monospaced digits, so every
+                // rating renders the exact same width — the star (and the bubble
+                // anchored to it) never shifts between values, with no padded gap.
+                Text(String(format: "%.1f", r))
                     .font(.title3).monospacedDigit()
-                    // Fixed-width slot: "3" and "3.5" occupy the same space, so the
-                    // star (and the bubble anchored to it) never shifts.
-                    .frame(width: numberSlotWidth, alignment: .leading)
             }
         }
         // Unrated shows a white outline star (rated fills it + shows the number);

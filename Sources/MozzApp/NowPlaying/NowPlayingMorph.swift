@@ -60,8 +60,10 @@ struct NowPlayingMorphContainer: View {
     @State private var ratingPickerOpen = false
     /// Live hold-drag reveal state published by the active rating star, drawn at the
     /// morph root so the reveal bubble sits ABOVE the traveling artwork (a local
-    /// overlay renders underneath it). Non-nil only while the finger is down.
-    @State private var ratingReveal: RatingReveal?
+    /// overlay renders underneath it). Presence is split from the previewed value so
+    /// the fast per-move preview updates don't restart the appear transition.
+    @State private var ratingRevealActive = false
+    @State private var ratingRevealPreview: Double?
     /// Whether the queue panel (Continue Playing + History) is showing in place of
     /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
     @State private var queueOpen = false
@@ -292,11 +294,18 @@ struct NowPlayingMorphContainer: View {
                     }
                 }
                 // Mirror the active star's live hold-drag reveal up to the root so
-                // the bubble draws above the traveling artwork. Animate so it
-                // scale-pops in/out like the local overlay used to.
+                // the bubble draws above the traveling artwork. Split presence from
+                // the previewed value: the value updates plainly on every finger
+                // move, while presence toggles inside a single `withAnimation` only
+                // when it actually flips — otherwise each rapid per-move update would
+                // restart (and so swallow) the bubble's appear transition.
                 .onPreferenceChange(RatingRevealKey.self) { reveal in
-                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.18)) {
-                        ratingReveal = reveal
+                    if let reveal { ratingRevealPreview = reveal.preview }
+                    let active = reveal != nil
+                    if active != ratingRevealActive {
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.20)) {
+                            ratingRevealActive = active
+                        }
                     }
                 }
                 .onChange(of: playback.currentTrack?.id) { _, _ in
@@ -370,20 +379,22 @@ struct NowPlayingMorphContainer: View {
     /// the live previewed rating.
     @ViewBuilder
     private func ratingRevealOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
-        if let reveal = ratingReveal, let anchor {
-            ratingBubble(rect: geo[anchor], geo: geo, dismiss: nil) {
-                VStack(spacing: 14) {
-                    RatingStripView(value: reveal.preview)
-                    Text((reveal.preview ?? 0) > 0 ? LikeControl.format(reveal.preview!) + " stars" : "No rating")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+        Group {
+            if ratingRevealActive, let anchor {
+                ratingBubble(rect: geo[anchor], geo: geo, dismiss: nil) {
+                    VStack(spacing: 14) {
+                        RatingStripView(value: ratingRevealPreview)
+                        Text((ratingRevealPreview ?? 0) > 0 ? LikeControl.format(ratingRevealPreview!) + " stars" : "No rating")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .padding(.top, 26)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
                 }
-                .padding(.top, 26)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
+                .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
         }
     }
 
