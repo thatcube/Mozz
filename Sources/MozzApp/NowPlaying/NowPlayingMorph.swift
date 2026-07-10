@@ -885,31 +885,38 @@ struct NowPlayingMorphContainer: View {
             receiving = true
             settled = false
             // Invalidate any in-flight queue open/close completion: the collapse below
-            // drives `queueP` to 0 and its own completion resets the queue flags, so a
-            // stale queue completion firing afterwards must not flip `queueSettled`
-            // back on (which would blank the drawer on the next expand).
+            // keeps the queue progresses pinned and its own completion resets the queue
+            // flags, so a stale queue completion firing afterwards must not flip
+            // `queueSettled` back on (which would blank the drawer on the next expand).
             queueTransition &+= 1
             // NOTE: don't reset `queueWantsOpen` here — it feeds `.onChange`, and
-            // flipping it now would kick `driveQueue()` which (seeing queueP heading
-            // to 0) would unmount `queueTop` at the START of the collapse. We keep it
-            // true through the collapse (queueP is driven to 0 by this spring) and
-            // reset it in the completion, once fully collapsed.
-            // Keep `queueSettled` TRUE through the collapse: the card's own in-flow
-            // star + artwork then ride down and fade WITH the drawer body (which is
-            // clipped to the surface). Flipping it false here would revive the
-            // root-level traveling star and, as `queueP`→0, send it flying UP toward
-            // the hero slot — off the top of the screen, since the traveling cluster
-            // sits OUTSIDE the surface clip. Reset once fully collapsed instead.
+            // flipping it now would kick `driveQueue()` which (seeing a close intent)
+            // would unmount `queueTop` at the START of the collapse. We keep it true
+            // through the collapse and reset it in the completion, once fully collapsed.
+            // Dismiss the drawer as ONE rigid unit — do NOT morph the queue open→hero
+            // during the collapse. Keep all three queue progresses (`queueP`,
+            // `queueBodyP`, `queueHeroP`) pinned at 1 so the fully laid-out queue
+            // (docked artwork, card star, shuffle/repeat pills, "Queue" header, list)
+            // rides straight down and is clipped away WITH the surface, instead of the
+            // artwork flying back to center + the list fading while the body/hero stay
+            // put (the old jumble, caused by driving only `queueP`→0 here). `queueSettled`
+            // likewise stays TRUE so the card's in-flow star/artwork ride down rather
+            // than reviving the root-level traveling star (which sits outside the
+            // surface clip and would fling UP off-screen). Everything queue-related is
+            // reset in the completion once fully collapsed and invisible.
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                p = 0; dragY = 0; queueP = 0
+                p = 0; dragY = 0
             } completion: {
                 receiving = false
-                // Fully collapsed now (body faded out): reset the queue flags so a
-                // fresh present starts from the hero header with the traveling star,
-                // without any flash.
+                // Fully collapsed now (invisible): reset the queue flags AND all three
+                // progresses so a fresh present starts from the hero header with the
+                // traveling star, without any flash or stranded body/hero offset.
                 queueOpen = false
                 queueSettled = false
                 queueWantsOpen = false
+                queueP = 0
+                queueBodyP = 0
+                queueHeroP = 0
             }
         }
     }
