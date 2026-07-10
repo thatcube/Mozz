@@ -58,6 +58,10 @@ struct NowPlayingMorphContainer: View {
     @State private var playerRating: Double?
     /// Whether the sticky tap picker (hosted at the morph root) is open.
     @State private var ratingPickerOpen = false
+    /// Live hold-drag reveal state published by the active rating star, drawn at the
+    /// morph root so the reveal bubble sits ABOVE the traveling artwork (a local
+    /// overlay renders underneath it). Non-nil only while the finger is down.
+    @State private var ratingReveal: RatingReveal?
     /// Whether the queue panel (Continue Playing + History) is showing in place of
     /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
     @State private var queueOpen = false
@@ -282,7 +286,18 @@ struct NowPlayingMorphContainer: View {
                 // morph root — a screen-spanning ancestor — so it can catch
                 // outside taps and animate its own height (a system popover can't).
                 .overlayPreferenceValue(PlayerRatingAnchorKey.self) { anchor in
-                    ratingPickerOverlay(anchor: anchor, geo: geo)
+                    ZStack {
+                        ratingPickerOverlay(anchor: anchor, geo: geo)
+                        ratingRevealOverlay(anchor: anchor, geo: geo)
+                    }
+                }
+                // Mirror the active star's live hold-drag reveal up to the root so
+                // the bubble draws above the traveling artwork. Animate so it
+                // scale-pops in/out like the local overlay used to.
+                .onPreferenceChange(RatingRevealKey.self) { reveal in
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.18)) {
+                        ratingReveal = reveal
+                    }
                 }
                 .onChange(of: playback.currentTrack?.id) { _, _ in
                     playerRating = playback.currentTrack?.rating
@@ -342,40 +357,87 @@ struct NowPlayingMorphContainer: View {
     @ViewBuilder
     private func ratingPickerOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
         if ratingPickerOpen, let anchor, let track = playback.currentTrack {
-            let rect = geo[anchor]
-            let gap: CGFloat = 6
-            let bottomSpace = max(0, geo.size.height - (rect.minY - gap))
-            ZStack {
+            ratingBubble(rect: geo[anchor], geo: geo, dismiss: { closeRatingPicker() }) {
+                RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
+            }
+            // Native popover feel: scale-pop UP OUT OF the tail (the anchor at the
+            // star) on present; a quick pure fade on dismiss (no scale/slide).
+            .transition(reduceMotion
+                ? .opacity
+                : .asymmetric(
+                    insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
+                    removal: .opacity))
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { closeRatingPicker() }
+        }
+    }
+
+    /// The root-hosted hold-drag reveal, drawn above the traveling artwork (which
+    /// would otherwise cover the star's own local overlay). Non-interactive; shows
+    /// the live previewed rating.
+    @ViewBuilder
+    private func ratingRevealOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
+        if let reveal = ratingReveal, let anchor {
+            ratingBubble(rect: geo[anchor], geo: geo, dismiss: nil) {
+                VStack(spacing: 14) {
+                    RatingStripView(value: reveal.preview)
+                    Text((reveal.preview ?? 0) > 0 ? LikeControl.format(reveal.preview!) + " stars" : "No rating")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .padding(.top, 26)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+            }
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Shared layout for both root rating bubbles: bottom-pin the bubble just above
+    /// the star, clamp it horizontally within a screen margin so it never runs off
+    /// the edge, and aim the tail at the star even when the body is shifted inward.
+    private func ratingBubble<Content: View>(
+        rect: CGRect,
+        geo: GeometryProxy,
+        dismiss: (() -> Void)?,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let gap: CGFloat = 6
+        let bottomSpace = max(0, geo.size.height - (rect.minY - gap))
+        // Analytic bubble width: the 5-star strip plus its 24pt horizontal padding
+        // on each side. Kept in sync with the bubble content's own layout.
+        let bubbleWidth = RatingMath.stripWidth() + 48
+        let margin: CGFloat = 12
+        let half = bubbleWidth / 2
+        let minCenter = half + margin
+        let maxCenter = geo.size.width - half - margin
+        let center = maxCenter >= minCenter
+            ? min(max(rect.midX, minCenter), maxCenter)
+            : geo.size.width / 2
+        // Tail X within the bubble's own space (TailedBubble clamps it to the body).
+        let tailX = rect.midX - (center - half)
+        return ZStack {
+            if let dismiss {
                 // Tap-catcher: dismiss on any tap outside the bubble.
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture { closeRatingPicker() }
+                    .onTapGesture { dismiss() }
                     .accessibilityHidden(true)
-                // Bottom-pinned bubble: grows upward as the Clear row appears, its
-                // tail staying on the star. No height measurement needed.
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
-                        .padding(.bottom, RatingTuning.revealTailHeight)
-                        .glassBackground(TailedBubble())
-                        .fixedSize()
-                        .offset(x: rect.midX - geo.size.width / 2)
-                        // Native popover feel: scale-pop UP OUT OF the tail (the
-                        // anchor at the star) on present; a quick pure fade on
-                        // dismiss (no scale/slide).
-                        .transition(reduceMotion
-                            ? .opacity
-                            : .asymmetric(
-                                insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
-                                removal: .opacity))
-                        .accessibilityAddTraits(.isModal)
-                        .accessibilityAction(.escape) { closeRatingPicker() }
-                    Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
             }
-            .ignoresSafeArea()
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                content()
+                    .padding(.bottom, RatingTuning.revealTailHeight)
+                    .glassBackground(TailedBubble(tailX: tailX))
+                    .frame(width: bubbleWidth)
+                    .offset(x: center - geo.size.width / 2)
+                Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .ignoresSafeArea()
     }
 
     private func setPlayerRating(_ value: Double?, track: Track) {
@@ -490,7 +552,8 @@ struct NowPlayingMorphContainer: View {
                         onRequestPicker: {
                             withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) { ratingPickerOpen = true }
                         },
-                        emitsAnchor: emitsAnchor
+                        emitsAnchor: emitsAnchor,
+                        hostReveal: true
                     )
                 } else {
                     PlayerLikeControl(track: track)

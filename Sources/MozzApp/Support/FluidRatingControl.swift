@@ -55,13 +55,18 @@ struct TailedBubble: Shape {
     var tailHeight: CGFloat = RatingTuning.revealTailHeight
     var tailShoulder: CGFloat = RatingTuning.revealTailShoulder
     var tailTip: CGFloat = RatingTuning.revealTailTip
+    /// X position (in the shape's own coordinate space) the tail should point at.
+    /// `nil` centers it. Clamped so the tail base never overruns the body corners,
+    /// so a caller can aim it at an off-center star without breaking the outline.
+    var tailX: CGFloat? = nil
 
     func path(in rect: CGRect) -> Path {
         let r = min(cornerRadius, min(rect.width, rect.height - tailHeight) / 2)
         let w = rect.width
         let bottom = rect.maxY - tailHeight        // body's bottom edge (tail base)
-        let cx = rect.midX
         let baseHalf = tailBase / 2
+        let cx = min(max(tailX ?? rect.midX, rect.minX + r + baseHalf),
+                     rect.maxX - r - baseHalf)
         let tipY = rect.maxY
 
         var p = Path()
@@ -363,6 +368,21 @@ struct PlayerRatingAnchorKey: PreferenceKey {
     }
 }
 
+/// Live state of an in-progress hold-drag reveal, published up to the player root
+/// so the reveal bubble can be drawn ABOVE the traveling album artwork (a local
+/// overlay renders under it). Non-nil only while a `hostReveal` control is being
+/// dragged; the previewed value tracks the finger.
+struct RatingReveal: Equatable {
+    var preview: Double?
+}
+
+struct RatingRevealKey: PreferenceKey {
+    static let defaultValue: RatingReveal? = nil
+    static func reduce(value: inout RatingReveal?, nextValue: () -> RatingReveal?) {
+        value = nextValue() ?? value
+    }
+}
+
 // MARK: - Player fluid rating control
 //
 // Compact display for the now-playing player (ratings/Plex path only): a single
@@ -385,9 +405,19 @@ struct FluidRatingControl: View {
     /// scrolling star); only the currently-active one should emit the anchor so
     /// the bubble stays unambiguous. Defaults to `true` for standalone use.
     var emitsAnchor: Bool = true
+    /// When true this control does NOT draw its own hold-drag reveal; instead it
+    /// publishes `RatingRevealKey` so a screen-spanning host can draw the reveal
+    /// bubble above the traveling artwork (which otherwise covers a local overlay).
+    /// The drag math is unaffected — it reads the star's frame, not the reveal.
+    var hostReveal: Bool = false
     /// Glyph size for the collapsed player star, shared with the other player
     /// controls so they read at a consistent size.
     var glyphSize: CGFloat = PlayerControlMetrics.utilityGlyph
+
+    /// Fixed-width slot for the rating number so the star's position — and thus the
+    /// sticky bubble's anchor — never shifts as the number's character count changes
+    /// (e.g. "3" → "3.5"). Scales with Dynamic Type so it won't clip larger text.
+    @ScaledMetric(relativeTo: .title3) private var numberSlotWidth: CGFloat = 34
 
     @State private var preview: Double?
     @State private var isDragging = false
@@ -404,6 +434,10 @@ struct FluidRatingControl: View {
         surface
             .anchorPreference(key: PlayerRatingAnchorKey.self,
                               value: .bounds) { emitsAnchor ? $0 : nil }
+            // Publish the live reveal so the host can draw it above the artwork.
+            // Only the host-driven, actively-dragged control emits a value.
+            .preference(key: RatingRevealKey.self,
+                        value: (hostReveal && isDragging) ? RatingReveal(preview: preview) : nil)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Rating")
             .accessibilityValue(rating.map { "\(LikeControl.format($0)) stars" } ?? "No rating")
@@ -420,14 +454,37 @@ struct FluidRatingControl: View {
                 .onTapGesture { onRequestPicker() }
         } else {
             collapsedStar
+                // Track the star's frame so the drag math (and any host-drawn
+                // reveal) stays centered on it without depending on a rendered
+                // reveal overlay — the strip sits centered over the star.
+                .background(starFrameReader)
                 .overlay(alignment: .center) {
-                    if isDragging { revealStrip.offset(y: RatingTuning.revealYOffset) }
+                    if isDragging && !hostReveal { revealStrip.offset(y: RatingTuning.revealYOffset) }
                 }
                 .frame(minWidth: PlayerControlMetrics.minHit, minHeight: PlayerControlMetrics.minHit)
                 .coordinateSpace(name: space)
                 .contentShape(Rectangle())
                 .gesture(rateGesture)
         }
+    }
+
+    /// Records the collapsed star's frame (in the gesture's coordinate space) and
+    /// derives the reveal strip's frame from it — centered on the star, exactly
+    /// `stripWidth` wide — so finger-X maps to a rating identically whether the
+    /// reveal is drawn locally or by the host.
+    private var starFrameReader: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { stripFrame = centeredStrip(around: geo.frame(in: .named(space))) }
+                .onChange(of: geo.frame(in: .named(space))) { _, new in
+                    stripFrame = centeredStrip(around: new)
+                }
+        }
+    }
+
+    private func centeredStrip(around star: CGRect) -> CGRect {
+        let w = RatingMath.stripWidth()
+        return CGRect(x: star.midX - w / 2, y: star.midY, width: w, height: 0)
     }
 
     // MARK: Collapsed display (single star + number when rated)
@@ -439,7 +496,11 @@ struct FluidRatingControl: View {
                 .resizable().scaledToFit()
                 .frame(width: glyphSize, height: glyphSize)
             if let r = rating, r > 0 {
-                Text(LikeControl.format(r)).font(.title3).monospacedDigit()
+                Text(LikeControl.format(r))
+                    .font(.title3).monospacedDigit()
+                    // Fixed-width slot: "3" and "3.5" occupy the same space, so the
+                    // star (and the bubble anchored to it) never shifts.
+                    .frame(width: numberSlotWidth, alignment: .leading)
             }
         }
         // Unrated shows a white outline star (rated fills it + shows the number);
@@ -449,17 +510,12 @@ struct FluidRatingControl: View {
     }
 
     // MARK: Hold-drag reveal (self-contained overlay; non-interactive)
+    // Used only when NOT host-driven (`hostReveal == false`); the player hosts the
+    // reveal at its root so it can draw above the traveling artwork.
 
     private var revealStrip: some View {
         VStack(spacing: 14) {
             RatingStripView(value: preview)
-                .background {
-                    GeometryReader { geo in
-                        Color.clear
-                            .onAppear { stripFrame = geo.frame(in: .named(space)) }
-                            .onChange(of: geo.frame(in: .named(space))) { _, new in stripFrame = new }
-                    }
-                }
             Text((preview ?? 0) > 0 ? LikeControl.format(preview!) + " stars" : "No rating")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
