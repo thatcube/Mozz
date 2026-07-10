@@ -403,6 +403,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // to the top can't bleed into an accidental drawer pull. The two are
             // mutually exclusive within a single touch.
             .modifier(QueuePullGestureModifier(atTop: scrollY <= 0.5,
+                                               enabled: dragFrom == nil,
                                                onPull: onPull,
                                                onEnd: onPullEnd))
             .onPreferenceChange(HistoryHeightKey.self) { historyHeight = $0 }
@@ -1185,6 +1186,10 @@ private struct QueuePullGesture: UIGestureRecognizerRepresentable {
     /// Whether the list is settled at its very top RIGHT NOW. Sampled once, at the
     /// instant each gesture begins, to classify it as scroll-vs-pull.
     var atTop: Bool
+    /// Whether the pull-to-dismiss is allowed to arm at all. False while an in-place
+    /// row reorder is active, so a downward drag on a row's handle (which, with no
+    /// history, begins settled at the very top) can't also pull the whole drawer.
+    var enabled: Bool
     /// Live 1:1 pull distance (points, ≥0). Maps straight to `dragY`. Only ever
     /// non-zero for a gesture that began settled at the top.
     var onPull: (CGFloat) -> Void
@@ -1206,6 +1211,7 @@ private struct QueuePullGesture: UIGestureRecognizerRepresentable {
 
     func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
         context.coordinator.atTop = atTop
+        context.coordinator.enabled = enabled
         context.coordinator.onPull = onPull
         context.coordinator.onEnd = onEnd
     }
@@ -1218,12 +1224,25 @@ private struct QueuePullGesture: UIGestureRecognizerRepresentable {
         /// Live "is the list settled at the top" flag, kept fresh via
         /// `updateUIGestureRecognizer`. Read ONCE per gesture (at `.began`).
         var atTop = true
+        /// Live "is the pull allowed to arm" flag (false during a row reorder). Read
+        /// at `.began` to gate arming, and continuously in `.changed` so a reorder
+        /// that engages mid-gesture disarms an already-armed pull.
+        var enabled = true
         var onPull: (CGFloat) -> Void = { _ in }
         var onEnd: (CGFloat, CGFloat) -> Void = { _, _ in }
         /// Whether THIS gesture began while the list was already settled at the very
         /// top. Only such gestures can pull the drawer; a gesture that began mid-list
         /// stays a pure scroll for its whole life, even after it reaches the top.
         private var beganAtTop = false
+        /// Whether the pull has moved past `pullActivate` while still enabled, i.e.
+        /// committed to actually dragging the drawer. A short deadzone at the start
+        /// lets a concurrent row-reorder (which engages at ~8pt and then flips
+        /// `enabled` off) win the ambiguity window WITHOUT the drawer twitching first.
+        private var pullCommitted = false
+        /// Downward distance (points) the finger must travel before an armed pull
+        /// starts moving the drawer. Above the reorder gesture's 8pt threshold so a
+        /// handle drag disarms this pull before it can move anything.
+        private let pullActivate: CGFloat = 14
         /// The queue's own scroll view, captured so we can freeze its top rubber-band
         /// for the duration of a drawer pull.
         private weak var scrollView: UIScrollView?
@@ -1287,20 +1306,40 @@ private struct QueuePullGesture: UIGestureRecognizerRepresentable {
             switch g.state {
             case .began:
                 if scrollView == nil { scrollView = findScrollView(g.view) }
-                // Classify ONCE by start position. If the list was already settled at
-                // the top, this gesture pulls the drawer; freeze the bounce for its
-                // whole life so the content can never rubber-band alongside the pull.
-                // If it began mid-list, it stays a pure scroll — we never touch it, so
-                // reaching the top just rubber-bands natively and the drawer stays put.
-                beganAtTop = atTop
+                // Classify ONCE by start position, and only arm if pulling is allowed
+                // (no active reorder). If the list was already settled at the top,
+                // this gesture pulls the drawer; freeze the bounce for its whole life
+                // so the content can never rubber-band alongside the pull. If it began
+                // mid-list, it stays a pure scroll — we never touch it, so reaching the
+                // top just rubber-bands natively and the drawer stays put.
+                beganAtTop = atTop && enabled
+                pullCommitted = false
                 if beganAtTop { setBounceFrozen(true) }
             case .changed:
-                // Only a top-started gesture drives the drawer, and only downward
-                // (max(0,…)): dragging up from the top just scrolls into the list.
-                if beganAtTop { onPull(max(0, t)) }
+                guard beganAtTop else { break }
+                // A row reorder engaged mid-gesture: disarm, snap the drawer back to
+                // rest, and hand the scroll back — the reorder owns the touch now.
+                if !enabled {
+                    onPull(0)
+                    beganAtTop = false
+                    pullCommitted = false
+                    setBounceFrozen(false)
+                    break
+                }
+                // Hold the drawer still until the finger clears the deadzone, then
+                // track 1:1 from that point (no jump). Only downward (max(0,…)):
+                // dragging up from the top just scrolls into the list.
+                if !pullCommitted {
+                    guard t >= pullActivate else { break }
+                    pullCommitted = true
+                }
+                onPull(max(0, t - pullActivate))
             case .ended, .cancelled, .failed:
-                if beganAtTop { onEnd(max(0, t), g.velocity(in: space).y) }
+                if beganAtTop && pullCommitted {
+                    onEnd(max(0, t - pullActivate), g.velocity(in: space).y)
+                }
                 beganAtTop = false
+                pullCommitted = false
                 setBounceFrozen(false)
             default:
                 break
@@ -1314,12 +1353,14 @@ private struct QueuePullGesture: UIGestureRecognizerRepresentable {
 /// `.modifier(...)` without an inline `if #available` at the call site.
 private struct QueuePullGestureModifier: ViewModifier {
     var atTop: Bool
+    var enabled: Bool
     var onPull: (CGFloat) -> Void
     var onEnd: (CGFloat, CGFloat) -> Void
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content.gesture(QueuePullGesture(atTop: atTop, onPull: onPull, onEnd: onEnd))
+            content.gesture(QueuePullGesture(atTop: atTop, enabled: enabled,
+                                             onPull: onPull, onEnd: onEnd))
         } else {
             content
         }
