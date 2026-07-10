@@ -410,9 +410,14 @@ struct NowPlayingMorphContainer: View {
             : geo.size.width / 2
         // Tail X within the bubble's own space (TailedBubble clamps it to the body).
         let tailX = rect.midX - (center - half)
-        // Grow the bubble UP OUT OF the tail (which points at the star), so it reads
-        // as emerging from the star rather than the full-screen container scaling.
-        let tailAnchor = UnitPoint(x: min(max(tailX / bubbleWidth, 0), 1), y: 1)
+        // Scale the whole overlay from the STAR's screen position (as a UnitPoint of
+        // the full container) so the bubble grows up out of the star. Anchoring the
+        // transition on the outermost inserted view is what makes the scale/offset
+        // actually run — nested on the bubble, only opacity came through.
+        let starAnchor = UnitPoint(
+            x: min(max(rect.midX / geo.size.width, 0), 1),
+            y: min(max(rect.minY / geo.size.height, 0), 1)
+        )
         return ZStack {
             if let dismiss {
                 // Tap-catcher: dismiss on any tap outside the bubble.
@@ -428,21 +433,18 @@ struct NowPlayingMorphContainer: View {
                     .glassBackground(TailedBubble(tailX: tailX))
                     .frame(width: bubbleWidth)
                     .offset(x: center - geo.size.width / 2)
-                    // Transition lives on the bubble itself (not the full-screen
-                    // container) so it scales from the tail/star, bottom-to-top,
-                    // with a little upward drift, instead of the whole overlay
-                    // sliding in from a corner.
-                    .transition(reduceMotion
-                        ? .opacity
-                        : .asymmetric(
-                            insertion: .scale(scale: 0.82, anchor: tailAnchor)
-                                .combined(with: .opacity)
-                                .combined(with: .offset(y: 12)),
-                            removal: .opacity))
                 Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        // Grows out of the star with a little upward drift; quick fade on dismiss.
+        .transition(reduceMotion
+            ? .opacity
+            : .asymmetric(
+                insertion: .scale(scale: 0.82, anchor: starAnchor)
+                    .combined(with: .opacity)
+                    .combined(with: .offset(y: 16)),
+                removal: .opacity))
         .ignoresSafeArea()
     }
 
