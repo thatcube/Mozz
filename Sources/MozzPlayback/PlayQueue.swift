@@ -317,6 +317,25 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         refreshWrapCache()
     }
 
+    /// Reorder the "up next" queue by moving the item at up-next offset `from` to
+    /// offset `to` — both 0-based within the up-next tail (offset 0 is the track
+    /// that plays next). Uses final-position semantics: after the move the item
+    /// sits at offset `to`. Only the tail permutation (`order[(position+1)...]`)
+    /// changes — history, the current track, and shuffle/repeat state are all
+    /// untouched. The pre-roll cache is refreshed because moving the first up-next
+    /// item changes the very next track. No-op when out of range or `from == to`.
+    public mutating func moveUpNext(fromOffset from: Int, toOffset to: Int) {
+        guard position >= 0 else { return }
+        let tailStart = position + 1
+        let tailCount = order.count - tailStart
+        guard from >= 0, from < tailCount,
+              to >= 0, to < tailCount, from != to else { return }
+        let element = order.remove(at: tailStart + from)
+        order.insert(element, at: tailStart + to)
+        nextLoopOrder = nil
+        refreshWrapCache()
+    }
+
     // MARK: Repeat
 
     /// Set the repeat mode. Routed through a method (rather than a settable

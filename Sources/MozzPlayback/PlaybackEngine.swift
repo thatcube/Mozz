@@ -383,6 +383,17 @@ public final class PlaybackEngine {
         publish()
     }
 
+    /// Reorder the up-next queue: move the item at up-next offset `from` to offset
+    /// `to` (both 0-based within up-next; 0 = plays next). Refills the gapless
+    /// lookahead because moving the first up-next item changes the immediate next
+    /// track, then republishes so the UI and persistence pick up the new order.
+    public func moveUpNext(fromOffset from: Int, toOffset to: Int) {
+        guard from != to else { return }
+        queue.moveUpNext(fromOffset: from, toOffset: to)
+        refillLookahead()
+        publish()
+    }
+
     public func seek(to seconds: TimeInterval) {
         let target = max(0, seconds)
         if loggedTrackID != nil, let track = currentTrack {

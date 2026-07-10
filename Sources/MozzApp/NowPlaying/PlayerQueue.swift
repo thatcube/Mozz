@@ -198,6 +198,26 @@ struct QueueControlsHeightKey: PreferenceKey {
     }
 }
 
+/// Height of a single up-next row — the uniform pitch used to lay out the
+/// drag-reorder overlay and map the finger to an insertion slot.
+struct QueueRowHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Global Y of the up-next list's top edge — where the reorder overlay's first
+/// slot begins (just under the pinned "Queue" header). Sentinel default so an
+/// unmeasured value is obvious.
+struct QueueUpNextTopKey: PreferenceKey {
+    static let defaultValue: CGFloat = .nan
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if !next.isNaN { value = next }
+    }
+}
+
 /// The full-player queue: the played "History" (scroll up), the now-playing
 /// **card** (injected by the container — artwork + title + star/overflow +
 /// shuffle/repeat pills), and the "Continue Playing" up-next list. The card
@@ -236,6 +256,12 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     var onClearHistory: () -> Void
     /// Drop the up-next queue.
     var onClearQueue: () -> Void
+    /// A drag-reorder session is active (a row is being dragged). Hides the real
+    /// up-next rows (the overlay draws them instead) and freezes the scroll.
+    var reordering: Bool = false
+    /// Emitted by an up-next row's drag handle so the container can drive the
+    /// reorder overlay + commit the move.
+    var onReorder: (QueueReorderEvent) -> Void = { _ in }
     /// Top-overscroll (≥0) once History is fully revealed and there's nothing left
     /// to scroll up — the container translates the whole drawer down by this.
     var onPull: (CGFloat) -> Void = { _ in }
@@ -273,6 +299,16 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// Measured height of the queue-controls block (pills + Queue/Clear header) —
     /// how tall the sticky block is once it pins to the top.
     @State private var queueControlsH: CGFloat = 0
+    /// Measured uniform height of an up-next row — the pitch the reorder overlay
+    /// lays rows out on and maps the finger to a slot with.
+    @State private var upNextRowH: CGFloat = 0
+    /// Measured global Y of the up-next list's top edge — the reorder overlay's
+    /// slot-0 origin.
+    @State private var upNextTopY: CGFloat = .nan
+    /// The up-next offset of the row whose handle is mid-drag, or `nil` when no
+    /// handle drag is in flight. Distinguishes the first gesture change (emit
+    /// `.begin`) from subsequent moves (emit `.change`).
+    @State private var draggingHandleIndex: Int? = nil
 
     private let nowPlayingID = "queue.nowPlaying"
 
@@ -339,6 +375,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .onPreferenceChange(HistoryHeaderHeightKey.self) { historyHeaderH = $0 }
             .onPreferenceChange(QueueCardHeightKey.self) { cardHeight = $0 }
             .onPreferenceChange(QueueControlsHeightKey.self) { queueControlsH = $0 }
+            .onPreferenceChange(QueueRowHeightKey.self) { if $0 > 0 { upNextRowH = $0 } }
+            .onPreferenceChange(QueueUpNextTopKey.self) { if !$0.isNaN { upNextTopY = $0 } }
             .onAppear { viewportH = geo.size.height }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
         }
@@ -485,6 +523,16 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     // unit as the queue opens.
                     .modifier(BodyRise(progress: bodyP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
                     .modifier(BodyFade(progress: bodyP, start: bodyFadeStart))
+                    // Report the list's live top edge (global) so the reorder
+                    // overlay knows where slot-0 begins.
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: QueueUpNextTopKey.self,
+                                               value: g.frame(in: .global).minY)
+                    })
+                    // While a row is being dragged the overlay draws the whole
+                    // list, so hide the real rows (kept laid out for measurement).
+                    .opacity(reordering ? 0 : 1)
+                    .allowsHitTesting(!reordering)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
@@ -501,6 +549,9 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // the content can't move and no counter-offset is needed.
         }
         .scrollIndicators(.hidden)
+        // Freeze the underlying scroll while dragging a row — the reorder overlay
+        // owns scrolling (auto-scroll) during that time.
+        .scrollDisabled(reordering)
     }
 
     /// Snap the scroll so the now-playing card sits at the very top (iOS 17
@@ -608,7 +659,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
         if !items.isEmpty {
             let base = playback.history.count + 1
             ForEach(Array(items.enumerated()), id: \.offset) { index, track in
-                row(track: track, orderPosition: base + index, showsHandle: true)
+                row(track: track, orderPosition: base + index,
+                    showsHandle: true, upNextIndex: index)
             }
         }
     }
@@ -616,36 +668,83 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     // MARK: Row
 
     private func row(track: Track, orderPosition: Int,
-                     dimmed: Bool = false, showsHandle: Bool = false) -> some View {
-        Button {
-            onSelect(orderPosition)
-        } label: {
-            HStack(spacing: 12) {
-                ArtworkView(artwork: track.artwork,
-                            seed: track.albumTitle ?? track.title,
-                            size: 44, cornerRadius: 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.title)
-                        .font(.body)
-                        .lineLimit(1)
-                    Text(track.artistName)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                     dimmed: Bool = false, showsHandle: Bool = false,
+                     upNextIndex: Int? = nil) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                onSelect(orderPosition)
+            } label: {
+                HStack(spacing: 12) {
+                    ArtworkView(artwork: track.artwork,
+                                seed: track.albumTitle ?? track.title,
+                                size: 44, cornerRadius: 6)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title)
+                            .font(.body)
+                            .lineLimit(1)
+                        Text(track.artistName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
                 }
-                Spacer(minLength: 8)
+                .contentShape(Rectangle())
+                .opacity(dimmed ? 0.6 : 1)
+            }
+            .buttonStyle(.plain)
+
+            if showsHandle {
+                reorderHandle(upNextIndex: upNextIndex)
+            }
+        }
+        .padding(.vertical, 6)
+        // Measure a representative up-next row's pitch (spacing is 0 in the
+        // enclosing VStack, so this is the exact layout pitch the reorder overlay
+        // uses). Only up-next rows carry a handle, so gate on that.
+        .background(
+            Group {
                 if showsHandle {
-                    // Static drag-handle placeholder (reorder deferred).
-                    Image(mozz: "line.3.horizontal")
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
+                    GeometryReader { g in
+                        Color.clear.preference(key: QueueRowHeightKey.self,
+                                               value: g.size.height)
+                    }
                 }
             }
-            .padding(.vertical, 6)
+        )
+    }
+
+    /// The trailing drag handle for an up-next row. An enlarged (~44pt) hit target
+    /// carrying a high-priority drag gesture that emits `QueueReorderEvent`s. A tap
+    /// falls through to nothing (only the row body's Button selects/jumps).
+    @ViewBuilder
+    private func reorderHandle(upNextIndex: Int?) -> some View {
+        Image(mozz: "line.3.horizontal")
+            .font(.body)
+            .foregroundStyle(.tertiary)
+            .frame(width: 44, height: 44)
             .contentShape(Rectangle())
-            .opacity(dimmed ? 0.6 : 1)
-        }
-        .buttonStyle(.plain)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                    .onChanged { value in
+                        guard let idx = upNextIndex else { return }
+                        if draggingHandleIndex == nil {
+                            draggingHandleIndex = idx
+                            onReorder(.begin(index: idx,
+                                             fingerY: value.location.y,
+                                             rowHeight: upNextRowH,
+                                             regionTopY: upNextTopY))
+                        } else {
+                            onReorder(.change(fingerY: value.location.y))
+                        }
+                    }
+                    .onEnded { _ in
+                        if draggingHandleIndex != nil {
+                            draggingHandleIndex = nil
+                            onReorder(.end)
+                        }
+                    }
+            )
     }
 }
 
