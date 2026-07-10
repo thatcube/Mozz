@@ -116,6 +116,10 @@ struct NowPlayingMorphContainer: View {
     /// reorder — the controls move out of the way while the grabbed row is dragged,
     /// then return on drop. The list itself never moves (see `PlayerQueuePanel`).
     @State private var reorderChromeHidden = false
+    /// Measured height of the transport-chrome region beneath the header (the space
+    /// the chrome vacates during a drag-reorder). Passed to the queue panel so it
+    /// can grow its viewport down into the reclaimed space and reveal the full list.
+    @State private var chromeRegionH: CGFloat = 0
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -550,8 +554,18 @@ struct NowPlayingMorphContainer: View {
                 .opacity(reorderChromeHidden ? 0 : 1)
                 .offset(y: reorderChromeHidden ? Self.reorderChromeDrop : 0)
                 .allowsHitTesting(!reorderChromeHidden)
+                // Measure the chrome region's height (its LAYOUT height is fixed —
+                // the slide/fade above only offsets it) so the queue panel knows how
+                // far it may grow down into the space this vacates during a reorder.
+                .background(
+                    GeometryReader { g in
+                        Color.clear.preference(key: ChromeRegionHeightKey.self,
+                                               value: g.size.height)
+                    }
+                )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onPreferenceChange(ChromeRegionHeightKey.self) { chromeRegionH = $0 }
     }
 
     /// The transport chrome beneath the header/queue: scrubber, play controls,
@@ -707,6 +721,7 @@ struct NowPlayingMorphContainer: View {
                     withAnimation(Self.reorderChromeSpring) { reorderChromeHidden = active }
                 },
                 onCommitReorder: { from, to in playback.moveUpNext(fromOffset: from, toOffset: to) },
+                reorderExtraHeight: max(0, chromeRegionH - (Morph.bottomOverhang + m.safeBottom)),
                 onPull: { raw in handleQueuePull(raw) },
                 onPullEnd: { raw, velocity in handleQueuePullEnd(raw, velocity) },
                 card: { nowPlayingCard(m) },
@@ -1150,6 +1165,16 @@ private let marqueeReturn = Animation.spring(response: 0.45, dampingFraction: 0.
 
 /// Publishes a measured intrinsic (untruncated) text width up the view tree.
 private struct MarqueeWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Publishes the measured height of the transport-chrome region up the view tree,
+/// so the queue panel knows how far it may grow into the reclaimed space during a
+/// drag-reorder.
+private struct ChromeRegionHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

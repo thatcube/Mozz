@@ -252,6 +252,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// Commit a finished reorder: move the up-next item from offset `from` to `to`
     /// (final-position semantics — see `PlaybackEngine.moveUpNext`).
     var onCommitReorder: (Int, Int) -> Void = { _, _ in }
+    /// How far the panel may grow DOWNWARD while a row is being dragged — the height
+    /// of the transport-chrome region the container slides away, so the up-next list
+    /// expands to fill the reclaimed space (Apple-Music style) instead of staying
+    /// clipped to the header-tall window. `0` disables the growth.
+    var reorderExtraHeight: CGFloat = 0
     /// Top-overscroll (≥0) once History is fully revealed and there's nothing left
     /// to scroll up — the container translates the whole drawer down by this.
     var onPull: (CGFloat) -> Void = { _ in }
@@ -301,6 +306,10 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     @State private var dragTo: Int? = nil
     /// The grabbed row's live finger translation (points) from its grab point.
     @State private var dragOffset: CGFloat = 0
+    /// Whether the visible viewport is currently grown into the reclaimed chrome
+    /// space. Toggled (animated, in lockstep with the container's chrome slide) on
+    /// pickup/drop so the list expands to fill the freed space during a reorder.
+    @State private var reorderGrown = false
 
     private let nowPlayingID = "queue.nowPlaying"
 
@@ -316,6 +325,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
 
     var body: some View {
         GeometryReader { geo in
+            let baseH = geo.size.height
+            // While a row is dragged, grow the visible viewport DOWN into the space
+            // the transport chrome vacates so the full up-next list is reachable
+            // (Apple-Music style) instead of clipping to the header-tall window.
+            // `viewportH` (set below) stays on `baseH`, so the snap/detent math and
+            // scroll position are unchanged — only the ScrollView's own frame and
+            // the clip grow, revealing rows already laid out below the fold.
+            let grownH = baseH + (reorderGrown ? reorderExtraHeight : 0)
             Group {
                 if #available(iOS 18.0, *) {
                     // iOS 18+: drive the snap ourselves for a fast, crisp settle we
@@ -341,6 +358,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     }
                 }
             }
+            .frame(height: grownH, alignment: .top)
             .opacity(queueP)
             .mask(bottomFadeMask)
             // Pinned History header: stays fixed at the top while its rows scroll
@@ -368,7 +386,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .onPreferenceChange(QueueCardHeightKey.self) { cardHeight = $0 }
             .onPreferenceChange(QueueControlsHeightKey.self) { queueControlsH = $0 }
             .onPreferenceChange(QueueRowHeightKey.self) { if $0 > 0 { upNextRowH = $0 } }
-            .onAppear { viewportH = geo.size.height }
+            .onAppear { viewportH = baseH }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
         }
     }
@@ -714,6 +732,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// `PlayerQueuePanel` is generic and can't hold static stored properties.)
     private let reorderLiftSpring = Animation.spring(response: 0.28, dampingFraction: 0.72)
     private let reorderPartSpring = Animation.spring(response: 0.30, dampingFraction: 0.82)
+    /// Spring for growing/shrinking the viewport into the reclaimed chrome space —
+    /// tuned to match the container's chrome slide (`reorderChromeSpring`) so the
+    /// list expands in lockstep as the controls move away, and settles back as they
+    /// return.
+    private let reorderGrowSpring = Animation.spring(response: 0.34, dampingFraction: 0.9)
 
     /// Vertical offset for up-next row `i` during an in-place reorder. The grabbed
     /// row follows the finger; every other row holds still until the grabbed row
@@ -754,6 +777,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         if dragFrom == nil {
                             onReorderActive(true)
                             reorderPickupHaptic()
+                            withAnimation(reorderGrowSpring) { reorderGrown = true }
                             withAnimation(reorderLiftSpring) {
                                 dragFrom = idx
                                 dragTo = idx
@@ -786,6 +810,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         dragFrom = nil
                         dragTo = nil
                         dragOffset = 0
+                        withAnimation(reorderGrowSpring) { reorderGrown = false }
                         onReorderActive(false)
                     }
             )
