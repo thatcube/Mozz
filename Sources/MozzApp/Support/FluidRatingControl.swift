@@ -183,7 +183,7 @@ struct RatingStripView: View {
     private var isInteractive: Bool { onCommit != nil }
 
     var body: some View {
-        let strip = HStack(spacing: spacing) {
+        let stars = HStack(spacing: spacing) {
             ForEach(0..<RatingTuning.starCount, id: \.self) { i in
                 Image(mozz: symbol(for: i))
                     .resizable()
@@ -193,12 +193,18 @@ struct RatingStripView: View {
                     .frame(width: starSize, height: starSize)
             }
         }
-        .contentShape(Rectangle())
 
         if isInteractive {
-            strip.gesture(dragGesture).animation(.snappy(duration: 0.12), value: value)
+            // Expand the hit area vertically to the 44pt minimum without enlarging
+            // the glyphs, so tapping/dragging the stars meets the touch-target
+            // guideline (the drag math reads X only, so vertical padding is free).
+            stars
+                .padding(.vertical, max(0, (PlayerControlMetrics.minHit - starSize) / 2))
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+                .animation(.snappy(duration: 0.12), value: value)
         } else {
-            strip.animation(.snappy(duration: 0.12), value: value)
+            stars.animation(.snappy(duration: 0.12), value: value)
         }
     }
 
@@ -300,7 +306,9 @@ struct RatingBubbleContent: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 24)
-        .padding(.bottom, showClear ? 14 : 24)
+        // Clear owns a full 44pt tap row (the bulk of the space under it); only a
+        // little breathing room below that before the bubble's edge.
+        .padding(.bottom, showClear ? 6 : 24)
     }
 
     // Live drag: update the stars only. Never change the popover height while the
