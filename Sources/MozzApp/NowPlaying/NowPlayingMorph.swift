@@ -430,11 +430,14 @@ struct NowPlayingMorphContainer: View {
                     .offset(x: center - geo.size.width / 2)
                     // Transition lives on the bubble itself (not the full-screen
                     // container) so it scales from the tail/star, bottom-to-top,
-                    // instead of the whole overlay sliding in from a corner.
+                    // with a little upward drift, instead of the whole overlay
+                    // sliding in from a corner.
                     .transition(reduceMotion
                         ? .opacity
                         : .asymmetric(
-                            insertion: .scale(scale: 0.82, anchor: tailAnchor).combined(with: .opacity),
+                            insertion: .scale(scale: 0.82, anchor: tailAnchor)
+                                .combined(with: .opacity)
+                                .combined(with: .offset(y: 12)),
                             removal: .opacity))
                 Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
             }
