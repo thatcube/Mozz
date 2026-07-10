@@ -360,13 +360,6 @@ struct NowPlayingMorphContainer: View {
             ratingBubble(rect: geo[anchor], geo: geo, dismiss: { closeRatingPicker() }) {
                 RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
             }
-            // Native popover feel: scale-pop UP OUT OF the tail (the anchor at the
-            // star) on present; a quick pure fade on dismiss (no scale/slide).
-            .transition(reduceMotion
-                ? .opacity
-                : .asymmetric(
-                    insertion: .scale(scale: 0.82, anchor: .bottom).combined(with: .opacity),
-                    removal: .opacity))
             .accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { closeRatingPicker() }
         }
@@ -390,7 +383,6 @@ struct NowPlayingMorphContainer: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
             }
-            .transition(.scale(scale: 0.9).combined(with: .opacity))
             .allowsHitTesting(false)
         }
     }
@@ -418,6 +410,9 @@ struct NowPlayingMorphContainer: View {
             : geo.size.width / 2
         // Tail X within the bubble's own space (TailedBubble clamps it to the body).
         let tailX = rect.midX - (center - half)
+        // Grow the bubble UP OUT OF the tail (which points at the star), so it reads
+        // as emerging from the star rather than the full-screen container scaling.
+        let tailAnchor = UnitPoint(x: min(max(tailX / bubbleWidth, 0), 1), y: 1)
         return ZStack {
             if let dismiss {
                 // Tap-catcher: dismiss on any tap outside the bubble.
@@ -433,6 +428,14 @@ struct NowPlayingMorphContainer: View {
                     .glassBackground(TailedBubble(tailX: tailX))
                     .frame(width: bubbleWidth)
                     .offset(x: center - geo.size.width / 2)
+                    // Transition lives on the bubble itself (not the full-screen
+                    // container) so it scales from the tail/star, bottom-to-top,
+                    // instead of the whole overlay sliding in from a corner.
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .asymmetric(
+                            insertion: .scale(scale: 0.82, anchor: tailAnchor).combined(with: .opacity),
+                            removal: .opacity))
                 Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
             }
             .frame(width: geo.size.width, height: geo.size.height)
