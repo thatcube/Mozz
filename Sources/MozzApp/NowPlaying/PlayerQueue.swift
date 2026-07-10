@@ -776,6 +776,10 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// ~60 fps tick) at the very edge — ramped down to 0 at the zone's inner border.
     private let reorderEdgeZone: CGFloat = 84
     private let reorderMaxScrollPerTick: CGFloat = 13
+    /// After dropping a row, hold the grown viewport + slid-away chrome for this long
+    /// before shrinking back and returning the controls, so the placement settles
+    /// visually before the controls glide home.
+    private let reorderChromeReturnDelay: TimeInterval = 0.5
 
     /// Vertical offset for up-next row `i` during an in-place reorder. The grabbed
     /// row follows the finger; every other row holds still until the grabbed row
@@ -836,17 +840,24 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         if from != to { onCommitReorder(from, to) }
                         reorderDropHaptic()
                         // Commit + clear the lift synchronously so SwiftUI renders one
-                        // final frame in the new order; ease any auto-scroll pan back
-                        // to rest so the list glides home instead of snapping.
+                        // final frame in the new order (row lands in place instantly).
+                        // Hold the grown viewport, auto-scroll pan, and slid-away chrome
+                        // for a beat AFTER the drop so the placement reads before the
+                        // controls glide back — then shrink + return them together.
                         dragFrom = nil
                         dragTo = nil
                         dragOffset = 0
                         reorderTranslation = 0
-                        withAnimation(reorderGrowSpring) {
-                            reorderGrown = false
-                            reorderPan = 0
+                        DispatchQueue.main.asyncAfter(deadline: .now() + reorderChromeReturnDelay) {
+                            // A new drag may have begun during the delay; if so, leave
+                            // its lifecycle alone and skip this deferred close.
+                            guard dragFrom == nil else { return }
+                            withAnimation(reorderGrowSpring) {
+                                reorderGrown = false
+                                reorderPan = 0
+                            }
+                            onReorderActive(false)
                         }
-                        onReorderActive(false)
                     }
             )
     }
