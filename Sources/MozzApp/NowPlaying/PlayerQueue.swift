@@ -740,7 +740,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
             .highPriorityGesture(
-                DragGesture(minimumDistance: 8)
+                // Measure in `.global` (screen) space, NOT `.local`. The grabbed
+                // row hosts this gesture and is simultaneously moved by
+                // `.offset(y: dragOffset)`; a `.local` gesture would have its
+                // coordinate space shift under the finger every frame, corrupting
+                // `translation` into a feedback loop (the row "fights" the finger
+                // and jitters). Global space is fixed to the screen, so the
+                // translation stays clean.
+                DragGesture(minimumDistance: 8, coordinateSpace: .global)
                     .onChanged { value in
                         guard let idx = upNextIndex else { return }
                         let count = playback.upNext.count
