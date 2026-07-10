@@ -69,7 +69,7 @@ final class AudioRouteMonitor: ObservableObject {
     private static func current() -> Output {
         let route = AVAudioSession.sharedInstance().currentRoute
         guard let out = route.outputs.first else {
-            return Output(name: "iPhone", icon: "iphone", showsLabel: false, showsSourcePrefix: false)
+            return Output(name: "iPhone", icon: airPlaySymbol, showsLabel: false, showsSourcePrefix: false)
         }
         return classify(port: out.portType, name: out.portName)
     }
@@ -77,7 +77,10 @@ final class AudioRouteMonitor: ObservableObject {
     private static func classify(port: AVAudioSession.Port, name: String) -> Output {
         switch port {
         case .builtInSpeaker, .builtInReceiver:
-            return Output(name: "iPhone", icon: "iphone", showsLabel: false, showsSourcePrefix: false)
+            // Nothing external is playing — show the AirPlay glyph (tap to pick a
+            // target), not a phone icon: the button's purpose is to START AirPlay,
+            // not to indicate the phone is the destination.
+            return Output(name: "iPhone", icon: airPlaySymbol, showsLabel: false, showsSourcePrefix: false)
         case .headphones, .headsetMic:
             return Output(name: name, icon: "headphones", showsLabel: true, showsSourcePrefix: false)
         case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
