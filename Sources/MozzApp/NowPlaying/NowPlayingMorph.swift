@@ -603,9 +603,6 @@ struct NowPlayingMorphContainer: View {
                 .padding(.top, 22)
             transport
                 .padding(.top, 54)
-            if let track = playback.currentTrack {
-                formatBadge(track: track).padding(.top, 10)
-            }
             Spacer(minLength: 8)
             VStack(spacing: 10) {
                 bottomButtonRow
@@ -1071,7 +1068,12 @@ struct NowPlayingMorphContainer: View {
 
     private var scrubber: some View {
         let snapshot = playback.snapshot
-        return SeekBar(elapsed: snapshot.elapsed, duration: snapshot.duration) { target in
+        let formatLabel = playback.currentTrack?.format.nowPlayingLabel
+        return SeekBar(
+            elapsed: snapshot.elapsed,
+            duration: snapshot.duration,
+            formatLabel: formatLabel
+        ) { target in
             playback.seek(to: target)
         }
     }
@@ -1091,12 +1093,6 @@ struct NowPlayingMorphContainer: View {
                              isEnabled: playback.snapshot.hasNext,
                              label: "Next") { playback.next() }
         }
-    }
-
-    private func formatBadge(track: Track) -> some View {
-        let parts = [track.format.codec?.uppercased(), track.format.sampleRateHz.map { "\($0 / 1000) kHz" }]
-            .compactMap { $0 }
-        return Text(parts.joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary)
     }
 
     /// The bottom control row: an equalizer button (opens the EQ sheet, tinted

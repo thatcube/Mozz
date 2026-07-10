@@ -137,6 +137,64 @@ public struct AudioFormat: Codable, Sendable, Hashable {
     }
 }
 
+public extension AudioFormat {
+    /// Compact technical label for Now Playing. Known FFmpeg/Plex/Jellyfin aliases
+    /// get familiar names; unknown values fall back to the server-provided codec so
+    /// newly supported formats appear automatically without an app update.
+    var nowPlayingLabel: String? {
+        guard let codecLabel else { return nil }
+        guard let sampleRateLabel else { return codecLabel }
+        return "\(codecLabel) · \(sampleRateLabel)"
+    }
+
+    var codecLabel: String? {
+        guard let raw = nonEmpty(codec) ?? nonEmpty(container) else { return nil }
+        let normalized = raw.lowercased()
+
+        if normalized == "pcm" || normalized.hasPrefix("pcm_") { return "PCM" }
+        if normalized == "dca" || normalized == "dts" { return "DTS" }
+        if normalized == "dsd" || normalized.hasPrefix("dsd_") { return "DSD" }
+
+        switch normalized {
+        case "aac", "mp4a", "mp4a.40.2": return "AAC"
+        case "ac3": return "AC-3"
+        case "eac3", "e-ac3": return "E-AC-3"
+        case "alac": return "ALAC"
+        case "ape": return "APE"
+        case "flac": return "FLAC"
+        case "mlp": return "MLP"
+        case "mp2": return "MP2"
+        case "mp3": return "MP3"
+        case "opus": return "OPUS"
+        case "truehd": return "TrueHD"
+        case "vorbis": return "Vorbis"
+        case "wavpack", "wv": return "WavPack"
+        case "wmav1", "wmav2": return "WMA"
+        case "wmapro": return "WMA Pro"
+        default:
+            return raw.replacingOccurrences(of: "_", with: " ").uppercased()
+        }
+    }
+
+    private var sampleRateLabel: String? {
+        guard let sampleRateHz, sampleRateHz > 0 else { return nil }
+        guard sampleRateHz >= 1_000 else { return "\(sampleRateHz) Hz" }
+
+        let whole = sampleRateHz / 1_000
+        let remainder = sampleRateHz % 1_000
+        guard remainder != 0 else { return "\(whole) kHz" }
+
+        var fraction = String(format: "%03d", remainder)
+        while fraction.last == "0" { fraction.removeLast() }
+        return "\(whole).\(fraction) kHz"
+    }
+
+    private func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 /// A track as returned by a backend during catalog sync.
 ///
 /// Fields are denormalized (album title, artist name) so track lists render

@@ -11,6 +11,7 @@ import UIKit
 struct SeekBar: View {
     let elapsed: Double
     let duration: Double
+    let formatLabel: String?
     /// Called once, on release, with the target time to seek to.
     let onSeek: (Double) -> Void
 
@@ -91,15 +92,21 @@ struct SeekBar: View {
     // MARK: Labels
 
     private var labels: some View {
-        HStack(spacing: 0) {
-            timeLabel(Format.duration(current))
-                .scaleEffect(scrubbing ? seekLabelScale : 1, anchor: .leading)
-            Spacer(minLength: 0)
-            timeLabel("\u{2212}" + Format.duration(remaining))
-                .scaleEffect(scrubbing ? seekLabelScale : 1, anchor: .trailing)
+        ZStack {
+            HStack(spacing: 0) {
+                timeLabel(Format.duration(current))
+                    .scaleEffect(scrubbing ? seekLabelScale : 1, anchor: .leading)
+                Spacer(minLength: 0)
+                timeLabel("\u{2212}" + Format.duration(remaining))
+                    .scaleEffect(scrubbing ? seekLabelScale : 1, anchor: .trailing)
+            }
+            .foregroundStyle(.primary.opacity(scrubbing ? 1 : restLabelOpacity))
+            .animation(anim, value: scrubbing)
+
+            if let formatLabel {
+                AudioFormatBadge(label: formatLabel)
+            }
         }
-        .foregroundStyle(.primary.opacity(scrubbing ? 1 : restLabelOpacity))
-        .animation(anim, value: scrubbing)
     }
 
     private func timeLabel(_ text: String) -> some View {
@@ -115,5 +122,25 @@ struct SeekBar: View {
         let generator = UIImpactFeedbackGenerator(style: .soft)
         generator.impactOccurred(intensity: 0.7)
 #endif
+    }
+}
+
+private struct AudioFormatBadge: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.thinMaterial, in: Capsule())
+            .overlay {
+                Capsule().stroke(.primary.opacity(0.08), lineWidth: 0.5)
+            }
+            .frame(maxWidth: 180)
+            .accessibilityLabel(Text("Audio format \(label)"))
     }
 }
