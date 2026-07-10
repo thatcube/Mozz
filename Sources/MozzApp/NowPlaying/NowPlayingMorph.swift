@@ -1105,7 +1105,7 @@ struct NowPlayingMorphContainer: View {
         ZStack {
             AirPlayRoutePicker(tint: .clear)   // invisible glyph, still tappable
             Image(systemName: routeMonitor.output.icon)
-                .font(.system(size: PlayerControlMetrics.utilityGlyph))
+                .font(.system(size: PlayerControlMetrics.routeGlyph))
                 .foregroundStyle(routeMonitor.output.showsLabel ? Color.primary : Color.secondary)
                 .allowsHitTesting(false)
         }

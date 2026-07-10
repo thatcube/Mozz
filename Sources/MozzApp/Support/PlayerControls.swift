@@ -10,6 +10,11 @@ enum PlayerControlMetrics {
     /// like heart, the overflow menu, the AirPlay route, lyrics, and the queue
     /// toggle. Sized so they read clearly without competing with transport.
     static let utilityGlyph: CGFloat = 26
+    /// The output-route (AirPlay / device) glyph is a real SF Symbol, not one of the
+    /// thin-stroke Tabler template icons its neighbours use — at the same nominal
+    /// point size its heavier, wider body reads noticeably larger. Size it a touch
+    /// smaller so it sits visually level with the lyrics/queue icons beside it.
+    static let routeGlyph: CGFloat = 22
     /// Skip-back / skip-forward: larger than the utility icons.
     static let skipGlyph: CGFloat = 40
     /// Play / pause: the largest control on the player.
