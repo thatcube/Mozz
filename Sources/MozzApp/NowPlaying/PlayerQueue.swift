@@ -437,7 +437,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
 
     /// Vertical position of the pinned header (see `pinnedHistoryHeader`).
     private var pinnedHeaderY: CGFloat {
-        let y = clampedScrollY
+        let y = scrollY
         let pushedByCard = detentTop - y - historyHeaderH
         return min(max(-y, 0), pushedByCard)
     }
@@ -465,20 +465,20 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// below the card (`detentTop + cardHeight` in content terms) minus the scroll,
     /// clamped so they never rise above the panel top — that's the pin.
     private var queueControlsY: CGFloat {
-        max(0, detentTop + cardHeight - effClampedScrollY)
+        max(0, detentTop + cardHeight - effScrollY)
     }
 
-    /// Scroll offset with the top overscroll removed. During a top pull the raw
-    /// `scrollY` goes negative; the whole drawer translates by that (see `onPull`)
-    /// and the content is counter-offset to stay put, so the pinned overlays and
-    /// fade must ignore the overscroll too — otherwise they'd drift while the rest
-    /// of the panel stays rigid. Clamping to ≥0 freezes them at the top state.
-    private var clampedScrollY: CGFloat { max(0, scrollY) }
-
-    /// `clampedScrollY` plus the reorder auto-scroll pan — the *effective* scroll the
-    /// pinned overlays and top fade must follow so they stay glued to the content
-    /// while it pans during a drag-reorder. Equal to `clampedScrollY` at rest.
-    private var effClampedScrollY: CGFloat { max(0, scrollY + reorderPan) }
+    /// The *effective* scroll the pinned overlays (shuffle/repeat pills + Queue/Clear
+    /// header) and top fade follow so they stay glued to the content: raw `scrollY`
+    /// plus the reorder auto-scroll pan. It is deliberately NOT clamped to ≥0 — when
+    /// the user pulls the top and the scroll gives way (a native rubber-band, i.e. the
+    /// rigid `QueuePullGesture` didn't arm), `scrollY` goes negative and the overlays
+    /// must ride DOWN with the rest of the list rather than freezing at the top (which
+    /// left them stuck while everything around them moved). A rigid drawer pull freezes
+    /// the scroll's bounce instead (see `QueuePullGesture`), so `scrollY` stays ~0 there
+    /// and the overlays stay put anyway. During a drag-reorder the pan is floored at the
+    /// top of the up-next list, so this stays ≥0 then.
+    private var effScrollY: CGFloat { scrollY + reorderPan }
 
     /// The body holds down at the scrub-bar line through the first slice of the open
     /// (`bodyRiseStart`), then rises to rest by q=1 — so it travels up *as the hero
@@ -510,7 +510,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// whichever direction is active (History above, or queue controls below).
     private var topFadeAmount: CGFloat {
         let historyFade = max(0, min(historyHeaderH, historyHeaderH + pinnedHeaderY))
-        let queueFade = max(0, min(queueControlsH, effClampedScrollY - detentTop))
+        let queueFade = max(0, min(queueControlsH, effScrollY - detentTop))
         return max(historyFade, queueFade)
     }
 
