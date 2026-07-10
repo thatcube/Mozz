@@ -112,19 +112,10 @@ struct NowPlayingMorphContainer: View {
     /// close) is kicked by `.onChange(of: queueWantsOpen)` instead, since `onAppear`
     /// won't fire again. This flag routes each open to exactly one of those.
     @State private var queueWasMounted = false
-    /// The live drag-reorder session (a row is being dragged in the up-next list),
-    /// or `nil` when not reordering. Owns the floating overlay's geometry; drives
-    /// the `reordering` flag passed down to the panel (which hides the real rows +
-    /// freezes its scroll while the overlay draws the list).
-    @State private var reorderSession: QueueReorderSession?
-    /// Animated flag for the transport-chrome fade during a reorder. Separate from
-    /// `reorderSession` so the overlay + hidden real rows swap in INSTANTLY (no
-    /// double-image), while only the chrome fades/slides on its own spring.
+    /// Animated flag for the transport-chrome slide/fade during an in-place row
+    /// reorder — the controls move out of the way while the grabbed row is dragged,
+    /// then return on drop. The list itself never moves (see `PlayerQueuePanel`).
     @State private var reorderChromeHidden = false
-    /// Fires ~60fps while a reorder drag is held near a top/bottom edge to keep
-    /// auto-scrolling even when the finger is stationary (drag `.onChanged` is
-    /// silent then). Invalidated on drop/cancel.
-    @State private var reorderAutoScrollTimer: Timer?
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -271,21 +262,6 @@ struct NowPlayingMorphContainer: View {
                             }
                         }
                         .position(x: m.surfaceCenterX, y: m.islandTapCenterY)
-
-                    // Drag-reorder overlay: a full-screen top layer (global coords,
-                    // origin top-left) that draws the floating grabbed row + the
-                    // parted list while a queue row is dragged. Rendered above the
-                    // surface so it sits over the real (hidden) up-next rows.
-                    if let session = reorderSession {
-                        QueueReorderOverlay(
-                            session: session,
-                            contentLeftX: (m.surfaceCenterX - m.width / 2) + 24,
-                            contentWidth: m.width - 48
-                        )
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-                        .environment(\.colorScheme, surfaceColorScheme)
-                        .allowsHitTesting(false)
-                    }
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 // Press-scale the WHOLE island as one unit: scale the entire
@@ -567,11 +543,12 @@ struct NowPlayingMorphContainer: View {
                 }
 
             bottomChrome(m)
-                // Fade + drop the transport chrome away while a row is being
-                // dragged, so the reorder overlay can extend the list down into the
-                // reclaimed space (Apple-Music style). Animated on its own spring.
+                // Slide + fade the transport chrome fully out of the way while a
+                // row is being dragged, so the controls move aside (Apple-Music
+                // style) and never sit under the grabbed row. Animated on its own
+                // spring. The queue list itself stays put — only the chrome moves.
                 .opacity(reorderChromeHidden ? 0 : 1)
-                .offset(y: reorderChromeHidden ? 44 : 0)
+                .offset(y: reorderChromeHidden ? Self.reorderChromeDrop : 0)
                 .allowsHitTesting(!reorderChromeHidden)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -726,8 +703,10 @@ struct NowPlayingMorphContainer: View {
                 onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
                 onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } },
                 onClearQueue: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearUpNext() } },
-                reordering: reorderSession != nil,
-                onReorder: { handleReorder($0, m) },
+                onReorderActive: { active in
+                    withAnimation(Self.reorderChromeSpring) { reorderChromeHidden = active }
+                },
+                onCommitReorder: { from, to in playback.moveUpNext(fromOffset: from, toOffset: to) },
                 onPull: { raw in handleQueuePull(raw) },
                 onPullEnd: { raw, velocity in handleQueuePullEnd(raw, velocity) },
                 card: { nowPlayingCard(m) },
@@ -1010,122 +989,10 @@ struct NowPlayingMorphContainer: View {
     private static let reorderChromeSpring = Animation.spring(response: 0.34,
                                                               dampingFraction: 0.86)
 
-    /// Handles a reorder event from an up-next row's drag handle: seeds/updates the
-    /// overlay session, fires haptics, drives the chrome fade, runs auto-scroll, and
-    /// commits the move on drop. `m` supplies the drawer geometry for the region.
-    private func handleReorder(_ event: QueueReorderEvent, _ m: Morph) {
-        switch event {
-        case let .begin(index, fingerY, rowHeight, regionTopY):
-            guard rowHeight > 0, !regionTopY.isNaN else { return }
-            let snapshot = playback.upNext
-            guard snapshot.indices.contains(index) else { return }
-            // The list may fill from just under the pinned "Queue" header down to
-            // the reclaimed drawer bottom once the transport chrome slides away.
-            let regionBottomY = m.height - m.safeBottom - 8
-            var session = QueueReorderSession(
-                tracks: snapshot,
-                fromIndex: index,
-                rowHeight: rowHeight,
-                regionTopY: regionTopY,
-                regionBottomY: regionBottomY,
-                // Seed slot-0 at the real list's top so the parted overlay rows
-                // land exactly over the (now hidden) real rows — no pickup jump.
-                contentBaseY: regionTopY,
-                fingerY: fingerY,
-                targetIndex: index
-            )
-            session.clampContentBase()
-            session.targetIndex = session.computeTarget()
-            reorderPickupHaptic()
-            reorderSession = session                       // instant overlay + hide real rows
-            withAnimation(Self.reorderChromeSpring) { reorderChromeHidden = true }
-            startReorderAutoScroll()
-
-        case let .change(fingerY):
-            guard var session = reorderSession else { return }
-            session.fingerY = fingerY
-            let previous = session.targetIndex
-            session.targetIndex = session.computeTarget()
-            reorderSession = session
-            if session.targetIndex != previous { reorderMoveHaptic() }
-
-        case .end:
-            finishReorder(commit: true)
-
-        case .cancel:
-            finishReorder(commit: false)
-        }
-    }
-
-    /// Commit (or abandon) the drag, fade the chrome back, and tear down the session.
-    private func finishReorder(commit: Bool) {
-        reorderAutoScrollTimer?.invalidate()
-        reorderAutoScrollTimer = nil
-        guard let session = reorderSession else { return }
-        if commit {
-            reorderDropHaptic()
-            playback.moveUpNext(fromOffset: session.fromIndex, toOffset: session.targetIndex)
-        }
-        withAnimation(Self.reorderChromeSpring) { reorderChromeHidden = false }
-        reorderSession = nil
-    }
-
-    /// Start a ~60fps timer that keeps auto-scrolling the overlay while the finger
-    /// is held near a top/bottom edge (drag `.onChanged` is silent when stationary).
-    private func startReorderAutoScroll() {
-        reorderAutoScrollTimer?.invalidate()
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { _ in
-            stepReorderAutoScroll()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        reorderAutoScrollTimer = timer
-    }
-
-    /// One auto-scroll tick: shift the overlay content toward the edge the finger
-    /// sits near, re-clamp, recompute the target, and haptic on a slot change.
-    private func stepReorderAutoScroll() {
-        guard var session = reorderSession else { return }
-        let edge: CGFloat = 64          // px zone at each end that triggers scrolling
-        let maxSpeed: CGFloat = 13      // px shifted per tick at the very edge
-        let y = session.fingerY
-        let topZone = session.regionTopY + edge
-        let bottomZone = session.regionBottomY - edge
-        var delta: CGFloat = 0
-        if y < topZone {
-            delta = min(1, (topZone - y) / edge) * maxSpeed       // reveal earlier rows
-        } else if y > bottomZone {
-            delta = -min(1, (y - bottomZone) / edge) * maxSpeed   // reveal later rows
-        }
-        guard delta != 0 else { return }
-        let before = session.contentBaseY
-        session.contentBaseY += delta
-        session.clampContentBase()
-        guard session.contentBaseY != before else { return }      // already at an end
-        let previous = session.targetIndex
-        session.targetIndex = session.computeTarget()
-        reorderSession = session
-        if session.targetIndex != previous { reorderMoveHaptic() }
-    }
-
-    private func reorderPickupHaptic() {
-        #if canImport(UIKit)
-        let g = UIImpactFeedbackGenerator(style: .medium)
-        g.prepare(); g.impactOccurred()
-        #endif
-    }
-
-    private func reorderMoveHaptic() {
-        #if canImport(UIKit)
-        UISelectionFeedbackGenerator().selectionChanged()
-        #endif
-    }
-
-    private func reorderDropHaptic() {
-        #if canImport(UIKit)
-        let g = UIImpactFeedbackGenerator(style: .rigid)
-        g.prepare(); g.impactOccurred()
-        #endif
-    }
+    /// How far (points) the transport chrome slides DOWN as it fades out during an
+    /// in-place row reorder — enough to clear the drawer so it fully leaves rather
+    /// than hovering half-visible under the grabbed row.
+    private static let reorderChromeDrop: CGFloat = 360
 
 
     /// hand-off (hero lift + `RangeFadeOut`, card rise + `LateFade`, `BodyRise`) is

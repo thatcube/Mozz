@@ -198,23 +198,12 @@ struct QueueControlsHeightKey: PreferenceKey {
     }
 }
 
-/// Height of a single up-next row — the uniform pitch used to lay out the
-/// drag-reorder overlay and map the finger to an insertion slot.
+/// Height of a single up-next row — the uniform pitch used to part the rows and
+/// map the finger to an insertion slot during an in-place drag-reorder.
 struct QueueRowHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
-    }
-}
-
-/// Global Y of the up-next list's top edge — where the reorder overlay's first
-/// slot begins (just under the pinned "Queue" header). Sentinel default so an
-/// unmeasured value is obvious.
-struct QueueUpNextTopKey: PreferenceKey {
-    static let defaultValue: CGFloat = .nan
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        if !next.isNaN { value = next }
     }
 }
 
@@ -256,12 +245,13 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     var onClearHistory: () -> Void
     /// Drop the up-next queue.
     var onClearQueue: () -> Void
-    /// A drag-reorder session is active (a row is being dragged). Hides the real
-    /// up-next rows (the overlay draws them instead) and freezes the scroll.
-    var reordering: Bool = false
-    /// Emitted by an up-next row's drag handle so the container can drive the
-    /// reorder overlay + commit the move.
-    var onReorder: (QueueReorderEvent) -> Void = { _ in }
+    /// Called `true` when an in-place drag-reorder begins and `false` when it ends,
+    /// so the container can slide the transport chrome out of the way. The list
+    /// itself never moves — the grabbed row lifts and the others part in place.
+    var onReorderActive: (Bool) -> Void = { _ in }
+    /// Commit a finished reorder: move the up-next item from offset `from` to `to`
+    /// (final-position semantics — see `PlaybackEngine.moveUpNext`).
+    var onCommitReorder: (Int, Int) -> Void = { _, _ in }
     /// Top-overscroll (≥0) once History is fully revealed and there's nothing left
     /// to scroll up — the container translates the whole drawer down by this.
     var onPull: (CGFloat) -> Void = { _ in }
@@ -299,16 +289,18 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// Measured height of the queue-controls block (pills + Queue/Clear header) —
     /// how tall the sticky block is once it pins to the top.
     @State private var queueControlsH: CGFloat = 0
-    /// Measured uniform height of an up-next row — the pitch the reorder overlay
-    /// lays rows out on and maps the finger to a slot with.
+    /// Measured uniform height of an up-next row — the pitch used to part the rows
+    /// and map the finger to an insertion slot during an in-place drag-reorder.
     @State private var upNextRowH: CGFloat = 0
-    /// Measured global Y of the up-next list's top edge — the reorder overlay's
-    /// slot-0 origin.
-    @State private var upNextTopY: CGFloat = .nan
-    /// The up-next offset of the row whose handle is mid-drag, or `nil` when no
-    /// handle drag is in flight. Distinguishes the first gesture change (emit
-    /// `.begin`) from subsequent moves (emit `.change`).
-    @State private var draggingHandleIndex: Int? = nil
+    /// Origin up-next offset of the row being dragged, or `nil` when no reorder is
+    /// in flight. The grabbed row follows the finger; every other row stays put
+    /// until the drag crosses it, then shifts by exactly one row to open the gap —
+    /// so the list never moves, only parts.
+    @State private var dragFrom: Int? = nil
+    /// The insertion slot the grabbed row currently targets (0-based in up-next).
+    @State private var dragTo: Int? = nil
+    /// The grabbed row's live finger translation (points) from its grab point.
+    @State private var dragOffset: CGFloat = 0
 
     private let nowPlayingID = "queue.nowPlaying"
 
@@ -376,7 +368,6 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .onPreferenceChange(QueueCardHeightKey.self) { cardHeight = $0 }
             .onPreferenceChange(QueueControlsHeightKey.self) { queueControlsH = $0 }
             .onPreferenceChange(QueueRowHeightKey.self) { if $0 > 0 { upNextRowH = $0 } }
-            .onPreferenceChange(QueueUpNextTopKey.self) { if !$0.isNaN { upNextTopY = $0 } }
             .onAppear { viewportH = geo.size.height }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
         }
@@ -523,16 +514,6 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     // unit as the queue opens.
                     .modifier(BodyRise(progress: bodyP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
                     .modifier(BodyFade(progress: bodyP, start: bodyFadeStart))
-                    // Report the list's live top edge (global) so the reorder
-                    // overlay knows where slot-0 begins.
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: QueueUpNextTopKey.self,
-                                               value: g.frame(in: .global).minY)
-                    })
-                    // While a row is being dragged the overlay draws the whole
-                    // list, so hide the real rows (kept laid out for measurement).
-                    .opacity(reordering ? 0 : 1)
-                    .allowsHitTesting(!reordering)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
@@ -549,9 +530,9 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // the content can't move and no counter-offset is needed.
         }
         .scrollIndicators(.hidden)
-        // Freeze the underlying scroll while dragging a row — the reorder overlay
-        // owns scrolling (auto-scroll) during that time.
-        .scrollDisabled(reordering)
+        // Freeze the underlying scroll while a row is being dragged, so the list
+        // stays exactly where it was at grab and only the parting moves.
+        .scrollDisabled(dragFrom != nil)
     }
 
     /// Snap the scroll so the now-playing card sits at the very top (iOS 17
@@ -653,7 +634,10 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     }
 
     /// The up-next rows (the "Continue Playing" list). The section header lives in
-    /// `queueControlsBlock` above so it can pin with the pills.
+    /// `queueControlsBlock` above so it can pin with the pills. During an in-place
+    /// drag-reorder the grabbed row lifts and follows the finger while the others
+    /// part by exactly one row — the real rows move, nothing is reconstructed, so
+    /// the list can never teleport.
     @ViewBuilder private var upNextRows: some View {
         let items = playback.upNext
         if !items.isEmpty {
@@ -661,6 +645,17 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, track in
                 row(track: track, orderPosition: base + index,
                     showsHandle: true, upNextIndex: index)
+                    // Lift the grabbed row: a faint elevated card + shadow + slight
+                    // scale so it reads as picked up above the others.
+                    .background {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(.white.opacity(dragFrom == index ? 0.14 : 0))
+                    }
+                    .scaleEffect(dragFrom == index ? 1.03 : 1)
+                    .shadow(color: .black.opacity(dragFrom == index ? 0.3 : 0),
+                            radius: 14, y: 6)
+                    .offset(y: reorderOffset(index))
+                    .zIndex(dragFrom == index ? 1 : 0)
             }
         }
     }
@@ -714,9 +709,29 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
         )
     }
 
+    /// Springs for the in-place reorder: a snappy lift on pickup and a slightly
+    /// softer part as the target slot changes. (Instance `let`, not `static` —
+    /// `PlayerQueuePanel` is generic and can't hold static stored properties.)
+    private let reorderLiftSpring = Animation.spring(response: 0.28, dampingFraction: 0.72)
+    private let reorderPartSpring = Animation.spring(response: 0.30, dampingFraction: 0.82)
+
+    /// Vertical offset for up-next row `i` during an in-place reorder. The grabbed
+    /// row follows the finger; every other row holds still until the grabbed row
+    /// crosses it, then shifts by exactly one row height to open the insertion gap.
+    private func reorderOffset(_ i: Int) -> CGFloat {
+        guard let from = dragFrom else { return 0 }
+        if i == from { return dragOffset }
+        guard let to = dragTo, from != to, upNextRowH > 0 else { return 0 }
+        if from < to, i > from, i <= to { return -upNextRowH }
+        if to < from, i >= to, i < from { return upNextRowH }
+        return 0
+    }
+
     /// The trailing drag handle for an up-next row. An enlarged (~44pt) hit target
-    /// carrying a high-priority drag gesture that emits `QueueReorderEvent`s. A tap
-    /// falls through to nothing (only the row body's Button selects/jumps).
+    /// carrying a high-priority drag gesture that reorders the list in place: the
+    /// grabbed row lifts and follows the finger, the others part around it, and the
+    /// move commits on release. A tap falls through (only the row body's Button
+    /// selects/jumps).
     @ViewBuilder
     private func reorderHandle(upNextIndex: Int?) -> some View {
         Image(mozz: "line.3.horizontal")
@@ -725,27 +740,63 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
             .highPriorityGesture(
-                DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                DragGesture(minimumDistance: 8)
                     .onChanged { value in
                         guard let idx = upNextIndex else { return }
-                        if draggingHandleIndex == nil {
-                            draggingHandleIndex = idx
-                            onReorder(.begin(index: idx,
-                                             fingerY: value.location.y,
-                                             rowHeight: upNextRowH,
-                                             regionTopY: upNextTopY))
-                        } else {
-                            onReorder(.change(fingerY: value.location.y))
+                        let count = playback.upNext.count
+                        if dragFrom == nil {
+                            onReorderActive(true)
+                            reorderPickupHaptic()
+                            withAnimation(reorderLiftSpring) {
+                                dragFrom = idx
+                                dragTo = idx
+                            }
+                        }
+                        guard upNextRowH > 0 else {
+                            dragOffset = value.translation.height
+                            return
+                        }
+                        // Clamp the grabbed row to the list's slot span so it can't
+                        // be dragged off into empty space beyond the ends.
+                        let lo = CGFloat(-idx) * upNextRowH
+                        let hi = CGFloat(count - 1 - idx) * upNextRowH
+                        dragOffset = min(max(value.translation.height, lo), hi)
+                        let steps = Int((dragOffset / upNextRowH).rounded())
+                        let clamped = min(max(idx + steps, 0), max(0, count - 1))
+                        if clamped != dragTo {
+                            withAnimation(reorderPartSpring) { dragTo = clamped }
+                            reorderMoveHaptic()
                         }
                     }
                     .onEnded { _ in
-                        if draggingHandleIndex != nil {
-                            draggingHandleIndex = nil
-                            onReorder(.end)
-                        }
+                        guard let from = dragFrom else { return }
+                        let to = dragTo ?? from
+                        if from != to { onCommitReorder(from, to) }
+                        reorderDropHaptic()
+                        // Commit + clear synchronously so SwiftUI renders one final
+                        // frame (new order, zero offsets): no teleport, no stranded
+                        // state, no bad intermediate frame.
+                        dragFrom = nil
+                        dragTo = nil
+                        dragOffset = 0
+                        onReorderActive(false)
                     }
             )
     }
+
+    #if canImport(UIKit)
+    private func reorderPickupHaptic() {
+        let g = UIImpactFeedbackGenerator(style: .medium); g.prepare(); g.impactOccurred()
+    }
+    private func reorderMoveHaptic() { UISelectionFeedbackGenerator().selectionChanged() }
+    private func reorderDropHaptic() {
+        let g = UIImpactFeedbackGenerator(style: .rigid); g.prepare(); g.impactOccurred()
+    }
+    #else
+    private func reorderPickupHaptic() {}
+    private func reorderMoveHaptic() {}
+    private func reorderDropHaptic() {}
+    #endif
 }
 
 /// Slides the queue body (pills + "Queue" header + Continue-Playing list) DOWN by
