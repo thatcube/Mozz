@@ -59,8 +59,20 @@ struct TailedBubble: Shape {
     /// `nil` centers it. Clamped so the tail base never overruns the body corners,
     /// so a caller can aim it at an off-center star without breaking the outline.
     var tailX: CGFloat? = nil
+    /// When true the tail sits on the TOP edge pointing UP (bubble drawn BELOW the
+    /// star) instead of the bottom edge pointing down. The body path is built once
+    /// (tail down) and mirrored vertically, so both variants stay identical.
+    var tailUp: Bool = false
 
     func path(in rect: CGRect) -> Path {
+        let p = bottomTailPath(in: rect)
+        guard tailUp else { return p }
+        // Mirror vertically about the rect's centre so the tail moves to the top.
+        return p.applying(CGAffineTransform(a: 1, b: 0, c: 0, d: -1,
+                                            tx: 0, ty: rect.minY + rect.maxY))
+    }
+
+    private func bottomTailPath(in rect: CGRect) -> Path {
         let r = min(cornerRadius, min(rect.width, rect.height - tailHeight) / 2)
         let w = rect.width
         let bottom = rect.maxY - tailHeight        // body's bottom edge (tail base)

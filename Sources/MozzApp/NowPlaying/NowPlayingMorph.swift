@@ -358,11 +358,12 @@ struct NowPlayingMorphContainer: View {
     }
 
     /// The root-hosted sticky rating bubble + a full-screen tap-catcher, anchored
-    /// above the player's rating star.
+    /// to the player's rating star.
     @ViewBuilder
     private func ratingPickerOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
         if ratingPickerOpen, let anchor, let track = playback.currentTrack {
-            ratingBubble(rect: geo[anchor], geo: geo, dismiss: { closeRatingPicker() }) {
+            RatingBubbleContainer(rect: geo[anchor], geo: geo, reduceMotion: reduceMotion,
+                                  dismiss: { closeRatingPicker() }) {
                 RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
             }
             .accessibilityAddTraits(.isModal)
@@ -377,7 +378,8 @@ struct NowPlayingMorphContainer: View {
     private func ratingRevealOverlay(anchor: Anchor<CGRect>?, geo: GeometryProxy) -> some View {
         Group {
             if ratingRevealActive, let anchor {
-                ratingBubble(rect: geo[anchor], geo: geo, dismiss: nil) {
+                RatingBubbleContainer(rect: geo[anchor], geo: geo, reduceMotion: reduceMotion,
+                                      dismiss: nil) {
                     VStack(spacing: 14) {
                         RatingStripView(value: ratingRevealPreview)
                         Text((ratingRevealPreview ?? 0) > 0 ? LikeControl.format(ratingRevealPreview!) + " stars" : "No rating")
@@ -392,64 +394,11 @@ struct NowPlayingMorphContainer: View {
                 .allowsHitTesting(false)
             }
         }
-        // Drives the bubble's insertion/removal transition. Keyed to presence only,
-        // so the live per-move preview updates re-render the strip instantly without
-        // spawning a new animation transaction that would restart (and swallow) the
-        // appear transition.
+        // Provides the transaction for the bubble's REMOVAL fade when the finger
+        // lifts. Keyed to presence only, so the live per-move preview updates don't
+        // spawn a transaction of their own. (The appear is driven by the container's
+        // onAppear, so preview churn can't snap it — see RatingBubbleContainer.)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: ratingRevealActive)
-    }
-
-    /// Shared layout for both root rating bubbles: bottom-pin the bubble just above
-    /// the star, clamp it horizontally within a screen margin so it never runs off
-    /// the edge, and aim the tail at the star even when the body is shifted inward.
-    private func ratingBubble<Content: View>(
-        rect: CGRect,
-        geo: GeometryProxy,
-        dismiss: (() -> Void)?,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        let gap: CGFloat = 6
-        let bottomSpace = max(0, geo.size.height - (rect.minY - gap))
-        // Analytic bubble width: the 5-star strip plus its 24pt horizontal padding
-        // on each side. Kept in sync with the bubble content's own layout.
-        let bubbleWidth = RatingMath.stripWidth() + 48
-        let margin: CGFloat = 12
-        let half = bubbleWidth / 2
-        let minCenter = half + margin
-        let maxCenter = geo.size.width - half - margin
-        let center = maxCenter >= minCenter
-            ? min(max(rect.midX, minCenter), maxCenter)
-            : geo.size.width / 2
-        // Tail X within the bubble's own space (TailedBubble clamps it to the body).
-        let tailX = rect.midX - (center - half)
-        return ZStack {
-            if let dismiss {
-                // Tap-catcher: dismiss on any tap outside the bubble.
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismiss() }
-                    .accessibilityHidden(true)
-            }
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                content()
-                    .padding(.bottom, RatingTuning.revealTailHeight)
-                    .glassBackground(TailedBubble(tailX: tailX))
-                    .frame(width: bubbleWidth)
-                    .offset(x: center - geo.size.width / 2)
-                Color.clear.frame(height: bottomSpace).allowsHitTesting(false)
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-        // Kept on the outermost inserted view so it actually runs (a nested
-        // transition only faded). A gentle rise + fade on appear, quick fade on
-        // dismiss — no scale, which when anchored at the star flung the overlay up.
-        .transition(reduceMotion
-            ? .opacity
-            : .asymmetric(
-                insertion: .offset(y: 18).combined(with: .opacity),
-                removal: .opacity))
-        .ignoresSafeArea()
     }
 
     private func setPlayerRating(_ value: Double?, track: Track) {
@@ -2251,4 +2200,94 @@ private struct MorphArtwork: View {
     }
 
     private var placeholder: some View { ArtworkPlaceholder() }
+}
+
+/// Positions a rating bubble relative to the star: pinned just ABOVE it by default
+/// (tail pointing down), but flipped BELOW (tail up) when there isn't room above —
+/// e.g. with the queue open, where the star sits near the status bar / notch.
+///
+/// The appear is driven by an `onAppear` property animation (`shown`), NOT a
+/// `.transition`: the hold-drag reveal re-renders rapidly as the finger moves, and
+/// a `.transition`-based appear gets finalized by those unrelated re-renders (it
+/// read as "no animation"). Animating an explicit property survives that churn.
+/// Horizontally clamps within a screen margin and aims the tail at the star even
+/// when the body is shifted inward.
+private struct RatingBubbleContainer<Content: View>: View {
+    let rect: CGRect
+    let geo: GeometryProxy
+    let reduceMotion: Bool
+    let dismiss: (() -> Void)?
+    let content: Content
+
+    init(rect: CGRect, geo: GeometryProxy, reduceMotion: Bool,
+         dismiss: (() -> Void)?, @ViewBuilder content: () -> Content) {
+        self.rect = rect
+        self.geo = geo
+        self.reduceMotion = reduceMotion
+        self.dismiss = dismiss
+        self.content = content()
+    }
+
+    @State private var shown = false
+
+    private let gap: CGFloat = 6
+    private let margin: CGFloat = 12
+    // Conservative bubble height, used ONLY to choose above-vs-below (the positioning
+    // itself is height-agnostic). Generous so we flip a touch eagerly near the top
+    // rather than risk bleeding into the status bar / Dynamic Island.
+    private let flipHeight: CGFloat = 210
+
+    var body: some View {
+        let topInset = geo.safeAreaInsets.top > 0 ? geo.safeAreaInsets.top : 59
+        let bubbleWidth = RatingMath.stripWidth() + 48
+        let half = bubbleWidth / 2
+        let minCenter = half + margin
+        let maxCenter = geo.size.width - half - margin
+        let center = maxCenter >= minCenter
+            ? min(max(rect.midX, minCenter), maxCenter)
+            : geo.size.width / 2
+        // Tail X within the bubble's own space (TailedBubble clamps it to the body).
+        let tailX = rect.midX - (center - half)
+        // Flip below when the bubble wouldn't clear the top safe area above the star.
+        let placeBelow = (rect.minY - gap - flipHeight) < (topInset + margin)
+
+        ZStack {
+            if let dismiss {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismiss() }
+                    .accessibilityHidden(true)
+            }
+            VStack(spacing: 0) {
+                if placeBelow {
+                    Color.clear.frame(height: max(0, rect.maxY + gap)).allowsHitTesting(false)
+                } else {
+                    Spacer(minLength: 0)
+                }
+                content
+                    .padding(placeBelow ? .top : .bottom, RatingTuning.revealTailHeight)
+                    .glassBackground(TailedBubble(tailX: tailX, tailUp: placeBelow))
+                    .frame(width: bubbleWidth)
+                    .offset(x: center - geo.size.width / 2,
+                            y: shown ? 0 : (placeBelow ? -12 : 12))
+                    .opacity(shown ? 1 : 0)
+                if placeBelow {
+                    Spacer(minLength: 0)
+                } else {
+                    Color.clear.frame(height: max(0, geo.size.height - (rect.minY - gap)))
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        // Appear is handled by `shown`; only the removal fades (via the caller's
+        // animation transaction). `.identity` insertion avoids a second,
+        // transition-driven appear that the preview churn would snap.
+        .transition(.asymmetric(insertion: .identity, removal: .opacity))
+        .ignoresSafeArea()
+        .onAppear {
+            if reduceMotion { shown = true }
+            else { withAnimation(.snappy(duration: 0.26)) { shown = true } }
+        }
+    }
 }
