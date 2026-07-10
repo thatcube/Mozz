@@ -1013,9 +1013,9 @@ struct NowPlayingMorphContainer: View {
     /// hand-off (hero lift + `RangeFadeOut`, card rise + `LateFade`, `BodyRise`) is
     /// keyed on `queueP` (0→1), so scaling the one spring that drives `queueP` slows
     /// the WHOLE sequence proportionally — the relative timing of each phase is
-    /// preserved, just stretched out so it can be observed and tuned. Set back to `1`
-    /// for production feel.
-    private static let queueTimeScale: CGFloat = 1
+    /// preserved, just stretched out. `1.2` = a bit slower/gentler than the raw
+    /// spring tuning, which reads smoother on both open and close.
+    private static let queueTimeScale: CGFloat = 1.2
 
     /// Shared open/close spring for the queue transition (× `queueTimeScale`).
     private static let queueSpring = Animation.spring(response: 0.48 * queueTimeScale,
