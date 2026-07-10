@@ -310,6 +310,25 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// space. Toggled (animated, in lockstep with the container's chrome slide) on
     /// pickup/drop so the list expands to fill the freed space during a reorder.
     @State private var reorderGrown = false
+    /// Extra pan (points) applied to the scroll content DURING a reorder so dragging
+    /// toward an edge auto-scrolls the frozen list — positive reveals lower rows.
+    /// Folded into the grabbed-row follow math and the pinned-overlay positions so
+    /// everything tracks. `0` whenever a reorder isn't in flight.
+    @State private var reorderPan: CGFloat = 0
+    /// The grabbed row's last finger translation (points), retained so the auto-
+    /// scroll timer can recompute the follow offset as the pan advances while the
+    /// finger is held still at an edge.
+    @State private var reorderTranslation: CGFloat = 0
+    /// The finger's Y within the panel's own (stable) coordinate space — drives the
+    /// edge-zone auto-scroll. Unaffected by the grabbed row's offset or the content
+    /// pan, so it's a clean read of where the finger physically is in the viewport.
+    @State private var reorderFingerY: CGFloat = 0
+    /// The frozen scroll offset captured at pickup. `effScroll = reorderScrollBase +
+    /// reorderPan`; the pan is clamped so `effScroll` never rises above the top of
+    /// the up-next list (you can't reorder into the now-playing card / History).
+    @State private var reorderScrollBase: CGFloat = 0
+    /// Drives the edge-zone auto-scroll while a row is held near the top/bottom.
+    @State private var autoScroller = QueueAutoScroller()
 
     private let nowPlayingID = "queue.nowPlaying"
 
@@ -359,6 +378,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 }
             }
             .frame(height: grownH, alignment: .top)
+            // A stable coordinate space anchored at the panel top (it does NOT move
+            // when the grabbed row is offset or the content pans), so the reorder
+            // gesture can read a clean finger translation AND the finger's position
+            // within the viewport for edge-zone auto-scroll.
+            .coordinateSpace(.named("queueReorderSpace"))
             .opacity(queueP)
             .mask(bottomFadeMask)
             // Pinned History header: stays fixed at the top while its rows scroll
@@ -440,7 +464,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// below the card (`detentTop + cardHeight` in content terms) minus the scroll,
     /// clamped so they never rise above the panel top — that's the pin.
     private var queueControlsY: CGFloat {
-        max(0, detentTop + cardHeight - clampedScrollY)
+        max(0, detentTop + cardHeight - effClampedScrollY)
     }
 
     /// Scroll offset with the top overscroll removed. During a top pull the raw
@@ -449,6 +473,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// fade must ignore the overscroll too — otherwise they'd drift while the rest
     /// of the panel stays rigid. Clamping to ≥0 freezes them at the top state.
     private var clampedScrollY: CGFloat { max(0, scrollY) }
+
+    /// `clampedScrollY` plus the reorder auto-scroll pan — the *effective* scroll the
+    /// pinned overlays and top fade must follow so they stay glued to the content
+    /// while it pans during a drag-reorder. Equal to `clampedScrollY` at rest.
+    private var effClampedScrollY: CGFloat { max(0, scrollY + reorderPan) }
 
     /// The body holds down at the scrub-bar line through the first slice of the open
     /// (`bodyRiseStart`), then rises to rest by q=1 — so it travels up *as the hero
@@ -480,7 +509,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// whichever direction is active (History above, or queue controls below).
     private var topFadeAmount: CGFloat {
         let historyFade = max(0, min(historyHeaderH, historyHeaderH + pinnedHeaderY))
-        let queueFade = max(0, min(queueControlsH, clampedScrollY - detentTop))
+        let queueFade = max(0, min(queueControlsH, effClampedScrollY - detentTop))
         return max(historyFade, queueFade)
     }
 
@@ -541,6 +570,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // space onto the BOTTOM (top-aligned) so the card still docks at the
             // top instead of floating mid-screen.
             .frame(minHeight: detentTop + viewportH, alignment: .top)
+            // Auto-scroll pan: while a row is dragged toward an edge, shift the whole
+            // (frozen) content up/down so the rest of the up-next list is reachable.
+            // 0 except during/settling a reorder. The grabbed row counter-offsets
+            // this in `reorderOffset` so it keeps tracking the finger.
+            .offset(y: -reorderPan)
             // NOTE: no counter-offset here. A gesture that began mid-list must
             // rubber-band natively when it reaches the top (the drawer stays put),
             // so we must NOT cancel the overscroll. During a real drawer pull the
@@ -737,6 +771,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// list expands in lockstep as the controls move away, and settles back as they
     /// return.
     private let reorderGrowSpring = Animation.spring(response: 0.34, dampingFraction: 0.9)
+    /// How close (points) the finger must be to the top/bottom edge of the grown
+    /// viewport before the list auto-scrolls, and the peak scroll speed (points per
+    /// ~60 fps tick) at the very edge — ramped down to 0 at the zone's inner border.
+    private let reorderEdgeZone: CGFloat = 84
+    private let reorderMaxScrollPerTick: CGFloat = 13
 
     /// Vertical offset for up-next row `i` during an in-place reorder. The grabbed
     /// row follows the finger; every other row holds still until the grabbed row
@@ -763,18 +802,19 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
             .highPriorityGesture(
-                // Measure in `.global` (screen) space, NOT `.local`. The grabbed
-                // row hosts this gesture and is simultaneously moved by
-                // `.offset(y: dragOffset)`; a `.local` gesture would have its
-                // coordinate space shift under the finger every frame, corrupting
-                // `translation` into a feedback loop (the row "fights" the finger
-                // and jitters). Global space is fixed to the screen, so the
-                // translation stays clean.
-                DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                // Measure in a stable named space anchored at the panel top (NOT
+                // `.local`): the grabbed row hosts this gesture and is moved by
+                // `.offset`, so a local space would shift under the finger every
+                // frame and corrupt `translation` into a jitter feedback loop. The
+                // named space also gives the finger's position within the viewport,
+                // which drives the edge-zone auto-scroll.
+                DragGesture(minimumDistance: 8, coordinateSpace: .named("queueReorderSpace"))
                     .onChanged { value in
                         guard let idx = upNextIndex else { return }
-                        let count = playback.upNext.count
                         if dragFrom == nil {
+                            reorderScrollBase = scrollY
+                            reorderPan = 0
+                            reorderTranslation = 0
                             onReorderActive(true)
                             reorderPickupHaptic()
                             withAnimation(reorderGrowSpring) { reorderGrown = true }
@@ -782,38 +822,88 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                                 dragFrom = idx
                                 dragTo = idx
                             }
+                            autoScroller.onTick = { stepAutoScroll() }
+                            autoScroller.start()
                         }
-                        guard upNextRowH > 0 else {
-                            dragOffset = value.translation.height
-                            return
-                        }
-                        // Clamp the grabbed row to the list's slot span so it can't
-                        // be dragged off into empty space beyond the ends.
-                        let lo = CGFloat(-idx) * upNextRowH
-                        let hi = CGFloat(count - 1 - idx) * upNextRowH
-                        dragOffset = min(max(value.translation.height, lo), hi)
-                        let steps = Int((dragOffset / upNextRowH).rounded())
-                        let clamped = min(max(idx + steps, 0), max(0, count - 1))
-                        if clamped != dragTo {
-                            withAnimation(reorderPartSpring) { dragTo = clamped }
-                            reorderMoveHaptic()
-                        }
+                        reorderTranslation = value.translation.height
+                        reorderFingerY = value.location.y
+                        updateReorderFollow()
                     }
                     .onEnded { _ in
+                        autoScroller.stop()
                         guard let from = dragFrom else { return }
                         let to = dragTo ?? from
                         if from != to { onCommitReorder(from, to) }
                         reorderDropHaptic()
-                        // Commit + clear synchronously so SwiftUI renders one final
-                        // frame (new order, zero offsets): no teleport, no stranded
-                        // state, no bad intermediate frame.
+                        // Commit + clear the lift synchronously so SwiftUI renders one
+                        // final frame in the new order; ease any auto-scroll pan back
+                        // to rest so the list glides home instead of snapping.
                         dragFrom = nil
                         dragTo = nil
                         dragOffset = 0
-                        withAnimation(reorderGrowSpring) { reorderGrown = false }
+                        reorderTranslation = 0
+                        withAnimation(reorderGrowSpring) {
+                            reorderGrown = false
+                            reorderPan = 0
+                        }
                         onReorderActive(false)
                     }
             )
+    }
+
+    /// Recompute the grabbed row's follow offset and target slot from the current
+    /// finger translation PLUS the auto-scroll pan, so the row keeps tracking the
+    /// finger as the list scrolls under it. Called on every finger move and on every
+    /// auto-scroll tick.
+    private func updateReorderFollow() {
+        guard let idx = dragFrom, upNextRowH > 0 else {
+            dragOffset = reorderTranslation
+            return
+        }
+        let count = playback.upNext.count
+        // Clamp the effective displacement to the up-next slot span so the grabbed
+        // row can't be dragged above the first row or below the last.
+        let lo = CGFloat(-idx) * upNextRowH
+        let hi = CGFloat(count - 1 - idx) * upNextRowH
+        let displacement = min(max(reorderTranslation + reorderPan, lo), hi)
+        dragOffset = displacement
+        let steps = Int((displacement / upNextRowH).rounded())
+        let target = min(max(idx + steps, 0), max(0, count - 1))
+        if target != dragTo {
+            withAnimation(reorderPartSpring) { dragTo = target }
+            reorderMoveHaptic()
+        }
+    }
+
+    /// One auto-scroll tick: if the finger sits in the top/bottom edge zone of the
+    /// grown viewport, advance the content pan toward that edge (ramped by how deep
+    /// into the zone the finger is), clamped so it never scrolls above the top of the
+    /// up-next list or past its last row, then re-run the follow math.
+    private func stepAutoScroll() {
+        guard dragFrom != nil, upNextRowH > 0 else { return }
+        let grownH = viewportH + reorderExtraHeight
+        let y = reorderFingerY
+        var delta: CGFloat = 0
+        if y < reorderEdgeZone {
+            let depth = (reorderEdgeZone - max(0, y)) / reorderEdgeZone
+            delta = -reorderMaxScrollPerTick * depth        // scroll up
+        } else if y > grownH - reorderEdgeZone {
+            let depth = (max(0, y) - (grownH - reorderEdgeZone)) / reorderEdgeZone
+            delta = reorderMaxScrollPerTick * min(1, depth) // scroll down
+        }
+        guard delta != 0 else { return }
+        let count = playback.upNext.count
+        // Floor: top of the up-next list (can't reorder into the now-playing card or
+        // History). Ceiling: the last row resting at the bottom of the viewport.
+        let contentBottom = detentTop + cardHeight + queueControlsH
+            + CGFloat(count) * upNextRowH + 24
+        let minEff = detentTop
+        let maxEff = max(minEff, contentBottom - grownH)
+        let eff = reorderScrollBase + reorderPan
+        let newEff = min(max(eff + delta, minEff), maxEff)
+        guard newEff != eff else { return }
+        reorderPan = newEff - reorderScrollBase
+        updateReorderFollow()
     }
 
     #if canImport(UIKit)
@@ -829,6 +919,33 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     private func reorderMoveHaptic() {}
     private func reorderDropHaptic() {}
     #endif
+}
+
+/// A tiny ~60 fps ticker that drives the edge-zone auto-scroll during a drag-
+/// reorder. Held in `@State` so it survives view re-renders; started on pickup and
+/// stopped on drop. The tick closure (set fresh each pickup) reads/writes the
+/// panel's `@State` — whose backing storage is stable — so the timer can advance
+/// the pan while the finger is held motionless at an edge.
+private final class QueueAutoScroller {
+    private var timer: Timer?
+    var onTick: (() -> Void)?
+
+    func start() {
+        stop()
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.onTick?()
+        }
+        // Common mode so it keeps firing during the touch-tracking run loop mode.
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit { stop() }
 }
 
 /// Slides the queue body (pills + "Queue" header + Continue-Playing list) DOWN by
