@@ -966,7 +966,7 @@ struct NowPlayingMorphContainer: View {
     private static let queueTimeScale: CGFloat = 1
 
     /// Shared open/close spring for the queue transition (× `queueTimeScale`).
-    private static let queueSpring = Animation.spring(response: 0.56 * queueTimeScale,
+    private static let queueSpring = Animation.spring(response: 0.48 * queueTimeScale,
                                                       dampingFraction: 0.86)
 
     /// Gentler, longer spring for the queue BODY's rise/fade on OPEN only, so its
@@ -974,14 +974,14 @@ struct NowPlayingMorphContainer: View {
     /// hero→card title cross-fade) above it. Higher `response` = slower climb; high
     /// damping keeps it from overshooting on the long travel. The close still uses
     /// `queueSpring` (see `driveQueue`), so this only stretches the entrance.
-    private static let queueBodySpring = Animation.spring(response: 0.85 * queueTimeScale,
+    private static let queueBodySpring = Animation.spring(response: 0.72 * queueTimeScale,
                                                           dampingFraction: 0.92)
 
     /// Slower spring for the hero row's lift/fade on OPEN only, so the title/artist
     /// visibly travel up and out at a gentler pace than the fast artwork dock instead
     /// of snapping away. Higher `response` = slower; the close reuses `queueSpring`
     /// (see `driveQueue`) so retract stays snappy.
-    private static let queueHeroSpring = Animation.spring(response: 0.75 * queueTimeScale,
+    private static let queueHeroSpring = Animation.spring(response: 0.64 * queueTimeScale,
                                                           dampingFraction: 0.88)
 
     // MARK: Drawer controls
