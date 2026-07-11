@@ -344,7 +344,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// Whether the sticky pinned-header overlays are in use (iOS 18+, where we get
     /// the live scroll offset). On iOS 17 the headers render inline instead.
     private var usesStickyHeaders: Bool {
+#if os(iOS)
         if #available(iOS 18.0, *) { return true } else { return false }
+#else
+        return false
+#endif
     }
 
     /// The "card at top" detent: how far the content must scroll for the card to
@@ -372,6 +376,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // the clip grow, revealing rows already laid out below the fold.
             let grownH = baseH + activeReorderExtraHeight
             Group {
+#if os(iOS)
                 if #available(iOS 18.0, *) {
                     // iOS 18+: drive the snap ourselves for a fast, crisp settle we
                     // fully control (native ScrollTargetBehavior's release
@@ -403,6 +408,15 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                             .onChange(of: resetToken) { _, _ in resetToCard(proxy) }
                     }
                 }
+#else
+                ScrollViewReader { proxy in
+                    scrollBase
+                        .modifier(QueueSnapModifier(detentTop: detentTop,
+                                                    enabled: !reduceMotion))
+                        .onAppear { resetToCard(proxy) }
+                        .onChange(of: resetToken) { _, _ in resetToCard(proxy) }
+                }
+#endif
             }
             .frame(height: grownH, alignment: .top)
             // A stable coordinate space anchored at the panel top (it does NOT move
@@ -454,7 +468,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     ///   • slides up (negative) as the now-playing card's top rises to meet it,
     ///     so the card — and only the card — pushes it off the top.
     @ViewBuilder private var pinnedHistoryHeader: some View {
-        if #available(iOS 18.0, *), detentTop > 1, !playback.history.isEmpty,
+        if usesStickyHeaders, detentTop > 1, !playback.history.isEmpty,
            historyHeaderH > 0 {
             historyHeaderRow
                 .padding(.horizontal, 24)
@@ -480,7 +494,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// the up-next rows scroll under it. Scrolling back up, the descending card
     /// pushes it back down to its natural spot.
     @ViewBuilder private var pinnedQueueControls: some View {
-        if #available(iOS 18.0, *), cardHeight > 0, queueControlsH > 0 {
+        if usesStickyHeaders, cardHeight > 0, queueControlsH > 0 {
             queueControlsBlock
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1073,6 +1087,7 @@ private final class QueueAutoScroller {
     deinit { stop() }
 }
 #endif
+
 /// Slides the queue body (pills + "Queue" header + Continue-Playing list) DOWN by
 /// `distance` at q=0 so it rises up from below the scrub bar into place by q=1,
 /// holding at the bottom until `start` so it travels up AS the hero row fades out
@@ -1144,6 +1159,7 @@ private struct QueueScrollRequest: Equatable {
 /// Dragging within the one-viewport band between them snaps in the direction of
 /// the release flick (or, on a still release, to the nearer detent) — symmetric.
 /// Past the card (into Continue Playing) or deep into History, scrolling is free.
+#if os(iOS)
 @available(iOS 18.0, *)
 private struct QueueManualSnap18: ViewModifier {
     var detentTop: CGFloat
@@ -1310,6 +1326,7 @@ private struct QueueManualSnap18: ViewModifier {
         }
     }
 }
+#endif
 
 // MARK: - Top-of-list pull-to-dismiss (per-gesture, start-position gated)
 
@@ -1329,6 +1346,7 @@ private struct QueueManualSnap18: ViewModifier {
 ///     bounce is frozen so the content can't rubber-band, and the whole drawer drags
 ///     1:1 with the finger. (Dragging UP still scrolls down into the list normally —
 ///     freezing bounce only kills the past-the-edge rubber-band, not real scrolling.)
+#if os(iOS)
 @available(iOS 18.0, *)
 private struct QueuePullGesture: UIGestureRecognizerRepresentable {
     /// Whether the list is settled at its very top RIGHT NOW. Sampled once, at the
@@ -1495,6 +1513,7 @@ private struct QueuePullGesture: UIGestureRecognizerRepresentable {
         }
     }
 }
+#endif
 
 /// Applies the iOS-18 pull gesture (a no-op on iOS 17, where the whole sticky
 /// overscroll machinery is disabled). Lets the caller attach it with a plain
@@ -1506,12 +1525,16 @@ private struct QueuePullGestureModifier: ViewModifier {
     var onEnd: (CGFloat, CGFloat) -> Void
 
     func body(content: Content) -> some View {
+#if os(iOS)
         if #available(iOS 18.0, *) {
             content.gesture(QueuePullGesture(atTop: atTop, enabled: enabled,
                                              onPull: onPull, onEnd: onEnd))
         } else {
             content
         }
+#else
+        content
+#endif
     }
 }
 
