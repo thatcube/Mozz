@@ -1012,13 +1012,21 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         // ScrollView is frozen. On iOS 18, transfer its effective Y
                         // into the real ScrollPosition before releasing the pan so
                         // the list stays exactly where the drag scrolled it.
+                        let transfersReorderPan: Bool
+#if os(iOS)
                         if #available(iOS 18.0, *), abs(reorderPan) > 0.5 {
+                            transfersReorderPan = true
                             reorderScrollRequestID &+= 1
                             reorderScrollRequest = QueueScrollRequest(
                                 id: reorderScrollRequestID,
                                 y: reorderScrollBase + reorderPan
                             )
+                        } else {
+                            transfersReorderPan = false
                         }
+#else
+                        transfersReorderPan = false
+#endif
                         // Commit + clear the lift synchronously so SwiftUI renders one
                         // final frame in the new order (row lands in place instantly).
                         // Hold the grown viewport, auto-scroll pan, and slid-away chrome
@@ -1038,10 +1046,9 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                                   reorderGeneration == closeGeneration else { return }
                             withAnimation(reorderGrowSpring) {
                                 reorderGrown = false
-                                // iOS 18 has already transferred the visual pan into
-                                // ScrollPosition. The iOS 17 fallback still clears it
-                                // here because it has no offset-based scroll API.
-                                if #unavailable(iOS 18.0) { reorderPan = 0 }
+                                // Only an iOS 18 handoff clears the visual pan through
+                                // QueueManualSnap18. Every fallback clears it here.
+                                if !transfersReorderPan { reorderPan = 0 }
                             }
                             onReorderActive(false)
                         }
