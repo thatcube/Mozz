@@ -342,6 +342,16 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// reach the top edge = the History section's height.
     private var detentTop: CGFloat { max(0, historyHeight) }
 
+    /// Temporary height reclaimed from the transport chrome during a reorder.
+    /// Applied to BOTH the visible viewport and an unconditional trailing spacer
+    /// so their difference (the maximum scroll offset) never changes, regardless
+    /// of queue length. Without the matching content growth, the scroll view can
+    /// clamp to a new offset as the viewport expands and cannot recover its prior
+    /// position when it shrinks.
+    private var activeReorderExtraHeight: CGFloat {
+        reorderGrown ? reorderExtraHeight : 0
+    }
+
     var body: some View {
         GeometryReader { geo in
             let baseH = geo.size.height
@@ -351,7 +361,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // `viewportH` (set below) stays on `baseH`, so the snap/detent math and
             // scroll position are unchanged — only the ScrollView's own frame and
             // the clip grow, revealing rows already laid out below the fold.
-            let grownH = baseH + (reorderGrown ? reorderExtraHeight : 0)
+            let grownH = baseH + activeReorderExtraHeight
             Group {
                 if #available(iOS 18.0, *) {
                     // iOS 18+: drive the snap ourselves for a fast, crisp settle we
@@ -565,12 +575,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
-            // Guarantee the card can always scroll to the very top: the
-            // scrollable content must be at least (History height + one
-            // viewport) tall. When Continue Playing is short, this pads empty
-            // space onto the BOTTOM (top-aligned) so the card still docks at the
-            // top instead of floating mid-screen.
+            // Guarantee the card can always scroll to the very top when the queue
+            // is short, then add the reorder delta OUTSIDE that minimum-height
+            // frame. This unconditionally grows content by exactly as much as the
+            // visible viewport — for short, medium, and long queues — keeping the
+            // maximum scroll offset invariant so SwiftUI never clamps (and loses)
+            // the user's current position.
             .frame(minHeight: detentTop + viewportH, alignment: .top)
+            .padding(.bottom, activeReorderExtraHeight)
             // Auto-scroll pan: while a row is dragged toward an edge, shift the whole
             // (frozen) content up/down so the rest of the up-next list is reachable.
             // 0 except during/settling a reorder. The grabbed row counter-offsets
@@ -893,7 +905,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// up-next list or past its last row, then re-run the follow math.
     private func stepAutoScroll() {
         guard dragFrom != nil, upNextRowH > 0 else { return }
-        let grownH = viewportH + reorderExtraHeight
+        let grownH = viewportH + activeReorderExtraHeight
         let y = reorderFingerY
         var delta: CGFloat = 0
         if y < reorderEdgeZone {
@@ -1462,4 +1474,3 @@ struct QueuePill: View {
         .buttonStyle(.plain)
     }
 }
-
