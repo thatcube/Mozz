@@ -283,7 +283,7 @@ public final class PlaybackEngine {
         // reshuffles when parked on the last slot with shuffle + repeat-all.
         queue.rebuildTransientState()
         pendingSeek = state.elapsed > 1 ? state.elapsed : nil
-        reload(autoplay: false)
+        reload(autoplay: false, initialElapsed: state.elapsed)
     }
 
     /// Enqueue tracks to play after the current track.
@@ -468,13 +468,22 @@ public final class PlaybackEngine {
     /// `logStartOnLoad` is `false` only for an in-place rebuild (e.g. superseding
     /// an in-flight load when the equalizer is toggled mid-load) where the same
     /// track keeps playing and must not emit a fresh `.started` listening event.
-    private func reload(autoplay: Bool, logStartOnLoad: Bool = true) {
+    /// `initialElapsed == nil` preserves the current position; new tracks use 0.
+    private func reload(autoplay: Bool, logStartOnLoad: Bool = true,
+                        initialElapsed: TimeInterval? = 0) {
         loadGeneration += 1
         let generation = loadGeneration
         cancelRecovery()          // a fresh load abandons any in-flight recovery
         player.pause()
         player.removeAllItems()
         loaded.removeAll()
+        if let initialElapsed {
+            if initialElapsed == 0 { pendingSeek = nil }
+            // Publish the new track with its own starting position immediately.
+            // Otherwise a rapid skip after seeking briefly gives the incoming
+            // track the outgoing track's seek target until the next 0.5s tick.
+            snapshot.elapsed = initialElapsed
+        }
 
         guard let track = queue.current else {
             currentTrack = nil
@@ -892,7 +901,7 @@ public final class PlaybackEngine {
             // item with the pre-toggle EQ state. Supersede it with a fresh load
             // carrying the new state, without re-logging the start.
             reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering,
-                   logStartOnLoad: false)
+                   logStartOnLoad: false, initialElapsed: nil)
         }
     }
 
@@ -972,6 +981,7 @@ public final class PlaybackEngine {
             onNeedsArtwork?(track)
             logStart(track)
         }
+        snapshot.elapsed = 0
         publish(status: .playing)
         report(.playing)
         refillLookahead()

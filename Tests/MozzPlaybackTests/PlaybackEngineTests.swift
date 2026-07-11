@@ -290,4 +290,23 @@ final class PlaybackSeekTests: XCTestCase {
         XCTAssertEqual(resolver.startSecondsLog.count, before,
                        "a range-seekable stream must seek natively, without re-resolving")
     }
+
+    func testSkipImmediatelyAfterSeekResetsElapsedForNewTrack() async {
+        let resolver = RecordingResolver(requiresServerSeek: true)
+        let engine = PlaybackEngine(resolver: resolver)
+        let tracks = [
+            Track(id: "t0", title: "T0", artistName: "A", duration: 200),
+            Track(id: "t1", title: "T1", artistName: "A", duration: 200)
+        ]
+        engine.play(tracks: tracks)
+        await engine.awaitPendingLoadsForTesting()
+
+        engine.seek(to: 42)
+        XCTAssertEqual(engine.snapshot.elapsed, 42)
+        engine.next()
+
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.elapsed, 0,
+                       "the incoming track must not inherit the previous seek target")
+    }
 }
