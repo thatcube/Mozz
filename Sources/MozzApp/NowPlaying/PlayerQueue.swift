@@ -217,6 +217,11 @@ struct QueueRowHeightKey: PreferenceKey {
 /// history row at index `i` maps to order position `i`, and an up-next row at
 /// index `j` maps to `history.count + 1 + j` (the current track — the card —
 /// sits at `history.count`, but isn't a tappable list row).
+private struct QueueReorderIdentity: Equatable {
+    let track: Track
+    let occurrence: Int
+}
+
 struct PlayerQueuePanel<Card: View, Controls: View>: View {
     var playback: PlaybackEngine
     /// Queue-open progress (0…1) — fades the list in alongside the docking card.
@@ -302,6 +307,17 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// until the drag crosses it, then shifts by exactly one row to open the gap —
     /// so the list never moves, only parts.
     @State private var dragFrom: Int? = nil
+    /// Stable identity of the grabbed queue occurrence. Track IDs alone are not
+    /// enough because the same track may be queued more than once.
+    @State private var draggedQueueItem: QueueReorderIdentity?
+    /// Exact up-next snapshot the visible drag geometry was calculated from.
+    /// Any external mutation invalidates those positional offsets.
+    @State private var reorderItemsAtPickup: [Track] = []
+    /// Once playback mutates the queue under an active finger, keep that gesture
+    /// cancelled until lift. Otherwise its next `.onChanged` would pick up the
+    /// different track that inherited the same row offset.
+    @State private var reorderInvalidated = false
+    @GestureState private var reorderGestureActive = false
     /// The insertion slot the grabbed row currently targets (0-based in up-next).
     @State private var dragTo: Int? = nil
     /// The grabbed row's live finger translation (points) from its grab point.
@@ -458,6 +474,13 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 autoScroller.onTick = nil
             }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
+            .onChange(of: playback.upNext) { oldItems, newItems in
+                guard dragFrom != nil, oldItems != newItems else { return }
+                cancelReorder()
+            }
+            .onChange(of: reorderGestureActive) { _, active in
+                if !active { reorderInvalidated = false }
+            }
         }
     }
 
@@ -832,6 +855,47 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// visually before the controls glide home.
     private let reorderChromeReturnDelay: TimeInterval = 0.5
 
+    private func reorderIdentity(at index: Int, in items: [Track]) -> QueueReorderIdentity {
+        let track = items[index]
+        let occurrence = items[..<index].reduce(into: 0) { count, candidate in
+            if candidate == track { count += 1 }
+        }
+        return QueueReorderIdentity(track: track, occurrence: occurrence)
+    }
+
+    private func index(of identity: QueueReorderIdentity, in items: [Track]) -> Int? {
+        var occurrence = 0
+        for (index, track) in items.enumerated() where track == identity.track {
+            if occurrence == identity.occurrence { return index }
+            occurrence += 1
+        }
+        return nil
+    }
+
+    /// Playback can advance while a handle is held (remote Next, natural finish).
+    /// The row offsets are positional, so any live queue mutation invalidates the
+    /// gesture. Cancel instead of ever committing those offsets to different items.
+    private func cancelReorder() {
+        guard dragFrom != nil || reorderGrown else { return }
+        reorderGeneration &+= 1
+        reorderInvalidated = true
+        autoScroller.stop()
+        autoScroller.onTick = nil
+        draggedQueueItem = nil
+        reorderItemsAtPickup = []
+        reorderScrollRequest = nil
+        withAnimation(reorderGrowSpring) {
+            dragFrom = nil
+            dragTo = nil
+            dragOffset = 0
+            reorderTranslation = 0
+            reorderFingerY = 0
+            reorderPan = 0
+            reorderGrown = false
+        }
+        onReorderActive(false)
+    }
+
     /// Vertical offset for up-next row `i` during an in-place reorder. The grabbed
     /// row follows the finger; every other row holds still until the grabbed row
     /// crosses it, then shifts by exactly one row height to open the insertion gap.
@@ -864,10 +928,18 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 // named space also gives the finger's position within the viewport,
                 // which drives the edge-zone auto-scroll.
                 DragGesture(minimumDistance: 8, coordinateSpace: .named("queueReorderSpace"))
+                    .updating($reorderGestureActive) { _, active, _ in
+                        active = true
+                    }
                     .onChanged { value in
                         guard let idx = upNextIndex else { return }
+                        guard !reorderInvalidated else { return }
                         if dragFrom == nil {
+                            let items = playback.upNext
+                            guard items.indices.contains(idx) else { return }
                             reorderGeneration &+= 1
+                            draggedQueueItem = reorderIdentity(at: idx, in: items)
+                            reorderItemsAtPickup = items
                             reorderScrollBase = scrollY
                             reorderPan = 0
                             reorderTranslation = 0
@@ -890,7 +962,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     .onEnded { _ in
                         autoScroller.stop()
                         autoScroller.onTick = nil
+                        reorderInvalidated = false
                         guard let from = dragFrom else { return }
+                        guard let draggedQueueItem,
+                              playback.upNext == reorderItemsAtPickup,
+                              index(of: draggedQueueItem, in: playback.upNext) == from else {
+                            cancelReorder()
+                            return
+                        }
                         let to = dragTo ?? from
                         let closeGeneration = reorderGeneration
                         if from != to { onCommitReorder(from, to) }
@@ -915,6 +994,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         dragTo = nil
                         dragOffset = 0
                         reorderTranslation = 0
+                        self.draggedQueueItem = nil
+                        reorderItemsAtPickup = []
                         DispatchQueue.main.asyncAfter(deadline: .now() + reorderChromeReturnDelay) {
                             // A newer drag may have begun (and even ended) during
                             // the delay. Only this drop's generation may close its
