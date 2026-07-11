@@ -26,6 +26,13 @@ struct SubsonicLoginView: View {
     var body: some View {
         Form {
             Section {
+                BrandHero(brand: .navidrome)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 8, trailing: 16))
+            .listRowSeparator(.hidden)
+
+            Section {
                 TextField("https://music.example.com", text: $serverURL)
                     .urlFieldStyle()
                     .accessibilityLabel("Server address")
@@ -75,7 +82,9 @@ struct SubsonicLoginView: View {
         .safeAreaInset(edge: .bottom) {
             SignInBar(title: "Sign In", isBusy: isBusy, isEnabled: canSubmit) { signIn() }
         }
-        .navigationTitle("Navidrome")
+        // The BrandHero is the on-screen title; keep the nav bar chrome-only
+        // (back button) with no redundant title text.
+        .navigationTitle("")
         .inlineNavigationTitle()
     }
 

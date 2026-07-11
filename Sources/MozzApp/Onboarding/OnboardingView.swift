@@ -4,142 +4,146 @@ import MozzCore
 /// The sign-in entry point: choose a backend to connect, or launch the offline
 /// demo (a synthetic catalog + bundled clip so the whole app works with no
 /// server — ideal for the simulator).
+///
+/// Design: clean / minimal. Identity comes from the pixel-art Mozz mark, the
+/// monochrome brand glyphs, and intentional whitespace — never decorative color.
+/// The three providers are grouped into ONE inset card with hairline dividers.
 struct OnboardingView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var isLoadingDemo = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image("MozzLogo")
-                        .interpolation(.none) // preserve crisp pixel-art edges
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 112, height: 112)
-                    Text("Mozz").font(.largeTitle.bold())
-                    Text("One app for your music, wherever it lives. Free forever. Open source.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+            VStack(spacing: 0) {
+                Spacer(minLength: 24)
 
-                Spacer()
+                brandHeader
 
-                VStack(spacing: 12) {
-                    NavigationLink {
-                        JellyfinLoginView()
-                    } label: {
-                        connectLabel(title: "Jellyfin", systemImage: "server.rack",
-                                     colors: Self.jellyfinColors, logo: "JellyfinLogo")
-                    }
-                    NavigationLink {
-                        PlexLoginView()
-                    } label: {
-                        connectLabel(title: "Plex", systemImage: "play.tv",
-                                     colors: Self.plexColors, logo: "PlexLogo", logoSize: 26)
-                    }
-                    NavigationLink {
-                        SubsonicLoginView()
-                    } label: {
-                        connectLabel(title: "Navidrome (Subsonic)", systemImage: "waveform",
-                                     colors: Self.navidromeColors, logo: "NavidromeLogo")
-                    }
+                Spacer(minLength: 32)
 
-                    #if targetEnvironment(simulator)
-                    // Simulator only: the offline demo (synthetic catalog +
-                    // bundled clip) — useful because the sim can't reach a real
-                    // server. Hidden on device builds (incl. Debug) so it's not
-                    // in the way for real use.
-                    Button {
-                        Task {
-                            isLoadingDemo = true
-                            try? await env.activateDemo()
-                            isLoadingDemo = false
-                        }
-                    } label: {
-                        connectLabel(title: "Try the offline demo", systemImage: "sparkles",
-                                     colors: Self.demoColors, isLoading: isLoadingDemo)
-                    }
-                    .disabled(isLoadingDemo)
-                    #endif
-                }
-                .tint(Color.primary)
-                .padding(.horizontal)
+                providerCard
+
+                #if targetEnvironment(simulator)
+                // Simulator only: the offline demo (synthetic catalog + bundled
+                // clip) — useful because the sim can't reach a real server.
+                // Hidden on device builds (incl. Debug) so it's not in the way.
+                demoButton
+                    .padding(.top, 20)
+                #endif
+
+                Spacer(minLength: 24)
 
                 Text("GPL-3.0 · your library stays on your device")
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .padding(.bottom)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            .padding()
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity)
         }
     }
 
-    /// A "connect" row with a brand-colored icon chip. We deliberately use each
-    /// service's signature COLOR with a neutral SF Symbol rather than embedding
-    /// the official Plex/Jellyfin/Navidrome logos (those are trademarked assets);
-    /// the color carries the recognition and nothing is reproduced.
-    private func connectLabel(
-        title: String,
-        systemImage: String,
-        colors: [Color],
-        logo: String? = nil,
-        logoSize: CGFloat = 20,
-        isLoading: Bool = false
-    ) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 38, height: 38)
-                if isLoading {
-                    ProgressView().tint(.white)
-                } else if let logo {
-                    // Official brand logo (a monochrome template SVG in the module
-                    // asset catalog), tinted white to sit on the colored chip.
-                    Image(logo, bundle: .module)
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: logoSize, height: logoSize)
-                        .foregroundStyle(.white)
-                } else {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-            Spacer()
-            Image(systemName: "chevron.forward")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+    // MARK: Brand header (upper third)
+
+    private var brandHeader: some View {
+        VStack(spacing: 10) {
+            Image("MozzLogo")
+                .interpolation(.none) // preserve crisp pixel-art edges
+                .resizable()
+                .scaledToFit()
+                .frame(width: 104, height: 104)
+                .accessibilityHidden(true)
+            Text("Mozz").font(.largeTitle.bold())
+            Text("One app for your music, wherever it lives.\nFree forever and open source.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    // MARK: Provider card (centered)
+
+    /// One grouped card holding the three providers, separated by hairline
+    /// dividers inset to align with the row text — a single calm surface instead
+    /// of three colored pills.
+    private var providerCard: some View {
+        VStack(spacing: 0) {
+            providerRow(brand: .jellyfin) { JellyfinLoginView() }
+            rowDivider
+            providerRow(brand: .plex) { PlexLoginView() }
+            rowDivider
+            providerRow(brand: .navidrome) { SubsonicLoginView() }
+        }
         .background(Color.mozzSecondaryBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .tint(.primary)
     }
 
-    // Brand signature colors (a gradient per service) for the icon chips.
-    private static let jellyfinColors = [
-        Color(red: 0.667, green: 0.361, blue: 0.765),   // #AA5CC3 purple
-        Color(red: 0.0,   green: 0.643, blue: 0.863),   // #00A4DC blue
-    ]
-    private static let plexColors = [
-        Color(red: 0.898, green: 0.627, blue: 0.051),   // #E5A00D gold
-        Color(red: 0.808, green: 0.451, blue: 0.086),   // #CE7316 amber
-    ]
-    private static let navidromeColors = [
-        Color(red: 0.180, green: 0.545, blue: 0.965),   // #2E8BF6 blue
-        Color(red: 0.094, green: 0.388, blue: 0.863),   // #1863DC deep blue
-    ]
-    private static let demoColors = [
-        Color.gray, Color.gray.opacity(0.7),
-    ]
+    private var rowDivider: some View {
+        Divider().padding(.leading, 56)
+    }
+
+    /// A provider row: monochrome brand glyph · name · chevron. Every row is a
+    /// single balanced line; the glyph is a template SVG tinted with the label
+    /// color (no chip, no gradient).
+    private func providerRow<Destination: View>(
+        brand: BrandStyle,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 14) {
+                Image(brand.logo, bundle: .module)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 26, height: 26)
+                    .foregroundStyle(.primary)
+                    .accessibilityHidden(true)
+                Text(brand.pickerName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(brand.pickerName)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    // MARK: Simulator demo
+
+    #if targetEnvironment(simulator)
+    private var demoButton: some View {
+        Button {
+            Task {
+                isLoadingDemo = true
+                try? await env.activateDemo()
+                isLoadingDemo = false
+            }
+        } label: {
+            HStack(spacing: 8) {
+                if isLoadingDemo {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "sparkles")
+                }
+                Text("Try the offline demo")
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+        }
+        .disabled(isLoadingDemo)
+    }
+    #endif
 }
