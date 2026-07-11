@@ -327,6 +327,15 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// reorderPan`; the pan is clamped so `effScroll` never rises above the top of
     /// the up-next list (you can't reorder into the now-playing card / History).
     @State private var reorderScrollBase: CGFloat = 0
+    /// One-shot request that transfers the reorder's visual edge-scroll pan into
+    /// the real iOS 18 `ScrollPosition` on drop. The request ID makes repeated
+    /// drops to the same Y distinct for `.onChange`.
+    @State private var reorderScrollRequest: QueueScrollRequest?
+    @State private var reorderScrollRequestID = 0
+    /// Identifies the current pickup/drop lifecycle so a delayed close from an
+    /// older drop cannot collapse a newer reorder that started and ended within
+    /// the 0.5-second return delay.
+    @State private var reorderGeneration = 0
     /// Drives the edge-zone auto-scroll while a row is held near the top/bottom.
     @State private var autoScroller = QueueAutoScroller()
 
@@ -374,6 +383,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                                                     viewportH: viewportH,
                                                     enabled: !reduceMotion,
                                                     resetToken: resetToken,
+                                                    externalScrollRequest: reorderScrollRequest,
+                                                    onExternalScrollApplied: { y in
+                                                        // The native scroll and visual-pan removal
+                                                        // happen in one transaction, so the pixels
+                                                        // do not move during the ownership handoff.
+                                                        scrollY = y
+                                                        reorderPan = 0
+                                                    },
                                                     onScrollY: { scrollY = $0 }))
                 } else {
                     // iOS 17 fallback: native ScrollTargetBehavior + ScrollViewReader
@@ -829,6 +846,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     .onChanged { value in
                         guard let idx = upNextIndex else { return }
                         if dragFrom == nil {
+                            reorderGeneration &+= 1
                             reorderScrollBase = scrollY
                             reorderPan = 0
                             reorderTranslation = 0
@@ -850,8 +868,20 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         autoScroller.stop()
                         guard let from = dragFrom else { return }
                         let to = dragTo ?? from
+                        let closeGeneration = reorderGeneration
                         if from != to { onCommitReorder(from, to) }
                         reorderDropHaptic()
+                        // Edge auto-scroll is a visual content pan while the native
+                        // ScrollView is frozen. On iOS 18, transfer its effective Y
+                        // into the real ScrollPosition before releasing the pan so
+                        // the list stays exactly where the drag scrolled it.
+                        if #available(iOS 18.0, *), abs(reorderPan) > 0.5 {
+                            reorderScrollRequestID &+= 1
+                            reorderScrollRequest = QueueScrollRequest(
+                                id: reorderScrollRequestID,
+                                y: reorderScrollBase + reorderPan
+                            )
+                        }
                         // Commit + clear the lift synchronously so SwiftUI renders one
                         // final frame in the new order (row lands in place instantly).
                         // Hold the grown viewport, auto-scroll pan, and slid-away chrome
@@ -862,12 +892,17 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         dragOffset = 0
                         reorderTranslation = 0
                         DispatchQueue.main.asyncAfter(deadline: .now() + reorderChromeReturnDelay) {
-                            // A new drag may have begun during the delay; if so, leave
-                            // its lifecycle alone and skip this deferred close.
-                            guard dragFrom == nil else { return }
+                            // A newer drag may have begun (and even ended) during
+                            // the delay. Only this drop's generation may close its
+                            // viewport/chrome lifecycle.
+                            guard dragFrom == nil,
+                                  reorderGeneration == closeGeneration else { return }
                             withAnimation(reorderGrowSpring) {
                                 reorderGrown = false
-                                reorderPan = 0
+                                // iOS 18 has already transferred the visual pan into
+                                // ScrollPosition. The iOS 17 fallback still clears it
+                                // here because it has no offset-based scroll API.
+                                if #unavailable(iOS 18.0) { reorderPan = 0 }
                             }
                             onReorderActive(false)
                         }
@@ -1022,6 +1057,11 @@ private struct BodyFade: ViewModifier, Animatable {
 
 // MARK: - Two-detent "stuck to top" snap scroll
 
+private struct QueueScrollRequest: Equatable {
+    let id: Int
+    let y: CGFloat
+}
+
 /// **iOS 18+ manual snap.** We own the whole thing so the settle is fast and
 /// crisp: the native `ScrollTargetBehavior` uses Apple's fixed release
 /// deceleration, which is not tunable and felt too slow. Instead we track the
@@ -1044,6 +1084,11 @@ private struct QueueManualSnap18: ViewModifier {
     var viewportH: CGFloat
     var enabled: Bool
     var resetToken: Int
+    /// One-shot offset transfer from reorder edge auto-scroll into the native
+    /// ScrollPosition. Applying it without animation is visually neutral because
+    /// the panel removes its equal-and-opposite visual pan in the same transaction.
+    var externalScrollRequest: QueueScrollRequest?
+    var onExternalScrollApplied: (CGFloat) -> Void
     /// Reports the live content offset so the panel can drive its pinned header.
     var onScrollY: (CGFloat) -> Void
 
@@ -1097,11 +1142,36 @@ private struct QueueManualSnap18: ViewModifier {
                 hasUserScrolled = false
                 pinToTop()
             }
+            .onChange(of: externalScrollRequest) { _, request in
+                guard let request else { return }
+                applyExternalScroll(request.y)
+            }
             .onChange(of: detentTop) { _, _ in
                 // Detent height can arrive/refine after first layout; keep the
                 // card pinned to the top until the user actually scrolls.
                 if !hasUserScrolled { pinToTop() }
             }
+    }
+
+    /// Convert the reorder overlay's temporary pan into the ScrollView's real
+    /// offset. No animation: the content is already visibly at `y`; this only
+    /// changes which layer owns that displacement.
+    private func applyExternalScroll(_ y: CGFloat) {
+        let target = max(0, y)
+        programmatic = true
+        hasUserScrolled = true
+        recentDelta = 0
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            scrollPos.scrollTo(y: target)
+            currentY = target
+            prevY = target
+            onExternalScrollApplied(target)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            programmatic = false
+        }
     }
 
     /// Reset to the docked (card-at-top) position, un-animated, and re-arm the
