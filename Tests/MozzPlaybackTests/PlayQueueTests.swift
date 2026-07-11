@@ -322,4 +322,55 @@ final class PlayQueueTests: XCTestCase {
         XCTAssertNotEqual(restored.order, orderBeforeWrap,
                           "first wrap after restore reshuffles (rebuildTransientState primed the cache)")
     }
+
+    // MARK: Clear up-next
+
+    func testClearUpNextDropsTailKeepsHistoryAndCurrent() {
+        var q = PlayQueue()
+        q.setItems(tracks(5), startingAt: 2)          // history t0,t1 · current t2 · up-next t3,t4
+        q.clearUpNext()
+        XCTAssertEqual(q.current?.id, "t2")
+        XCTAssertEqual(q.upNext.map(\.id), [])
+        XCTAssertEqual(q.history.map(\.id), ["t0", "t1"])
+        XCTAssertEqual(q.count, 3)
+        XCTAssertFalse(q.hasNext)
+    }
+
+    func testClearUpNextIsNoOpWhenNothingQueued() {
+        var q = PlayQueue()
+        q.setItems(tracks(3), startingAt: 2)          // current is already last
+        q.clearUpNext()
+        XCTAssertEqual(q.current?.id, "t2")
+        XCTAssertEqual(q.count, 3)
+        XCTAssertEqual(q.history.map(\.id), ["t0", "t1"])
+    }
+
+    // MARK: Move up-next
+
+    func testMoveUpNextReordersTailKeepsHistoryAndCurrent() {
+        var q = PlayQueue()
+        q.setItems(tracks(6), startingAt: 1)          // history t0 · current t1 · up-next t2,t3,t4,t5
+        q.moveUpNext(fromOffset: 0, toOffset: 2)      // move t2 down two slots
+        XCTAssertEqual(q.upNext.map(\.id), ["t3", "t4", "t2", "t5"])
+        XCTAssertEqual(q.current?.id, "t1")
+        XCTAssertEqual(q.history.map(\.id), ["t0"])
+    }
+
+    func testMoveUpNextToFrontUpdatesTheImmediateNext() {
+        var q = PlayQueue()
+        q.setItems(tracks(5), startingAt: 0)          // current t0 · up-next t1,t2,t3,t4
+        q.moveUpNext(fromOffset: 3, toOffset: 0)      // pull the last up-next to the front
+        XCTAssertEqual(q.upNext.map(\.id), ["t4", "t1", "t2", "t3"])
+        XCTAssertEqual(q.peekNext?.id, "t4")
+    }
+
+    func testMoveUpNextIsNoOpForSameOrOutOfRangeOffsets() {
+        var q = PlayQueue()
+        q.setItems(tracks(4), startingAt: 0)          // current t0 · up-next t1,t2,t3
+        let before = q.upNext.map(\.id)
+        q.moveUpNext(fromOffset: 1, toOffset: 1)      // same slot
+        q.moveUpNext(fromOffset: 0, toOffset: 9)      // to out of range
+        q.moveUpNext(fromOffset: 5, toOffset: 0)      // from out of range
+        XCTAssertEqual(q.upNext.map(\.id), before)
+    }
 }

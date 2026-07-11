@@ -47,6 +47,21 @@ final class DomainModelTests: XCTestCase {
         XCTAssertTrue(track.genres.isEmpty)
         XCTAssertNil(track.artwork)
     }
+
+    func testNowPlayingAudioFormatLabels() {
+        XCTAssertEqual(
+            AudioFormat(codec: "flac", sampleRateHz: 44_100).nowPlayingLabel,
+            "FLAC · 44.1 kHz"
+        )
+        XCTAssertEqual(
+            AudioFormat(codec: "pcm_s24le", sampleRateHz: 96_000).nowPlayingLabel,
+            "PCM · 96 kHz"
+        )
+        XCTAssertEqual(AudioFormat(codec: "dca").nowPlayingLabel, "DTS")
+        XCTAssertEqual(AudioFormat(codec: "future_codec").nowPlayingLabel, "FUTURE CODEC")
+        XCTAssertEqual(AudioFormat(container: "m4a").nowPlayingLabel, "M4A")
+        XCTAssertNil(AudioFormat().nowPlayingLabel)
+    }
 }
 
 final class PlaybackModeTests: XCTestCase {

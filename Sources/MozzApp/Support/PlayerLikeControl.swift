@@ -8,6 +8,8 @@ import MozzCore
 struct PlayerLikeControl: View {
     @EnvironmentObject private var env: AppEnvironment
     let track: Track
+    /// Glyph size, shared with the other player controls for a consistent look.
+    var glyphSize: CGFloat = PlayerControlMetrics.utilityGlyph
 
     @State private var isFavorite: Bool
 
@@ -32,7 +34,10 @@ struct PlayerLikeControl: View {
             Task { await env.setLiked(liked, track: snapshot) }
         } label: {
             Image(mozz: isFavorite ? "heart.fill" : "heart")
-                .foregroundStyle(isFavorite ? Color.pink : Color.secondary)
+                .resizable().scaledToFit()
+                .frame(width: glyphSize, height: glyphSize)
+                .foregroundStyle(isFavorite ? Color.pink : Color.primary)
+                .playerHitTarget()
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isFavorite ? "Unlike" : "Like")

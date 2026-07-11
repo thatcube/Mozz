@@ -1479,7 +1479,7 @@ public final class AppEnvironment: ObservableObject {
         PlaybackRemoteControl.next = { [weak self] in self?.playback.next() }
         PlaybackRemoteControl.previous = { [weak self] in self?.playback.previous() }
 
-        playback.$currentTrack
+        playback.currentTrackPublisher
             .removeDuplicates { $0?.id == $1?.id }
             .receive(on: RunLoop.main)
             .sink { [weak self] track in
@@ -1489,7 +1489,7 @@ public final class AppEnvironment: ObservableObject {
             }
             .store(in: &widgetCancellables)
 
-        playback.$snapshot
+        playback.snapshotPublisher
             .map(\.status)
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -1501,7 +1501,7 @@ public final class AppEnvironment: ObservableObject {
 
         // Keep the persisted elapsed position reasonably fresh while playing,
         // without hammering the disk on every 0.5s tick.
-        playback.$snapshot
+        playback.snapshotPublisher
             .throttle(for: .seconds(10), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in self?.persistPlaybackState() }
             .store(in: &widgetCancellables)
@@ -1514,7 +1514,7 @@ public final class AppEnvironment: ObservableObject {
         // showing a wrong "Pause". The snapshot only ticks while playing, so this
         // is silent when paused. 30s (≈120 reloads/hr) stays well under
         // WidgetKit's reload budget, so real playback never falsely goes neutral.
-        playback.$snapshot
+        playback.snapshotPublisher
             .filter { $0.status == .playing }
             .throttle(for: .seconds(30), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in self?.reloadWidget(MozzWidget.nowPlayingKind) }

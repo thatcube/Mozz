@@ -302,6 +302,40 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         refreshWrapCache()
     }
 
+    /// Drop the queued "up next" (everything after the current track), keeping
+    /// the played history and the current track. The current track stays where
+    /// it is (now the last row). Base `tracks` is rebuilt to the surviving set so
+    /// indices stay consistent. No-op when nothing is queued after the current.
+    public mutating func clearUpNext() {
+        guard order.indices.contains(position), position + 1 < order.count else { return }
+        let survivingBase = Array(order[0...position])
+        let newTracks = survivingBase.map { tracks[$0] }
+        tracks = newTracks
+        order = Array(newTracks.indices)
+        position = newTracks.count - 1
+        nextLoopOrder = nil
+        refreshWrapCache()
+    }
+
+    /// Reorder the "up next" queue by moving the item at up-next offset `from` to
+    /// offset `to` — both 0-based within the up-next tail (offset 0 is the track
+    /// that plays next). Uses final-position semantics: after the move the item
+    /// sits at offset `to`. Only the tail permutation (`order[(position+1)...]`)
+    /// changes — history, the current track, and shuffle/repeat state are all
+    /// untouched. The pre-roll cache is refreshed because moving the first up-next
+    /// item changes the very next track. No-op when out of range or `from == to`.
+    public mutating func moveUpNext(fromOffset from: Int, toOffset to: Int) {
+        guard position >= 0 else { return }
+        let tailStart = position + 1
+        let tailCount = order.count - tailStart
+        guard from >= 0, from < tailCount,
+              to >= 0, to < tailCount, from != to else { return }
+        let element = order.remove(at: tailStart + from)
+        order.insert(element, at: tailStart + to)
+        nextLoopOrder = nil
+        refreshWrapCache()
+    }
+
     // MARK: Repeat
 
     /// Set the repeat mode. Routed through a method (rather than a settable
