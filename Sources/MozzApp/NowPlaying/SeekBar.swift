@@ -18,9 +18,9 @@ struct SeekBar: View {
     // MARK: Tunables
     private let restHeight: CGFloat = 12
     private let seekHeight: CGFloat = 20
-    private let restFillOpacity: CGFloat = 0.65
-    private let restTrackOpacity: CGFloat = 0.22
-    private let seekTrackOpacity: CGFloat = 0.34
+    private let restFillOpacity: CGFloat = 0.82
+    private let restTrackOpacity: CGFloat = 0.30
+    private let seekTrackOpacity: CGFloat = 0.42
     private let restLabelOpacity: CGFloat = 0.5
     private let seekLabelScale: CGFloat = 1.14
     private let labelSpacing: CGFloat = 10
@@ -133,12 +133,16 @@ private struct AudioFormatBadge: View {
             .font(.caption2.weight(.semibold))
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary.opacity(0.72))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(.thinMaterial, in: Capsule())
+            // A fixed light wash stays luminous across artwork colors. Material
+            // sampled dark backdrops and made this pill look muddy.
+            .background {
+                Capsule().fill(.primary.opacity(0.16))
+            }
             .overlay {
-                Capsule().stroke(.primary.opacity(0.08), lineWidth: 0.5)
+                Capsule().stroke(.primary.opacity(0.12), lineWidth: 0.5)
             }
             .frame(maxWidth: 180)
             .accessibilityLabel(Text("Audio format \(label)"))
