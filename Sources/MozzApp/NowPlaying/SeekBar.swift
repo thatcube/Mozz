@@ -17,7 +17,7 @@ struct SeekBar: View {
     let onSeek: (Double) -> Void
 
     // MARK: Tunables
-    private let restHeight: CGFloat = 12
+    private let restHeight: CGFloat = 10
     private let seekHeight: CGFloat = 20
     private let seekScale: CGFloat = 1.015
     private let restFillOpacity: CGFloat = 0.82
