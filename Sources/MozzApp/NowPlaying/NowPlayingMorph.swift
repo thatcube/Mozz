@@ -1072,6 +1072,7 @@ struct NowPlayingMorphContainer: View {
         return SeekBar(
             elapsed: snapshot.elapsed,
             duration: snapshot.duration,
+            trackID: snapshot.currentTrackID,
             formatLabel: formatLabel
         ) { target in
             playback.seek(to: target)

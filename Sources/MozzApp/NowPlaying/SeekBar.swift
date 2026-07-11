@@ -11,6 +11,7 @@ import UIKit
 struct SeekBar: View {
     let elapsed: Double
     let duration: Double
+    let trackID: String?
     let formatLabel: String?
     /// Called once, on release, with the target time to seek to.
     let onSeek: (Double) -> Void
@@ -18,6 +19,7 @@ struct SeekBar: View {
     // MARK: Tunables
     private let restHeight: CGFloat = 12
     private let seekHeight: CGFloat = 20
+    private let seekScale: CGFloat = 1.025
     private let restFillOpacity: CGFloat = 0.82
     private let restTrackOpacity: CGFloat = 0.30
     private let seekTrackOpacity: CGFloat = 0.42
@@ -28,8 +30,13 @@ struct SeekBar: View {
 
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
+    @State private var settlingValue: Double?
+    @State private var settleGeneration = 0
 
-    private var current: Double { scrubbing ? scrubValue : elapsed }
+    private var current: Double {
+        if scrubbing { return scrubValue }
+        return settlingValue ?? elapsed
+    }
     private var progress: Double {
         guard duration > 0 else { return 0 }
         return min(max(current / duration, 0), 1)
@@ -40,6 +47,17 @@ struct SeekBar: View {
         VStack(spacing: labelSpacing) {
             bar
             labels
+        }
+        .onChange(of: elapsed) { _, newElapsed in
+            guard let settlingValue,
+                  abs(newElapsed - settlingValue) <= 1 else { return }
+            settleGeneration &+= 1
+            self.settlingValue = nil
+        }
+        .onChange(of: trackID) { _, _ in
+            settleGeneration &+= 1
+            settlingValue = nil
+            scrubbing = false
         }
     }
 
@@ -57,6 +75,9 @@ struct SeekBar: View {
                     .frame(width: min(w, max(h, w * progress)))
             }
             .frame(width: w, height: h)
+            // Scale the complete painted bar inside its fixed 20-point layout
+            // reservation, so pickup feels responsive without moving the labels.
+            .scaleEffect(scrubbing ? seekScale : 1)
             .frame(width: w, height: geo.size.height, alignment: .center)
             .contentShape(Rectangle())
             .gesture(seekGesture(width: w))
@@ -71,6 +92,8 @@ struct SeekBar: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if !scrubbing {
+                    settleGeneration &+= 1
+                    settlingValue = nil
                     withAnimation(anim) { scrubbing = true }
                     impact()
                 }
@@ -79,8 +102,20 @@ struct SeekBar: View {
             .onEnded { value in
                 let target = time(atX: value.location.x, width: width)
                 scrubValue = target
+                // Keep displaying the released target until the player's periodic
+                // snapshot catches up. Handing control straight back to `elapsed`
+                // exposes its pre-seek value for up to one tick and makes the fill
+                // spring away, then back.
+                settleGeneration &+= 1
+                let generation = settleGeneration
+                settlingValue = target
                 onSeek(target)
                 withAnimation(anim) { scrubbing = false }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard settleGeneration == generation else { return }
+                    settlingValue = nil
+                }
             }
     }
 
