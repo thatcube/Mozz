@@ -944,8 +944,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
 
     /// One display-linked auto-scroll step: if the finger sits in the top/bottom
     /// edge zone, advance the content pan toward that edge. Velocity ramps in and
-    /// out with a smoothstep curve and is integrated by elapsed time, so 60 Hz and
-    /// 120 Hz devices move identically without unsynchronized timer jumps.
+    /// out with a smoothstep curve and is integrated by elapsed time, so movement
+    /// stays consistent without unsynchronized timer jumps.
     private func stepAutoScroll(deltaTime: TimeInterval) {
         guard dragFrom != nil, upNextRowH > 0 else { return }
         let grownH = viewportH + activeReorderExtraHeight
@@ -960,12 +960,16 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
         }
         guard delta != 0 else { return }
         let count = playback.upNext.count
-        // Floor: top of the up-next list (can't reorder into the now-playing card or
-        // History). Ceiling: the last row resting at the bottom of the viewport.
+        // Floor: normally the top of the up-next list (can't reorder into the
+        // now-playing card or History). If the drag STARTED above that detent,
+        // however, keep its starting offset as the floor. Forcing such a drag
+        // forward to `detentTop` on the first tick is the large snap this clamp
+        // must prevent. The ceiling likewise includes the starting offset so an
+        // approximate content-bottom measurement can never snap backward.
         let contentBottom = detentTop + cardHeight + queueControlsH
             + CGFloat(count) * upNextRowH + 24
-        let minEff = detentTop
-        let maxEff = max(minEff, contentBottom - grownH)
+        let minEff = min(reorderScrollBase, detentTop)
+        let maxEff = max(reorderScrollBase, max(minEff, contentBottom - grownH))
         let eff = reorderScrollBase + reorderPan
         let newEff = min(max(eff + delta, minEff), maxEff)
         guard newEff != eff else { return }
@@ -993,10 +997,9 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     #endif
 }
 
-/// Display-synchronized ticker for edge auto-scroll. On iOS it follows the screen
-/// refresh rate (including 120 Hz ProMotion) and reports elapsed time so scroll
-/// velocity is frame-rate independent. Held in `@State` so it survives view
-/// re-renders while the finger remains motionless at an edge.
+/// Display-synchronized 60 Hz ticker for edge auto-scroll. It reports elapsed
+/// time so scroll velocity is frame-rate independent. Held in `@State` so it
+/// survives view re-renders while the finger remains motionless at an edge.
 #if canImport(UIKit)
 private final class QueueAutoScroller {
     private var displayLink: CADisplayLink?
@@ -1007,9 +1010,7 @@ private final class QueueAutoScroller {
     func start() {
         stop()
         let link = CADisplayLink(target: proxy, selector: #selector(proxy.tick(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(
-            minimum: 60, maximum: 120, preferred: 120
-        )
+        link.preferredFramesPerSecond = 60
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
