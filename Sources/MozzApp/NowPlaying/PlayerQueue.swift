@@ -469,10 +469,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .onPreferenceChange(QueueControlsHeightKey.self) { queueControlsH = $0 }
             .onPreferenceChange(QueueRowHeightKey.self) { if $0 > 0 { upNextRowH = $0 } }
             .onAppear { viewportH = baseH }
-            .onDisappear {
-                autoScroller.stop()
-                autoScroller.onTick = nil
-            }
+            .onDisappear { cancelReorder() }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
             .onChange(of: playback.upNext) { oldItems, newItems in
                 guard dragFrom != nil, oldItems != newItems else { return }
@@ -813,6 +810,18 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                 .opacity(dimmed ? 0.6 : 1)
             }
             .buttonStyle(.plain)
+            .accessibilityActions {
+                if let upNextIndex, upNextIndex > 0 {
+                    Button("Move Up") {
+                        accessibilityMoveUpNext(from: upNextIndex, by: -1)
+                    }
+                }
+                if let upNextIndex, upNextIndex < playback.upNext.count - 1 {
+                    Button("Move Down") {
+                        accessibilityMoveUpNext(from: upNextIndex, by: 1)
+                    }
+                }
+            }
 
             if showsHandle {
                 reorderHandle(upNextIndex: upNextIndex)
@@ -870,6 +879,31 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             occurrence += 1
         }
         return nil
+    }
+
+    /// Commit only while the queue still exactly matches the geometry or
+    /// accessibility action that chose these offsets.
+    @discardableResult
+    private func commitValidatedReorder(from: Int, to: Int,
+                                        identity: QueueReorderIdentity,
+                                        expectedItems: [Track]) -> Bool {
+        let currentItems = playback.upNext
+        guard currentItems == expectedItems,
+              currentItems.indices.contains(to),
+              index(of: identity, in: currentItems) == from else { return false }
+        if from != to { onCommitReorder(from, to) }
+        return true
+    }
+
+    private func accessibilityMoveUpNext(from: Int, by distance: Int) {
+        let items = playback.upNext
+        let to = from + distance
+        guard items.indices.contains(from), items.indices.contains(to) else { return }
+        let identity = reorderIdentity(at: from, in: items)
+        if commitValidatedReorder(from: from, to: to,
+                                  identity: identity, expectedItems: items) {
+            reorderMoveHaptic()
+        }
     }
 
     /// Playback can advance while a handle is held (remote Next, natural finish).
@@ -964,15 +998,15 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         autoScroller.onTick = nil
                         reorderInvalidated = false
                         guard let from = dragFrom else { return }
+                        let to = dragTo ?? from
                         guard let draggedQueueItem,
-                              playback.upNext == reorderItemsAtPickup,
-                              index(of: draggedQueueItem, in: playback.upNext) == from else {
+                              commitValidatedReorder(from: from, to: to,
+                                                     identity: draggedQueueItem,
+                                                     expectedItems: reorderItemsAtPickup) else {
                             cancelReorder()
                             return
                         }
-                        let to = dragTo ?? from
                         let closeGeneration = reorderGeneration
-                        if from != to { onCommitReorder(from, to) }
                         reorderDropHaptic()
                         // Edge auto-scroll is a visual content pan while the native
                         // ScrollView is frozen. On iOS 18, transfer its effective Y
