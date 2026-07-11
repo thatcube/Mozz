@@ -366,6 +366,11 @@ struct NowPlayingMorphContainer: View {
                                   dismiss: { closeRatingPicker() }) {
                 RatingBubbleContent(rating: playerRating) { setPlayerRating($0, track: track) }
             }
+            // Now Playing remains white-on-artwork regardless of the app/system
+            // appearance. Scope dark semantics to this bubble so its primary /
+            // secondary stars and glass stay consistent without affecting menus
+            // on library rows.
+            .environment(\.colorScheme, .dark)
             .accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { closeRatingPicker() }
         }
@@ -391,6 +396,7 @@ struct NowPlayingMorphContainer: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
                 }
+                .environment(\.colorScheme, .dark)
                 .allowsHitTesting(false)
             }
         }
