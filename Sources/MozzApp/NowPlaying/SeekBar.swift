@@ -19,14 +19,14 @@ struct SeekBar: View {
     // MARK: Tunables
     private let restHeight: CGFloat = 12
     private let seekHeight: CGFloat = 20
-    private let seekScale: CGFloat = 1.025
+    private let seekScale: CGFloat = 1.015
     private let restFillOpacity: CGFloat = 0.82
     private let restTrackOpacity: CGFloat = 0.30
     private let seekTrackOpacity: CGFloat = 0.42
     private let restLabelOpacity: CGFloat = 0.5
     private let seekLabelScale: CGFloat = 1.14
     private let labelSpacing: CGFloat = 10
-    private let anim: Animation = .spring(response: 0.30, dampingFraction: 0.82)
+    private let anim: Animation = .smooth(duration: 0.34)
 
     @State private var scrubbing = false
     @State private var scrubValue = 0.0
@@ -94,7 +94,7 @@ struct SeekBar: View {
                 if !scrubbing {
                     settleGeneration &+= 1
                     settlingValue = nil
-                    withAnimation(anim) { scrubbing = true }
+                    scrubbing = true
                     impact()
                 }
                 scrubValue = time(atX: value.location.x, width: width)
@@ -110,7 +110,7 @@ struct SeekBar: View {
                 let generation = settleGeneration
                 settlingValue = target
                 onSeek(target)
-                withAnimation(anim) { scrubbing = false }
+                scrubbing = false
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     guard settleGeneration == generation else { return }
