@@ -731,13 +731,15 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             ForEach(Array(items.enumerated()), id: \.offset) { index, track in
                 row(track: track, orderPosition: base + index,
                     showsHandle: true, upNextIndex: index)
-                    // Lift the grabbed row: a faint elevated card + shadow + slight
-                    // scale so it reads as picked up above the others.
+                    // Expand only the painted pickup container by the same six-point
+                    // inset the artwork already has vertically. The row's layout
+                    // remains unchanged while the 12-point outer corner stays
+                    // concentric with the artwork's six-point corner.
                     .background {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(.white.opacity(dragFrom == index ? 0.14 : 0))
+                            .padding(.horizontal, -6)
                     }
-                    .scaleEffect(dragFrom == index ? 1.03 : 1)
                     .shadow(color: .black.opacity(dragFrom == index ? 0.3 : 0),
                             radius: 14, y: 6)
                     .offset(y: reorderOffset(index))
