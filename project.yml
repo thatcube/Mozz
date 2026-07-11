@@ -52,6 +52,8 @@ targets:
         CFBundleDisplayName: Mozz
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Allow display-linked interactions to follow ProMotion up to 120 Hz.
+        CADisableMinimumFrameDurationOnPhone: true
         UILaunchScreen:
           UIColorName: SplashBackground
           UIImageName: MozzLogo

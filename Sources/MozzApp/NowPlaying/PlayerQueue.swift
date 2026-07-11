@@ -439,6 +439,10 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .onPreferenceChange(QueueControlsHeightKey.self) { queueControlsH = $0 }
             .onPreferenceChange(QueueRowHeightKey.self) { if $0 > 0 { upNextRowH = $0 } }
             .onAppear { viewportH = baseH }
+            .onDisappear {
+                autoScroller.stop()
+                autoScroller.onTick = nil
+            }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
         }
     }
@@ -802,10 +806,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// return.
     private let reorderGrowSpring = Animation.spring(response: 0.34, dampingFraction: 0.9)
     /// How close (points) the finger must be to the top/bottom edge of the grown
-    /// viewport before the list auto-scrolls, and the peak scroll speed (points per
-    /// ~60 fps tick) at the very edge — ramped down to 0 at the zone's inner border.
+    /// viewport before the list auto-scrolls, and the peak speed at the very edge.
+    /// Speed is time-based (not points-per-timer-tick) and enters on a smoothstep
+    /// curve so crossing into the zone never kicks the list abruptly.
     private let reorderEdgeZone: CGFloat = 84
-    private let reorderMaxScrollPerTick: CGFloat = 13
+    private let reorderMaxScrollSpeed: CGFloat = 420
     /// After dropping a row, hold the grown viewport + slid-away chrome for this long
     /// before shrinking back and returning the controls, so the placement settles
     /// visually before the controls glide home.
@@ -857,7 +862,9 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                                 dragFrom = idx
                                 dragTo = idx
                             }
-                            autoScroller.onTick = { stepAutoScroll() }
+                            autoScroller.onTick = { deltaTime in
+                                stepAutoScroll(deltaTime: deltaTime)
+                            }
                             autoScroller.start()
                         }
                         reorderTranslation = value.translation.height
@@ -866,6 +873,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     }
                     .onEnded { _ in
                         autoScroller.stop()
+                        autoScroller.onTick = nil
                         guard let from = dragFrom else { return }
                         let to = dragTo ?? from
                         let closeGeneration = reorderGeneration
@@ -934,21 +942,21 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
         }
     }
 
-    /// One auto-scroll tick: if the finger sits in the top/bottom edge zone of the
-    /// grown viewport, advance the content pan toward that edge (ramped by how deep
-    /// into the zone the finger is), clamped so it never scrolls above the top of the
-    /// up-next list or past its last row, then re-run the follow math.
-    private func stepAutoScroll() {
+    /// One display-linked auto-scroll step: if the finger sits in the top/bottom
+    /// edge zone, advance the content pan toward that edge. Velocity ramps in and
+    /// out with a smoothstep curve and is integrated by elapsed time, so 60 Hz and
+    /// 120 Hz devices move identically without unsynchronized timer jumps.
+    private func stepAutoScroll(deltaTime: TimeInterval) {
         guard dragFrom != nil, upNextRowH > 0 else { return }
         let grownH = viewportH + activeReorderExtraHeight
         let y = reorderFingerY
         var delta: CGFloat = 0
         if y < reorderEdgeZone {
             let depth = (reorderEdgeZone - max(0, y)) / reorderEdgeZone
-            delta = -reorderMaxScrollPerTick * depth        // scroll up
+            delta = -reorderMaxScrollSpeed * smoothEdgeDepth(depth) * CGFloat(deltaTime)
         } else if y > grownH - reorderEdgeZone {
             let depth = (max(0, y) - (grownH - reorderEdgeZone)) / reorderEdgeZone
-            delta = reorderMaxScrollPerTick * min(1, depth) // scroll down
+            delta = reorderMaxScrollSpeed * smoothEdgeDepth(depth) * CGFloat(deltaTime)
         }
         guard delta != 0 else { return }
         let count = playback.upNext.count
@@ -963,6 +971,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
         guard newEff != eff else { return }
         reorderPan = newEff - reorderScrollBase
         updateReorderFollow()
+    }
+
+    private func smoothEdgeDepth(_ raw: CGFloat) -> CGFloat {
+        let t = min(1, max(0, raw))
+        return t * t * (3 - 2 * t)
     }
 
     #if canImport(UIKit)
@@ -980,33 +993,83 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     #endif
 }
 
-/// A tiny ~60 fps ticker that drives the edge-zone auto-scroll during a drag-
-/// reorder. Held in `@State` so it survives view re-renders; started on pickup and
-/// stopped on drop. The tick closure (set fresh each pickup) reads/writes the
-/// panel's `@State` — whose backing storage is stable — so the timer can advance
-/// the pan while the finger is held motionless at an edge.
+/// Display-synchronized ticker for edge auto-scroll. On iOS it follows the screen
+/// refresh rate (including 120 Hz ProMotion) and reports elapsed time so scroll
+/// velocity is frame-rate independent. Held in `@State` so it survives view
+/// re-renders while the finger remains motionless at an edge.
+#if canImport(UIKit)
 private final class QueueAutoScroller {
-    private var timer: Timer?
-    var onTick: (() -> Void)?
+    private var displayLink: CADisplayLink?
+    private var lastTimestamp: CFTimeInterval?
+    private lazy var proxy = QueueAutoScrollDisplayLinkProxy(owner: self)
+    var onTick: ((TimeInterval) -> Void)?
 
     func start() {
         stop()
-        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.onTick?()
-        }
-        // Common mode so it keeps firing during the touch-tracking run loop mode.
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
+        let link = CADisplayLink(target: proxy, selector: #selector(proxy.tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 60, maximum: 120, preferred: 120
+        )
+        link.add(to: .main, forMode: .common)
+        displayLink = link
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        displayLink?.invalidate()
+        displayLink = nil
+        lastTimestamp = nil
+    }
+
+    fileprivate func tick(_ link: CADisplayLink) {
+        let elapsed = lastTimestamp.map { link.timestamp - $0 } ?? link.duration
+        lastTimestamp = link.timestamp
+        // Never convert a stalled frame into a giant catch-up jump.
+        onTick?(min(max(elapsed, 0), 1.0 / 30.0))
     }
 
     deinit { stop() }
 }
 
+private final class QueueAutoScrollDisplayLinkProxy: NSObject {
+    weak var owner: QueueAutoScroller?
+
+    init(owner: QueueAutoScroller) {
+        self.owner = owner
+    }
+
+    @objc func tick(_ link: CADisplayLink) {
+        owner?.tick(link)
+    }
+}
+#else
+private final class QueueAutoScroller {
+    private var timer: Timer?
+    private var lastTick: Date?
+    var onTick: ((TimeInterval) -> Void)?
+
+    func start() {
+        stop()
+        lastTick = Date()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let now = Date()
+            let elapsed = now.timeIntervalSince(lastTick ?? now)
+            lastTick = now
+            onTick?(min(max(elapsed, 0), 1.0 / 30.0))
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        lastTick = nil
+    }
+
+    deinit { stop() }
+}
+#endif
 /// Slides the queue body (pills + "Queue" header + Continue-Playing list) DOWN by
 /// `distance` at q=0 so it rises up from below the scrub bar into place by q=1,
 /// holding at the bottom until `start` so it travels up AS the hero row fades out
