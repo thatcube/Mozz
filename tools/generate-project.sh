@@ -13,7 +13,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # SwiftPM in a worktree/bare-repository host needs this to resolve packages.
-export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:-'safe.bareRepository=all'}"
+# Append rather than default-assign: the environment may already inject other
+# params (e.g. credential helpers), in which case a ':-' default never applies
+# and SwiftPM resolve fails with "Couldn't get the list of tags".
+[[ "${GIT_CONFIG_PARAMETERS:-}" == *safe.bareRepository* ]] || \
+  export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+${GIT_CONFIG_PARAMETERS} }'safe.bareRepository=all'"
 
 if ! command -v xcodegen >/dev/null 2>&1; then
   echo "xcodegen not found. Install it with: brew install xcodegen" >&2
