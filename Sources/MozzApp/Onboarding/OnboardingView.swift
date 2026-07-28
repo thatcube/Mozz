@@ -32,16 +32,36 @@ struct OnboardingView: View {
             // instead of being clipped.
             GeometryReader { proxy in
                 ScrollView {
+                    // ONE flat stack on purpose. The spacers share the leftover
+                    // height between them, which is what balances the page — put
+                    // any of them inside a nested stack and that stack absorbs
+                    // all the slack on its own, pinning the brand to the top and
+                    // the card to the bottom.
                     VStack(spacing: 0) {
-                        Spacer(minLength: 24)
-
                         if isWide {
+                            Spacer(minLength: 24)
                             wideLayout(availableWidth: proxy.size.width - horizontalPadding * 2)
+                            Spacer(minLength: 24)
                         } else {
-                            compactLayout
-                        }
+                            Spacer(minLength: 24)
 
-                        Spacer(minLength: 24)
+                            brandHeader(alignment: .center)
+
+                            Spacer(minLength: 32)
+
+                            providerCard
+
+                            #if targetEnvironment(simulator)
+                            // Simulator only: the offline demo (synthetic catalog
+                            // + bundled clip) — useful because the sim can't reach
+                            // a real server. Hidden on device builds (incl. Debug)
+                            // so it's not in the way.
+                            demoButton
+                                .padding(.top, 20)
+                            #endif
+
+                            Spacer(minLength: 24)
+                        }
 
                         Text("GPL-3.0 · your library stays on your device")
                             .font(.caption2)
@@ -77,25 +97,6 @@ struct OnboardingView: View {
                 #endif
             }
             .frame(width: columns * 0.6)
-        }
-    }
-
-    /// The original single centered column, unchanged on iPhone.
-    private var compactLayout: some View {
-        VStack(spacing: 0) {
-            brandHeader(alignment: .center)
-
-            Spacer(minLength: 32)
-
-            providerCard
-
-            #if targetEnvironment(simulator)
-            // Simulator only: the offline demo (synthetic catalog + bundled
-            // clip) — useful because the sim can't reach a real server.
-            // Hidden on device builds (incl. Debug) so it's not in the way.
-            demoButton
-                .padding(.top, 20)
-            #endif
         }
     }
 
