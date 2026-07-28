@@ -8,62 +8,115 @@ import MozzCore
 /// Design: clean / minimal. Identity comes from the pixel-art Mozz mark, the
 /// monochrome brand glyphs, and intentional whitespace — never decorative color.
 /// The three providers are grouped into ONE inset card with hairline dividers.
+///
+/// Layout adapts to width. A compact width (iPhone) stacks the brand above the
+/// card, centered. A regular width (iPad, and the large iPhones in landscape)
+/// splits into two columns — brand left-aligned on the left, providers on the
+/// right — because a single centered column strands the card far below a lone
+/// logo on a wide, short canvas. This mirrors the tvOS chooser in Plozz, which
+/// solves the same problem with the same side-by-side split.
 struct OnboardingView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isLoadingDemo = false
+
+    private var isWide: Bool { horizontalSizeClass == .regular }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Spacer(minLength: 24)
+            // The content is centered in the available height, but stays
+            // scrollable when it doesn't fit (landscape, large Dynamic Type)
+            // instead of being clipped.
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 24)
 
-                brandHeader
+                        if isWide {
+                            wideLayout
+                        } else {
+                            compactLayout
+                        }
 
-                Spacer(minLength: 32)
+                        Spacer(minLength: 24)
 
-                providerCard
-
-                #if targetEnvironment(simulator)
-                // Simulator only: the offline demo (synthetic catalog + bundled
-                // clip) — useful because the sim can't reach a real server.
-                // Hidden on device builds (incl. Debug) so it's not in the way.
-                demoButton
-                    .padding(.top, 20)
-                #endif
-
-                Spacer(minLength: 24)
-
-                Text("GPL-3.0 · your library stays on your device")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                        Text("GPL-3.0 · your library stays on your device")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, isWide ? 48 : 24)
+                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                }
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity)
         }
     }
 
-    // MARK: Brand header (upper third)
+    // MARK: Layouts
 
-    private var brandHeader: some View {
-        VStack(spacing: 10) {
+    /// Two columns: brand on the left, the provider card (and demo button) on
+    /// the right, both vertically centered against each other. Capped and
+    /// centered as a unit so the pair doesn't sprawl across a 13" iPad.
+    private var wideLayout: some View {
+        HStack(alignment: .center, spacing: 64) {
+            brandHeader(alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 20) {
+                providerCard
+                #if targetEnvironment(simulator)
+                demoButton
+                #endif
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: 980)
+    }
+
+    /// The original single centered column, unchanged on iPhone.
+    private var compactLayout: some View {
+        VStack(spacing: 0) {
+            brandHeader(alignment: .center)
+
+            Spacer(minLength: 32)
+
+            providerCard
+
+            #if targetEnvironment(simulator)
+            // Simulator only: the offline demo (synthetic catalog + bundled
+            // clip) — useful because the sim can't reach a real server.
+            // Hidden on device builds (incl. Debug) so it's not in the way.
+            demoButton
+                .padding(.top, 20)
+            #endif
+        }
+    }
+
+    // MARK: Brand header
+
+    /// Logo · wordmark · tagline. `alignment` drives both the stack and the
+    /// text, so the leading variant reads as one flush-left block rather than
+    /// centered text inside a left-aligned column.
+    private func brandHeader(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 10) {
             Image("MozzLogo")
                 .interpolation(.none) // preserve crisp pixel-art edges
                 .resizable()
                 .scaledToFit()
-                .frame(width: 104, height: 104)
+                .frame(width: isWide ? 128 : 104, height: isWide ? 128 : 104)
                 .accessibilityHidden(true)
             Text("Mozz").font(.largeTitle.bold())
             Text("One app for your music, wherever it lives.\nFree forever and open source.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(alignment == .leading ? .leading : .center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
-    // MARK: Provider card (centered)
+    // MARK: Provider card
 
     /// One grouped card holding the three providers, separated by hairline
     /// dividers inset to align with the row text — a single calm surface instead
