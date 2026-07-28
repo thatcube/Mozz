@@ -11,16 +11,19 @@ import MozzCore
 ///
 /// Layout adapts to width. A compact width (iPhone) stacks the brand above the
 /// card, centered. A regular width (iPad, and the large iPhones in landscape)
-/// splits into two columns — brand left-aligned on the left, providers on the
-/// right — because a single centered column strands the card far below a lone
-/// logo on a wide, short canvas. This mirrors the tvOS chooser in Plozz, which
-/// solves the same problem with the same side-by-side split.
+/// splits into two columns — brand on the left, providers on the right — because
+/// a single centered column strands the card far below a lone logo on a wide,
+/// short canvas. This mirrors the tvOS chooser in Plozz, down to its 40/60 split:
+/// the card carries three rows of text and needs the greater share.
 struct OnboardingView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isLoadingDemo = false
 
     private var isWide: Bool { horizontalSizeClass == .regular }
+
+    /// Gutter either side of the content.
+    private var horizontalPadding: CGFloat { isWide ? 48 : 24 }
 
     var body: some View {
         NavigationStack {
@@ -33,7 +36,7 @@ struct OnboardingView: View {
                         Spacer(minLength: 24)
 
                         if isWide {
-                            wideLayout
+                            wideLayout(availableWidth: proxy.size.width - horizontalPadding * 2)
                         } else {
                             compactLayout
                         }
@@ -44,7 +47,7 @@ struct OnboardingView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal, isWide ? 48 : 24)
+                    .padding(.horizontal, horizontalPadding)
                     .padding(.bottom, 20)
                     .frame(maxWidth: .infinity, minHeight: proxy.size.height)
                 }
@@ -54,13 +57,18 @@ struct OnboardingView: View {
 
     // MARK: Layouts
 
-    /// Two columns: brand on the left, the provider card (and demo button) on
-    /// the right, both vertically centered against each other. Capped and
-    /// centered as a unit so the pair doesn't sprawl across a 13" iPad.
-    private var wideLayout: some View {
-        HStack(alignment: .center, spacing: 64) {
-            brandHeader(alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    /// Two columns, vertically centered against each other: brand on the left,
+    /// the provider card (and demo button) on the right. The widths are split
+    /// explicitly rather than left to the stack, which would divide the space
+    /// evenly and leave the card cramped next to a mostly-empty brand column.
+    private func wideLayout(availableWidth: CGFloat) -> some View {
+        // Capped so the pair doesn't sprawl across a 13" iPad.
+        let gap: CGFloat = 56
+        let columns = min(availableWidth, 1000) - gap
+
+        return HStack(alignment: .center, spacing: gap) {
+            brandHeader(alignment: .center)
+                .frame(width: columns * 0.4)
 
             VStack(spacing: 20) {
                 providerCard
@@ -68,9 +76,8 @@ struct OnboardingView: View {
                 demoButton
                 #endif
             }
-            .frame(maxWidth: .infinity)
+            .frame(width: columns * 0.6)
         }
-        .frame(maxWidth: 980)
     }
 
     /// The original single centered column, unchanged on iPhone.
@@ -94,9 +101,7 @@ struct OnboardingView: View {
 
     // MARK: Brand header
 
-    /// Logo · wordmark · tagline. `alignment` drives both the stack and the
-    /// text, so the leading variant reads as one flush-left block rather than
-    /// centered text inside a left-aligned column.
+    /// Logo · wordmark · tagline, as one centered block.
     private func brandHeader(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 10) {
             Image("MozzLogo")
@@ -120,7 +125,7 @@ struct OnboardingView: View {
 
     /// One grouped card holding the three providers, separated by hairline
     /// dividers inset to align with the row text — a single calm surface instead
-    /// of three colored pills.
+    /// of three separate buttons.
     private var providerCard: some View {
         VStack(spacing: 0) {
             providerRow(brand: .jellyfin) { JellyfinLoginView() }
@@ -134,13 +139,15 @@ struct OnboardingView: View {
         .tint(.primary)
     }
 
+    /// Inset to clear the chip so the dividers line up with the row text.
     private var rowDivider: some View {
-        Divider().padding(.leading, 56)
+        Divider().padding(.leading, 16 + Self.chipSize + 14)
     }
 
-    /// A provider row: monochrome brand glyph · name · chevron. Every row is a
-    /// single balanced line; the glyph is a template SVG tinted with the label
-    /// color (no chip, no gradient).
+    private static let chipSize: CGFloat = 40
+
+    /// A provider row: brand chip · name · chevron. Every row is a single
+    /// balanced line.
     private func providerRow<Destination: View>(
         brand: BrandStyle,
         @ViewBuilder destination: @escaping () -> Destination
@@ -149,13 +156,7 @@ struct OnboardingView: View {
             destination()
         } label: {
             HStack(spacing: 14) {
-                Image(brand.logo, bundle: .module)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 26, height: 26)
-                    .foregroundStyle(.primary)
-                    .accessibilityHidden(true)
+                BrandChip(brand: brand, size: Self.chipSize)
                 Text(brand.pickerName)
                     .font(.headline)
                     .foregroundStyle(.primary)
@@ -164,7 +165,7 @@ struct OnboardingView: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 14)
             .padding(.horizontal, 16)
             .contentShape(Rectangle())
         }
