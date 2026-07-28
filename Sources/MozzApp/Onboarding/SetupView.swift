@@ -54,6 +54,12 @@ struct SetupView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        // Not a Form, so it doesn't need `mozzReadableWidth`'s grouped
+        // background — just stop the button and copy stretching across an iPad
+        // (or a phone in landscape). Narrower than a phone, so this is a no-op
+        // in portrait.
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private var progress: some View {

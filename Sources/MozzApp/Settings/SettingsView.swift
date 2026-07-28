@@ -134,6 +134,7 @@ struct SettingsView: View {
                     Text("A free, open-source app under GPL-3.0. If you enjoy Mozz, a GitHub star, a review, or a small tip means a lot — thank you!")
                 }
             }
+            .mozzReadableWidth()
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

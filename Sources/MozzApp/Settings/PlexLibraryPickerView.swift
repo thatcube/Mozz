@@ -75,6 +75,7 @@ struct PlexLibraryPickerView: View {
                 }
             }
         }
+        .mozzReadableWidth()
         .navigationTitle("Plex Libraries")
         .inlineNavigationTitle()
         .task { await load() }
