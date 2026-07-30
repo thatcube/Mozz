@@ -8,66 +8,127 @@ import MozzCore
 /// Design: clean / minimal. Identity comes from the pixel-art Mozz mark, the
 /// monochrome brand glyphs, and intentional whitespace — never decorative color.
 /// The three providers are grouped into ONE inset card with hairline dividers.
+///
+/// Layout adapts to width. A compact width (iPhone) stacks the brand above the
+/// card, centered. A regular width (iPad, and the large iPhones in landscape)
+/// splits into two columns — brand on the left, providers on the right — because
+/// a single centered column strands the card far below a lone logo on a wide,
+/// short canvas. This mirrors the tvOS chooser in Plozz, down to its 40/60 split:
+/// the card carries three rows of text and needs the greater share.
 struct OnboardingView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isLoadingDemo = false
+
+    private var isWide: Bool { horizontalSizeClass == .regular }
+
+    /// Gutter either side of the content.
+    private var horizontalPadding: CGFloat { isWide ? 48 : 24 }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Spacer(minLength: 24)
+            // The content is centered in the available height, but stays
+            // scrollable when it doesn't fit (landscape, large Dynamic Type)
+            // instead of being clipped.
+            GeometryReader { proxy in
+                ScrollView {
+                    // ONE flat stack on purpose. The spacers share the leftover
+                    // height between them, which is what balances the page — put
+                    // any of them inside a nested stack and that stack absorbs
+                    // all the slack on its own, pinning the brand to the top and
+                    // the card to the bottom.
+                    VStack(spacing: 0) {
+                        if isWide {
+                            Spacer(minLength: 24)
+                            wideLayout(availableWidth: proxy.size.width - horizontalPadding * 2)
+                            Spacer(minLength: 24)
+                        } else {
+                            Spacer(minLength: 24)
 
-                brandHeader
+                            brandHeader(alignment: .center)
 
-                Spacer(minLength: 32)
+                            Spacer(minLength: 32)
 
-                providerCard
+                            providerCard
 
-                #if targetEnvironment(simulator)
-                // Simulator only: the offline demo (synthetic catalog + bundled
-                // clip) — useful because the sim can't reach a real server.
-                // Hidden on device builds (incl. Debug) so it's not in the way.
-                demoButton
-                    .padding(.top, 20)
-                #endif
+                            #if targetEnvironment(simulator)
+                            // Simulator only: the offline demo (synthetic catalog
+                            // + bundled clip) — useful because the sim can't reach
+                            // a real server. Hidden on device builds (incl. Debug)
+                            // so it's not in the way.
+                            demoButton
+                                .padding(.top, 20)
+                            #endif
 
-                Spacer(minLength: 24)
+                            Spacer(minLength: 24)
+                        }
 
-                Text("GPL-3.0 · your library stays on your device")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                        Text("GPL-3.0 · your library stays on your device")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                }
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity)
         }
     }
 
-    // MARK: Brand header (upper third)
+    // MARK: Layouts
 
-    private var brandHeader: some View {
-        VStack(spacing: 10) {
+    /// Two columns, vertically centered against each other: brand on the left,
+    /// the provider card (and demo button) on the right. The widths are split
+    /// explicitly rather than left to the stack, which would divide the space
+    /// evenly and leave the card cramped next to a mostly-empty brand column.
+    private func wideLayout(availableWidth: CGFloat) -> some View {
+        // Capped so the pair doesn't sprawl across a 13" iPad, and floored at 0:
+        // GeometryReader reports .zero on its first layout pass, which would
+        // otherwise make this negative and hand a negative width to `.frame`.
+        let gap: CGFloat = 56
+        let columns = max(0, min(availableWidth, 1000) - gap)
+
+        return HStack(alignment: .center, spacing: gap) {
+            brandHeader(alignment: .center)
+                .frame(width: columns * 0.4)
+
+            VStack(spacing: 20) {
+                providerCard
+                #if targetEnvironment(simulator)
+                demoButton
+                #endif
+            }
+            .frame(width: columns * 0.6)
+        }
+    }
+
+    // MARK: Brand header
+
+    /// Logo · wordmark · tagline, as one centered block.
+    private func brandHeader(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 10) {
             Image("MozzLogo")
                 .interpolation(.none) // preserve crisp pixel-art edges
                 .resizable()
                 .scaledToFit()
-                .frame(width: 104, height: 104)
+                .frame(width: isWide ? 128 : 104, height: isWide ? 128 : 104)
                 .accessibilityHidden(true)
             Text("Mozz").font(.largeTitle.bold())
             Text("One app for your music, wherever it lives.\nFree forever and open source.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(alignment == .leading ? .leading : .center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
-    // MARK: Provider card (centered)
+    // MARK: Provider card
 
     /// One grouped card holding the three providers, separated by hairline
     /// dividers inset to align with the row text — a single calm surface instead
-    /// of three colored pills.
+    /// of three separate buttons.
     private var providerCard: some View {
         VStack(spacing: 0) {
             providerRow(brand: .jellyfin) { JellyfinLoginView() }
@@ -81,13 +142,15 @@ struct OnboardingView: View {
         .tint(.primary)
     }
 
+    /// Inset to clear the chip so the dividers line up with the row text.
     private var rowDivider: some View {
-        Divider().padding(.leading, 56)
+        Divider().padding(.leading, 16 + Self.chipSize + 14)
     }
 
-    /// A provider row: monochrome brand glyph · name · chevron. Every row is a
-    /// single balanced line; the glyph is a template SVG tinted with the label
-    /// color (no chip, no gradient).
+    private static let chipSize: CGFloat = 40
+
+    /// A provider row: brand chip · name · chevron. Every row is a single
+    /// balanced line.
     private func providerRow<Destination: View>(
         brand: BrandStyle,
         @ViewBuilder destination: @escaping () -> Destination
@@ -96,13 +159,7 @@ struct OnboardingView: View {
             destination()
         } label: {
             HStack(spacing: 14) {
-                Image(brand.logo, bundle: .module)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 26, height: 26)
-                    .foregroundStyle(.primary)
-                    .accessibilityHidden(true)
+                BrandChip(brand: brand, size: Self.chipSize)
                 Text(brand.pickerName)
                     .font(.headline)
                     .foregroundStyle(.primary)
@@ -111,7 +168,7 @@ struct OnboardingView: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 14)
             .padding(.horizontal, 16)
             .contentShape(Rectangle())
         }
