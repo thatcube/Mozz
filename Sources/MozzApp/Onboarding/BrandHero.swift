@@ -67,11 +67,12 @@ struct BrandChip: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                // Plex's mark is drawn tighter in its own artboard than the other
-                // two, so at an equal inset it reads visibly smaller. A little
-                // less padding evens them out without changing the chip's size,
-                // so the rows never shift.
-                .padding(size * (brand.logo == "PlexLogo" ? 0.26 : 0.22))
+                // `scaledToFit` fits the SVG's viewBox, not its ink, and Plex's
+                // chevron only occupies about half the width and three quarters
+                // of the height of its 24×24 canvas (Jellyfin's mark very nearly
+                // fills its own). At an equal inset Plex therefore renders
+                // visibly smaller, so give it a tighter one to even the two out.
+                .padding(size * (brand.logo == "PlexLogo" ? 0.16 : 0.22))
                 .foregroundStyle(brand.tint)
         }
         .frame(width: size, height: size)

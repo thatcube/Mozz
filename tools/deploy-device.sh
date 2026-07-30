@@ -175,6 +175,20 @@ if [[ -z "$APP" || ! -d "$APP" ]]; then
   echo "✗ Could not locate the built Mozz.app." >&2
   exit 1
 fi
+
+# Confirm the bundle on disk is the variant we were asked for. install-verified.sh
+# takes the bundle id from the .app itself, so a stale bundle would be installed
+# under ITS identity, not ours — and with --no-build (which skips the compile that
+# would have refreshed it) switching branches or toggling MOZZ_WIDGETS would
+# silently install, and overwrite, the canonical app. That's the exact collision
+# the per-branch identity exists to prevent, so refuse rather than guess.
+APP_BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+if [[ "$APP_BUNDLE" != "$BUNDLE" ]]; then
+  echo "✗ The built app is '$APP_BUNDLE', but this run wants '$BUNDLE'." >&2
+  echo "  Re-run without --no-build to rebuild for this variant." >&2
+  exit 1
+fi
+
 BUILD_NUM="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")"
 echo "✓ Build $BUILD_NUM ready ($(du -sh "$APP" | awk '{print $1}'))."
 

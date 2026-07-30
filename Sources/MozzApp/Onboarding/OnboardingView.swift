@@ -82,9 +82,11 @@ struct OnboardingView: View {
     /// explicitly rather than left to the stack, which would divide the space
     /// evenly and leave the card cramped next to a mostly-empty brand column.
     private func wideLayout(availableWidth: CGFloat) -> some View {
-        // Capped so the pair doesn't sprawl across a 13" iPad.
+        // Capped so the pair doesn't sprawl across a 13" iPad, and floored at 0:
+        // GeometryReader reports .zero on its first layout pass, which would
+        // otherwise make this negative and hand a negative width to `.frame`.
         let gap: CGFloat = 56
-        let columns = min(availableWidth, 1000) - gap
+        let columns = max(0, min(availableWidth, 1000) - gap)
 
         return HStack(alignment: .center, spacing: gap) {
             brandHeader(alignment: .center)
