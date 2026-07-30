@@ -22,6 +22,7 @@ struct AppearanceSettingsView: View {
                 Toggle("Liquid Glass", isOn: $liquidGlassEnabled)
             }
         }
+        .mozzReadableWidth()
         .navigationTitle("Appearance")
         .inlineNavigationTitle()
     }

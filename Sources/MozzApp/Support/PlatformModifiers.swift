@@ -105,6 +105,18 @@ extension View {
         modifier(MozzScreenBackground())
     }
 
+    /// Caps a form-like page at a comfortable reading width and centres it, but
+    /// only where the canvas is actually wide (iPad, and an iPhone in landscape).
+    /// A `Form` fills whatever it's given, which on an iPad leaves a single
+    /// column of controls stretched across 1200pt with each label and its value
+    /// at opposite ends of the screen.
+    ///
+    /// Compact widths pass through completely untouched, so nothing about the
+    /// iPhone layout changes.
+    func mozzReadableWidth(_ maxWidth: CGFloat = 640) -> some View {
+        modifier(MozzReadableWidth(maxWidth: maxWidth))
+    }
+
     /// A circular Liquid Glass background (iOS 26+) — sized by the caller's frame
     /// so the search-cancel ✕ can exactly match the field height. Falls back to a
     /// material circle on iOS 17–25 and the macOS test host.
@@ -149,6 +161,42 @@ private struct MozzScreenBackground: ViewModifier {
         content
             .scrollContentBackground(.hidden)
             .background(Color.mozzBackground.ignoresSafeArea())
+    }
+}
+
+/// Backing modifier for `mozzReadableWidth(_:)`. The two frames do the work: the
+/// inner one caps the page, the outer one re-claims the full width so the capped
+/// page is centred in it rather than pinned to the leading edge.
+private struct MozzReadableWidth: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let maxWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        if horizontalSizeClass == .regular {
+            content
+                .frame(maxWidth: maxWidth)
+                .frame(maxWidth: .infinity)
+                .background(Self.pageBackground.ignoresSafeArea())
+        } else {
+            content
+        }
+    }
+
+    /// The exact colour a grouped `Form` paints behind itself, so the margins
+    /// either side of the capped column are seamless in both appearances.
+    ///
+    /// Deliberately NOT `mozzBackground`: that token is `#1C1C1E` in standard
+    /// dark, where a grouped list's own floor is pure black, and the difference
+    /// would show up as a lit column down the middle of the screen. Hiding the
+    /// list background and painting the token instead isn't an option either —
+    /// `scrollContentBackground(.hidden)` also clears the inset-grouped ROW
+    /// fills, which is what gives the form its cards.
+    private static var pageBackground: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemGroupedBackground)
+        #else
+        Color.clear
+        #endif
     }
 }
 

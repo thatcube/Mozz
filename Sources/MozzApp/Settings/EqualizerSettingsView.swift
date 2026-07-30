@@ -52,6 +52,7 @@ struct EqualizerSettingsView: View {
                 .disabled(settings.isFlat)
             }
         }
+        .mozzReadableWidth()
         .navigationTitle("Equalizer")
         .toolbar {
             if presentedAsSheet {

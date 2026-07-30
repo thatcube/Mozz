@@ -124,6 +124,7 @@ struct PlexLoginView: View {
                 }
             }
         }
+        .mozzReadableWidth()
         // The BrandHero is the on-screen title; keep the nav bar chrome-only
         // (back button) with no redundant title text.
         .navigationTitle("")
