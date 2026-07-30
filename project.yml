@@ -62,6 +62,15 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # iPad multitasking requires ALL four orientations (an app that omits any
+        # must opt out of multitasking with UIRequiresFullScreen). Upside-down is
+        # only sensible on iPad, hence the ~ipad override rather than widening
+        # the iPhone list.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # CRITICAL for a music app: keep audio playing in the background.
         UIBackgroundModes:
           - audio
