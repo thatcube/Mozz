@@ -33,6 +33,13 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     TightHeader(title: "Home")
 
+                    // Below the header (so it can never cover the Settings
+                    // avatar) and above everything else, so sync progress is the
+                    // first thing you see while the library fills in.
+                    if env.isSyncing {
+                        SyncStatusBar()
+                    }
+
                     if env.active != nil && !gridRows.isEmpty {
                         madeForYouGrid
                     }
@@ -45,7 +52,10 @@ struct HomeView: View {
                     if !playlists.isEmpty {
                         PlaylistShelf(title: "Your Playlists", playlists: playlists)
                     }
-                    if loaded && mixes.isEmpty && recentlyPlayed.isEmpty
+                    // Not while syncing: the card above already says the library
+                    // is still filling in, so "Nothing Here Yet — sync your
+                    // library" would contradict it on a first run.
+                    if loaded && !env.isSyncing && mixes.isEmpty && recentlyPlayed.isEmpty
                         && recentlyAdded.isEmpty && playlists.isEmpty {
                         ContentUnavailableView {
                             Label("Nothing Here Yet", mozz: "house")
@@ -56,6 +66,7 @@ struct HomeView: View {
                     }
                 }
                 .padding(.bottom, 24)
+                .animation(.spring(response: 0.4, dampingFraction: 0.9), value: env.isSyncing)
             }
             .hideNavigationBar()
             .minimizesBottomBarOnScroll()

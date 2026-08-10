@@ -149,10 +149,10 @@ struct MainTabsView: View {
             ToastOverlayView(hasTrack: hasTrack)
                 .zIndex(110)
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SyncStatusBar()
-                .animation(.spring(response: 0.4, dampingFraction: 0.9), value: env.isSyncing)
-        }
+        // NOTE: the sync status card is deliberately NOT a top safe-area inset
+        // here any more. As an inset it sat over every tab's tight header, and
+        // that header carries the Settings avatar — so a running sync covered the
+        // profile navigation. It now lives in Home's scroll content instead.
         .onChange(of: selectedTab) { old, tab in
             loadedTabs.insert(tab)
             if tab != .search {

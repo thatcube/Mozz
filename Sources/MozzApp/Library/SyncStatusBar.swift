@@ -1,34 +1,39 @@
 import SwiftUI
 import MozzSync
 
-/// A slim, non-blocking status bar shown at the top of the app while a catalog
-/// sync is running. It persists across every tab (a top safe-area inset on the
-/// tab shell), so the user can browse and play freely during the first sync and
-/// always sees exactly what's happening — a live per-type breakdown plus an
-/// overall percentage — instead of one opaque number that jumps and stalls.
+/// A slim, non-blocking status card shown while a catalog sync is running.
+///
+/// It lives in the Home tab's scroll content — NOT in a top safe-area inset on
+/// the tab shell, which is where it used to sit. As an inset it overlapped the
+/// tight header on every tab, and that header carries the Settings avatar, so a
+/// running sync sat on top of the profile navigation. In the scroll content it
+/// can't cover anything, and it scrolls away like the rest of the page.
+///
+/// The caller decides when to show it (`if env.isSyncing`), so the insertion and
+/// removal transition belongs to the caller's `if` rather than firing inside a
+/// view that's already mounted.
 struct SyncStatusBar: View {
     @EnvironmentObject private var env: AppEnvironment
 
     var body: some View {
-        if env.isSyncing {
-            VStack(alignment: .leading, spacing: 7) {
-                header
-                if let details = env.syncProgress?.details, !details.isEmpty {
-                    breakdown(details)
-                }
+        VStack(alignment: .leading, spacing: 7) {
+            header
+            if let details = env.syncProgress?.details, !details.isEmpty {
+                breakdown(details)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.06)))
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-            .padding(.horizontal, 12)
-            .padding(.top, 4)
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(Text(env.syncStatusText ?? "Syncing your library"))
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.06)))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        // Matches the horizontal inset of Home's other sections so the card lines
+        // up with the grid and shelves below it.
+        .padding(.horizontal, 20)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(env.syncStatusText ?? "Syncing your library"))
     }
 
     // MARK: Header — title, %, progress bar
