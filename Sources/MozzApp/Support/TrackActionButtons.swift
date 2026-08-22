@@ -69,32 +69,7 @@ struct TrackActionButtons: View {
 
         if canGoToArtist || canGoToAlbum {
             Divider()
-            if canGoToArtist {
-                Button {
-                    let remoteId = track.artistID
-                    let origin = surface.navOrigin
-                    Task {
-                        // Present-but-unsynced → no-op (rare; the nil-id case is
-                        // already hidden above). No toast surface exists yet.
-                        guard let artist = await env.resolveArtist(remoteId: remoteId) else { return }
-                        env.requestNavigation(to: .artist(artist), from: origin)
-                    }
-                } label: {
-                    Label("Go to Artist", mozz: "music.mic")
-                }
-            }
-            if canGoToAlbum {
-                Button {
-                    let remoteId = track.albumID
-                    let origin = surface.navOrigin
-                    Task {
-                        guard let album = await env.resolveAlbum(remoteId: remoteId) else { return }
-                        env.requestNavigation(to: .album(album), from: origin)
-                    }
-                } label: {
-                    Label("Go to Album", mozz: "square.stack")
-                }
-            }
+            TrackNavigationButtons(track: track, surface: surface)
         }
 
         Divider()
@@ -139,6 +114,64 @@ struct TrackActionButtons: View {
                 Task { await env.suppressArtist(ofTrack: snapshot) }
             } label: {
                 Label("Don't recommend this artist", mozz: "hand.thumbsdown")
+            }
+        }
+    }
+}
+
+/// The "Go to Artist" / "Go to Album" pair, shared by the full track menu
+/// (``TrackActionButtons``) and the player's title/artist tap menu so the two
+/// never drift. `showsSubtitles` adds the artist/album *name* as a menu subtitle
+/// — used where the menu is the only thing shown, so it reads as a destination
+/// rather than a bare verb.
+struct TrackNavigationButtons: View {
+    @EnvironmentObject private var env: AppEnvironment
+
+    let track: Track
+    var surface: TrackActionSurface = .row
+    var showsSubtitles = false
+
+    static func canNavigate(_ track: Track, surface: TrackActionSurface) -> Bool {
+        (track.artistID != nil && surface != .artistDetail) || (track.albumID != nil && surface != .albumDetail)
+    }
+
+    var body: some View {
+        if track.artistID != nil && surface != .artistDetail {
+            Button {
+                let remoteId = track.artistID
+                let origin = surface.navOrigin
+                Task {
+                    // Present-but-unsynced → no-op (rare; the nil-id case is
+                    // already hidden above). No toast surface exists yet.
+                    guard let artist = await env.resolveArtist(remoteId: remoteId) else { return }
+                    env.requestNavigation(to: .artist(artist), from: origin)
+                }
+            } label: {
+                if showsSubtitles {
+                    Text("Go to Artist")
+                    Text(track.artistName)
+                    Image(mozz: "music.mic")
+                } else {
+                    Label("Go to Artist", mozz: "music.mic")
+                }
+            }
+        }
+        if track.albumID != nil && surface != .albumDetail {
+            Button {
+                let remoteId = track.albumID
+                let origin = surface.navOrigin
+                Task {
+                    guard let album = await env.resolveAlbum(remoteId: remoteId) else { return }
+                    env.requestNavigation(to: .album(album), from: origin)
+                }
+            } label: {
+                if showsSubtitles, let albumTitle = track.albumTitle, !albumTitle.isEmpty {
+                    Text("Go to Album")
+                    Text(albumTitle)
+                    Image(mozz: "square.stack")
+                } else {
+                    Label("Go to Album", mozz: "square.stack")
+                }
             }
         }
     }

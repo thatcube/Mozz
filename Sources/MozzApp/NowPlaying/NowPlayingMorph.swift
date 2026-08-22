@@ -655,12 +655,7 @@ struct NowPlayingMorphContainer: View {
     /// traveling copy.
     private func titleRow(_ m: Morph) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(playback.currentTrack?.title ?? "")
-                    .font(.title2.bold()).lineLimit(1)
-                Text(playback.currentTrack?.artistName ?? "")
-                    .font(.title3).foregroundStyle(.secondary).lineLimit(1)
-            }
+            titleArtistBlock
             Spacer(minLength: 8)
             // The real interactive star/like + overflow while the queue is closed.
             // Handed off (by cross-fade) to the card's own cluster once open.
@@ -679,6 +674,38 @@ struct NowPlayingMorphContainer: View {
         .modifier(RangeFadeOut(progress: queueHeroP,
                                start: Self.heroFadeStart,
                                end: Self.heroFadeEnd))
+    }
+
+    /// Title over artist, tappable: a tap opens the destination menu (Go to
+    /// Artist / Album with the name as a subtitle), the way the title block works
+    /// in Apple's player. Falls back to plain text when the track has neither a
+    /// linkable artist nor album (e.g. the offline demo backend), so nothing
+    /// presents an empty menu. The two lines sit tight (negative spacing) so they
+    /// read as one block rather than two separate labels.
+    @ViewBuilder
+    private var titleArtistBlock: some View {
+        let lines = VStack(alignment: .leading, spacing: -1) {
+            Text(playback.currentTrack?.title ?? "")
+                .font(.title2.bold()).lineLimit(1)
+                .foregroundStyle(.primary)
+            Text(playback.currentTrack?.artistName ?? "")
+                .font(.title3).lineLimit(1)
+                .foregroundStyle(.secondary)
+        }
+            .multilineTextAlignment(.leading)
+
+        if let track = playback.currentTrack,
+           TrackNavigationButtons.canNavigate(track, surface: .player) {
+            Menu {
+                TrackNavigationButtons(track: track, surface: .player, showsSubtitles: true)
+            } label: {
+                lines.contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(track.title), \(track.artistName)")
+            .accessibilityHint("Opens artist and album")
+        } else {
+            lines
+        }
     }
 
     /// Progress (in q, 0…1) by which the hero row completes its full upward lift.
