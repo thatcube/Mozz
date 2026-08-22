@@ -429,14 +429,14 @@ struct MainTabBar: View {
             let rightCX = lerpBar(W / 2, W - ci, m)
             // Fixed per-tab width so the selection lozenge is the SAME size at
             // every tab (consistent as it slides between them).
-            let itemW = max((W - 2 * Self.pad) / CGFloat(AppTab.allCases.count) - 8, 56)
+            let itemW = max((W - 2 * Self.selectionInset) / CGFloat(AppTab.allCases.count), 56)
             // The selection pill only lives while the full bar is (near) present;
             // it fades out over the first third of the minimize, before the split.
             let selShown = m < 0.35
             let selFade = Double(max(0, 1 - m / 0.35))
             let selX = iconCenterX(selected, W: W, m: m)
             let pillW = itemW
-            let pillH = h - 10
+            let pillH = h - 2 * Self.selectionInset
             // The tab shown as "active" (accent) — the finger's hovered tab while
             // dragging, otherwise the committed selection.
             let activeTab = hoverTab ?? selected
@@ -639,7 +639,9 @@ struct MainTabBar: View {
 
     // MARK: Glass shapes
 
-    private static let pad: CGFloat = 6
+    /// Shared on every edge so the selected lozenge remains concentric with the
+    /// outer bar capsule (Capsule radius becomes outer radius minus this inset).
+    private static let selectionInset: CGFloat = 5
 
     /// The bar's Liquid Glass: two shapes in one `GlassEffectContainer` so the
     /// split renders the native gooey surface-tension bridge. Expanded (m=0) both
@@ -683,8 +685,8 @@ struct MainTabBar: View {
     /// Each tab's centre X when expanded (evenly distributed across the bar).
     private func expandedCenterX(_ tab: AppTab, W: CGFloat) -> CGFloat {
         let i = CGFloat(AppTab.allCases.firstIndex(of: tab) ?? 0)
-        let usable = W - 2 * Self.pad
-        return Self.pad + usable / CGFloat(AppTab.allCases.count) * (i + 0.5)
+        let usable = W - 2 * Self.selectionInset
+        return Self.selectionInset + usable / CGFloat(AppTab.allCases.count) * (i + 0.5)
     }
 
     /// Animated centre X: the left-blob tab → left circle centre, Search → right
