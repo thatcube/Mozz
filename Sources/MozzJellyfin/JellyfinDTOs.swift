@@ -107,3 +107,17 @@ struct JFAuthenticationResult: Decodable {
     let ServerId: String?
     let User: JFUser?
 }
+
+// MARK: - Lyrics
+
+/// `GET /Audio/{itemId}/Lyrics` response. `Lyrics` carries one entry per line;
+/// `Start` (when present) is the line's offset in 100ns ticks. Plain-text lyrics
+/// omit `Start` entirely.
+struct JFLyricDto: Decodable {
+    let Lyrics: [JFLyricLineDto]?
+}
+
+struct JFLyricLineDto: Decodable {
+    let Text: String?
+    let Start: Int64?
+}

@@ -200,6 +200,21 @@ public protocol MusicBackend: Sendable {
 
     /// Report playback progress / scrobble. No-op by default.
     func reportPlayback(_ report: PlaybackReport) async throws
+
+    // MARK: Lyrics
+
+    /// The track's lyrics as stored by the server, or `nil` when it genuinely has
+    /// none.
+    ///
+    /// The distinction between "no lyrics" and "couldn't ask" is load-bearing: the
+    /// resolver caches a negative answer, so a conformer MUST return `nil` only for
+    /// an authoritative empty answer from a server it actually reached, and
+    /// **throw** for any transport failure (offline, DNS, TLS, timeout, expired
+    /// session). Returning `nil` on a network blip would burn a permanent "no
+    /// lyrics" into the cache for a track that has them.
+    ///
+    /// Default: `nil` — correct for a backend with no lyrics concept.
+    func fetchLyrics(for track: Track) async throws -> Lyrics?
 }
 
 public extension MusicBackend {
@@ -228,4 +243,8 @@ public extension MusicBackend {
     /// Default: no user photo. Correct for every server that doesn't store one
     /// (and for the offline demo backend).
     func userAvatarURL(size: Int) async -> URL? { nil }
+
+    /// Default: the backend has no lyrics concept. An authoritative "none" rather
+    /// than a failure, so the resolver is free to fall back to LRCLIB.
+    func fetchLyrics(for track: Track) async throws -> Lyrics? { nil }
 }

@@ -11,6 +11,7 @@ struct SettingsView: View {
     /// Open metadata enrichment on/off (default on). Read live by
     /// `AppEnvironment.enrichment`, so no wiring is needed beyond this store.
     @AppStorage("mozz.enrichmentEnabled") private var enrichmentEnabled = true
+    @AppStorage(LyricsSettings.onlineLookupKey) private var lyricsOnlineLookup = true
     /// Live enrichment coverage for the status line; polled while Settings is open
     /// (the task is hosted on the always-present Form — see `.task` below — because
     /// a `.task` on a view whose only content is conditional never fires until the
@@ -58,6 +59,16 @@ struct SettingsView: View {
                         } label: {
                             Label("Equalizer", mozz: "waveform")
                         }
+                    }
+
+                    Section {
+                        Toggle(isOn: $lyricsOnlineLookup) {
+                            Label("Look Up Lyrics Online", mozz: "quote.bubble")
+                        }
+                        Text("When your server has no lyrics for a song, Mozz can check LRCLIB, a free community lyrics database. Only the song title, artist and length are sent, no account or personal data. Turn this off to use your server's lyrics only.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } header: {
+                        Text("Lyrics")
                     }
 
                     Section {

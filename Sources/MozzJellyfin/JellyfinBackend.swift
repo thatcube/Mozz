@@ -522,6 +522,43 @@ public struct JellyfinBackend: MusicBackend {
         _ = try await client.send(try Endpoint.jsonPost(path, body: body))
     }
 
+    // MARK: Lyrics
+
+    /// `GET /Audio/{id}/Lyrics`. The server answers 404 when a track has no
+    /// lyrics, which is an authoritative "none" and maps to `nil`; every other
+    /// failure is a transport problem and is rethrown so the resolver never caches
+    /// a false negative.
+    public func fetchLyrics(for track: Track) async throws -> Lyrics? {
+        let dto: JFLyricDto
+        do {
+            dto = try await client.send(
+                Endpoint(path: "Audio/\(track.id)/Lyrics"),
+                as: JFLyricDto.self
+            )
+        } catch MozzError.notFound {
+            return nil
+        } catch MozzError.decodingFailed {
+            // A 200 whose body isn't a lyric document (some servers answer with an
+            // empty body rather than 404). Treat as an authoritative "none".
+            return nil
+        }
+        guard let rawLines = dto.Lyrics, !rawLines.isEmpty else { return nil }
+        var lines = rawLines.map { line in
+            LyricLine(
+                text: line.Text ?? "",
+                start: line.Start.map { Double($0) / JellyfinMapper.ticksPerSecond }
+            )
+        }
+        // The player's active-line scan assumes ascending order, so guard against a
+        // server that returns timed lines out of order. Only sort when there ARE
+        // timestamps — reordering plain lines would scramble their reading order.
+        if lines.contains(where: { $0.start != nil }) {
+            lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
+        }
+        let lyrics = Lyrics(lines: lines)
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(.jellyfin)
+    }
+
     // MARK: Helpers
 
     private func pageQuery(offset: Int, limit: Int) -> [URLQueryItem] {

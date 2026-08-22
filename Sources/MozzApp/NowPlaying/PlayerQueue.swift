@@ -240,6 +240,14 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// time), which collapsed the rise to nothing. The now-playing card is excluded
     /// — it docks via the traveling artwork and its own short title/star cross-fade.
     var bodyRise: CGFloat = 0
+    /// Opacity of the queue's body — History, the pills/header, and the up-next
+    /// list — never the now-playing card.
+    ///
+    /// Swapping between this panel and the lyrics cross-fades the two bodies while
+    /// both cards stay fully opaque. They are the same card, so drawing it twice
+    /// looks like drawing it once, and it holds perfectly still rather than dipping
+    /// through the middle of a dissolve.
+    var bodyOpacity: Double = 1
     /// Bumped by the container on every queue open; each change snaps the scroll
     /// back to the now-playing card at the top (so a reopen never lingers on
     /// History or a prior scroll position).
@@ -447,8 +455,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             // OUTSIDE the fade mask so it stays crisp while rows dissolve beneath.
             // iOS 18 only (needs the live scroll offset); on 17 the header just
             // scrolls with the list.
-            .overlay(alignment: .top) { pinnedHistoryHeader }
-            .overlay(alignment: .top) { pinnedQueueControls }
+            .overlay(alignment: .top) { pinnedHistoryHeader.opacity(bodyOpacity) }
+            .overlay(alignment: .top) { pinnedQueueControls.opacity(bodyOpacity) }
             .clipped()
             // Top-of-list pull-to-dismiss, classified per gesture by START position.
             // A non-consuming UIKit pan attached HERE — at the panel container, an
@@ -471,8 +479,13 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
             .onAppear { viewportH = baseH }
             .onDisappear { cancelReorder() }
             .onChange(of: geo.size.height) { _, h in viewportH = h }
-            .onChange(of: playback.upNext) { oldItems, newItems in
-                guard dragFrom != nil, oldItems != newItems else { return }
+            // Watch the revision, not the array. `onChange` compares its value on
+            // every view update, and this body updates on every frame of a scroll
+            // (it reports the live offset) — so comparing the queue itself ran an
+            // element-by-element check over thousands of tracks per frame on a
+            // shuffled library. The revision is an Int.
+            .onChange(of: playback.queueRevision) { _, _ in
+                guard dragFrom != nil else { return }
                 cancelReorder()
             }
             .onChange(of: reorderGestureActive) { _, active in
@@ -602,6 +615,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                     Color.clear.preference(key: HistoryHeightKey.self,
                                            value: g.size.height)
                 })
+                .opacity(bodyOpacity)
                 card()
                     .id(nowPlayingID)
                     .background(GeometryReader { g in
@@ -622,11 +636,13 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                         Color.clear.preference(key: QueueControlsHeightKey.self,
                                                value: g.size.height)
                     })
+                    .opacity(bodyOpacity)
                 upNextRows
                     // Rise up from below the scrub bar with the pills/header as one
                     // unit as the queue opens.
                     .modifier(BodyRise(progress: bodyP, start: bodyRiseStart, distance: bodyRise, ease: bodyRiseEase))
                     .modifier(BodyFade(progress: bodyP, start: bodyFadeStart))
+                    .opacity(bodyOpacity)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
@@ -686,9 +702,24 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
 
     // MARK: History
 
+    /// How many played tracks History shows.
+    ///
+    /// History is everything before the current track, so tapping a song deep into
+    /// a shuffled library moves thousands of tracks into it at once. Unbounded,
+    /// that is slow to lay out and useless to scroll — and it pushes the
+    /// now-playing card thousands of rows below wherever you happen to be. A recent
+    /// window keeps the section meaningful and its layout cheap and exact, which is
+    /// what lets the rows stay eager (the scroll snap measures their full height —
+    /// see `scrollBase`).
+    private static var historyLimit: Int { 200 }
+
     @ViewBuilder private var history: some View {
         let items = playback.history
         if !items.isEmpty {
+            // Only the most recent window, indexed in place: an order position IS
+            // the history index, so slicing by index keeps row → jump-target
+            // mapping correct with no arithmetic to get wrong.
+            let first = max(0, items.count - Self.historyLimit)
             // Reserve the header's vertical space; INVISIBLE on iOS 18 where the
             // pinned overlay (pinnedHistoryHeader) draws the visible, sticky copy
             // so it stays stuck to the top while these rows scroll under it. On
@@ -704,8 +735,8 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
                                            value: g.size.height)
                 })
 
-            ForEach(Array(items.enumerated()), id: \.offset) { index, track in
-                row(track: track, orderPosition: index, dimmed: true)
+            ForEach(first..<items.count, id: \.self) { index in
+                row(track: items[index], orderPosition: index, dimmed: true)
             }
             .padding(.bottom, 4)
         }
@@ -758,26 +789,45 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// drag-reorder the grabbed row lifts and follows the finger while the others
     /// part by exactly one row — the real rows move, nothing is reconstructed, so
     /// the list can never teleport.
+    /// Continue Playing.
+    ///
+    /// **Lazy**, unlike History above it. Shuffling a whole library puts thousands
+    /// of tracks up next, and every row carries an `ArtworkView` — laying them all
+    /// out eagerly built thousands of rows and fired thousands of image loads
+    /// before the panel could draw, so the queue simply never opened.
+    ///
+    /// Laziness is safe *here* specifically, and would not be above: the only
+    /// measurement the snap depends on is `HistoryHeightKey`, and History keeps its
+    /// eager layout. The row-pitch measurement this list does publish
+    /// (`QueueRowHeightKey`) comes from whichever rows are on screen, and the
+    /// reader ignores zero, so it survives rows being recycled out.
     @ViewBuilder private var upNextRows: some View {
         let items = playback.upNext
         if !items.isEmpty {
             let base = playback.history.count + 1
-            ForEach(Array(items.enumerated()), id: \.offset) { index, track in
-                row(track: track, orderPosition: base + index,
-                    showsHandle: true, upNextIndex: index)
-                    // Expand only the painted pickup container by the same six-point
-                    // inset the artwork already has vertically. The row's layout
-                    // remains unchanged while the 12-point outer corner stays
-                    // concentric with the artwork's six-point corner.
-                    .background {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(.white.opacity(dragFrom == index ? 0.14 : 0))
-                            .padding(.horizontal, -6)
-                    }
-                    .shadow(color: .black.opacity(dragFrom == index ? 0.3 : 0),
-                            radius: 14, y: 6)
-                    .offset(y: reorderOffset(index))
-                    .zIndex(dragFrom == index ? 1 : 0)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                // Indices rather than `Array(items.enumerated())`: the live scroll
+                // offset re-evaluates this body on every frame, and materialising a
+                // tuple array of the whole queue each time is pure waste on a long
+                // one. Identity is the index either way.
+                ForEach(items.indices, id: \.self) { index in
+                    let track = items[index]
+                    row(track: track, orderPosition: base + index,
+                        showsHandle: true, upNextIndex: index)
+                        // Expand only the painted pickup container by the same six-point
+                        // inset the artwork already has vertically. The row's layout
+                        // remains unchanged while the 12-point outer corner stays
+                        // concentric with the artwork's six-point corner.
+                        .background {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(.white.opacity(dragFrom == index ? 0.14 : 0))
+                                .padding(.horizontal, -6)
+                        }
+                        .shadow(color: .black.opacity(dragFrom == index ? 0.3 : 0),
+                                radius: 14, y: 6)
+                        .offset(y: reorderOffset(index))
+                        .zIndex(dragFrom == index ? 1 : 0)
+                }
             }
         }
     }

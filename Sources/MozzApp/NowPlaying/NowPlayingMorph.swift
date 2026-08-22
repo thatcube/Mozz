@@ -25,12 +25,29 @@ import UIKit
 // which shrinks the surface up to the island frame (clipping the body away),
 // fades the body out, fades the mini controls in, dissolves the frost into
 // Liquid Glass and lands the artwork in the slot.
+/// The two secondary surfaces that can take the now-playing hero's place in the
+/// expanded player. They are mutually exclusive because they share one slot — and
+/// one set of open/close progresses — so exactly one can be on screen at a time.
+enum PlayerPanel: Equatable, Hashable, CaseIterable {
+    case queue
+    case lyrics
+}
+
 struct NowPlayingMorphContainer: View {
     var playback: PlaybackEngine
     @ObservedObject var ui: PlayerUIModel
     /// Tab-bar minimize progress (0 = docked island above the bar, 1 = island
     /// dropped into the bar's centre pill between the split blobs). Scroll-driven.
     var minimize: CGFloat = 0
+
+    init(playback: PlaybackEngine, ui: PlayerUIModel, minimize: CGFloat = 0) {
+        self.playback = playback
+        self.ui = ui
+        self.minimize = minimize
+        // Seeded here rather than lazily, because the controller owns tasks and a
+        // ticker that must belong to exactly one instance for the player's lifetime.
+        _lyrics = State(initialValue: LyricsController(playback: playback))
+    }
 
     /// 0 = docked island, 1 = full drawer. Animated by the open/collapse springs.
     @State private var p: CGFloat = 0
@@ -64,60 +81,82 @@ struct NowPlayingMorphContainer: View {
     /// the fast per-move preview updates don't restart the appear transition.
     @State private var ratingRevealActive = false
     @State private var ratingRevealPreview: Double?
-    /// Whether the queue panel (Continue Playing + History) is showing in place of
-    /// the now-playing hero. Only meaningful while fully expanded; reset on collapse.
-    @State private var queueOpen = false
-    /// Queue-open animation progress (0 = hero cover big-center, 1 = cover docked
-    /// into the queue's compact-header thumbnail slot). Driven as a spring alongside
-    /// `queueOpen` so the single traveling artwork *slides* into place instead of the
+    /// Which secondary panel (if any) is showing in place of the now-playing hero.
+    /// Only meaningful while fully expanded; reset on collapse.
+    ///
+    /// The queue and the lyrics occupy the SAME slot and share one set of
+    /// open/close progresses, because their entrance is identical: the hero title
+    /// row lifts away, the big artwork docks into the compact card, and a body
+    /// rises into the space below. Only the body differs.
+    @State private var openPanel: PlayerPanel?
+    /// Panel-open animation progress (0 = hero cover big-center, 1 = cover docked
+    /// into the card's compact thumbnail slot). Driven as a spring alongside
+    /// `openPanel` so the single traveling artwork *slides* into place instead of the
     /// big cover cross-fading with a separate thumbnail.
-    @State private var queueP: CGFloat = 0
+    @State private var panelP: CGFloat = 0
     /// A SECOND, slower open/close progress that drives ONLY the queue body's rise +
-    /// fade (see `PlayerQueuePanel.bodyP`). Animated alongside `queueP` in
-    /// `driveQueue()` but on `queueBodySpring` (a gentler, longer response) for the
+    /// fade (see `PlayerQueuePanel.bodyP`). Animated alongside `panelP` in
+    /// `drivePanel()` but on `panelBodySpring` (a gentler, longer response) for the
     /// OPEN so the body glides into place after the fast artwork/card hand-off; the
-    /// CLOSE reuses the fast `queueSpring` so it retracts in lock-step with `queueP`
+    /// CLOSE reuses the fast `panelSpring` so it retracts in lock-step with `panelP`
     /// and the existing unmount-on-completion stays correct.
-    @State private var queueBodyP: CGFloat = 0
+    @State private var panelBodyP: CGFloat = 0
     /// A THIRD open/close progress that drives ONLY the hero row's lift + fade
-    /// (`HeroLift` / `RangeFadeOut` in `titleRow`). Animated alongside `queueP` in
-    /// `driveQueue()` but on `queueHeroSpring` (a slower response) for the OPEN so the
+    /// (`HeroLift` / `RangeFadeOut` in `titleRow`). Animated alongside `panelP` in
+    /// `drivePanel()` but on `panelHeroSpring` (a slower response) for the OPEN so the
     /// hero title/artist visibly *travels* up and out at its own gentler pace, decoupled
-    /// from the fast artwork dock. The CLOSE reuses the fast `queueSpring` so the hero
+    /// from the fast artwork dock. The CLOSE reuses the fast `panelSpring` so the hero
     /// snaps back in lock-step with the rest.
-    @State private var queueHeroP: CGFloat = 0
-    /// True only once the queue-open spring has fully settled (and false the moment
-    /// a close/open starts, and while the queue is closed). Gates the seamless
+    @State private var panelHeroP: CGFloat = 0
+    /// True only once the panel-open spring has fully settled (and false the moment
+    /// a close/open starts, and while no panel is open). Gates the seamless
     /// hand-off between the traveling artwork/star (shown during the transition)
     /// and the card's own scrolling artwork/star (shown at rest).
-    @State private var queueSettled = false
-    /// Bumped every time the queue opens, so the panel resets its scroll to the
+    @State private var panelSettled = false
+    /// Bumped every time a panel opens, so the queue resets its scroll to the
     /// now-playing card at the top (never left showing History or scrolled) on
     /// each reopen — not just the first appearance.
-    @State private var queueOpenNonce = 0
-    /// Monotonic id bumped on every `setQueue` call. Each open/close spring's
+    @State private var panelOpenNonce = 0
+    /// Monotonic id bumped on every `setPanel` call. Each open/close spring's
     /// `completion:` captures the id and only applies its terminal state if it's still
-    /// current — so when you toggle the queue faster than the spring settles, a stale
+    /// current — so when you toggle a panel faster than the spring settles, a stale
     /// completion from the superseded transition can't fire out of order and strand
-    /// the view in a corrupt state (e.g. `queueSettled == true` while `queueOpen ==
-    /// false`, which hides both the traveling AND the card artwork → blank drawer).
-    @State private var queueTransition = 0
-    /// The user's *latest* queue intent (true = open, false = close), set
-    /// synchronously in `setQueue`. Distinct from `queueOpen` (the mount flag, which
-    /// lingers true through a close until its spring completes). It's the single
-    /// source of truth for direction: the toggle button and `driveQueue()` read it,
-    /// and flipping it fires `.onChange(of: queueWantsOpen)` which deterministically
-    /// animates `queueP` to the latest target — so no fast toggle can strand the hero
+    /// the view in a corrupt state (e.g. `panelSettled == true` while `openPanel ==
+    /// nil`, which hides both the traveling AND the card artwork → blank drawer).
+    @State private var panelTransition = 0
+    /// The user's *latest* panel intent (which panel to show, or nil to close), set
+    /// synchronously in `setPanel`. Distinct from `openPanel` (the mount flag, which
+    /// lingers through a close until its spring completes). It's the single
+    /// source of truth for direction: the toggle buttons and `drivePanel()` read it,
+    /// and flipping it fires `.onChange(of: panelWantsOpen)` which deterministically
+    /// animates `panelP` to the latest target — so no fast toggle can strand the hero
     /// row (previously a late `onAppear` could resurrect a superseded open and pin
-    /// `queueP` at 1: hero stuck at the top, queue logically closed → next open
+    /// `panelP` at 1: hero stuck at the top, panel logically closed → next open
     /// teleported).
-    @State private var queueWantsOpen = false
-    /// Whether `queueTop` was *already mounted* when the current open began. A fresh
-    /// open (panel was unmounted) is kicked by `queueTop.onAppear` so it animates
-    /// from a committed q=0 frame (no snap); a re-open *while still mounted* (during a
-    /// close) is kicked by `.onChange(of: queueWantsOpen)` instead, since `onAppear`
-    /// won't fire again. This flag routes each open to exactly one of those.
-    @State private var queueWasMounted = false
+    @State private var panelWantsOpen: PlayerPanel?
+    /// Whether the panel subtree was *already mounted* when the current open began.
+    /// A fresh open (it was unmounted) is kicked by the subtree's `onAppear` so it
+    /// animates from a committed q=0 frame (no snap); a re-open *while still mounted*
+    /// (during a close) is kicked by `.onChange(of: panelWantsOpen)` instead, since
+    /// `onAppear` won't fire again. This flag routes each open to exactly one of those.
+    @State private var panelWasMounted = false
+    /// The panel being replaced during a swap, kept mounted underneath the incoming
+    /// one until the cross-fade finishes. `nil` whenever no swap is in flight.
+    @State private var panelSwapFrom: PlayerPanel?
+    /// The incoming panel's opacity during a swap (0 → 1).
+    @State private var panelSwapP: CGFloat = 1
+    /// Identifies the current swap so a superseded one's completion can't unmount
+    /// the outgoing panel of a newer swap that started inside the same window.
+    @State private var panelSwapGeneration = 0
+    /// Whether the lyrics panel has taken over the whole drawer: after a spell of no
+    /// interaction the transport chrome fades away and the lyrics grow into the space
+    /// it vacates. Any touch brings the chrome back. Queue-only concept-free — this is
+    /// never set while the queue is the open panel.
+    @State private var lyricsImmersive = false
+    /// Restarted on every interaction while the lyrics are open; when it elapses the
+    /// chrome fades and `lyricsImmersive` turns on. Held so an interaction can cancel
+    /// a countdown already in flight.
+    @State private var immersiveCountdown: Task<Void, Never>?
     /// Animated flag for the transport-chrome slide/fade during an in-place row
     /// reorder — the controls move out of the way while the grabbed row is dragged,
     /// then return on drop. The list itself never moves (see `PlayerQueuePanel`).
@@ -126,6 +165,10 @@ struct NowPlayingMorphContainer: View {
     /// the chrome vacates during a drag-reorder). Passed to the queue panel so it
     /// can grow its viewport down into the reclaimed space and reveal the full list.
     @State private var chromeRegionH: CGFloat = 0
+    /// Resolves the current track's lyrics and publishes which line is being sung.
+    /// Built once per player (it owns tasks + a ticker) and pointed at the live
+    /// backend, so signing into a different server needs no rebuild.
+    @State private var lyrics: LyricsController
     /// True only once the expand spring has fully settled (and false the moment a
     /// collapse/expand starts). Gates expensive-at-rest effects — the artwork's
     /// soft shadow and the backdrop's live drift — OFF during the transition, so
@@ -141,6 +184,10 @@ struct NowPlayingMorphContainer: View {
     @StateObject private var power = LowPowerModeObserver()
 
     @AppStorage(PlayerBackgroundStyle.storageKey) private var bgStyleRaw = PlayerBackgroundStyle.default.rawValue
+    /// User setting: allow the keyless online lyrics lookup (LRCLIB) when the
+    /// user's own server has none. On by default; Settings can turn it off for
+    /// anyone who would rather nothing leave their network.
+    @AppStorage(LyricsSettings.onlineLookupKey) private var lyricsOnlineLookup = true
     /// User setting: use Liquid Glass chrome for the player (default on). When off,
     /// the player uses a cheaper opaque chrome surface.
     @AppStorage("mozz.liquidGlass") private var liquidGlassEnabled = true
@@ -151,6 +198,10 @@ struct NowPlayingMorphContainer: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     /// Colors sampled from the current artwork for the adaptive backdrop.
     @State private var artGrid: ArtworkColorGrid?
+
+    /// Whether the transport chrome is currently slid out of the way — either for a
+    /// drag-reorder in the queue, or the lyrics' idle takeover.
+    private var chromeHidden: Bool { reorderChromeHidden || lyricsImmersive }
 
     private var bgStyle: PlayerBackgroundStyle {
         PlayerBackgroundStyle(rawValue: bgStyleRaw) ?? .default
@@ -196,7 +247,7 @@ struct NowPlayingMorphContainer: View {
                               safeTop: safeTop, safeBottom: safeBottom,
                               pRaw: p, receiving: receiving,
                               isExpanded: ui.isFullPresented, minimize: minimize,
-                              queue: queueP)
+                              queue: panelP)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     // Enlarged, invisible tap target so edge taps open the player
@@ -307,13 +358,34 @@ struct NowPlayingMorphContainer: View {
                 .onChange(of: playback.currentTrack?.id) { _, _ in
                     playerRating = playback.currentTrack?.rating
                     ratingPickerOpen = false
+                    lyrics.load(track: playback.currentTrack)
+                }
+                // Keep the resolver pointed at the live server + preference. Both are
+                // read at lookup time, so this is just bookkeeping — no re-render.
+                .onChange(of: env.active?.connection.id, initial: true) { _, _ in
+                    lyrics.backend = env.active?.backend
+                }
+                .onChange(of: lyricsOnlineLookup, initial: true) { _, enabled in
+                    lyrics.useOnlineLookup = enabled
+                }
+                .onChange(of: playback.snapshot.status) { _, status in
+                    syncImmersiveToPlayback(status)
+                }
+                // Turning the online lookup back ON must re-resolve: the answer we
+                // cached while it was off deliberately never asked LRCLIB.
+                .onChange(of: lyricsOnlineLookup) { wasEnabled, isEnabled in
+                    guard !wasEnabled, isEnabled else { return }
+                    lyrics.reload()
                 }
                 .onChange(of: ui.isFullPresented) { _, open in
                     if !open {
                         ratingPickerOpen = false
                     }
                 }
-                .onAppear { playerRating = playback.currentTrack?.rating }
+                .onAppear {
+                    playerRating = playback.currentTrack?.rating
+                    lyrics.load(track: playback.currentTrack)
+                }
                 // Derive the adaptive backdrop palette from the artwork; resolve
                 // synchronously if cached (correct on first frame), else crossfade.
                 .task(id: artworkToken) {
@@ -488,7 +560,7 @@ struct NowPlayingMorphContainer: View {
         // expand). Gated on `settled` + faded via color opacity, the shadow costs
         // nothing during the transition and rasterizes once at rest. Dropped while
         // the queue is open — the compact thumbnail carries no drop shadow.
-        let showShadow = settled && !queueOpen
+        let showShadow = settled && openPanel == nil
         return MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
             .scaleEffect(pausedScale)
             .shadow(color: .black.opacity(showShadow ? 0.35 : 0), radius: 16, y: 8)
@@ -496,7 +568,7 @@ struct NowPlayingMorphContainer: View {
             // Hidden once the queue settles: the card's own (scrolling) artwork
             // takes over at the identical slot, so it can scroll & clip with the
             // list. Instant swap at a coincident position → no pop.
-            .opacity(queueSettled ? 0 : 1)
+            .opacity(panelSettled ? 0 : 1)
             .allowsHitTesting(false)
             .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.72),
                        value: isPlaying)
@@ -554,36 +626,69 @@ struct NowPlayingMorphContainer: View {
             // trailing Spacer for vertical space, so the controls below never
             // shift and the queue list isn't squished.
             header(m)
-                .allowsHitTesting(!queueOpen)
+                .allowsHitTesting(openPanel == nil)
                 .overlay(alignment: .top) {
-                    if queueOpen {
-                        // No `.transition` here: the entrance is driven entirely
-                        // by the internal `q`-modifiers (the card title/star
-                        // cross-fade rise and the body's rise-from-below-the-
-                        // scrubber). `setQueue(open:)` mounts this at q=0 — where
-                        // those are already offset-below and faded to zero — then
-                        // springs q→1 on the next runloop so they interpolate in
-                        // rather than snapping to their resting state.
-                        queueTop(m)
+                    // No `.transition` here: the entrance is driven entirely
+                    // by the internal `q`-modifiers (the card title/star
+                    // cross-fade rise and the body's rise-from-below-the-
+                    // scrubber). `setPanel(_:)` mounts this at q=0 — where
+                    // those are already offset-below and faded to zero — then
+                    // springs q→1 on the next runloop so they interpolate in
+                    // rather than snapping to their resting state.
+                    // During a swap both bodies are mounted and the incoming one
+                    // fades in ON TOP of the outgoing, which holds full opacity
+                    // underneath. A symmetric cross-fade would dip the shared
+                    // now-playing card to ~75% halfway through (two half-opaque
+                    // copies of the same pixels), and that blink is exactly what
+                    // made switching read as a cut rather than a change of content.
+                    // Overlapping instead keeps the card, artwork and star rock
+                    // steady while only the body below them dissolves.
+                    // Every panel keeps its OWN slot, mounted or not, so swapping
+                    // is a change of content rather than of identity.
+                    //
+                    // Two conditional slots — "the outgoing one" and "the open one"
+                    // — meant that on a swap the very same panel moved from the
+                    // second slot to the first, which SwiftUI reads as one view
+                    // being destroyed and a different one created. The lyrics were
+                    // torn down and rebuilt mid-dissolve, so their first-appearance
+                    // ease ran again from zero: they vanished, then faded back in
+                    // while simultaneously fading out.
+                    ZStack(alignment: .top) {
+                        ForEach(PlayerPanel.allCases, id: \.self) { panel in
+                            if panel == openPanel || panel == panelSwapFrom {
+                                panelBody(panel, m)
+                                    // The arriving panel is always on top.
+                                    .zIndex(panel == openPanel ? 1 : 0)
+                            }
+                        }
                     }
                 }
                 // Deterministic driver for every toggle except a fresh open (which
-                // `queueTop.onAppear` handles). Attached to the always-mounted header
-                // so it fires reliably on each intent flip — close, and re-open while
-                // the panel is still mounted mid-close.
-                .onChange(of: queueWantsOpen) { _, wantsOpen in
-                    if wantsOpen && !queueWasMounted { return }  // fresh open → onAppear
-                    driveQueue()
+                // the panel subtree's `onAppear` handles). Attached to the always-
+                // mounted header so it fires reliably on each intent flip — close,
+                // and re-open while the panel is still mounted mid-close.
+                .onChange(of: panelWantsOpen) { _, wantsOpen in
+                    if wantsOpen != nil && !panelWasMounted { return }  // fresh open → onAppear
+                    drivePanel()
                 }
 
             bottomChrome(m)
-                // Slide + fade the transport chrome fully out of the way while a
-                // row is being dragged, so the controls move aside (Apple-Music
-                // style) and never sit under the grabbed row. Animated on its own
-                // spring. The queue list itself stays put — only the chrome moves.
-                .opacity(reorderChromeHidden ? 0 : 1)
-                .offset(y: reorderChromeHidden ? Self.reorderChromeDrop : 0)
-                .allowsHitTesting(!reorderChromeHidden)
+                // The chrome slides + fades fully out of the way in two cases, and
+                // the panel below grows into the space it leaves:
+                //   • a drag-reorder — so the controls never sit under the grabbed row;
+                //   • the lyrics' idle takeover — so the words get the whole screen.
+                // Animated on its own spring; the panel itself stays put, only the
+                // chrome moves.
+                .opacity(chromeHidden ? 0 : 1)
+                .offset(y: chromeHidden ? Self.reorderChromeDrop : 0)
+                .allowsHitTesting(!chromeHidden)
+                // Touching the transport is emphatically NOT "leaving the lyrics
+                // alone", so it restarts the idle countdown. A non-consuming
+                // observer, so the scrubber and buttons beneath still work normally.
+                .onTouchChanged { active, _ in
+                    guard active, panelWantsOpen == .lyrics else { return }
+                    armImmersiveCountdown()
+                }
                 // Measure the chrome region's height (its LAYOUT height is fixed —
                 // the slide/fade above only offsets it) so the queue panel knows how
                 // far it may grow down into the space this vacates during a reorder.
@@ -682,7 +787,7 @@ struct NowPlayingMorphContainer: View {
             // means SwiftUI sizes the cluster first and gives the title what's
             // left — so the title zone re-fits itself whenever the rating
             // appears, changes width, or clears.
-            starOverflowCluster(interactive: !queueOpen, emitsAnchor: !queueOpen)
+            starOverflowCluster(interactive: openPanel == nil, emitsAnchor: openPanel == nil)
         }
         .font(.title3)
         // Lift the whole row UP a long way as the queue opens — it should travel
@@ -690,11 +795,11 @@ struct NowPlayingMorphContainer: View {
         // nudge. It stays fully visible through the early climb, then fades out
         // across a back-loaded window (RangeFadeOut) so you actually see it move
         // before it hands off to the card row catching below it.
-        .modifier(HeroLift(progress: queueHeroP,
+        .modifier(HeroLift(progress: panelHeroP,
                            start: Self.heroLiftStart,
                            end: Self.heroLiftEnd,
                            distance: Self.heroRowLift))
-        .modifier(RangeFadeOut(progress: queueHeroP,
+        .modifier(RangeFadeOut(progress: panelHeroP,
                                start: Self.heroFadeStart,
                                end: Self.heroFadeEnd))
     }
@@ -748,7 +853,7 @@ struct NowPlayingMorphContainer: View {
     /// offset from animated state would linearize the endpoints and skip the corner).
     private static let heroLiftEnd: CGFloat = 0.9
 
-    /// Progress (in `queueHeroP`, 0…1) at which the hero row BEGINS its upward lift.
+    /// Progress (in `panelHeroP`, 0…1) at which the hero row BEGINS its upward lift.
     /// Below this it holds in place (still at full opacity), then climbs over
     /// [`heroLiftStart`, `heroLiftEnd`] — a delayed rise so the row sits a beat before
     /// travelling. Keep below `heroFadeEnd` or the climb happens after the row has
@@ -782,10 +887,10 @@ struct NowPlayingMorphContainer: View {
     /// underway).
     private static let cardFadeStart: CGFloat = 0.7
 
-    /// The queue view shown in place of the hero when `queueOpen`: a pinned
+    /// The queue view shown in place of the hero when it is the open panel: a pinned
     /// grabber over the scrollable History / now-playing card / Continue-Playing
     /// list. The card scrolls as one unit with the list (see `PlayerQueuePanel`).
-    private func queueTop(_ m: Morph) -> some View {
+    private func queueTop(_ m: Morph, bodyOpacity: Double = 1, showsCard: Bool = true) -> some View {
         VStack(spacing: 0) {
             Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
                 .padding(.top, m.safeTop + 8)
@@ -795,20 +900,28 @@ struct NowPlayingMorphContainer: View {
             PlayerQueuePanel(
                 playback: playback,
                 queueP: m.q,
-                bodyP: queueBodyP,
-                bodyRise: queueBodyRise(m),
-                resetToken: queueOpenNonce,
-                onSelect: { orderPosition in playback.jump(toOrderPosition: orderPosition) },
+                bodyP: panelBodyP,
+                bodyRise: panelBodyRise(m),
+                bodyOpacity: bodyOpacity,
+                resetToken: panelOpenNonce,
+                onSelect: { orderPosition in
+                    playback.jump(toOrderPosition: orderPosition)
+                    // Jumping rewrites what counts as history and what's up next, so
+                    // the row you tapped is now the card — somewhere far from where
+                    // you were scrolled. Re-dock so it lands back at the top instead
+                    // of leaving you staring at a stretch of queue you just skipped.
+                    panelOpenNonce &+= 1
+                },
                 onClearHistory: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearHistory() } },
                 onClearQueue: { withAnimation(.easeInOut(duration: 0.25)) { playback.clearUpNext() } },
                 onReorderActive: { active in
                     withAnimation(Self.reorderChromeSpring) { reorderChromeHidden = active }
                 },
                 onCommitReorder: { from, to in playback.moveUpNext(fromOffset: from, toOffset: to) },
-                reorderExtraHeight: max(0, chromeRegionH - (Morph.bottomOverhang + m.safeBottom)),
+                reorderExtraHeight: reclaimableChromeHeight(m),
                 onPull: { raw in handleQueuePull(raw) },
                 onPullEnd: { raw, velocity in handleQueuePullEnd(raw, velocity) },
-                card: { nowPlayingCard(m) },
+                card: { nowPlayingCard(m).opacity(showsCard ? 1 : 0) },
                 queueControls: { shuffleRepeatPills }
             )
         }
@@ -816,8 +929,84 @@ struct NowPlayingMorphContainer: View {
         // Fresh open only: this fires once the subtree has mounted + laid out at q=0,
         // so the whole entrance (artwork dock, card cross-fade, body rise) interpolates
         // 0→1 from a committed frame instead of snapping. Re-opens while still mounted
-        // are driven by `.onChange(of: queueWantsOpen)` (onAppear won't refire).
-        .onAppear { driveQueue() }
+        // are driven by `.onChange(of: panelWantsOpen)` (onAppear won't refire).
+        .onAppear { drivePanel() }
+    }
+
+    /// One of the two interchangeable panel bodies.
+    ///
+    /// During a swap both are mounted and their bodies cross-fade, while the card
+    /// above them stays put.
+    ///
+    /// Exactly ONE panel draws the card at any moment, and during a swap it is the
+    /// OUTGOING one — the panel that is already on screen with its card laid out
+    /// and positioned.
+    ///
+    /// Drawing it in both brightened the artist name: it is `.secondary`, a
+    /// translucent colour, so two stacked copies composite to roughly 0.84 alpha
+    /// instead of 0.6. Handing it to the arriving panel instead swapped that for a
+    /// worse problem — that panel is mounting this very frame and has not laid its
+    /// card out yet, so the whole header blinked out. The outgoing panel has no
+    /// such gap, and by the time it unmounts the arriving one has had the full
+    /// dissolve to settle, so the hand-over lands on identical pixels.
+    @ViewBuilder
+    private func panelBody(_ panel: PlayerPanel, _ m: Morph) -> some View {
+        let isOutgoing = panelSwapFrom != nil && panel == panelSwapFrom
+        let swapping = panelSwapFrom != nil
+        let bodyOpacity: Double = {
+            guard swapping else { return 1 }
+            return isOutgoing ? Double(1 - panelSwapP) : Double(panelSwapP)
+        }()
+        let showsCard = swapping ? isOutgoing : true
+        switch panel {
+        case .queue: queueTop(m, bodyOpacity: bodyOpacity, showsCard: showsCard)
+        case .lyrics: lyricsTop(m, bodyOpacity: bodyOpacity, showsCard: showsCard)
+        }
+    }
+
+    /// The lyrics view shown in place of the hero when it is the open panel. Shares
+    /// the queue's slot, grabber and now-playing card verbatim — only the body below
+    /// the card differs — so the two read as one surface with two contents.
+    ///
+    /// While immersive it grows DOWN into the height the transport chrome vacates,
+    /// exactly as the queue does during a drag-reorder.
+    private func lyricsTop(_ m: Morph, bodyOpacity: Double = 1, showsCard: Bool = true) -> some View {
+        VStack(spacing: 0) {
+            Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
+                .padding(.top, m.safeTop + 8)
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
+
+            PlayerLyricsPanel(
+                controller: lyrics,
+                lyricsP: m.q,
+                bodyP: panelBodyP,
+                bodyRise: panelBodyRise(m),
+                chromeReclaim: reclaimableChromeHeight(m),
+                cardReserve: Morph.queueArtSide + 26,
+                // The same rail the queue's content uses, which is also where the
+                // travelling artwork docks — so the two panels' headers line up
+                // exactly and the artwork doesn't shift as it hands over.
+                cardInset: Morph.queueArtLeading,
+                bodyOpacity: bodyOpacity,
+                immersive: lyricsImmersive,
+                onInteract: { handleLyricsInteraction() },
+                onSeekToLine: { index in
+                    lyrics.seek(toLine: index)
+                    handleLyricsInteraction()
+                },
+                card: { nowPlayingCard(m).opacity(showsCard ? 1 : 0) }
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear { drivePanel() }
+    }
+
+    /// How far a panel may grow DOWNWARD once the transport chrome is out of the
+    /// way: the chrome region's height minus the part of it that hangs off the
+    /// bottom of the screen anyway.
+    private func reclaimableChromeHeight(_ m: Morph) -> CGFloat {
+        max(0, chromeRegionH - (Morph.bottomOverhang + m.safeBottom))
     }
 
     /// How far the queue body (pills + "Queue" header + Continue-Playing list) drops
@@ -829,7 +1018,7 @@ struct NowPlayingMorphContainer: View {
     /// open and its GeometryReader reads 0 for the first frames, which is exactly what
     /// left the body pinned in place.) Overshoot is harmless — the panel is clipped,
     /// so a body that starts a little past the scrubber just rises in from off-screen.
-    private func queueBodyRise(_ m: Morph) -> CGFloat {
+    private func panelBodyRise(_ m: Morph) -> CGFloat {
         m.safeTop + 45 + m.expArtSide
     }
 
@@ -846,10 +1035,10 @@ struct NowPlayingMorphContainer: View {
             // the queue and returns to the now-playing hero.
             MorphArtwork(track: playback.currentTrack,
                          side: Morph.queueArtSide, cornerRadius: Morph.queueArtRadius)
-                .opacity(queueSettled ? 1 : 0)
+                .opacity(panelSettled ? 1 : 0)
                 .contentShape(Rectangle())
-                .onTapGesture { if queueSettled { setQueue(open: false) } }
-                .allowsHitTesting(queueSettled)
+                .onTapGesture { if panelSettled { setPanel(nil) } }
+                .allowsHitTesting(panelSettled)
             VStack(alignment: .leading, spacing: 2) {
                 Text(playback.currentTrack?.title ?? "")
                     .font(.headline).lineLimit(1)
@@ -871,7 +1060,7 @@ struct NowPlayingMorphContainer: View {
             // lifting away above. Interactive + owns the rating anchor only once
             // settled (the hero cluster owns it while the queue is closed, so
             // exactly one anchor is ever published).
-            starOverflowCluster(interactive: queueSettled, emitsAnchor: queueSettled)
+            starOverflowCluster(interactive: panelSettled, emitsAnchor: panelSettled)
                 .modifier(GatedRise(progress: m.q, start: Self.cardFadeStart, distance: Self.cardRowRise))
                 .modifier(LateFade(progress: m.q, start: Self.cardFadeStart))
         }
@@ -890,7 +1079,7 @@ struct NowPlayingMorphContainer: View {
                 // restores it), which swings `detentTop`. Re-dock so the current
                 // song snaps back to the top with the fresh order instead of
                 // leaving the user stranded mid-list.
-                queueOpenNonce &+= 1
+                panelOpenNonce &+= 1
             }
             QueuePill(glyph: AppIcon.repeatTracks,
                       label: snapshot.repeatMode == .one ? "Repeat One" : "Repeat",
@@ -968,22 +1157,22 @@ struct NowPlayingMorphContainer: View {
         } else {
             receiving = true
             settled = false
-            // Invalidate any in-flight queue open/close completion: the collapse below
-            // keeps the queue progresses pinned and its own completion resets the queue
-            // flags, so a stale queue completion firing afterwards must not flip
-            // `queueSettled` back on (which would blank the drawer on the next expand).
-            queueTransition &+= 1
-            // NOTE: don't reset `queueWantsOpen` here — it feeds `.onChange`, and
-            // flipping it now would kick `driveQueue()` which (seeing a close intent)
-            // would unmount `queueTop` at the START of the collapse. We keep it true
+            // Invalidate any in-flight panel open/close completion: the collapse below
+            // keeps the panel progresses pinned and its own completion resets the panel
+            // flags, so a stale panel completion firing afterwards must not flip
+            // `panelSettled` back on (which would blank the drawer on the next expand).
+            panelTransition &+= 1
+            // NOTE: don't reset `panelWantsOpen` here — it feeds `.onChange`, and
+            // clearing it now would kick `drivePanel()` which (seeing a close intent)
+            // would unmount the panel at the START of the collapse. We keep it set
             // through the collapse and reset it in the completion, once fully collapsed.
             // Dismiss the drawer as ONE rigid unit — do NOT morph the queue open→hero
-            // during the collapse. Keep all three queue progresses (`queueP`,
-            // `queueBodyP`, `queueHeroP`) pinned at 1 so the fully laid-out queue
+            // during the collapse. Keep all three queue progresses (`panelP`,
+            // `panelBodyP`, `panelHeroP`) pinned at 1 so the fully laid-out queue
             // (docked artwork, card star, shuffle/repeat pills, "Queue" header, list)
             // rides straight down and is clipped away WITH the surface, instead of the
             // artwork flying back to center + the list fading while the body/hero stay
-            // put (the old jumble, caused by driving only `queueP`→0 here). `queueSettled`
+            // put (the old jumble, caused by driving only `panelP`→0 here). `panelSettled`
             // likewise stays TRUE so the card's in-flow star/artwork ride down rather
             // than reviving the root-level traveling star (which sits outside the
             // surface clip and would fling UP off-screen). Everything queue-related is
@@ -992,101 +1181,245 @@ struct NowPlayingMorphContainer: View {
                 p = 0; dragY = 0
             } completion: {
                 receiving = false
-                // Fully collapsed now (invisible): reset the queue flags AND all three
+                // Fully collapsed now (invisible): reset the panel flags AND all three
                 // progresses so a fresh present starts from the hero header with the
                 // traveling star, without any flash or stranded body/hero offset.
-                queueOpen = false
-                queueSettled = false
-                queueWantsOpen = false
-                queueP = 0
-                queueBodyP = 0
-                queueHeroP = 0
+                openPanel = nil
+                panelSettled = false
+                panelWantsOpen = nil
+                panelP = 0
+                panelBodyP = 0
+                panelHeroP = 0
+                endImmersive()
             }
         }
     }
 
-    /// Open/close the queue, driving `queueP` as a spring and managing
-    /// `queueSettled` (the traveling ⇄ card artwork/star hand-off flag).
-    /// Toggle the queue. This ONLY records intent (`queueWantsOpen`) and manages the
-    /// mount flag — it never springs `queueP` itself. The animation is driven by
-    /// `driveQueue()`, kicked from exactly one place per transition:
-    ///   • fresh open (panel unmounted)  → `queueTop.onAppear`  (committed q=0 frame)
-    ///   • re-open while mounted / close → `.onChange(of: queueWantsOpen)`
-    /// so `queueP` deterministically animates to the *latest* intent no matter how
+    /// Show `panel` (or close whatever is open when `nil`), driving `panelP` as a
+    /// spring and managing `panelSettled` — the traveling ⇄ card artwork/star
+    /// hand-off flag.
+    ///
+    /// This ONLY records intent (`panelWantsOpen`) and manages the mount flag; it
+    /// never springs `panelP` itself. The animation is driven by `drivePanel()`,
+    /// kicked from exactly one place per transition:
+    ///   • fresh open (nothing mounted) → the subtree's `onAppear` (committed q=0 frame)
+    ///   • re-open while mounted / close → `.onChange(of: panelWantsOpen)`
+    /// so `panelP` deterministically animates to the *latest* intent no matter how
     /// fast you toggle — no `onAppear`-vs-lingering-mount race can strand the hero row.
-    private func setQueue(open: Bool) {
-        // Ignore a tap that matches the current intent (e.g. a double close): it would
-        // only churn the transition token and fire a redundant onChange.
-        guard open != queueWantsOpen else { return }
+    ///
+    /// Switching directly between the queue and the lyrics does NOT close and
+    /// reopen. Everything above the body — the docked artwork, the card, the lifted
+    /// hero — is identical in both, so only the body cross-fades while the rest
+    /// holds perfectly still. Closing first would throw all of that away and play
+    /// the same entrance twice for no reason.
+    private func setPanel(_ panel: PlayerPanel?) {
+        guard panel != panelWantsOpen else { return }
+        let isSwap = panel != nil && panelWantsOpen != nil && panelP > 0
+        // Arm or tear down the lyrics' idle takeover for the panel we're moving to.
+        // On a swap the chrome has to come back on the same spring as everything
+        // else, or it would snap in underneath a body that is still dissolving.
+        if panel == .lyrics {
+            armImmersiveCountdown()
+        } else if isSwap {
+            withAnimation(Self.immersiveSpring) { endImmersive() }
+        } else {
+            endImmersive()
+        }
+        if let panel, isSwap {
+            // Live swap: every progress stays exactly where it is — the hero is
+            // already lifted away and the artwork already docked, so re-running
+            // that entrance would be motion for its own sake. Only the body changes.
+            let outgoing = openPanel
+            panelSwapGeneration &+= 1
+            let generation = panelSwapGeneration
+            panelWantsOpen = panel
+            panelOpenNonce &+= 1
+            panelSwapFrom = outgoing
+            panelSwapP = 0
+            openPanel = panel
+            guard !reduceMotion else {
+                panelSwapFrom = nil
+                panelSwapP = 1
+                return
+            }
+            // Kick the dissolve on the NEXT runloop turn, once the frame above has
+            // been committed. Animating in the same update does nothing at all:
+            // `panelSwapP` rests at 1, so setting it to 0 and then animating it
+            // back to 1 in one pass is a no-op — SwiftUI only ever sees 1, the
+            // intermediate 0 is never rendered, and the bodies simply cut. What was
+            // left visibly moving was the rebuilt panel replaying its own entrance.
+            Task { @MainActor in
+                guard generation == panelSwapGeneration else { return }
+                withAnimation(Self.panelSwapFade) {
+                    panelSwapP = 1
+                } completion: {
+                    guard generation == panelSwapGeneration else { return }
+                    panelSwapFrom = nil
+                }
+            }
+            return
+        }
+        // Any non-swap transition starts from a clean slate.
+        panelSwapFrom = nil
+        panelSwapP = 1
         // Supersede any in-flight transition so its completion can't apply terminal
         // flags after this newer toggle.
-        queueTransition &+= 1
-        if open {
-            // `queueWasMounted` distinguishes a re-open-during-close (panel still up,
-            // onAppear won't refire) from a fresh open (panel remounts, onAppear fires).
-            queueWasMounted = queueOpen
-            queueOpen = true
-            queueSettled = false
-            queueOpenNonce &+= 1
+        panelTransition &+= 1
+        if let panel {
+            // `panelWasMounted` distinguishes a re-open-during-close (subtree still
+            // up, onAppear won't refire) from a fresh open (it remounts, onAppear fires).
+            panelWasMounted = openPanel != nil
+            openPanel = panel
+            panelSettled = false
+            panelOpenNonce &+= 1
         } else {
-            queueSettled = false
+            panelSettled = false
         }
         // Flip intent LAST so `.onChange(of:)` sees the mount flags already updated.
-        queueWantsOpen = open
+        panelWantsOpen = panel
         if reduceMotion {
-            queueP = open ? 1 : 0
-            queueBodyP = open ? 1 : 0
-            queueHeroP = open ? 1 : 0
-            queueSettled = open
-            if !open { queueOpen = false }
+            let open = panel != nil
+            panelP = open ? 1 : 0
+            panelBodyP = open ? 1 : 0
+            panelHeroP = open ? 1 : 0
+            panelSettled = open
+            if !open { openPanel = nil }
         }
     }
 
     /// The single writer of the open/close spring. Reads the *current* intent, so it
-    /// always animates `queueP` toward the latest target; the completion is token-
-    /// guarded so a superseded transition can't commit `queueSettled`/unmount late.
-    /// Called from `queueTop.onAppear` (fresh open) and `.onChange(of: queueWantsOpen)`
-    /// (re-open while mounted, and every close) — see `setQueue` for the routing.
-    private func driveQueue() {
+    /// always animates `panelP` toward the latest target; the completion is token-
+    /// guarded so a superseded transition can't commit `panelSettled`/unmount late.
+    /// Called from the panel subtree's `onAppear` (fresh open) and
+    /// `.onChange(of: panelWantsOpen)` (re-open while mounted, and every close) —
+    /// see `setPanel` for the routing.
+    private func drivePanel() {
         guard !reduceMotion else { return }
-        let token = queueTransition
-        if queueWantsOpen {
-            guard queueP < 1 else { return }
-            withAnimation(Self.queueSpring) {
-                queueP = 1
+        let token = panelTransition
+        if panelWantsOpen != nil {
+            guard panelP < 1 else { return }
+            withAnimation(Self.panelSpring) {
+                panelP = 1
             } completion: {
-                guard token == queueTransition else { return }
-                queueSettled = true
+                guard token == panelTransition else { return }
+                panelSettled = true
             }
             // Body climbs on its own gentler, longer spring so it settles into place
-            // after the fast hand-off above — not tied to the queueP completion.
-            withAnimation(Self.queueBodySpring) {
-                queueBodyP = 1
+            // after the fast hand-off above — not tied to the panelP completion.
+            withAnimation(Self.panelBodySpring) {
+                panelBodyP = 1
             }
             // Hero lifts + fades on its own slower spring so its travel reads as a
             // deliberate hand-off rather than a quick snap, decoupled from the artwork.
-            withAnimation(Self.queueHeroSpring) {
-                queueHeroP = 1
+            withAnimation(Self.panelHeroSpring) {
+                panelHeroP = 1
             }
         } else {
             // Already collapsed: nothing to animate, just drop the mount.
-            guard queueP > 0 else { queueOpen = false; queueBodyP = 0; queueHeroP = 0; return }
-            withAnimation(Self.queueSpring) {
-                queueP = 0
+            guard panelP > 0 else { openPanel = nil; panelBodyP = 0; panelHeroP = 0; return }
+            withAnimation(Self.panelSpring) {
+                panelP = 0
             } completion: {
-                guard token == queueTransition else { return }
-                queueOpen = false
+                guard token == panelTransition else { return }
+                openPanel = nil
             }
-            // Retract the body in lock-step with queueP (fast spring) so it finishes
-            // together and the unmount-on-queueP-completion above stays clean.
-            withAnimation(Self.queueSpring) {
-                queueBodyP = 0
+            // Retract the body in lock-step with panelP (fast spring) so it finishes
+            // together and the unmount-on-panelP-completion above stays clean.
+            withAnimation(Self.panelSpring) {
+                panelBodyP = 0
             }
             // Hero snaps back with the fast spring too — no reason to linger on close.
-            withAnimation(Self.queueSpring) {
-                queueHeroP = 0
+            withAnimation(Self.panelSpring) {
+                panelHeroP = 0
             }
         }
+    }
+
+    // MARK: Lyrics immersive takeover
+
+    /// The dissolve when swapping the queue body for the lyrics body (or back)
+    /// while the panel stays open.
+    ///
+    /// Deliberately quick. The card and artwork above don't move at all, and the
+    /// two bodies are completely different text — linger over that and you read it
+    /// as both sets of words on screen at once rather than as one changing into the
+    /// other.
+    private static let panelSwapFade = Animation.easeInOut(duration: 0.18)
+
+    /// How long the lyrics sit alongside the full transport before the chrome
+    /// fades and they take over the screen. Long enough to scrub or skip without
+    /// the controls sliding out from under you, short enough that simply looking
+    /// at the lyrics gets you the full-screen view.
+    private static let immersiveDelay: Duration = .seconds(5)
+
+    /// Spring for the chrome's exit/return. Slower and softer than the reorder
+    /// slide — this is an ambient transition the user didn't ask for, so it should
+    /// drift rather than snap.
+    private static let immersiveSpring = Animation.spring(response: 0.55, dampingFraction: 0.9)
+
+    /// Whether audio is actually running. `.buffering` counts: a stall is the app
+    /// working on the user's behalf, not the user stopping.
+    private var isPlayingOrBuffering: Bool {
+        let status = playback.snapshot.status
+        return status == .playing || status == .buffering
+    }
+
+    /// (Re)starts the idle countdown to the immersive takeover. Any interaction
+    /// calls this, so the chrome only leaves after a genuine pause.
+    ///
+    /// Nothing is armed unless audio is actually playing — the takeover exists to
+    /// get out of the way of a song, and a stopped player with no controls is just
+    /// a dead end.
+    private func armImmersiveCountdown() {
+        immersiveCountdown?.cancel()
+        immersiveCountdown = nil
+        guard !reduceMotion, isPlayingOrBuffering else { return }
+        immersiveCountdown = Task { @MainActor in
+            try? await Task.sleep(for: Self.immersiveDelay)
+            guard !Task.isCancelled,
+                  panelWantsOpen == .lyrics,
+                  isPlayingOrBuffering else { return }
+            withAnimation(Self.immersiveSpring) { lyricsImmersive = true }
+        }
+    }
+
+    /// Keeps the takeover in step with the transport.
+    ///
+    /// Pausing means the user wants the controls, so they come back and stay back
+    /// until playback resumes. A transient `.buffering` is deliberately ignored —
+    /// a stall on a slow server shouldn't yank the chrome in and out.
+    private func syncImmersiveToPlayback(_ status: PlaybackStatus) {
+        guard panelWantsOpen == .lyrics else { return }
+        switch status {
+        case .playing:
+            guard !lyricsImmersive else { return }
+            armImmersiveCountdown()
+        case .paused, .idle:
+            immersiveCountdown?.cancel()
+            immersiveCountdown = nil
+            guard lyricsImmersive else { return }
+            withAnimation(Self.immersiveSpring) { lyricsImmersive = false }
+        case .buffering:
+            break
+        }
+    }
+
+    /// A touch anywhere in the lyrics: bring the chrome back if it has gone, and
+    /// restart the countdown either way.
+    private func handleLyricsInteraction() {
+        if lyricsImmersive {
+            withAnimation(Self.immersiveSpring) { lyricsImmersive = false }
+        }
+        armImmersiveCountdown()
+    }
+
+    /// Cancels the countdown and restores the chrome, without animation — used when
+    /// the panel closes or the whole drawer collapses, where the state must simply
+    /// be clean for the next open.
+    private func endImmersive() {
+        immersiveCountdown?.cancel()
+        immersiveCountdown = nil
+        lyricsImmersive = false
     }
 
     // MARK: Drag-to-reorder (up-next)
@@ -1102,29 +1435,29 @@ struct NowPlayingMorphContainer: View {
 
 
     /// hand-off (hero lift + `RangeFadeOut`, card rise + `LateFade`, `BodyRise`) is
-    /// keyed on `queueP` (0→1), so scaling the one spring that drives `queueP` slows
+    /// keyed on `panelP` (0→1), so scaling the one spring that drives `panelP` slows
     /// the WHOLE sequence proportionally — the relative timing of each phase is
     /// preserved, just stretched out. `1.4` = a bit slower/gentler than the raw
     /// spring tuning, which reads smoother on both open and close.
-    private static let queueTimeScale: CGFloat = 1.4
+    private static let panelTimeScale: CGFloat = 1.4
 
-    /// Shared open/close spring for the queue transition (× `queueTimeScale`).
-    private static let queueSpring = Animation.spring(response: 0.48 * queueTimeScale,
+    /// Shared open/close spring for the queue transition (× `panelTimeScale`).
+    private static let panelSpring = Animation.spring(response: 0.48 * panelTimeScale,
                                                       dampingFraction: 0.86)
 
     /// Gentler, longer spring for the queue BODY's rise/fade on OPEN only, so its
-    /// climb visibly takes longer than the fast `queueSpring` hand-off (artwork dock +
+    /// climb visibly takes longer than the fast `panelSpring` hand-off (artwork dock +
     /// hero→card title cross-fade) above it. Higher `response` = slower climb; high
     /// damping keeps it from overshooting on the long travel. The close still uses
-    /// `queueSpring` (see `driveQueue`), so this only stretches the entrance.
-    private static let queueBodySpring = Animation.spring(response: 0.72 * queueTimeScale,
+    /// `panelSpring` (see `drivePanel`), so this only stretches the entrance.
+    private static let panelBodySpring = Animation.spring(response: 0.72 * panelTimeScale,
                                                           dampingFraction: 0.92)
 
     /// Slower spring for the hero row's lift/fade on OPEN only, so the title/artist
     /// visibly travel up and out at a gentler pace than the fast artwork dock instead
-    /// of snapping away. Higher `response` = slower; the close reuses `queueSpring`
-    /// (see `driveQueue`) so retract stays snappy.
-    private static let queueHeroSpring = Animation.spring(response: 0.64 * queueTimeScale,
+    /// of snapping away. Higher `response` = slower; the close reuses `panelSpring`
+    /// (see `drivePanel`) so retract stays snappy.
+    private static let panelHeroSpring = Animation.spring(response: 0.64 * panelTimeScale,
                                                           dampingFraction: 0.88)
 
     // MARK: Drawer controls
@@ -1159,24 +1492,32 @@ struct NowPlayingMorphContainer: View {
         }
     }
 
-    /// The bottom control row: an equalizer button (opens the EQ sheet, tinted
-    /// when the EQ is on), the current-output-route control (shows the real device
-    /// The bottom control row: a (dummy) lyrics button, the current-output-route
-    /// control (shows the real device icon; tap to open the AirPlay picker), and
-    /// the queue toggle. Lyrics + a per-track context menu aren't built yet, so
-    /// lyrics is a disabled placeholder. (The equalizer lives in Settings for now.)
+    /// The bottom control row: the lyrics toggle, the current-output-route control
+    /// (shows the real device icon; tap to open the AirPlay picker), and the queue
+    /// toggle. The two panel toggles are mutually exclusive — they share one slot —
+    /// so tapping one while the other is open swaps between them.
+    /// (The equalizer lives in Settings for now.)
     private var bottomButtonRow: some View {
         HStack {
-            PlayerIconButton(glyph: .lyrics, tint: .secondary, isEnabled: false,
-                             label: "Lyrics") { }
+            PlayerIconButton(glyph: .lyrics,
+                             tint: panelWantsOpen == .lyrics ? .primary : .secondary,
+                             haptics: false,
+                             isActive: panelWantsOpen == .lyrics,
+                             label: "Lyrics") {
+                setPanel(panelWantsOpen == .lyrics ? nil : .lyrics)
+            }
             Spacer()
             #if canImport(UIKit)
             routeControl
             #endif
             Spacer()
-            PlayerIconButton(glyph: .queue, tint: queueWantsOpen ? .primary : .secondary,
+            PlayerIconButton(glyph: .queue,
+                             tint: panelWantsOpen == .queue ? .primary : .secondary,
                              haptics: false,
-                             label: "Queue") { setQueue(open: !queueWantsOpen) }
+                             isActive: panelWantsOpen == .queue,
+                             label: "Queue") {
+                setPanel(panelWantsOpen == .queue ? nil : .queue)
+            }
         }
     }
 

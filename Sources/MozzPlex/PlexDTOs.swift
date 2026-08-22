@@ -45,6 +45,21 @@ struct PlexPart: Decodable {
     let file: String?
     let size: Int64?
     let container: String?
+    /// Per-part streams. Only `streamType == 4` (lyrics) is read here; audio
+    /// streams are described by the parent `Media` entry instead.
+    let Stream: [PlexStream]?
+}
+
+/// A media stream attached to a `Part`. Plex uses `streamType` 1 = video,
+/// 2 = audio, 3 = subtitle, 4 = lyrics. A lyric stream's `key` is a
+/// server-relative path (`/library/streams/5555`) that serves the `.lrc` (or
+/// timed-JSON) body.
+struct PlexStream: Decodable {
+    let id: Int?
+    let streamType: Int?
+    let key: String?
+    let format: String?
+    let displayTitle: String?
 }
 
 struct PlexMedia: Decodable {

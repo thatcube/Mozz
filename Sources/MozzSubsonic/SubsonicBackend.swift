@@ -82,7 +82,10 @@ public struct SubsonicBackend: MusicBackend {
             supportsFavorites: true,          // star/unstar
             supportsRatings: true,            // setRating 1–5
             supportsLyrics: extensions.contains("songLyrics"),
-            supportsSyncedLyrics: false,      // no lyric fetch/UI path in v1 scope
+            // The `songLyrics` extension's structured documents carry per-line
+            // millisecond offsets, so a server advertising it can serve synced
+            // lyrics. (Whether a given track HAS them is per-track, not per-server.)
+            supportsSyncedLyrics: extensions.contains("songLyrics"),
             supportsNormalizationGain: openSubsonic, // replayGain is OpenSubsonic
             supportsProgressReporting: true,  // scrobble
             serverProduct: product,
@@ -357,6 +360,81 @@ public struct SubsonicBackend: MusicBackend {
             URLQueryItem(name: "id", value: report.track.id),
             URLQueryItem(name: "submission", value: submission ? "true" : "false"),
         ], as: SubsonicEmpty.self)
+    }
+
+    // MARK: Lyrics
+
+    /// Prefers the OpenSubsonic `songLyrics` extension (`getLyricsBySongId`),
+    /// which returns structured — and often *synced* — lines, then falls back to
+    /// classic `getLyrics`, which is plain text only.
+    ///
+    /// Both endpoints are best-effort: a server that doesn't implement one
+    /// answers with a Subsonic error envelope, which the client maps to a thrown
+    /// `MozzError`. Those "endpoint isn't here" verdicts collapse to `nil` (an
+    /// authoritative none), while genuine transport failures propagate so the
+    /// resolver never caches a false negative.
+    public func fetchLyrics(for track: Track) async throws -> Lyrics? {
+        if let structured = try await structuredLyrics(for: track) { return structured }
+        return try await plainLyrics(for: track)
+    }
+
+    private func structuredLyrics(for track: Track) async throws -> Lyrics? {
+        let body: SubsonicResponseBody<SubsonicLyricsListPayload>
+        do {
+            body = try await client.send(
+                "getLyricsBySongId",
+                query: [URLQueryItem(name: "id", value: track.id)],
+                as: SubsonicLyricsListPayload.self
+            )
+        } catch let error as MozzError where !error.isReachabilityFailure {
+            // Unsupported endpoint / unknown parameter / not found — the server
+            // answered, it just has nothing here.
+            return nil
+        }
+        let documents = body.payload.lyricsList?.structuredLyrics ?? []
+        // Several documents can come back (one per language). Prefer a synced one
+        // — it's what makes the panel scroll — and otherwise take the first with
+        // any content at all.
+        let chosen = documents.first(where: { doc in
+            doc.synced == true && !(doc.line ?? []).isEmpty
+        }) ?? documents.first(where: { !($0.line ?? []).isEmpty })
+        guard let chosen, let rawLines = chosen.line, !rawLines.isEmpty else { return nil }
+
+        let offsetSeconds = Double(chosen.offset ?? 0) / 1000
+        var lines = rawLines.map { line in
+            LyricLine(
+                text: line.value ?? "",
+                // A document flagged unsynced may still carry stray `start`
+                // values; honour the flag so we don't render bogus timings.
+                start: chosen.synced == false
+                    ? nil
+                    : line.start.map { Double($0) / 1000 + offsetSeconds }
+            )
+        }
+        if lines.contains(where: { $0.start != nil }) {
+            lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
+        }
+        let lyrics = Lyrics(lines: lines)
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(.subsonic)
+    }
+
+    private func plainLyrics(for track: Track) async throws -> Lyrics? {
+        // Classic `getLyrics` matches on artist + title rather than id.
+        var query = [URLQueryItem(name: "title", value: track.title)]
+        if !track.artistName.isEmpty {
+            query.append(URLQueryItem(name: "artist", value: track.artistName))
+        }
+        let body: SubsonicResponseBody<SubsonicLyricsPayload>
+        do {
+            body = try await client.send("getLyrics", query: query, as: SubsonicLyricsPayload.self)
+        } catch let error as MozzError where !error.isReachabilityFailure {
+            return nil
+        }
+        guard let text = body.payload.lyrics?.value,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        // Some servers stuff an `.lrc` body in here, so try the timed parser first.
+        let lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(.subsonic)
     }
 
     // MARK: Helpers

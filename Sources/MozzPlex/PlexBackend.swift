@@ -100,8 +100,11 @@ public struct PlexBackend: MusicBackend {
             // heart off supportsFavorites and shows a rating chip off this flag.
             supportsFavorites: false,
             supportsRatings: true,
-            supportsLyrics: false,
-            supportsSyncedLyrics: false,
+            // Plex stores lyrics as a `streamType == 4` stream on the track's
+            // media part — either its own timed-JSON or an `.lrc` sidecar, so
+            // synced lyrics are available whenever the file has them.
+            supportsLyrics: true,
+            supportsSyncedLyrics: true,
             supportsNormalizationGain: false,
             supportsProgressReporting: true,
             hasPlexPass: nil
@@ -248,6 +251,48 @@ public struct PlexBackend: MusicBackend {
             URLQueryItem(name: "X-Plex-Client-Identifier", value: connection.clientIdentifier),
         ])
         _ = try await client.send(endpoint)
+    }
+
+    // MARK: Lyrics
+
+    /// A Plex track exposes lyrics as a `streamType == 4` stream on its media
+    /// part; the stream's `key` serves the file itself.
+    ///
+    /// Returns `nil` only for a genuine "this track has no lyrics" answer from a
+    /// server we reached — a transport failure is rethrown so the resolver can
+    /// retry later rather than caching a false negative.
+    public func fetchLyrics(for track: Track) async throws -> Lyrics? {
+        let detail: PlexContainerResponse
+        do {
+            detail = try await client.send(
+                Endpoint(path: "library/metadata/\(track.id)"),
+                as: PlexContainerResponse.self
+            )
+        } catch MozzError.notFound {
+            return nil
+        }
+        guard let streams = detail.MediaContainer.Metadata?.first?.Media?.first?.Part?.first?.Stream,
+              let key = streams.first(where: { $0.streamType == 4 })?.key else {
+            return nil
+        }
+        // `download=1` asks for the file itself rather than a transcoded view.
+        let data: Data
+        do {
+            data = try await client.send(
+                Endpoint(path: key, query: [URLQueryItem(name: "download", value: "1")])
+            )
+        } catch MozzError.notFound {
+            return nil
+        }
+        // Most sidecars are UTF-8; fall back to Latin-1, which maps any byte, so a
+        // non-UTF-8 `.lrc` still decodes rather than silently vanishing.
+        guard let text = String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .isoLatin1) else { return nil }
+        // Plex serves either its own timed-JSON or an `.lrc`/plain-text sidecar;
+        // `Lyrics(plexLyricsText:)` routes between them (and must NOT sniff a
+        // leading `[` as JSON — every real `.lrc` starts with one).
+        guard let lyrics = Lyrics(plexLyricsText: text), !lyrics.isEmpty else { return nil }
+        return lyrics.taggingSource(.plex)
     }
 
     // MARK: Helpers

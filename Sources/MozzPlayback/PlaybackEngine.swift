@@ -40,6 +40,15 @@ public final class PlaybackEngine {
     public private(set) var upNext: [Track] = []
     /// Tracks played before the current one (oldest first) — the queue's history.
     public private(set) var history: [Track] = []
+    /// Bumped whenever the queue is republished — a track change, a jump, a
+    /// reorder, a clear, a transport state change.
+    ///
+    /// Exists so the UI can react to "the queue moved under me" in constant time.
+    /// Watching ``upNext`` itself means an array-equality check over every queued
+    /// track on each view update, which on a shuffled library is thousands of
+    /// element comparisons per scroll frame. Deliberately not driven by the 0.5s
+    /// position tick, so it stays a genuine signal that something changed.
+    public private(set) var queueRevision = 0
 
     // MARK: Combine bridge (for non-SwiftUI observers)
 
@@ -1019,6 +1028,7 @@ public final class PlaybackEngine {
     private func publish(status: PlaybackStatus? = nil) {
         upNext = queue.upNext
         history = queue.history
+        queueRevision &+= 1
         var snap = snapshot
         if let status { snap.status = status }
         snap.currentTrackID = queue.current?.id

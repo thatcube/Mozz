@@ -287,3 +287,45 @@ struct SubsonicID: Decodable, Hashable {
         }
     }
 }
+
+// MARK: - Lyrics
+
+/// `getLyricsBySongId` (OpenSubsonic `songLyrics` extension). Returns a
+/// structured list of lyric documents (one per language/variant); each carries
+/// lines whose `start` is an offset in **milliseconds**. `synced` reports whether
+/// those offsets are meaningful.
+struct SubsonicLyricsListPayload: Decodable {
+    let lyricsList: SubsonicLyricsList?
+}
+
+struct SubsonicLyricsList: Decodable {
+    let structuredLyrics: [SubsonicStructuredLyrics]?
+}
+
+struct SubsonicStructuredLyrics: Decodable {
+    let lang: String?
+    let synced: Bool?
+    /// Milliseconds to add to every line's `start` (server-supplied correction).
+    let offset: Int?
+    let line: [SubsonicLyricLine]?
+}
+
+struct SubsonicLyricLine: Decodable {
+    /// Offset from the start of the track, in milliseconds. Absent on unsynced
+    /// documents.
+    let start: Int?
+    let value: String?
+}
+
+/// `getLyrics` (classic Subsonic). Plain text only — no timestamps.
+struct SubsonicLyricsPayload: Decodable {
+    let lyrics: SubsonicPlainLyrics?
+}
+
+struct SubsonicPlainLyrics: Decodable {
+    let artist: String?
+    let title: String?
+    /// The lyric text itself, which classic Subsonic returns as the element's
+    /// character data — serialized to JSON under the `value` key.
+    let value: String?
+}

@@ -42,6 +42,9 @@ extension View {
 /// A reusable icon button for the Now Playing player. Renders `glyph` at
 /// `glyphSize`, centred in a `hitSize` square so it always meets the touch-target
 /// minimum, with a consistent tint, disabled dimming, and an accessibility label.
+///
+/// `isActive` marks a toggle whose surface is currently showing (lyrics, queue),
+/// drawing a quiet wash behind the glyph.
 struct PlayerIconButton: View {
     let glyph: AppIcon
     var glyphSize: CGFloat = PlayerControlMetrics.utilityGlyph
@@ -49,6 +52,9 @@ struct PlayerIconButton: View {
     var tint: Color = .primary
     var isEnabled: Bool = true
     var haptics: Bool = true
+    /// Whether this control's surface is open. Draws the selected backdrop so the
+    /// state is legible at a glance rather than only from a tint shift.
+    var isActive: Bool = false
     let label: LocalizedStringKey
     let action: () -> Void
 
@@ -56,13 +62,42 @@ struct PlayerIconButton: View {
         Button(action: action) {
             glyph.styled(size: glyphSize)
                 .playerHitTarget(hitSize)
+                .background { activeBackdrop }
         }
         .buttonStyle(PlayerButtonStyle(haptic: haptics))
         .foregroundStyle(tint)
         .opacity(isEnabled ? 1 : 0.35)
         .disabled(!isEnabled)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
+
+    /// The selected-state wash: the same fixed light fill + hairline the audio
+    /// format badge uses, as a circle around the glyph.
+    ///
+    /// A fixed `.primary` wash rather than a material, for the same reason as that
+    /// badge — the player's backdrop is sampled from the artwork, and a material
+    /// blurs it into something muddy on dark covers.
+    private var activeBackdrop: some View {
+        Circle()
+            .fill(.primary.opacity(0.16))
+            .overlay { Circle().stroke(.primary.opacity(0.12), lineWidth: 0.5) }
+            .frame(width: backdropSize, height: backdropSize)
+            // Grown into place rather than simply faded, so the toggle feels like
+            // it is switching on.
+            .scaleEffect(isActive ? 1 : 0.72)
+            .opacity(isActive ? 1 : 0)
+            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isActive)
+    }
+
+    /// Sized off the glyph so it stays concentric at any icon size, with enough
+    /// margin that the wash reads as a surface the icon sits on rather than a
+    /// tight outline around it.
+    ///
+    /// Not clamped to the hit target: this is a `background`, so it takes no part
+    /// in layout and is free to be a little larger than the 44pt square the touch
+    /// area needs.
+    private var backdropSize: CGFloat { glyphSize + 23 }
 }
 
 /// A tactile press style shared by every player button: a firm scale-down and
