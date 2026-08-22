@@ -262,6 +262,10 @@ public struct PlexBackend: MusicBackend {
     /// server we reached — a transport failure is rethrown so the resolver can
     /// retry later rather than caching a false negative.
     public func fetchLyrics(for track: Track) async throws -> Lyrics? {
+        // Lyrics are optional, so this asks once and gets out of the way. The
+        // shared client retries, which on a weak connection means extra requests
+        // competing with the stream the user actually cares about.
+        let client = self.client.withRetryPolicy(.none)
         let detail: PlexContainerResponse
         do {
             detail = try await client.send(

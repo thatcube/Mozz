@@ -529,6 +529,10 @@ public struct JellyfinBackend: MusicBackend {
     /// failure is a transport problem and is rethrown so the resolver never caches
     /// a false negative.
     public func fetchLyrics(for track: Track) async throws -> Lyrics? {
+        // Lyrics are optional, so this asks once and gets out of the way. The
+        // shared client retries, which on a weak connection means extra requests
+        // competing with the stream the user actually cares about.
+        let client = self.client.withRetryPolicy(.none)
         let dto: JFLyricDto
         do {
             dto = try await client.send(

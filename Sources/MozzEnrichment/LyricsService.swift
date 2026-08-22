@@ -96,18 +96,34 @@ public struct LyricsService: Sendable {
     /// block on a slow server beyond this.
     public static let serverHeadStart: TimeInterval = 0.3
 
+    /// Backs off the online lookup when the network is genuinely bad, so a dead
+    /// spot costs one failed attempt rather than a burst of them per song. Shared
+    /// app-wide because the service is constructed per player.
+    public static let lrclibBackoff = NetworkBackoff()
+    /// The same for the user's own server. Matters most when playing downloaded
+    /// tracks somewhere the server can't be reached at all — audio is coming off
+    /// disk, and there's no reason to ask an unreachable server for words on every
+    /// single track.
+    public static let serverBackoff = NetworkBackoff()
+
     private let lrclib: LRCLIBLyricsProvider
     private let memo: LyricsMemoCache
     private let disk: LyricsDiskCache
+    private let lrclibBackoff: NetworkBackoff
+    private let serverBackoff: NetworkBackoff
 
     public init(
         lrclib: LRCLIBLyricsProvider = LRCLIBLyricsProvider(),
         memo: LyricsMemoCache = .shared,
-        disk: LyricsDiskCache = .shared
+        disk: LyricsDiskCache = .shared,
+        lrclibBackoff: NetworkBackoff = LyricsService.lrclibBackoff,
+        serverBackoff: NetworkBackoff = LyricsService.serverBackoff
     ) {
         self.lrclib = lrclib
         self.memo = memo
         self.disk = disk
+        self.lrclibBackoff = lrclibBackoff
+        self.serverBackoff = serverBackoff
     }
 
     // MARK: Resolution
@@ -119,11 +135,16 @@ public struct LyricsService: Sendable {
     ///     for transport failures and return `nil` only for an authoritative
     ///     "none" — the negative-authority rules depend on that distinction.
     ///   - useLRCLIB: the user's "look up lyrics online" preference.
+    ///   - userInitiated: the user explicitly asked for lyrics right now (opened
+    ///     the panel, turned the setting on). Such a request ignores the bad-network
+    ///     backoff entirely — a deliberate tap should always try, however poor the
+    ///     signal.
     public func resolve(
         track: Track,
         backend: (any MusicBackend)?,
         context: LyricsResolveContext,
-        useLRCLIB: Bool
+        useLRCLIB: Bool,
+        userInitiated: Bool = false
     ) async -> LyricsResolution {
         let key = LyricsCacheKey.make(
             trackID: track.id, connectionID: backend?.connection.id
@@ -153,7 +174,8 @@ public struct LyricsService: Sendable {
             track: track,
             backend: backend,
             useLRCLIB: useLRCLIB,
-            allowTitleOnlyFallback: context == .visible
+            allowTitleOnlyFallback: context == .visible,
+            ignoresBackoff: userInitiated
         )
         // Only persist a result we actually trust. A positive is always
         // trustworthy; a negative only when it was authoritative. An offline
@@ -185,7 +207,8 @@ public struct LyricsService: Sendable {
 
         // This re-checks the track the user is looking at, so it earns full effort.
         let outcome = await lookUp(
-            track: track, backend: backend, useLRCLIB: useLRCLIB, allowTitleOnlyFallback: true
+            track: track, backend: backend, useLRCLIB: useLRCLIB,
+            allowTitleOnlyFallback: true, ignoresBackoff: false
         )
         // Offline: leave the existing entry alone and let a future play try again.
         // We only consume the debounce window on an authoritative response.
@@ -218,12 +241,30 @@ public struct LyricsService: Sendable {
         track: Track,
         backend: (any MusicBackend)?,
         useLRCLIB: Bool,
-        allowTitleOnlyFallback: Bool
+        allowTitleOnlyFallback: Bool,
+        ignoresBackoff: Bool
     ) async -> Outcome {
         let artist = track.artistName.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasArtist = !artist.isEmpty
-        let lrclibConsulted = useLRCLIB && hasArtist
         let hasUsableDuration = track.duration > 0
+        // A closed gate is "we couldn't ask", never "the answer is no" — so a
+        // negative formed while backed off is not authoritative and is never
+        // cached. The moment the network returns, the next lookup resolves normally.
+        let mayAskServer: Bool
+        if ignoresBackoff {
+            mayAskServer = true
+        } else {
+            mayAskServer = await serverBackoff.shouldAttempt()
+        }
+        let mayAskLRCLIB: Bool
+        if !useLRCLIB || !hasArtist {
+            mayAskLRCLIB = false
+        } else if ignoresBackoff {
+            mayAskLRCLIB = true
+        } else {
+            mayAskLRCLIB = await lrclibBackoff.shouldAttempt()
+        }
+        let lrclibConsulted = useLRCLIB && hasArtist
 
         enum Source { case server, lrclib, deadline }
         struct Probe: Sendable {
@@ -233,7 +274,13 @@ public struct LyricsService: Sendable {
         }
 
         return await withTaskGroup(of: Probe.self) { group in
+            let serverBackoff = self.serverBackoff
+            let lrclibBackoff = self.lrclibBackoff
             group.addTask {
+                guard mayAskServer else {
+                    // Backed off — we didn't ask, so we know nothing.
+                    return Probe(source: .server, lyrics: nil, reachable: false)
+                }
                 guard let backend else {
                     // No backend at all (offline demo): an authoritative "the
                     // server has nothing", so LRCLIB alone decides.
@@ -244,12 +291,20 @@ public struct LyricsService: Sendable {
                 // So any throw means we could NOT get an authoritative verdict.
                 do {
                     let lyrics = try await backend.fetchLyrics(for: track)
+                    // Reaching the server at all — even to be told there are no
+                    // lyrics — proves the connection works, so the gate reopens.
+                    await serverBackoff.recordSuccess()
                     return Probe(source: .server, lyrics: lyrics, reachable: true)
+                } catch is CancellationError {
+                    // Skipping tracks quickly cancels these; that says nothing
+                    // about the network and must not count against it.
+                    return Probe(source: .server, lyrics: nil, reachable: false)
                 } catch {
+                    await serverBackoff.recordFailure()
                     return Probe(source: .server, lyrics: nil, reachable: false)
                 }
             }
-            if lrclibConsulted {
+            if mayAskLRCLIB {
                 group.addTask {
                     let result = await lrclib.lyrics(
                         title: track.title,
@@ -257,6 +312,14 @@ public struct LyricsService: Sendable {
                         duration: track.duration,
                         allowTitleOnlyFallback: allowTitleOnlyFallback
                     )
+                    if Task.isCancelled {
+                        return Probe(source: .lrclib, lyrics: nil, reachable: false)
+                    }
+                    if result.reachable {
+                        await lrclibBackoff.recordSuccess()
+                    } else {
+                        await lrclibBackoff.recordFailure()
+                    }
                     return Probe(source: .lrclib, lyrics: result.lyrics, reachable: result.reachable)
                 }
             }

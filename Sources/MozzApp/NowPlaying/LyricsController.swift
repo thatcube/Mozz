@@ -111,6 +111,13 @@ final class LyricsController {
         guard visible != self.visible else { return }
         self.visible = visible
         if visible {
+            // Opening the panel is the user asking for lyrics in as many words, so
+            // if the last attempt came back with nothing it may try again ignoring
+            // the bad-network backoff. Cached answers still short-circuit, so a
+            // known instrumental costs nothing.
+            if case .silent = state {
+                load(track: playback.currentTrack, userInitiated: true)
+            }
             resetAnchor()
             updateActiveLine()
             startTicker()
@@ -124,7 +131,7 @@ final class LyricsController {
 
     /// Resolves lyrics for `track`, cancelling any in-flight lookup so a fast
     /// next/previous never leaves a stale track's words on screen.
-    func load(track: Track?) {
+    func load(track: Track?, userInitiated: Bool = false) {
         loadTask?.cancel()
         refreshTask?.cancel()
         prefetchTask?.cancel()
@@ -143,7 +150,8 @@ final class LyricsController {
 
         loadTask = Task { [weak self] in
             let resolution = await service.resolve(
-                track: track, backend: backend, context: .visible, useLRCLIB: useLRCLIB
+                track: track, backend: backend, context: .visible,
+                useLRCLIB: useLRCLIB, userInitiated: userInitiated
             )
             guard !Task.isCancelled, let self else { return }
             // Ignore a result that arrived after the user moved on.
@@ -171,7 +179,7 @@ final class LyricsController {
     /// online-lookup setting back on: the resolve that ran while it was off
     /// deliberately skipped LRCLIB, so the cached answer is incomplete.
     func reload() {
-        load(track: playback.currentTrack)
+        load(track: playback.currentTrack, userInitiated: true)
     }
 
     /// Silent re-check for a track whose visible state is `.silent`. Promotes to

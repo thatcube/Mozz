@@ -50,6 +50,20 @@ public struct HTTPClient: Sendable {
         )
     }
 
+    /// Return a copy that retries differently. Used for **optional** work — a
+    /// lyric lookup, say — which should cost one attempt and get out of the way
+    /// rather than retrying over a connection the user is trying to stream through.
+    public func withRetryPolicy(_ policy: RetryPolicy) -> HTTPClient {
+        HTTPClient(
+            baseURL: baseURL,
+            transport: transport,
+            defaultHeaders: defaultHeaders,
+            defaultQueryItems: defaultQueryItems,
+            retryPolicy: policy,
+            logger: logger
+        )
+    }
+
     /// Return a copy with default query items appended to *every* request (and
     /// preserved by ``makeRequest`` so the same signed URL can be reused for
     /// media/download sessions). This is the ergonomic signing hook used by

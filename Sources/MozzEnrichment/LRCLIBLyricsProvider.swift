@@ -57,8 +57,26 @@ public struct LRCLIBLyricsProvider: Sendable {
     private let client: HTTPClient
     private let limiter: TokenBucketLimiter
 
+    /// One session for the whole app.
+    ///
+    /// Shared because the provider is constructed more often than it looks —
+    /// SwiftUI re-initialises the views that own it on every parent update — and a
+    /// fresh `URLSession` each time is pure waste. It also declines
+    /// **constrained** networks: Low Data Mode is the user asking not to spend
+    /// data on things they didn't ask for, and lyrics are exactly that. Requests
+    /// then fail instantly and locally rather than going out at all.
+    public static let sharedTransport: any HTTPTransport = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 30
+        config.waitsForConnectivity = false
+        config.allowsConstrainedNetworkAccess = false
+        config.httpAdditionalHeaders = ["Accept-Encoding": "gzip, deflate"]
+        return URLSessionTransport(session: URLSession(configuration: config))
+    }()
+
     public init(
-        transport: any HTTPTransport = URLSessionTransport(),
+        transport: any HTTPTransport = LRCLIBLyricsProvider.sharedTransport,
         limiter: TokenBucketLimiter = LRCLIBLyricsProvider.sharedLimiter,
         baseURL: URL = URL(string: "https://lrclib.net/api")!
     ) {
