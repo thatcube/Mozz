@@ -23,8 +23,12 @@ struct StoredSession: Codable, Sendable {
 
 /// Reads/writes the single active ``StoredSession`` as a JSON blob under one
 /// credential key.
+///
+/// The key is the one entry routed through iCloud Keychain (see
+/// ``RoutingCredentialStore``), so a sign-in on one device brings the server up
+/// on the user's other devices — and a sign-out clears it everywhere.
 enum SessionPersistence {
-    private static let key = "session.active"
+    static let key = "session.active"
 
     static func save(_ session: StoredSession, to store: any CredentialStore) {
         guard let data = try? JSONEncoder().encode(session),

@@ -4,23 +4,41 @@ import Security
 /// Keychain-backed ``CredentialStore`` used by the app.
 ///
 /// Items are stored as generic passwords under a single service, keyed by the
-/// caller's key as the account. Accessibility is
-/// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: readable while the
-/// device is unlocked after first unlock (so background downloads and audio can
-/// resume), never migrated to another device via backup.
+/// caller's key as the account.
+///
+/// Two accessibility policies, chosen per store:
+///
+/// * **Device-local** (default) — `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`:
+///   readable while the device is unlocked after first unlock (so background
+///   downloads and audio can resume), never migrated to another device.
+/// * **Synchronizable** — rides iCloud Keychain to the user's other devices, so
+///   signing in on the iPhone signs you in on the iPad. iCloud Keychain refuses
+///   `ThisDeviceOnly` accessibility, so these use plain
+///   `kSecAttrAccessibleAfterFirstUnlock`.
+///
+/// The two are separate item namespaces even for the same key: a keychain query
+/// that doesn't mention `kSecAttrSynchronizable` matches only non-synchronizable
+/// items, so a store never sees the other's items. Moving a key between them is
+/// therefore an explicit copy — see ``RoutingCredentialStore``.
 public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable {
     private let service: String
+    private let synchronizable: Bool
 
-    public init(service: String = "com.thatcube.Mozz.credentials") {
+    public init(service: String = "com.thatcube.Mozz.credentials", synchronizable: Bool = false) {
         self.service = service
+        self.synchronizable = synchronizable
     }
 
     private func baseQuery(forKey key: String) -> [String: Any] {
-        [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
+        // Only set on the syncing store: an absent attribute already means
+        // "non-synchronizable items only", which is exactly the local store.
+        if synchronizable { query[kSecAttrSynchronizable as String] = kCFBooleanTrue }
+        return query
     }
 
     public func string(forKey key: String) throws -> String? {
@@ -62,7 +80,9 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
         case errSecItemNotFound:
             var addQuery = query
             addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            addQuery[kSecAttrAccessible as String] = synchronizable
+                ? kSecAttrAccessibleAfterFirstUnlock
+                : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 throw MozzError.transport("Keychain add failed (\(addStatus))")

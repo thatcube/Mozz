@@ -260,7 +260,11 @@ public final class AppEnvironment: ObservableObject {
         let dbURL = support.appendingPathComponent("mozz.sqlite")
         let database = try MusicDatabase.open(at: dbURL)
         let fileStore = try DownloadFileStore(root: try DownloadFileStore.defaultRoot())
-        let credentials = KeychainCredentialStore()
+        let credentials = RoutingCredentialStore(
+            local: KeychainCredentialStore(),
+            synced: KeychainCredentialStore(synchronizable: true),
+            syncedKeys: [SessionPersistence.key]
+        )
         return AppEnvironment(database: database, credentials: credentials, fileStore: fileStore)
     }
 
@@ -1419,12 +1423,19 @@ public final class AppEnvironment: ObservableObject {
     // MARK: Backend construction
 
     private func buildBackend(from stored: StoredSession) async throws -> (ServerConnection, any MusicBackend) {
+        // Always present THIS device's client identifier, never the one baked
+        // into the stored session: that session may have arrived from another
+        // device through iCloud Keychain, and two devices sharing an identifier
+        // register as a single device on Plex/Jellyfin (they'd fight over the
+        // same server-side session). The token stays valid either way — it
+        // authorizes the account, not the device id.
+        let clientIdentifier = self.clientIdentifier
         switch stored.kind {
         case .jellyfin:
             let connection = ServerConnection(
                 id: Self.serverId(kind: .jellyfin, baseURL: stored.baseURL),
                 kind: .jellyfin, name: stored.serverName, baseURL: stored.baseURL,
-                userID: stored.userID, clientIdentifier: stored.clientIdentifier
+                userID: stored.userID, clientIdentifier: clientIdentifier
             )
             let backend = JellyfinBackend(connection: connection, token: stored.token, clientInfo: clientInfo)
             return (connection, backend)
@@ -1432,7 +1443,7 @@ public final class AppEnvironment: ObservableObject {
             var connection = ServerConnection(
                 id: Self.serverId(kind: .plex, baseURL: stored.baseURL),
                 kind: .plex, name: stored.serverName, baseURL: stored.baseURL,
-                userID: stored.userID, clientIdentifier: stored.clientIdentifier,
+                userID: stored.userID, clientIdentifier: clientIdentifier,
                 musicSectionID: stored.musicSectionID
             )
             var backend = PlexBackend(connection: connection, token: stored.token, clientInfo: clientInfo)
@@ -1455,7 +1466,7 @@ public final class AppEnvironment: ObservableObject {
             let connection = ServerConnection(
                 id: Self.serverId(kind: .subsonic, baseURL: stored.baseURL, username: stored.userID),
                 kind: .subsonic, name: stored.serverName, baseURL: stored.baseURL,
-                userID: stored.userID, clientIdentifier: stored.clientIdentifier,
+                userID: stored.userID, clientIdentifier: clientIdentifier,
                 musicSectionID: stored.musicSectionID
             )
             let backend = SubsonicBackend(connection: connection, credential: credential, clientInfo: clientInfo)
