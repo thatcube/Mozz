@@ -6,8 +6,9 @@ import MozzDatabase
 /// tracks rated ≥ 4★, unified by ``LibraryRepository/likedTracks(serverId:limit:)``.
 /// Reads the local DB so it works offline. The collection has no cover of its
 /// own, so (like Mozz Weekly) the hero blends a color from a representative
-/// liked track's artwork, chosen stably when the list loads. Reloads on return
-/// so a like/unlike made elsewhere is reflected.
+/// liked track's artwork — re-rolled at random each time the screen is opened so
+/// a growing list of likes doesn't always greet you with the same cover. Reloads
+/// on return so a like/unlike made elsewhere is reflected.
 struct LikedSongsView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var tracks: [TrackRecord] = []
@@ -55,14 +56,24 @@ struct LikedSongsView: View {
     private func load() async {
         let result = (try? await env.repository.likedTracks(serverId: env.active?.connection.id)) ?? []
         tracks = result
-        // Stable hero backdrop: the first liked track that has artwork.
-        if let pick = result.first(where: { $0.artworkKey != nil }), let key = pick.artworkKey {
-            heroArtwork = ArtworkRef(key: key)
-            heroSeed = key
-        } else {
+        updateHero(from: result)
+        loaded = true
+    }
+
+    /// Rotating hero backdrop: a random liked cover, drawn from the *distinct*
+    /// artwork keys so an album with a dozen likes doesn't crowd out everything
+    /// else. Picked once per visit — the reload on return keeps the same backdrop
+    /// unless that cover is no longer liked (or there are no likes left).
+    private func updateHero(from result: [TrackRecord]) {
+        let keys = Set(result.compactMap(\.artworkKey))
+        guard !keys.isEmpty else {
             heroArtwork = nil
             heroSeed = "liked-songs"
+            return
         }
-        loaded = true
+        if let current = heroArtwork?.key, keys.contains(current) { return }
+        guard let key = keys.randomElement() else { return }
+        heroArtwork = ArtworkRef(key: key)
+        heroSeed = key
     }
 }
