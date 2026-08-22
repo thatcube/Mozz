@@ -110,6 +110,9 @@ public final class AppEnvironment: ObservableObject {
     public let toasts = ToastCenter()
 
     private let resolver = SwappableResolver()
+    /// Shared lyrics resolution, used both by the player and by the download hook
+    /// that saves lyrics for offline listening.
+    let lyricsService = LyricsService()
 
     /// The active server, or `nil` when the user needs to sign in.
     @Published public private(set) var active: ActiveServer?
@@ -1071,6 +1074,20 @@ public final class AppEnvironment: ObservableObject {
     public var usesFavorites: Bool { active?.capabilities.supportsFavorites ?? false }
     public var usesRatings: Bool { active?.capabilities.supportsRatings ?? false }
 
+    /// Resolve and durably store the lyrics for a just-downloaded track.
+    ///
+    /// Best-effort by design: the download has already succeeded, so anything
+    /// that goes wrong here is silent. Runs off the download's critical path.
+    private func captureOfflineLyrics(trackInternalId: Int64) async {
+        guard UserDefaults.standard.object(forKey: LyricsSettings.offlineCaptureKey) as? Bool ?? true
+        else { return }
+        guard let record = try? await repository.track(id: trackInternalId) else { return }
+        let useLRCLIB = UserDefaults.standard.object(forKey: LyricsSettings.onlineLookupKey) as? Bool ?? true
+        await lyricsService.captureForOffline(
+            track: record.toDomain(), backend: active?.backend, useLRCLIB: useLRCLIB
+        )
+    }
+
     /// Like or unlike a track. On a favorites backend this toggles the boolean
     /// favorite; on a ratings backend it sets 5★ (like) or clears the rating
     /// (unlike). Offline-first: the local DB updates immediately and the server
@@ -1847,6 +1864,14 @@ public final class AppEnvironment: ObservableObject {
             Task { @MainActor in
                 MozzAppDelegate.backgroundSessionCompletionHandler?()
                 MozzAppDelegate.backgroundSessionCompletionHandler = nil
+            }
+        }
+        // Save a downloaded track's lyrics alongside it, so music kept for
+        // offline listening reads offline too. Fire-and-forget: it runs after the
+        // audio is already safely on disk and can never fail a download.
+        downloads.onTrackDownloaded = { [weak self] trackInternalId in
+            Task { @MainActor in
+                await self?.captureOfflineLyrics(trackInternalId: trackInternalId)
             }
         }
         #endif

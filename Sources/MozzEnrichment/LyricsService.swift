@@ -109,6 +109,7 @@ public struct LyricsService: Sendable {
     private let lrclib: LRCLIBLyricsProvider
     private let memo: LyricsMemoCache
     private let disk: LyricsDiskCache
+    private let offline: LyricsDiskCache
     private let lrclibBackoff: NetworkBackoff
     private let serverBackoff: NetworkBackoff
 
@@ -116,14 +117,60 @@ public struct LyricsService: Sendable {
         lrclib: LRCLIBLyricsProvider = LRCLIBLyricsProvider(),
         memo: LyricsMemoCache = .shared,
         disk: LyricsDiskCache = .shared,
+        offline: LyricsDiskCache = .offline,
         lrclibBackoff: NetworkBackoff = LyricsService.lrclibBackoff,
         serverBackoff: NetworkBackoff = LyricsService.serverBackoff
     ) {
         self.lrclib = lrclib
         self.memo = memo
         self.disk = disk
+        self.offline = offline
         self.lrclibBackoff = lrclibBackoff
         self.serverBackoff = serverBackoff
+    }
+
+    /// Resolves and durably stores a track's lyrics because the user downloaded
+    /// it for offline listening.
+    ///
+    /// Saved to the offline store rather than the ordinary cache: that one lives
+    /// in Caches and the OS may reclaim it at any point, which would quietly
+    /// break the one situation downloading exists for. Only a real result is kept
+    /// — a track we couldn't reach a source for is left alone so it can be picked
+    /// up next time rather than remembered as having none.
+    @discardableResult
+    public func captureForOffline(
+        track: Track,
+        backend: (any MusicBackend)?,
+        useLRCLIB: Bool
+    ) async -> Lyrics? {
+        let key = LyricsCacheKey.make(
+            trackID: track.id, connectionID: backend?.connection.id
+        )
+        // Already saved for offline — downloading an album twice costs nothing.
+        if let existing = await offline.cached(key) { return existing }
+        // A track whose own title says it is instrumental needs no network.
+        if isExplicitlyInstrumental(title: track.title) {
+            await offline.store(nil, for: key)
+            return nil
+        }
+        // Reuse whatever the ordinary cache already knows before going out.
+        if let cached = await disk.cached(key), let lyrics = cached {
+            await offline.store(lyrics, for: key)
+            return lyrics
+        }
+        // A download is a deliberate request to have this track work offline, so
+        // it earns the full lookup and ignores the bad-network backoff.
+        let outcome = await lookUp(
+            track: track,
+            backend: backend,
+            useLRCLIB: useLRCLIB,
+            allowTitleOnlyFallback: true,
+            ignoresBackoff: true
+        )
+        guard outcome.lyrics != nil || outcome.isAuthoritative else { return nil }
+        await offline.store(outcome.lyrics, for: key)
+        await memo.set(outcome.lyrics, for: key)
+        return outcome.lyrics
     }
 
     // MARK: Resolution
@@ -154,7 +201,14 @@ public struct LyricsService: Sendable {
         if let cached = await memo.value(for: key) {
             return LyricsResolution(lyrics: cached, staySilent: cached == nil)
         }
-        // L2: on-disk cache. A negative hit here is the big saving for
+        // L2: lyrics saved because the track was downloaded. Consulted before the
+        // ordinary cache because it is the durable one — and because a downloaded
+        // track is exactly the case where there may be no network to fall back on.
+        if let saved = await offline.cached(key) {
+            await memo.set(saved, for: key)
+            return LyricsResolution(lyrics: saved, staySilent: saved == nil)
+        }
+        // L3: on-disk cache. A negative hit here is the big saving for
         // instrumentals — once we've asked and found nothing we skip the network
         // and stay quiet, while a debounced background re-check still catches a
         // later upload.
@@ -162,7 +216,7 @@ public struct LyricsService: Sendable {
             await memo.set(cached, for: key)
             return LyricsResolution(lyrics: cached, staySilent: cached == nil)
         }
-        // L3: title heuristic. Persisted through both layers so it isn't
+        // L4: title heuristic. Persisted through the cache layers so it isn't
         // re-evaluated on every play.
         if isExplicitlyInstrumental(title: track.title) {
             await memo.set(nil, for: key)

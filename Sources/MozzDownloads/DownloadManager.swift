@@ -29,6 +29,14 @@ public final class DownloadManager: NSObject, ObservableObject {
     /// system we're done processing background events.
     public var backgroundCompletionHandler: (@Sendable () -> Void)?
 
+    /// Called with the internal track id once a track is safely on disk, so the
+    /// app can capture anything else that ought to be available offline — lyrics,
+    /// today. Deliberately a hook rather than a dependency: downloading is about
+    /// moving bytes into place and has no business knowing how lyrics are
+    /// resolved. Never blocks the download, and a failure in it is not a download
+    /// failure.
+    public var onTrackDownloaded: (@Sendable (Int64) -> Void)?
+
     private let store: DownloadStore
     private let repository: LibraryRepository
     private let fileStore: DownloadFileStore
@@ -152,6 +160,7 @@ public final class DownloadManager: NSObject, ObservableObject {
     private func recordDownloaded(trackId: Int64, relativePath: String, size: Int64) async {
         try? await store.markDownloaded(trackId: trackId, localPath: relativePath, sizeBytes: size)
         progress[trackId] = 1
+        onTrackDownloaded?(trackId)
     }
 
     private func recordFailed(trackId: Int64, error: String) async {

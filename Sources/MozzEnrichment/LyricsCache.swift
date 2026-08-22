@@ -54,7 +54,19 @@ public actor LyricsMemoCache {
 /// A song's JSON is roughly 3 KB, so even a few thousand remembered tracks costs
 /// only a handful of megabytes.
 public actor LyricsDiskCache {
+    /// The opportunistic cache: whatever we happened to look up while playing.
+    /// Lives in Caches, so the OS may reclaim it — losing it costs one lookup.
     public static let shared = LyricsDiskCache()
+
+    /// The **offline** store, for tracks the user deliberately downloaded.
+    ///
+    /// Deliberately NOT in Caches. The whole point of downloading is that the
+    /// music works with no network, and iOS is free to evict a Caches directory
+    /// whenever it likes — so lyrics saved alongside a download have to live in
+    /// Application Support, where they survive until the user removes them. It is
+    /// excluded from iCloud backup: it is all re-derivable, just not re-derivable
+    /// *offline*, which is exactly why it has to be on disk.
+    public static let offline = LyricsDiskCache(directory: offlineDirectory())
 
     private struct Entry: Codable {
         let lyrics: Lyrics?
@@ -164,6 +176,23 @@ public actor LyricsDiskCache {
 
     public static func defaultDirectory() -> URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+
+    /// Durable storage for downloaded tracks' lyrics, created on first use.
+    public static func offlineDirectory() -> URL? {
+        guard var directory = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first else { return nil }
+        directory.appendPathComponent("Lyrics", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            try? FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
+            var resourceValues = URLResourceValues()
+            resourceValues.isExcludedFromBackup = true
+            try? directory.setResourceValues(resourceValues)
+        }
+        return directory
     }
 }
 

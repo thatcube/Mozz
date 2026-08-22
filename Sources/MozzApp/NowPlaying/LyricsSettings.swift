@@ -10,4 +10,11 @@ enum LyricsSettings {
     /// (a track title, artist and duration), so it gets an explicit off-switch.
     /// When off, only the server is consulted.
     static let onlineLookupKey = "mozz.lyricsOnlineLookup"
+
+    /// Whether downloading a track also saves its lyrics for offline listening.
+    ///
+    /// On by default — it is the whole point of downloading that the track works
+    /// with no signal — but it does mean a lookup per downloaded track, so
+    /// anyone downloading a large library on a metered connection can turn it off.
+    static let offlineCaptureKey = "mozz.lyricsOfflineCapture"
 }

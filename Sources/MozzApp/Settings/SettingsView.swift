@@ -12,6 +12,7 @@ struct SettingsView: View {
     /// `AppEnvironment.enrichment`, so no wiring is needed beyond this store.
     @AppStorage("mozz.enrichmentEnabled") private var enrichmentEnabled = true
     @AppStorage(LyricsSettings.onlineLookupKey) private var lyricsOnlineLookup = true
+    @AppStorage(LyricsSettings.offlineCaptureKey) private var lyricsOfflineCapture = true
     /// Live enrichment coverage for the status line; polled while Settings is open
     /// (the task is hosted on the always-present Form — see `.task` below — because
     /// a `.task` on a view whose only content is conditional never fires until the
@@ -66,6 +67,11 @@ struct SettingsView: View {
                             Label("Look Up Lyrics Online", mozz: "quote.bubble")
                         }
                         Text("When your server has no lyrics for a song, Mozz can check LRCLIB, a free community lyrics database. Only the song title, artist and length are sent, no account or personal data. Turn this off to use your server's lyrics only.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle(isOn: $lyricsOfflineCapture) {
+                            Label("Save Lyrics with Downloads", mozz: "arrow.down.circle")
+                        }
+                        Text("Downloading a song also saves its lyrics, so they're there when you have no signal.")
                             .font(.caption).foregroundStyle(.secondary)
                     } header: {
                         Text("Lyrics")
