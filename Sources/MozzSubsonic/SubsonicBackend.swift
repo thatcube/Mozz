@@ -306,6 +306,16 @@ public struct SubsonicBackend: MusicBackend {
         ])
     }
 
+    /// Deliberately unimplemented (inherits the `nil` default), even though
+    /// Subsonic defines `getAvatar` and Navidrome routes it.
+    ///
+    /// Navidrome has no user-photo storage at all: `getAvatar` answers 200 with a
+    /// *bundled generic placeholder*, and only redirects to Gravatar when the
+    /// admin enabled `EnableGravatar` AND the user has an email set. Since the
+    /// response is a normal image either way, a client cannot tell a real photo
+    /// from the placeholder — so calling it would reliably replace Mozz's own
+    /// icon with a stranger's generic silhouette. Our icon is the better default.
+
     // MARK: Writes
 
     public func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {

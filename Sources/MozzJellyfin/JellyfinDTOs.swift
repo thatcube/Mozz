@@ -97,6 +97,9 @@ struct JFQuickConnectResult: Decodable {
 struct JFUser: Decodable {
     let Id: String?
     let Name: String?
+    /// Present (non-empty) only when the user has uploaded a profile photo;
+    /// doubles as the image's cache tag. Absent → requesting the image 404s.
+    let PrimaryImageTag: String?
 }
 
 struct JFAuthenticationResult: Decodable {

@@ -88,6 +88,21 @@ public struct PlexAuthenticator: Sendable {
 
     // MARK: Resource discovery
 
+    /// The account's avatar, as an absolute plex.tv URL, or `nil` when the
+    /// account has no photo.
+    ///
+    /// This is an **account**-level lookup, so it needs the account token from
+    /// the PIN flow — the per-server access token stored with a connection is
+    /// scoped to that server and is rejected here. The returned URL is served
+    /// publicly by plex.tv (no token), so it can be handed straight to an image
+    /// loader.
+    public func accountAvatarURL(accountToken: String) async throws -> URL? {
+        let authedClient = client.withDefaultHeaders(["X-Plex-Token": accountToken])
+        let user = try await authedClient.send(Endpoint(path: "api/v2/user"), as: PlexAccountUser.self)
+        guard let thumb = user.thumb, !thumb.isEmpty else { return nil }
+        return URL(string: thumb)
+    }
+
     /// Discover the account's servers and flatten them into candidate
     /// connections (local first, relay last). Each carries its own
     /// server-scoped access token.

@@ -113,6 +113,11 @@ public final class AppEnvironment: ObservableObject {
 
     /// The active server, or `nil` when the user needs to sign in.
     @Published public private(set) var active: ActiveServer?
+    /// The signed-in user's profile photo on the active server, once fetched.
+    /// `nil` means "no photo" (or not looked up yet) and the UI falls back to the
+    /// generic person icon — see ``refreshUserAvatar()``.
+    @Published public private(set) var userAvatarURL: URL?
+    private var avatarTask: Task<Void, Never>?
     /// Whether we're still restoring a saved session at launch.
     @Published public private(set) var isRestoring = true
     @Published public private(set) var lastSyncSummary: String?
@@ -451,6 +456,8 @@ public final class AppEnvironment: ObservableObject {
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
+        // Look up the signed-in user's profile photo for the header avatar.
+        refreshUserAvatar()
         // Resume the enrichment crawl for the now-active server. `enrich` is
         // server-aware: a same-server rebuild is a single-flight no-op (doesn't
         // restart the drain), and a switch to a different server cancels the stale
@@ -458,6 +465,42 @@ public final class AppEnvironment: ObservableObject {
         // previous library crawling. Toggle-gated inside the service.
         resumeEnrichmentIfNeeded()
     }
+
+    /// Look up the signed-in user's profile photo on the active server and
+    /// publish it for the header avatar. Best-effort decoration: any failure
+    /// (offline, older server, no photo) just leaves the generic icon in place.
+    ///
+    /// Plex is the odd one out — the photo belongs to the plex.tv *account*, not
+    /// the server, so it needs the account token from the sign-in flow rather
+    /// than the per-server access token the backend holds.
+    public func refreshUserAvatar() {
+        avatarTask?.cancel()
+        guard let active else {
+            userAvatarURL = nil
+            return
+        }
+        let backend = active.backend
+        let kind = active.connection.kind
+        let accountToken = kind == .plex ? SessionPersistence.load(credentials)?.accountToken : nil
+        let clientInfo = self.clientInfo
+        let clientIdentifier = self.clientIdentifier
+        avatarTask = Task { [weak self] in
+            var url: URL?
+            if let accountToken {
+                let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: clientIdentifier)
+                url = try? await auth.accountAvatarURL(accountToken: accountToken)
+            }
+            if url == nil {
+                url = await backend.userAvatarURL(size: Self.avatarPixelSize)
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.userAvatarURL = url }
+        }
+    }
+
+    /// Pixel size requested for the header avatar (30pt at 3×, rounded up), so a
+    /// server that resizes serves something crisp but small.
+    static let avatarPixelSize = 120
 
     /// Kick the background enrichment crawl for the active server if one isn't
     /// already running. Safe to call on every launch/foreground: it's single-flight

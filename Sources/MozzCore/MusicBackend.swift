@@ -176,6 +176,17 @@ public protocol MusicBackend: Sendable {
     /// pixel size. Returns `nil` if the reference cannot be resolved.
     func artworkURL(for artwork: ArtworkRef, size: Int) -> URL?
 
+    /// A directly loadable URL for the **signed-in user's** profile photo at
+    /// (at least) `size` px, or `nil` when the account has no photo — or the
+    /// server has no concept of one.
+    ///
+    /// Async because no backend can form this URL from local state alone: it has
+    /// to ask the server who the user is first (Jellyfin needs the image tag,
+    /// Plex the account thumb). Callers treat `nil` as "show the generic icon",
+    /// so a failed request is indistinguishable from "no photo" by design — this
+    /// is decoration and must never surface an error.
+    func userAvatarURL(size: Int) async -> URL?
+
     // MARK: Writes (gated by capabilities)
 
     /// Set or clear a favorite. Throws ``MozzError/unsupported(_:)`` if the
@@ -213,4 +224,8 @@ public extension MusicBackend {
     /// Default: no specialized bulk enumeration; the sync engine uses the flat
     /// ``fetchTracks(offset:limit:)`` pager instead.
     func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>? { nil }
+
+    /// Default: no user photo. Correct for every server that doesn't store one
+    /// (and for the offline demo backend).
+    func userAvatarURL(size: Int) async -> URL? { nil }
 }

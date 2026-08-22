@@ -457,6 +457,31 @@ public struct JellyfinBackend: MusicBackend {
         return mediaURL(path: "Items/\(itemID)/Images/Primary", query: query)
     }
 
+    /// Jellyfin stores a per-user profile image. `Users/Me` reports whether one
+    /// exists (`PrimaryImageTag`) — without that check the image request is a
+    /// guaranteed 404 for the many users who never set a photo. The tag is passed
+    /// through as the cache tag so the server can serve it with strong caching.
+    ///
+    /// Uses the legacy `Users/{id}/Images/Primary` path (rather than 10.9's
+    /// `UserImage`) because it is still routed to the same handler and also works
+    /// on the older servers Mozz supports, and `maxWidth`/`maxHeight` rather than
+    /// `fillWidth` for the same reason. Unlike item artwork this endpoint requires
+    /// auth, hence the `api_key` — the URL is loaded by a plain image loader that
+    /// carries no headers, so it must not be logged.
+    public func userAvatarURL(size: Int) async -> URL? {
+        guard let me = try? await client.send(Endpoint(path: "Users/Me"), as: JFUser.self),
+              let tag = me.PrimaryImageTag, !tag.isEmpty,
+              let id = me.Id ?? connection.userID, !id.isEmpty
+        else { return nil }
+        return mediaURL(path: "Users/\(id)/Images/Primary", query: [
+            URLQueryItem(name: "maxWidth", value: "\(size)"),
+            URLQueryItem(name: "maxHeight", value: "\(size)"),
+            URLQueryItem(name: "quality", value: "90"),
+            URLQueryItem(name: "tag", value: tag),
+            URLQueryItem(name: "api_key", value: token),
+        ])
+    }
+
     // MARK: Writes
 
     public func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {
