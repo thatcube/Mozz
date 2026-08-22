@@ -641,12 +641,27 @@ struct NowPlayingMorphContainer: View {
 
             titleRow(m)
                 .padding(.top, 22)
-                .padding(.horizontal, 32)
+                .padding(.horizontal, Self.heroSideInset)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .gesture(dragGesture)
     }
+
+    /// Side inset of the hero's title row (matches the scrubber below it).
+    /// Doubles as the distance a scrolling title is allowed to bleed past its
+    /// own leading edge, so its fade lands on the screen edge.
+    private static let heroSideInset: CGFloat = 32
+
+    /// Gap between the title block and the star/overflow cluster.
+    ///
+    /// Deliberately small, because two invisible things already pad it out: the
+    /// title's trailing fade ramp dissolves the text ~14pt before its frame ends,
+    /// and the cluster's 44pt minimum touch target leaves ~9pt of empty space
+    /// around a 26pt glyph. The gap you SEE is roughly this plus both of those.
+    /// Doubles as the title's trailing bleed, so the fade finishes inside this
+    /// gap rather than short of it and the two stay in step when tuned.
+    private static let titleClusterGap: CGFloat = 8
 
     /// The hero's now-playing metadata: title/artist on the left, the interactive
     /// star + overflow cluster on the right. On queue-open the WHOLE row lifts up and
@@ -654,11 +669,19 @@ struct NowPlayingMorphContainer: View {
     /// fade in below by the docked artwork — a directional cross-fade, no single
     /// traveling copy.
     private func titleRow(_ m: Morph) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: Self.titleClusterGap) {
             titleArtistBlock
-            Spacer(minLength: 8)
-            // The real interactive star/like + overflow while the queue is closed.
-            // Handed off (by cross-fade) to the card's own cluster once open.
+            // No Spacer: the title block is greedy, so it already pushes the
+            // cluster to the trailing edge, and the gap is exactly the HStack
+            // spacing. A Spacer here stacked ANOTHER gap between the two (its
+            // minLength plus a second helping of spacing), which is what left
+            // the title stranded so far from the star.
+            //
+            // The cluster reports an honest intrinsic width (a 44pt minimum that
+            // grows when the rating shows "4.5"), and greedy-versus-intrinsic
+            // means SwiftUI sizes the cluster first and gives the title what's
+            // left — so the title zone re-fits itself whenever the rating
+            // appears, changes width, or clears.
             starOverflowCluster(interactive: !queueOpen, emitsAnchor: !queueOpen)
         }
         .font(.title3)
@@ -681,18 +704,25 @@ struct NowPlayingMorphContainer: View {
     /// in Apple's player. Falls back to plain text when the track has neither a
     /// linkable artist nor album (e.g. the offline demo backend), so nothing
     /// presents an empty menu. The two lines sit tight (negative spacing) so they
-    /// read as one block rather than two separate labels.
+    /// read as one block rather than two separate labels, and each scrolls its
+    /// own overflow rather than truncating.
     @ViewBuilder
     private var titleArtistBlock: some View {
         let lines = VStack(alignment: .leading, spacing: -1) {
-            Text(playback.currentTrack?.title ?? "")
-                .font(.title2.bold()).lineLimit(1)
+            MarqueeLine(text: playback.currentTrack?.title ?? "",
+                        leadBleed: Self.heroSideInset, trailBleed: Self.titleClusterGap)
+                .font(.title2.bold())
                 .foregroundStyle(.primary)
-            Text(playback.currentTrack?.artistName ?? "")
-                .font(.title3).lineLimit(1)
+            MarqueeLine(text: playback.currentTrack?.artistName ?? "",
+                        leadBleed: Self.heroSideInset, trailBleed: Self.titleClusterGap)
+                .font(.title3)
                 .foregroundStyle(.secondary)
         }
             .multilineTextAlignment(.leading)
+            // Claim the row's remaining width so the lines know how much room
+            // they have to overflow past — without it they'd size to their text
+            // and shove the star/overflow cluster off the row.
+            .frame(maxWidth: .infinity, alignment: .leading)
 
         if let track = playback.currentTrack,
            TrackNavigationButtons.canNavigate(track, surface: .player) {
@@ -1229,6 +1259,180 @@ private struct MarqueeWidthKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// Publishes the width actually available to a ``MarqueeLine`` (its own frame),
+/// which is what decides whether the text overflows and by how much.
+private struct MarqueeZoneWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// One line of text that scrolls its overflow instead of truncating it.
+///
+/// The island has its own marquee welded into ``IslandSlideText`` (which also
+/// owns the swipe cross-slide), so this is the standalone version for anywhere
+/// that just needs "long text shouldn't end in an ellipsis" — currently the
+/// expanded player's title and artist. Same tuning constants as the island, so
+/// both surfaces scroll at one speed and dwell for the same beats.
+///
+/// Font and colour come from the environment, so callers style it exactly like
+/// the `Text` it replaces. Both edges soft-fade rather than hard-clip; the
+/// leading fade only appears while the line is away from home, so a parked line
+/// starts flush with everything below it.
+private struct MarqueeLine: View {
+    let text: String
+    /// Width of the soft edge ramp. Kept modest so it dissolves the overflow
+    /// without visibly dimming a line that only just overflows.
+    var fade: CGFloat = 14
+    /// How far the scrolling text may run PAST its own leading edge before it
+    /// fades out. The player passes its side inset here, so a scrolling title
+    /// runs into the margin and dissolves at the screen edge rather than
+    /// stopping short at the text column — the head gets the full width of the
+    /// screen to travel through, and the ramp reads as part of the display
+    /// rather than as a box the text lives in.
+    var leadBleed: CGFloat = 0
+    /// Same idea at the other end: how far the line may run past its trailing
+    /// edge before fading. The gap to the star plus the dead space inside the
+    /// star's 44pt touch target is otherwise unusable, which left the fade
+    /// finishing well short of the glyph.
+    var trailBleed: CGFloat = 0
+
+    /// Intrinsic (untruncated) width, measured off the real label.
+    @State private var naturalW: CGFloat = 0
+    /// The width this line is allowed to occupy.
+    @State private var zoneW: CGFloat = 0
+    @State private var marqueeX: CGFloat = 0
+    /// True for the whole out-and-back cycle. Drives the leading fade, so the
+    /// mask only ever changes while the text is parked — never mid-glide, which
+    /// would pop the ramp on or off under the moving glyphs.
+    @State private var gliding = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // A hidden, NON-fixedSize twin does the layout: a plain one-line `Text`
+        // compresses to whatever the row can spare, exactly like the label this
+        // replaces, so the line can never push its neighbours off the row. The
+        // real (unclipped, scrolling) label rides in an overlay, which by
+        // definition contributes nothing to layout.
+        //
+        // Getting this wrong is loud: with `fixedSize` in the layout path the
+        // block reports the title's full intrinsic width, the row grows past the
+        // screen, and the title renders half off the left edge with the star and
+        // overflow buttons pushed out of sight.
+        Text(text)
+            .lineLimit(1)
+            .hidden()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { g in
+                    Color.clear.preference(key: MarqueeZoneWidthKey.self, value: g.size.width)
+                }
+            }
+            .overlay(alignment: .leading) {
+                Text(text)
+                    .lineLimit(1)
+                    // Full intrinsic width: never truncates, so there's a real
+                    // tail to reveal and no ellipsis to swap mid-animation.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background(alignment: .leading) {
+                        GeometryReader { g in
+                            Color.clear.preference(key: MarqueeWidthKey.self, value: g.size.width)
+                        }
+                    }
+                    .offset(x: marqueeX)
+            }
+            // Widen the maskable region to the LEFT by the bleed, fade inside
+            // that widened region, then take the width back with a negative
+            // padding so layout is untouched. The strip the ramp now lives in is
+            // the row's own margin, so the text dissolves at the screen edge
+            // while everything below still lines up on the inset.
+            .padding(.leading, leadBleed)
+            .padding(.trailing, trailBleed)
+            .mask(fadeMask)
+            .padding(.leading, -leadBleed)
+            .padding(.trailing, -trailBleed)
+            .onPreferenceChange(MarqueeWidthKey.self) { naturalW = $0 }
+            .onPreferenceChange(MarqueeZoneWidthKey.self) { zoneW = $0 }
+            .task(id: marqueeKey) { await drive() }
+            .onChange(of: text) { _, _ in
+                // A new track paints at the previous line's scroll offset unless
+                // we park it first — and animating that would look like the new
+                // title sliding in from nowhere.
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { marqueeX = 0; gliding = false }
+            }
+    }
+
+    @MainActor
+    private func drive() async {
+        guard active else {
+            if marqueeX != 0 { withAnimation(marqueeReturn) { marqueeX = 0 } }
+            gliding = false
+            return
+        }
+        // Travel the overflow PLUS whatever the trailing ramp still covers after
+        // the bleed. Stopping at the bare overflow parks the tail underneath the
+        // fade, so a title that had scrolled the whole way still looked clipped
+        // at exactly the moment the reader wanted those glyphs.
+        let dist = overflow + max(0, fade - trailBleed)
+        let dur = Double(dist / marqueeSpeed)
+        // Ease home first if a previous run (or a resize mid-scroll) left the
+        // line off-home, so a cycle always starts from the beginning.
+        if marqueeX != 0 { withAnimation(marqueeReturn) { marqueeX = 0 } }
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: marqueeStartDwell)
+                gliding = true
+                withAnimation(.linear(duration: dur)) { marqueeX = -dist }
+                try await Task.sleep(for: .seconds(dur))
+                try await Task.sleep(for: marqueeEndDwell)
+                withAnimation(.linear(duration: dur)) { marqueeX = 0 }
+                try await Task.sleep(for: .seconds(dur))
+                gliding = false
+                try await Task.sleep(for: marqueeLoopGap)
+            } catch {
+                // Cancelled: a fresh run owns the offset and will ease it home.
+                return
+            }
+        }
+    }
+
+    private var overflow: CGFloat { max(0, naturalW - zoneW) }
+
+    private var active: Bool {
+        !reduceMotion && !text.isEmpty && overflow > marqueeMinOverflow && zoneW > 0
+    }
+
+    /// Identity for the driver: a new track, a real width change, or losing/
+    /// gaining overflow restarts it from the first dwell. Width is bucketed so
+    /// sub-pixel layout jitter doesn't churn the task.
+    private var marqueeKey: String {
+        "\(text)|\(Int((zoneW / 3).rounded()))|\(Int(naturalW.rounded()))|\(active ? 1 : 0)"
+    }
+
+    /// Soft ramps at the edges instead of a hard cut. The trailing ramp is there
+    /// whenever the line overflows (that's the "there's more" cue that replaces
+    /// the ellipsis); the leading one only while scrolled away from home, and it
+    /// spans the whole bleed strip so the head dissolves gradually across the
+    /// margin rather than snapping off at the text column.
+    private var fadeMask: some View {
+        let total = max(zoneW + leadBleed + trailBleed, 1)
+        let leadWidth = max(leadBleed, fade)
+        let lead = gliding ? min(leadWidth / total, 0.5) : 0
+        let trail = overflow > 0 ? min(fade / total, 0.4) : 0
+        return LinearGradient(
+            stops: [
+                .init(color: lead > 0 ? .clear : .black, location: 0),
+                .init(color: .black, location: lead),
+                .init(color: .black, location: 1 - trail),
+                .init(color: trail > 0 ? .clear : .black, location: 1),
+            ],
+            startPoint: .leading, endPoint: .trailing)
     }
 }
 
