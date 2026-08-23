@@ -1,0 +1,6 @@
+app_identifier("com.thatcube.Mozz")
+team_id("N8Z5T4AK3X")
+
+# No Apple ID login: everything authenticates with an App Store Connect API key
+# (see the Fastfile and .env.fastlane.example), which is what lets these lanes
+# run unattended without a 2FA prompt.

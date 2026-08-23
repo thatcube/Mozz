@@ -18,6 +18,9 @@ struct MockBackend: MusicBackend {
     /// more than it returns), and force a short-but-non-terminal first track
     /// page (simulate a server that returns fewer than `limit` mid-enumeration).
     var trackTotalOverride: Int?
+    /// Report a different `totalCount` from a given offset onwards, to simulate
+    /// the library changing while a sync is walking it.
+    var trackTotalFromOffset: (offset: Int, total: Int)?
     var trackShortFirstPage = false
     /// Whether this backend can count cheaply and sort songs by date added —
     /// true for Plex/Jellyfin. When false the mock behaves like Subsonic: it can
@@ -28,6 +31,7 @@ struct MockBackend: MusicBackend {
     /// Shared by every copy of the struct, so a test can prove how much network
     /// work a catch-up actually did.
     let calls = CallCounts()
+    var trackFetchProbe: TrackFetchProbe?
 
     init(serverId: String = "srv") {
         self.connection = ServerConnection(
@@ -46,12 +50,16 @@ struct MockBackend: MusicBackend {
         Self.page(albums, offset: offset, limit: limit)
     }
     func fetchTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track> {
+        try trackFetchProbe?.record(offset: offset)
         // Simulate a short (but non-terminal) first page: return 2 items even
         // though more remain, so the engine must not treat "short == done".
         if trackShortFirstPage && offset == 0 && tracks.count > 2 {
             return CatalogPage(items: Array(tracks.prefix(2)), totalCount: trackTotalOverride ?? tracks.count)
         }
         let page = Self.page(tracks, offset: offset, limit: limit)
+        if let drift = trackTotalFromOffset, offset >= drift.offset {
+            return CatalogPage(items: page.items, totalCount: drift.total)
+        }
         if let total = trackTotalOverride {
             return CatalogPage(items: page.items, totalCount: total)
         }
@@ -139,6 +147,37 @@ final class CallCounts: @unchecked Sendable {
         lock.lock()
         _countProbes = 0; _trackPages = 0; _albumPages = 0; _albumTrackFetches = 0
         lock.unlock()
+    }
+}
+
+final class TrackFetchProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var offsets: [Int] = []
+    private var failingOffset: Int?
+
+    init(failingOffset: Int? = nil) {
+        self.failingOffset = failingOffset
+    }
+
+    func record(offset: Int) throws {
+        lock.lock()
+        offsets.append(offset)
+        let shouldFail = offset == failingOffset
+        lock.unlock()
+        if shouldFail { throw MozzError.serverUnreachable }
+    }
+
+    func reset(failingOffset: Int? = nil) {
+        lock.lock()
+        offsets.removeAll()
+        self.failingOffset = failingOffset
+        lock.unlock()
+    }
+
+    var recordedOffsets: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return offsets
     }
 }
 
@@ -330,6 +369,182 @@ final class LibrarySyncEngineTests: XCTestCase {
         let artistsAfter = try await repository.artistCount(serverId: "srv")
         XCTAssertEqual(artistsAfter, 5, "a truncated tracks phase must not authorize pruning artists")
         XCTAssertEqual(summary.deleted, 0)
+    }
+
+    func testInterruptedCursorPersistsAndResumeSkipsCommittedPages() async throws {
+        let database = try MusicDatabase.inMemory()
+        let probe = TrackFetchProbe(failingOffset: 8)
+        var backend = MockBackend()
+        backend.tracks = makeTracks(12)
+        backend.trackFetchProbe = probe
+
+        do {
+            _ = try await LibrarySyncEngine(
+                backend: backend,
+                database: database,
+                pageSize: 4
+            ).sync(startMode: .restart)
+            XCTFail("expected the injected page failure")
+        } catch MozzError.serverUnreachable {
+            // Expected: the first two pages committed before offset 8 failed.
+        }
+
+        let store = CatalogSyncStore(database)
+        let checkpoint = try await store.checkpoint(serverId: "srv", phase: "tracks")
+        XCTAssertEqual(checkpoint?.committedOffset, 8)
+        XCTAssertEqual(checkpoint?.reportedTotal, 12)
+        XCTAssertEqual(checkpoint?.completed, false)
+        let interrupted = try await store.hasInterruptedRun(serverId: "srv")
+        XCTAssertTrue(interrupted)
+
+        probe.reset()
+        let summary = try await LibrarySyncEngine(
+            backend: backend,
+            database: database,
+            pageSize: 4
+        ).sync(startMode: .resumeIfPossible)
+
+        XCTAssertEqual(probe.recordedOffsets, [8, 12])
+        XCTAssertEqual(summary.tracks, 12)
+        let stillInterrupted = try await store.hasInterruptedRun(serverId: "srv")
+        let completed = try await store.checkpoint(serverId: "srv", phase: "tracks")?.completed
+        XCTAssertFalse(stillInterrupted)
+        XCTAssertEqual(completed, true)
+    }
+
+    func testChangedTotalDiscardsCursorAndRestartsPhase() async throws {
+        let database = try MusicDatabase.inMemory()
+        let probe = TrackFetchProbe(failingOffset: 8)
+        var backend = MockBackend()
+        backend.tracks = makeTracks(10)
+        backend.trackFetchProbe = probe
+
+        do {
+            _ = try await LibrarySyncEngine(
+                backend: backend,
+                database: database,
+                pageSize: 4
+            ).sync(startMode: .restart)
+            XCTFail("expected the injected page failure")
+        } catch MozzError.serverUnreachable {}
+
+        backend.tracks = makeTracks(12)
+        probe.reset()
+        let summary = try await LibrarySyncEngine(
+            backend: backend,
+            database: database,
+            pageSize: 4
+        ).sync(startMode: .resumeIfPossible)
+
+        XCTAssertEqual(Array(probe.recordedOffsets.prefix(2)), [8, 0],
+                       "a changed server total must invalidate the old offset")
+        XCTAssertEqual(summary.tracks, 12)
+        let checkpoint = try await CatalogSyncStore(database)
+            .checkpoint(serverId: "srv", phase: "tracks")
+        XCTAssertEqual(checkpoint?.reportedTotal, 12)
+        XCTAssertEqual(checkpoint?.completed, true)
+    }
+
+    /// The guard that stands between a resumed run and catastrophe.
+    ///
+    /// A resumed phase only holds the ids AFTER its checkpoint. If that partial
+    /// set were ever treated as a complete enumeration, the prune would delete
+    /// every row before it — and because `download` rows cascade from `track`,
+    /// that takes the user's offline music with it.
+    ///
+    /// The completeness arithmetic is deliberately rigged here so it would say
+    /// "complete": the server reports a total equal to the resumed SUFFIX, so
+    /// `Set(seen).count >= total` holds. Only `phaseCompleted`'s
+    /// `resumedFromCheckpoint` guard can refuse the prune — remove it and this
+    /// test fails, which is the whole point. (It previously passed either way,
+    /// because the suffix was smaller than the total and the arithmetic blocked
+    /// the prune on its own.)
+    func testResumedSyncCannotPruneRowsOutsideItsSuffix() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.tracks = makeTracks(8)
+        _ = try await LibrarySyncEngine(
+            backend: backend,
+            database: database,
+            pageSize: 4
+        ).sync(startMode: .restart)
+
+        // Give the user a download, so a bad prune would take real user data with
+        // it — exactly what makes this failure unrecoverable rather than annoying.
+        let repository = LibraryRepository(database)
+        let downloadedRecord = try await repository.track(serverId: "srv", remoteId: "t0")
+        let downloadedTrackId = try XCTUnwrap(downloadedRecord?.id)
+        try await DownloadStore(database).markDownloaded(
+            trackId: downloadedTrackId, localPath: "t0.m4a", sizeBytes: 1
+        )
+
+        // Rig the arithmetic so the resumed SUFFIX alone satisfies the
+        // completeness predicate: the server reports a total of four, and the
+        // suffix (t4…t7) is four. The total is set BEFORE the interrupted run so
+        // the stored checkpoint records it too — otherwise the resumed run sees the
+        // total change, discards the checkpoint and walks from zero, and the guard
+        // is never consulted at all.
+        backend.trackTotalOverride = 4
+        let probe = TrackFetchProbe(failingOffset: 4)
+        backend.trackFetchProbe = probe
+        do {
+            _ = try await LibrarySyncEngine(
+                backend: backend,
+                database: database,
+                pageSize: 4
+            ).sync(startMode: .restart)
+            XCTFail("expected the injected page failure")
+        } catch MozzError.serverUnreachable {}
+
+        probe.reset()
+        // `Set(seen).count >= reportedTotal` now holds for the suffix, so
+        // `phaseCompleted`'s resumedFromCheckpoint guard is the ONLY thing
+        // refusing the prune. Remove it and this test fails.
+        let summary = try await LibrarySyncEngine(
+            backend: backend,
+            database: database,
+            pageSize: 4
+        ).sync(startMode: .resumeIfPossible)
+
+        let count = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(probe.recordedOffsets.first, 4, "resume must skip the committed page")
+        XCTAssertEqual(summary.deleted, 0, "a resumed run must never prune")
+        XCTAssertEqual(count, 8, "the unseen prefix must survive a resumed run")
+        let download = try await repository.download(trackId: downloadedTrackId)
+        XCTAssertNotNil(download, "a resumed run must not cascade-delete downloads")
+    }
+
+    /// A total that moves WHILE a run is paging is ordinary — someone added an
+    /// album, or the server's own scan finished — and must not disturb the run.
+    ///
+    /// It briefly did: any drift discarded the pages fetched so far and restarted
+    /// the phase at zero, and a second drift threw, aborting the sync. On the case
+    /// resume exists for — a multi-hour first Jellyfin sync — that threw away hours
+    /// of paging and could end in "Sync failed". Drift is a reason not to PRUNE,
+    /// which the completeness check already handles, not a reason to start over.
+    func testMidRunTotalDriftNeitherRestartsNorFailsTheSync() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.tracks = makeTracks(12)
+        // From the third page on, the server claims a bigger library than we will
+        // manage to enumerate.
+        backend.trackTotalFromOffset = (offset: 8, total: 20)
+        let probe = TrackFetchProbe()
+        backend.trackFetchProbe = probe
+
+        let summary = try await LibrarySyncEngine(
+            backend: backend,
+            database: database,
+            pageSize: 4
+        ).sync(startMode: .restart)
+
+        XCTAssertEqual(probe.recordedOffsets, [0, 4, 8, 12],
+                       "a mid-run total change must not restart the phase")
+        XCTAssertEqual(summary.tracks, 12)
+        XCTAssertEqual(summary.deleted, 0,
+                       "an enumeration short of the reported total must not prune")
+        let count = try await LibraryRepository(database).trackCount(serverId: "srv")
+        XCTAssertEqual(count, 12)
     }
 
     func testPlaylistItemsSyncedInOrder() async throws {

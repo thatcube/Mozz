@@ -1,33 +1,34 @@
 {
+  "info" : { "author" : "xcode", "version" : 1 },
   "colors" : [
     {
+      "idiom" : "universal",
+      "comment" : "Matches the app's own page background so the launch screen hands off to the first real screen without a colour change. This was a pink wash, which read as a red tint over a near-white UI.",
       "color" : {
         "color-space" : "srgb",
         "components" : {
           "alpha" : "1.000",
-          "blue"  : "0xDC",
-          "green" : "0xD6",
-          "red"   : "0xFF"
+          "red"   : "0xF2",
+          "green" : "0xF2",
+          "blue"  : "0xF7"
         }
-      },
-      "idiom" : "universal"
+      }
     },
     {
+      "idiom" : "universal",
       "appearances" : [
         { "appearance" : "luminosity", "value" : "dark" }
       ],
+      "comment" : "The standard-dark page background. The OLED variant can't be expressed here (a launch screen can't read a user setting), so the neutral dark is used and the app's own surfaces take over straight after.",
       "color" : {
         "color-space" : "srgb",
         "components" : {
           "alpha" : "1.000",
-          "blue"  : "0x1E",
+          "red"   : "0x1C",
           "green" : "0x1C",
-          "red"   : "0x1B"
+          "blue"  : "0x1E"
         }
-      },
-      "idiom" : "universal"
+      }
     }
-  ],
-  "info" : { "author" : "xcode", "version" : 1 }
+  ]
 }
-

@@ -154,6 +154,7 @@ let package = Package(
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
+        .testTarget(name: "MozzAppTests", dependencies: ["MozzApp"]),
     ],
     swiftLanguageModes: [.v5]
 )

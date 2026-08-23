@@ -441,6 +441,14 @@ struct FluidRatingControl: View {
     @State private var touchDownAt: Date?
     @State private var lastX: CGFloat = 0
     @State private var revealWork: DispatchWorkItem?
+    /// Press feedback for a tap. Latched like the transport buttons, and driven
+    /// by the same springs — this control can't use `PlayerButtonStyle` because
+    /// it isn't a `Button` (a `Button` plus a simultaneous drag would fight over
+    /// the hold-to-rate gesture), so it keeps its own copy of the state and
+    /// borrows the shared timing.
+    @State private var pressed = false
+    @State private var pressedAt = Date.now
+    @State private var pendingLift: DispatchWorkItem?
 
     private let haptic = RatingHaptic()
     private let space = "fluidRating"
@@ -472,7 +480,22 @@ struct FluidRatingControl: View {
                 // Track the star's frame so the drag math (and any host-drawn
                 // reveal) stays centered on it without depending on a rendered
                 // reveal overlay — the strip sits centered over the star.
+                // Read before the press transform, so a squashed star can't
+                // shift where a drag thinks the strip is.
                 .background(starFrameReader)
+                // The press. Every value here is the transport buttons' own, so
+                // this feels identical under the finger despite being driven by
+                // a drag gesture rather than a button. Deliberately absent from
+                // the Reduce Motion path above. Applied before the overlay so
+                // the reveal bubble, which replaces this once a hold engages,
+                // never inherits it.
+                .background { pressWash }
+                .scaleEffect(pressed ? PlayerButtonStyle.pressScale : 1)
+                .opacity(pressed ? PlayerButtonStyle.pressOpacity : 1)
+                .animation(PlayerButtonStyle.spring(down: pressed), value: pressed)
+                .sensoryFeedback(trigger: pressed) { _, down in
+                    down ? PlayerButtonStyle.pressHaptic : nil
+                }
                 .overlay(alignment: .center) {
                     if isDragging && !hostReveal { revealStrip.offset(y: RatingTuning.revealYOffset) }
                 }
@@ -481,6 +504,23 @@ struct FluidRatingControl: View {
                 .contentShape(Rectangle())
                 .gesture(rateGesture)
         }
+    }
+
+    /// The press wash, matching the one every player button draws.
+    ///
+    /// A capsule rather than a circle only because the content it sits behind
+    /// isn't always square: unrated it is a lone star and the capsule renders as
+    /// exactly the heart's circle, rated it stretches to take in the number.
+    /// Inset from the glyph itself rather than given a fixed diameter, since
+    /// that width changes with the rating.
+    private var pressWash: some View {
+        Capsule()
+            .fill(.primary.opacity(PlayerButtonStyle.washOpacity))
+            .padding(-PlayerButtonStyle.washInset)
+            .scaleEffect(pressed ? 1 : PlayerButtonStyle.washRestScale)
+            .opacity(pressed ? 1 : 0)
+            .animation(PlayerButtonStyle.washSpring, value: pressed)
+            .allowsHitTesting(false)
     }
 
     /// Records the collapsed star's frame (in the gesture's coordinate space) and
@@ -550,6 +590,7 @@ struct FluidRatingControl: View {
                     touchDownAt = Date()
                     haptic.prepare()
                     scheduleReveal()
+                    press()
                 }
                 let moved = hypot(value.translation.width, value.translation.height) > RatingTuning.moveSlop
                 if moved && !isDragging { engage() }
@@ -557,6 +598,7 @@ struct FluidRatingControl: View {
             }
             .onEnded { value in
                 revealWork?.cancel(); revealWork = nil
+                lift()
                 let elapsed = touchDownAt.map { Date().timeIntervalSince($0) } ?? 0
                 let moved = hypot(value.translation.width, value.translation.height) > RatingTuning.moveSlop
                 if isDragging {
@@ -586,7 +628,36 @@ struct FluidRatingControl: View {
         guard !isDragging else { return }
         preview = rating
         lastHapticValue = rating
+        // The touch has become a hold-drag, so the tap's press feedback has no
+        // business lingering under the reveal — drop it at once rather than
+        // holding it for the usual minimum beat.
+        cancelPress()
         withAnimation(.snappy(duration: 0.18)) { isDragging = true }
+    }
+
+    private func press() {
+        pendingLift?.cancel()
+        pendingLift = nil
+        pressedAt = .now
+        pressed = true
+    }
+
+    /// Let go — but not before the press has been on screen long enough to see.
+    /// A tap is far shorter than the spring takes to travel, so without this the
+    /// star would barely move unless the finger lingered.
+    private func lift() {
+        let remaining = PlayerButtonStyle.minimumHold
+            - Date.now.timeIntervalSince(pressedAt)
+        guard remaining > 0 else { pressed = false; return }
+        let work = DispatchWorkItem { pressed = false }
+        pendingLift = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+    }
+
+    private func cancelPress() {
+        pendingLift?.cancel()
+        pendingLift = nil
+        pressed = false
     }
 
     private func updatePreview(forX x: CGFloat) {

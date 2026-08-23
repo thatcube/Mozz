@@ -1,6 +1,7 @@
 #if os(iOS)
 import CarPlay
 import MozzPlayback
+import Observation
 import UIKit
 
 /// The CarPlay scene.
@@ -15,6 +16,7 @@ final class MozzCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDel
     private var interfaceController: CPInterfaceController?
     private var browser: CarPlayBrowser?
     private var nowPlayingObserver: CarPlayNowPlayingObserver?
+    private var failureObserver: CarPlayFailureObserver?
 
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
@@ -30,6 +32,11 @@ final class MozzCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDel
             self.nowPlayingObserver = CarPlayNowPlayingObserver(
                 playback: env.playback, interfaceController: interfaceController
             )
+            // Surface a failed play as an alert instead of the silence the engine
+            // used to leave behind.
+            self.failureObserver = CarPlayFailureObserver(playback: env.playback) { [weak browser] failure in
+                browser?.presentFailure(failure)
+            }
 
             // Never pass a nil completion to a CarPlay template operation: the
             // framework raises an ObjC exception when an operation fails and no
@@ -45,6 +52,10 @@ final class MozzCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDel
             // this is already complete and returns immediately.
             let wasSignedIn = env.active != nil
             Task { @MainActor [weak self] in
+                // Know what's playable without the server before the first list is
+                // built, so downloads are marked from the outset rather than
+                // appearing a beat later.
+                await browser.refreshOfflineState()
                 await SharedEnvironment.start()
                 guard let self, self.interfaceController === interfaceController else { return }
                 // Only rebuild if the wait actually changed anything, and only if
@@ -54,6 +65,7 @@ final class MozzCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDel
                 // rebuilding unconditionally would yank someone browsing an album
                 // back to the root with no explanation. On the warm path it was
                 // also pure waste: a second tab bar and five more queries.
+                await browser.refreshOfflineState()
                 let signedInNow = env.active != nil
                 if signedInNow != wasSignedIn, interfaceController.templates.count <= 1 {
                     interfaceController.setRootTemplate(
@@ -78,6 +90,7 @@ final class MozzCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDel
         // Everything here holds the interface controller, directly or otherwise;
         // dropping it all is what keeps the app from leaking a dead car session.
         nowPlayingObserver = nil
+        failureObserver = nil
         browser = nil
         self.interfaceController = nil
     }
@@ -200,6 +213,37 @@ final class CarPlayNowPlayingObserver: NSObject, CPNowPlayingTemplateObserver {
         // bound to the current engine state.
         _ = snapshot
         template.updateNowPlayingButtons([shuffle, repeatButton])
+    }
+}
+
+/// Watches for a playback failure and hands it to the car.
+///
+/// Separate from the Now Playing observer because it reacts to a different thing:
+/// that one mirrors queue state onto a template, this one reports an event once,
+/// when it happens.
+@MainActor
+final class CarPlayFailureObserver {
+    private let playback: PlaybackEngine
+    private let onFailure: (PlaybackFailure) -> Void
+
+    init(playback: PlaybackEngine, onFailure: @escaping (PlaybackFailure) -> Void) {
+        self.playback = playback
+        self.onFailure = onFailure
+        observe()
+    }
+
+    private func observe() {
+        withObservationTracking {
+            _ = playback.lastFailure
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // `onChange` fires before the value is committed, so read it on the
+                // next turn to see what actually landed.
+                if let failure = playback.lastFailure { onFailure(failure) }
+                observe()
+            }
+        }
     }
 }
 #endif

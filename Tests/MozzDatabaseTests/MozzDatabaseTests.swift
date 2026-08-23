@@ -18,9 +18,138 @@ final class SchemaAndWriteTests: XCTestCase {
             let names = try String.fetchAll(database, sql: "SELECT name FROM sqlite_master WHERE type IN ('table','view')")
             return Set(names)
         }
-        for expected in ["server", "artist", "album", "track", "playlist", "playlistItem", "download", "play_event", "track_fts", "album_fts", "artist_fts"] {
+        for expected in [
+            "server", "artist", "album", "track", "playlist", "playlistItem",
+            "download", "play_event", "track_fts", "album_fts", "artist_fts",
+            "catalogSyncRun", "catalogSyncProgress",
+        ] {
             XCTAssertTrue(tables.contains(expected), "missing table \(expected)")
         }
+    }
+
+    func testV16MigrationAddsDurableCatalogSyncState() throws {
+        let queue = try DatabaseQueue()
+        let migrator = Schema.makeMigrator()
+        try migrator.migrate(queue, upTo: "v15.suppressedRefs")
+
+        let absentBeforeMigration = try queue.read { db in
+            try !db.tableExists("catalogSyncProgress") && !db.tableExists("catalogSyncRun")
+        }
+        XCTAssertTrue(absentBeforeMigration)
+
+        try migrator.migrate(queue)
+        let schema = try queue.read { db -> ([String: Int], Set<String>) in
+            let progressColumns = try Row.fetchAll(
+                db,
+                sql: "PRAGMA table_info(catalogSyncProgress)"
+            )
+            let primaryKeyPositions = Dictionary(
+                uniqueKeysWithValues: progressColumns.map {
+                    ($0["name"] as String, $0["pk"] as Int)
+                }
+            )
+            let runColumns = Set(try Row.fetchAll(
+                db,
+                sql: "PRAGMA table_info(catalogSyncRun)"
+            ).map { $0["name"] as String })
+            return (primaryKeyPositions, runColumns)
+        }
+
+        XCTAssertEqual(schema.0["serverId"], 1)
+        XCTAssertEqual(schema.0["phase"], 2)
+        XCTAssertNotNil(schema.0["committedOffset"])
+        XCTAssertNotNil(schema.0["reportedTotal"])
+        XCTAssertNotNil(schema.0["completed"])
+        XCTAssertNotNil(schema.0["updatedAt"])
+        XCTAssertTrue(schema.1.isSuperset(of: [
+            "serverId", "sourceFingerprint", "inProgress", "updatedAt",
+        ]))
+    }
+
+    func testCatalogSyncStoreRejectsStaleChangedAndDeliberatelyRestartedRuns() async throws {
+        let database = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(database)
+        let store = CatalogSyncStore(database)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        let old = Date(timeIntervalSince1970: 1_000)
+
+        _ = try await store.beginRun(
+            serverId: server.id,
+            sourceFingerprint: "source-a",
+            resumeIfPossible: false,
+            maximumAge: 60,
+            now: old
+        )
+        try await writer.upsertTracks(
+            [Track(id: "t1", title: "Track", artistName: "Artist")],
+            serverId: server.id,
+            syncCheckpoint: CatalogSyncCheckpoint(
+                serverId: server.id,
+                phase: "tracks",
+                committedOffset: 1,
+                reportedTotal: 10,
+                completed: false,
+                updatedAt: old
+            )
+        )
+
+        let staleResume = try await store.beginRun(
+            serverId: server.id,
+            sourceFingerprint: "source-a",
+            resumeIfPossible: true,
+            maximumAge: 60,
+            now: old.addingTimeInterval(61)
+        )
+        XCTAssertFalse(staleResume)
+        let staleCheckpoint = try await store.checkpoint(serverId: server.id, phase: "tracks")
+        XCTAssertNil(staleCheckpoint)
+
+        try await writer.upsertTracks(
+            [Track(id: "t2", title: "Track 2", artistName: "Artist")],
+            serverId: server.id,
+            syncCheckpoint: CatalogSyncCheckpoint(
+                serverId: server.id,
+                phase: "tracks",
+                committedOffset: 2,
+                reportedTotal: 10,
+                completed: false,
+                updatedAt: old.addingTimeInterval(62)
+            )
+        )
+        let changedSourceResume = try await store.beginRun(
+            serverId: server.id,
+            sourceFingerprint: "source-b",
+            resumeIfPossible: true,
+            maximumAge: 60,
+            now: old.addingTimeInterval(63)
+        )
+        XCTAssertFalse(changedSourceResume)
+        let changedSourceCheckpoint = try await store.checkpoint(serverId: server.id, phase: "tracks")
+        XCTAssertNil(changedSourceCheckpoint)
+
+        try await writer.upsertTracks(
+            [Track(id: "t3", title: "Track 3", artistName: "Artist")],
+            serverId: server.id,
+            syncCheckpoint: CatalogSyncCheckpoint(
+                serverId: server.id,
+                phase: "tracks",
+                committedOffset: 3,
+                reportedTotal: 10,
+                completed: false,
+                updatedAt: old.addingTimeInterval(64)
+            )
+        )
+        let deliberateResume = try await store.beginRun(
+            serverId: server.id,
+            sourceFingerprint: "source-b",
+            resumeIfPossible: false,
+            maximumAge: 60,
+            now: old.addingTimeInterval(65)
+        )
+        XCTAssertFalse(deliberateResume)
+        let deliberateCheckpoint = try await store.checkpoint(serverId: server.id, phase: "tracks")
+        XCTAssertNil(deliberateCheckpoint)
     }
 
     func testUpsertAndReadBack() async throws {

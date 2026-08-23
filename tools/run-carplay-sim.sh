@@ -31,6 +31,24 @@ if [ -d /Applications/Xcode-beta.app ]; then
   XCODEBUILD="env DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild"
 fi
 
+# Launch the Simulator that actually has the CarPlay display.
+#
+# Not every Simulator does. The standalone /Applications/Simulator.app has no
+# CarPlay support at all (no I/O ▸ External Displays menu), and Xcode 27 beta
+# ships no Simulator of its own — so the one bundled with stable Xcode is the one
+# to use. Checked by looking for CarPlay in the binary rather than by version, so
+# this keeps working as those move around.
+CARPLAY_SIM=""
+for candidate in \
+  /Applications/Xcode.app/Contents/Developer/Applications/Simulator.app \
+  /Applications/Xcode-beta.app/Contents/Developer/Applications/Simulator.app \
+  /Applications/Simulator.app; do
+  if [ -d "$candidate" ] && strings "$candidate/Contents/MacOS/Simulator" 2>/dev/null | grep -qi carplay; then
+    CARPLAY_SIM="$candidate"
+    break
+  fi
+done
+
 echo "▸ Generating project…"
 tools/generate-project.sh >/dev/null
 
@@ -43,7 +61,12 @@ if [ -z "$UDID" ]; then
   exit 1
 fi
 xcrun simctl boot "$UDID" 2>/dev/null || true
-open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
+if [ -n "$CARPLAY_SIM" ]; then
+  open -a "$CARPLAY_SIM" --args -CurrentDeviceUDID "$UDID" || true
+else
+  echo "⚠ No Simulator with CarPlay support found — the CarPlay display won't be available."
+  open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
+fi
 
 echo "▸ Building (ad-hoc signed so the CarPlay entitlement applies)…"
 # shellcheck disable=SC2086
@@ -80,4 +103,5 @@ xcrun simctl launch "$UDID" com.thatcube.Mozz >/dev/null || true
 
 echo
 echo "✓ Running on $DEVICE."
-echo "  In Simulator.app choose:  I/O ▸ External Displays ▸ CarPlay"
+echo "  In Simulator choose:  I/O ▸ External Displays ▸ CarPlay"
+if [ -n "$CARPLAY_SIM" ]; then echo "  (using $CARPLAY_SIM)"; fi

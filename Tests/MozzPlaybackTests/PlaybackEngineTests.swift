@@ -148,6 +148,84 @@ final class PlaybackEngineTests: XCTestCase {
         engine.append([Track(id: "b", title: "B", artistName: "X")])
         XCTAssertEqual(engine.transportEpoch, e1)
     }
+
+    // MARK: Transport direction signal
+
+    /// The player animates a skip in the direction the queue actually moved, so
+    /// every path that moves it has to report that direction — not just the
+    /// on-screen buttons. A skip from CarPlay, the Lock Screen, a headphone
+    /// remote or a track simply ending all land here.
+
+    func testStartingPlaybackDoesNotSignalATransportMove() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        XCTAssertEqual(engine.snapshot.transportGeneration, 0,
+                       "first play has no outgoing track to hand over from")
+    }
+
+    func testNextSignalsForward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        engine.next()
+        XCTAssertEqual(engine.snapshot.transportDirection, .forward)
+        XCTAssertEqual(engine.snapshot.transportGeneration, 1)
+    }
+
+    func testPreviousSignalsBackward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") },
+                    startAt: 2)
+        engine.previous()
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.transportDirection, .backward)
+        XCTAssertEqual(engine.snapshot.transportGeneration, 1)
+    }
+
+    /// Skipping back more than 3s into a track restarts it rather than changing
+    /// tracks. The user still moved the transport backwards, so it still has to
+    /// signal — otherwise the control sits inert and looks broken mid-song.
+    func testPreviousSignalsBackwardEvenWhenItOnlyRestartsTheTrack() {
+        let tracks = (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") }
+        let source = PlaybackEngine(resolver: StubResolver())
+        source.play(tracks: tracks)
+        guard let saved = source.persistentState else {
+            return XCTFail("expected a persistable session")
+        }
+        source.stop()
+
+        // Restoring parks the playhead well into the track synchronously, which
+        // is all `previous()` reads to choose restart over skip.
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.restore(PlaybackPersistentState(queue: saved.queue, elapsed: 42))
+        XCTAssertEqual(engine.snapshot.elapsed, 42)
+
+        engine.previous()
+
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t0", "the track must not change")
+        XCTAssertEqual(engine.snapshot.transportDirection, .backward)
+        XCTAssertGreaterThan(engine.snapshot.transportGeneration, 0)
+        engine.stop()
+    }
+
+    /// A track ending on its own is forward motion, and hands over like a skip.
+    func testNaturalFinishSignalsForward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        engine.handleNaturalFinish()
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.transportDirection, .forward)
+        XCTAssertEqual(engine.snapshot.transportGeneration, 1)
+    }
+
+    func testJumpBackwardsInTheQueueSignalsBackward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<5).map { Track(id: "t\($0)", title: "T", artistName: "A") },
+                    startAt: 3)
+        engine.jump(toOrderPosition: 1)
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.transportDirection, .backward)
+    }
+
 }
 
 /// Thread-safe counter for the station auto-extend test's `@Sendable` closure.
@@ -308,5 +386,79 @@ final class PlaybackSeekTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
         XCTAssertEqual(engine.snapshot.elapsed, 0,
                        "the incoming track must not inherit the previous seek target")
+    }
+}
+
+/// A resolver that refuses some tracks, standing in for a server that can't be
+/// reached for anything the user hasn't downloaded.
+private final class SelectiveResolver: TrackURLResolver, @unchecked Sendable {
+    private let playableIDs: Set<String>
+    init(playable: Set<String>) { self.playableIDs = playable }
+
+    func resolve(_ track: Track) async throws -> ResolvedTrackURL {
+        try await resolve(track, startSeconds: 0)
+    }
+
+    func resolve(_ track: Track, startSeconds: TimeInterval) async throws -> ResolvedTrackURL {
+        guard playableIDs.contains(track.id) else { throw MozzError.serverUnreachable }
+        return ResolvedTrackURL(url: URL(fileURLWithPath: "/dev/null/\(track.id).m4a"), isLocal: true)
+    }
+}
+
+/// A track that won't load used to leave the engine paused and silent, which in
+/// the car is indistinguishable from the tap not registering at all.
+@MainActor
+final class PlaybackLoadFailureTests: XCTestCase {
+    private func tracks(_ count: Int) -> [Track] {
+        (0..<count).map { Track(id: "t\($0)", title: "T\($0)", artistName: "A") }
+    }
+
+    /// Step over a gap rather than stopping on it: the user asked for this queue,
+    /// so continuing through it is far less surprising than silence.
+    func testSkipsPastUnplayableTracksToTheNextPlayableOne() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: ["t3"]))
+        engine.play(tracks: tracks(5))
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(engine.currentTrack?.id, "t3", "playback should land on the playable track")
+    }
+
+    /// A queue where nothing plays must say so, not churn silently through
+    /// thousands of tracks each making its own failing request.
+    func testReportsFailureWhenNothingInTheQueueCanPlay() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: []))
+        engine.play(tracks: tracks(4))
+        await engine.awaitPendingLoadsForTesting()
+
+        let failure = engine.lastFailure
+        XCTAssertNotNil(failure, "a failed play must be observable, not silent")
+        XCTAssertEqual(failure?.reason, .serverUnreachable)
+        XCTAssertTrue(failure?.isConnectivity == true)
+        XCTAssertNotEqual(engine.snapshot.status, .playing)
+    }
+
+    /// The bound exists so an unplayable library can't be walked end to end.
+    func testStopsSkippingAfterTooManyConsecutiveFailures() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: []))
+        engine.play(tracks: tracks(500))
+        await engine.awaitPendingLoadsForTesting()
+
+        XCTAssertNotNil(engine.lastFailure)
+        // Far short of the 500 queued, i.e. it gave up rather than grinding on.
+        let landedIndex = Int(engine.currentTrack?.id.dropFirst() ?? "0") ?? 0
+        XCTAssertLessThan(landedIndex, 20, "must not walk the whole queue")
+    }
+
+    /// A successful play clears the last failure, so stale bad news can't linger
+    /// on screen after things start working again.
+    func testSuccessfulPlaybackClearsThePreviousFailure() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: []))
+        engine.play(tracks: tracks(2))
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertNotNil(engine.lastFailure)
+
+        let working = PlaybackEngine(resolver: StubResolver())
+        working.play(tracks: tracks(2))
+        await working.awaitPendingLoadsForTesting()
+        XCTAssertNil(working.lastFailure)
     }
 }

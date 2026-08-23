@@ -1,0 +1,382 @@
+# Fastfile — App Store Connect automation for Mozz (iOS/iPadOS)
+#
+# Authentication is an App Store Connect API key, not an Apple ID, so these
+# lanes run unattended with no 2FA prompt. Provide via `.env.fastlane`
+# (see .env.fastlane.example) and run lanes with `--env fastlane`:
+#
+#   ASC_KEY_ID      Key ID     from App Store Connect > Integrations
+#   ASC_ISSUER_ID   Issuer ID  from the same page
+#   ASC_KEY_PATH    Path to AuthKey_XXXXXXXXXX.p8  (kept OUT of git)
+#
+# Lanes:
+#   fastlane bootstrap_testflight --env fastlane   # one-time TestFlight setup
+#   fastlane beta                --env fastlane    # build + upload to TestFlight
+#   fastlane build               --env fastlane    # archive an .ipa, no upload
+#   fastlane release             --env fastlane    # build + upload to App Store
+#   fastlane testflight_link     --env fastlane    # print the public beta link
+#
+# Distribution signing is handled by `build` via -allowProvisioningUpdates plus
+# the API key, so the widget extension's profile is created on first run too.
+
+require "shellwords"
+require "json"
+require "net/http"
+require "uri"
+require "base64"
+require "openssl"
+
+APP_IDENTIFIER = "com.thatcube.Mozz"
+APP_NAME       = "Mozz"
+XCODEPROJ      = "Mozz.xcodeproj"
+SCHEME         = "Mozz"
+OUTPUT_DIR     = "build"
+OUTPUT_NAME    = "Mozz.ipa"
+ARCHIVE_PATH   = File.join(OUTPUT_DIR, "Mozz.xcarchive")
+
+# External TestFlight group. Unlike Plozz's, this one is created by
+# `bootstrap_testflight` rather than by hand, because it also has to be the
+# group that carries the public link.
+EXTERNAL_GROUP = "Mozz Public Beta"
+
+# The host GitHub desktop/CLI app injects safe.bareRepository=explicit via
+# GIT_CONFIG_* env vars, which breaks SwiftPM's bare dependency checkouts during
+# xcodebuild. Relax just that one value back to git's default for everything
+# fastlane spawns.
+if ENV["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+  ENV["GIT_CONFIG_VALUE_0"] = "all"
+end
+
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_filepath: ENV.fetch("ASC_KEY_PATH"),
+    in_house: false
+  )
+end
+
+# --- Raw App Store Connect REST ------------------------------------------------
+#
+# `bootstrap_testflight` touches beta localizations, review details and beta
+# groups, which fastlane has no actions for and Spaceship covers unevenly across
+# versions. Signing our own JWT against the documented REST endpoints is both
+# shorter and less likely to break under us than reaching into Spaceship
+# internals.
+module ASC
+  module_function
+
+  def token
+    kid = ENV.fetch("ASC_KEY_ID")
+    b64 = ->(s) { Base64.urlsafe_encode64(s).delete("=") }
+    header = b64.call({ alg: "ES256", kid: kid, typ: "JWT" }.to_json)
+    claims = b64.call({
+      iss: ENV.fetch("ASC_ISSUER_ID"),
+      exp: Time.now.to_i + 600,
+      aud: "appstoreconnect-v1"
+    }.to_json)
+    key = OpenSSL::PKey::EC.new(File.read(ENV.fetch("ASC_KEY_PATH")))
+    der = key.sign(OpenSSL::Digest::SHA256.new, "#{header}.#{claims}")
+    # ASN.1 DER to the fixed-width r||s pair JWS expects.
+    r, s = OpenSSL::ASN1.decode(der).value.map { |v| v.value.to_s(2).rjust(32, "\x00") }
+    "#{header}.#{claims}.#{b64.call(r + s)}"
+  end
+
+  def request(method, path, body = nil)
+    uri = URI("https://api.appstoreconnect.apple.com#{path}")
+    klass = { get: Net::HTTP::Get, post: Net::HTTP::Post, patch: Net::HTTP::Patch }.fetch(method)
+    req = klass.new(uri, "Authorization" => "Bearer #{token}", "Content-Type" => "application/json")
+    req.body = body.to_json if body
+    res = Net::HTTP.start(uri.host, 443, use_ssl: true) { |http| http.request(req) }
+    unless res.code.start_with?("2")
+      UI.user_error!("App Store Connect #{method.to_s.upcase} #{path} failed: #{res.code}\n#{res.body}")
+    end
+    res.body.to_s.empty? ? {} : JSON.parse(res.body)
+  end
+
+  def app_id
+    @app_id ||= begin
+      found = request(:get, "/v1/apps?filter[bundleId]=#{APP_IDENTIFIER}")["data"].to_a.first
+      UI.user_error!("No App Store Connect record for #{APP_IDENTIFIER}") if found.nil?
+      found["id"]
+    end
+  end
+end
+
+# App Store Connect rejects any build made with a BETA Xcode / SDK (altool error
+# 90534 "Unsupported SDK or Xcode version"). This machine keeps the beta as the
+# active toolchain, so an unqualified fastlane run would build with the beta SDK
+# and the upload would bounce. Point every fastlane build at a RELEASE Xcode.
+def select_release_xcode
+  beta = ->(path) { path.downcase.include?("beta") }
+
+  if (dd = ENV["DEVELOPER_DIR"]) && !dd.empty?
+    if beta.call(dd)
+      UI.important("DEVELOPER_DIR points at a beta Xcode (#{dd}); overriding with a release Xcode.")
+    else
+      UI.message("Using caller-provided DEVELOPER_DIR: #{dd}")
+      return
+    end
+  end
+
+  candidates = Dir.glob("/Applications/Xcode*.app").reject { |p| beta.call(p) }
+  chosen = candidates.find { |p| p == "/Applications/Xcode.app" } || candidates.sort.last
+  unless chosen
+    UI.user_error!("No release Xcode found in /Applications (only a beta is installed). " \
+                   "App Store Connect rejects beta-SDK builds.")
+  end
+
+  developer_dir = File.join(chosen, "Contents", "Developer")
+  ENV["DEVELOPER_DIR"] = developer_dir
+  version = `DEVELOPER_DIR=#{developer_dir.shellescape} xcodebuild -version 2>/dev/null`.strip.tr("\n", " ")
+  UI.success("Building with release Xcode: #{chosen} (#{version})")
+end
+
+# TestFlight is the source of truth for the build number, not the commit count:
+# uploads must strictly increase, and a commit count can stall or go backwards
+# when shipping from different branches.
+def next_build_number
+  latest_testflight_build_number(
+    api_key: asc_api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: "ios",
+    initial_build_number: 0
+  ).to_i + 1
+end
+
+# The marketing version this ship carries, read from project.yml so the file
+# committed to the repo stays the single source of truth. Overridable for a
+# one-off, and passed down to generate-project.sh so the binary and the App Store
+# record can't disagree.
+def marketing_version
+  @marketing_version ||= begin
+    override = ENV["MOZZ_MARKETING_VERSION"].to_s.strip
+    if override.empty?
+      yml = File.read(File.expand_path("../project.yml", __dir__))
+      m = yml[/^\s*MARKETING_VERSION:\s*"?([0-9][^"\s]*)"?/, 1]
+      UI.user_error!("Could not read MARKETING_VERSION from project.yml") if m.nil?
+      m
+    else
+      override
+    end
+  end
+end
+
+# Release notes shown to testers as TestFlight's "What to Test". An external
+# beta must have them, so `beta` checks before spending minutes on a build.
+def whats_new
+  txt = ENV["MOZZ_WHATS_NEW"]
+  if txt.nil? || txt.strip.empty?
+    path = File.expand_path("../WHAT_TO_TEST.txt", __dir__)
+    txt = File.read(path) if File.exist?(path)
+  end
+  (txt || "").strip
+end
+
+desc "Regenerate the Xcode project from project.yml via XcodeGen"
+lane :generate_project do
+  sh("cd .. && ./tools/generate-project.sh")
+end
+
+desc "One-time TestFlight setup: beta metadata, review contact, public-link group"
+lane :bootstrap_testflight do
+  app_id = ASC.app_id
+  UI.message("App Store Connect app id #{app_id}")
+
+  # 1. Beta app localization — the description and feedback address TestFlight
+  #    shows testers. Required before external distribution.
+  feedback = ENV["MOZZ_FEEDBACK_EMAIL"].to_s.strip
+  UI.user_error!("Set MOZZ_FEEDBACK_EMAIL in .env.fastlane") if feedback.empty?
+  description = ENV["MOZZ_BETA_DESCRIPTION"].to_s.strip
+  if description.empty?
+    description = "Mozz plays the music on your own server — Plex, Jellyfin or " \
+                  "Subsonic — on your iPhone and iPad, streaming it or playing " \
+                  "downloads offline. Free, and open source."
+  end
+
+  existing = ASC.request(:get, "/v1/apps/#{app_id}/betaAppLocalizations")["data"].to_a
+  attrs = { description: description, feedbackEmail: feedback }
+  if (record = existing.find { |r| r.dig("attributes", "locale") == "en-US" })
+    ASC.request(:patch, "/v1/betaAppLocalizations/#{record['id']}",
+                data: { type: "betaAppLocalizations", id: record["id"], attributes: attrs })
+    UI.success("Updated beta app localization (en-US)")
+  else
+    ASC.request(:post, "/v1/betaAppLocalizations",
+                data: { type: "betaAppLocalizations",
+                        attributes: attrs.merge(locale: "en-US"),
+                        relationships: { app: { data: { type: "apps", id: app_id } } } })
+    UI.success("Created beta app localization (en-US)")
+  end
+
+  # 2. Beta app review detail — who Apple contacts, and how a reviewer gets past
+  #    the login screen. Mozz has no catalog of its own, so without a working
+  #    demo server a reviewer sees a sign-in form and nothing else, which is a
+  #    guaranteed rejection.
+  demo_url  = ENV["MOZZ_DEMO_SERVER_URL"].to_s.strip
+  demo_user = ENV["MOZZ_DEMO_ACCOUNT_NAME"].to_s.strip
+  demo_pass = ENV["MOZZ_DEMO_ACCOUNT_PASSWORD"].to_s.strip
+  if demo_url.empty? || demo_user.empty?
+    UI.important("No demo server configured (MOZZ_DEMO_SERVER_URL / MOZZ_DEMO_ACCOUNT_NAME).")
+    UI.important("App Review cannot sign in without one. Set them before submitting for review.")
+  end
+
+  notes = ENV["MOZZ_REVIEW_NOTES"].to_s.strip
+  if notes.empty?
+    notes = +"Mozz is a client for self-hosted music servers; it has no catalogue " \
+             "of its own and needs a server to sign in to.\n\n"
+    unless demo_url.empty?
+      notes << "On the sign-in screen choose the matching server type and enter:\n" \
+               "  Server: #{demo_url}\n  Username: #{demo_user}\n"
+      notes << "  Password: (in the demo account fields)\n" unless demo_pass.empty?
+      notes << "\nThe library syncs on first launch; playback, downloads, search " \
+               "and CarPlay all work against it.\n"
+    end
+  end
+
+  review_attrs = {
+    contactFirstName: ENV["MOZZ_CONTACT_FIRST_NAME"].to_s.strip,
+    contactLastName:  ENV["MOZZ_CONTACT_LAST_NAME"].to_s.strip,
+    contactEmail:     ENV["MOZZ_CONTACT_EMAIL"].to_s.strip,
+    contactPhone:     ENV["MOZZ_CONTACT_PHONE"].to_s.strip,
+    demoAccountName:     demo_user,
+    demoAccountPassword: demo_pass,
+    demoAccountRequired: !demo_user.empty?,
+    notes: notes
+  }
+  missing = review_attrs.select { |k, v| k.to_s.start_with?("contact") && v.to_s.empty? }.keys
+  UI.user_error!("Missing in .env.fastlane: #{missing.join(', ')}") unless missing.empty?
+
+  detail = ASC.request(:get, "/v1/apps/#{app_id}/betaAppReviewDetail")["data"]
+  ASC.request(:patch, "/v1/betaAppReviewDetails/#{detail['id']}",
+              data: { type: "betaAppReviewDetails", id: detail["id"], attributes: review_attrs })
+  UI.success("Updated beta app review detail")
+
+  # 3. External group carrying the public link. `publicLinkEnabled` is what turns
+  #    a group into a join-by-URL beta; it is not settable on an internal group.
+  groups = ASC.request(:get, "/v1/apps/#{app_id}/betaGroups?limit=200")["data"].to_a
+  group = groups.find { |g| g.dig("attributes", "name") == EXTERNAL_GROUP }
+  if group.nil?
+    created = ASC.request(:post, "/v1/betaGroups",
+                          data: { type: "betaGroups",
+                                  attributes: { name: EXTERNAL_GROUP,
+                                                publicLinkEnabled: true,
+                                                publicLinkLimitEnabled: false },
+                                  relationships: { app: { data: { type: "apps", id: app_id } } } })
+    group = created["data"]
+    UI.success("Created external group #{EXTERNAL_GROUP.inspect} with a public link")
+  elsif !group.dig("attributes", "publicLinkEnabled")
+    ASC.request(:patch, "/v1/betaGroups/#{group['id']}",
+                data: { type: "betaGroups", id: group["id"],
+                        attributes: { publicLinkEnabled: true, publicLinkLimitEnabled: false } })
+    UI.success("Enabled the public link on #{EXTERNAL_GROUP.inspect}")
+  else
+    UI.message("#{EXTERNAL_GROUP.inspect} already has a public link")
+  end
+
+  testflight_link
+end
+
+desc "Print the public TestFlight join link"
+lane :testflight_link do
+  groups = ASC.request(:get, "/v1/apps/#{ASC.app_id}/betaGroups?limit=200")["data"].to_a
+  group = groups.find { |g| g.dig("attributes", "name") == EXTERNAL_GROUP }
+  link = group&.dig("attributes", "publicLink")
+  if link.to_s.empty?
+    UI.important("No public link yet. Run `fastlane bootstrap_testflight --env fastlane`, " \
+                 "then upload a build with `fastlane beta --env fastlane`.")
+  else
+    UI.success("Public TestFlight link: #{link}")
+  end
+end
+
+desc "Archive a signed App Store .ipa"
+lane :build do
+  # App Store Connect rejects beta-SDK builds and this machine's active toolchain
+  # is the Xcode beta — force a release Xcode before anything compiles.
+  select_release_xcode
+
+  build_number = next_build_number
+  # Set both BEFORE generating, so generate-project.sh bakes them into the app
+  # and the widget extension together. A widget whose CFBundleVersion disagrees
+  # with its host app is rejected at upload.
+  ENV["MOZZ_BUILD_NUMBER"] = build_number.to_s
+  ENV["MOZZ_MARKETING_VERSION"] = marketing_version
+  UI.message("Build #{build_number} (CFBundleVersion), version #{marketing_version}")
+
+  generate_project
+
+  prov_args = "-allowProvisioningUpdates"
+  if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_PATH"]
+    prov_args += " -authenticationKeyPath #{ENV['ASC_KEY_PATH'].shellescape}" \
+                 " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
+                 " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
+  end
+
+  build_app(
+    project: XCODEPROJ,
+    scheme: SCHEME,
+    configuration: "Release",
+    export_method: "app-store",
+    output_directory: OUTPUT_DIR,
+    output_name: OUTPUT_NAME,
+    archive_path: ARCHIVE_PATH,
+    clean: true,
+    xcargs: prov_args
+  )
+  build_number
+end
+
+desc "Build and upload to TestFlight"
+lane :beta do
+  notes = whats_new
+  if notes.empty?
+    UI.user_error!(
+      "No release notes for the beta. Provide them before running `beta`:\n" \
+      "  • export MOZZ_WHATS_NEW=\"...\"   (inline), or\n" \
+      "  • create WHAT_TO_TEST.txt at the repo root."
+    )
+  end
+
+  build
+
+  # Distribute externally only once the public-link group exists; otherwise this
+  # is an internal-only upload and the lane still succeeds.
+  groups = ASC.request(:get, "/v1/apps/#{ASC.app_id}/betaGroups?limit=200")["data"].to_a
+  external = groups.find { |g| g.dig("attributes", "name") == EXTERNAL_GROUP }
+
+  upload_to_testflight(
+    api_key: asc_api_key,
+    app_identifier: APP_IDENTIFIER,
+    app_platform: "ios",
+    ipa: File.join(OUTPUT_DIR, OUTPUT_NAME),
+    distribute_external: !external.nil?,
+    groups: external.nil? ? nil : [EXTERNAL_GROUP],
+    notify_external_testers: !external.nil?,
+    changelog: notes,
+    submit_beta_review: !external.nil?,
+    skip_waiting_for_build_processing: false
+  )
+
+  if external.nil?
+    UI.important("Uploaded for internal testing only — no #{EXTERNAL_GROUP.inspect} group yet.")
+    UI.important("Run `fastlane bootstrap_testflight --env fastlane` to create it and get a public link.")
+  else
+    testflight_link
+  end
+end
+
+desc "Build and upload to the App Store"
+lane :release do
+  build
+  upload_to_app_store(
+    api_key: asc_api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: "ios",
+    ipa: File.join(OUTPUT_DIR, OUTPUT_NAME),
+    skip_screenshots: true,
+    skip_metadata: true,
+    precheck_include_in_app_purchases: false,
+    submit_for_review: false,
+    force: true
+  )
+  UI.success("Uploaded #{marketing_version} to App Store Connect. Submit for review there.")
+end

@@ -294,17 +294,6 @@ public final class AppEnvironment: ObservableObject {
         do {
             try await activate(saved)
             restoreLastPlaybackSession()
-            // A restored session with an EMPTY catalog means a previous first sync
-            // never finished — or the app was reinstalled while the keychain
-            // session survived (iOS keeps keychain across uninstall). Either way,
-            // kick off a sync so the user isn't stranded on an empty library with
-            // no sync running. finishActivation already started the media backfill;
-            // this starts the catalog itself. (A populated catalog is left as-is —
-            // gateInitialSync's re-login refresh only runs on an explicit sign-in.)
-            if let serverId = active?.connection.id,
-               ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0 {
-                startSync()
-            }
         } catch {
             SessionPersistence.clear(credentials)
         }
@@ -603,9 +592,10 @@ public final class AppEnvironment: ObservableObject {
         #endif
     }
 
-    /// Launch-time automation for headless verification in the simulator (the
-    /// accessibility bridge is unavailable in this toolchain). Gated entirely on
-    /// environment variables, so it is inert in normal use.
+    /// Launch-time recovery plus automation for headless simulator verification
+    /// (the accessibility bridge is unavailable in this toolchain). Normal
+    /// launches only resume an interrupted catalog mirror; the remaining behavior
+    /// is gated on environment variables.
     ///   MOZZ_AUTODEMO=1  → activate the offline demo with a small catalog.
     ///   MOZZ_AUTOPLAY=1  → start playing the first album after activation.
     public func runLaunchAutomationIfNeeded() async {
@@ -628,6 +618,20 @@ public final class AppEnvironment: ObservableObject {
         }
         if env["MOZZ_FORCESYNC"] == "1", active != nil {
             startSync()
+        } else if let serverId = active?.connection.id {
+            // Session restoration must finish first because the persisted run is
+            // server-scoped. This seam also keeps recovery out of `startSync`'s
+            // retry loop: launch requests one resume, while retries reuse the same
+            // checkpoints. An empty database without a marker still gets the
+            // existing quick-start path (for keychain-survived reinstalls).
+            let interrupted = (try? await CatalogSyncStore(database)
+                .hasInterruptedRun(serverId: serverId)) ?? false
+            let empty = ((try? await repository.trackCount(serverId: serverId)) ?? 0) == 0
+            if interrupted {
+                startSync(resumeInterrupted: true)
+            } else if empty {
+                startSync()
+            }
         }
         guard env["MOZZ_AUTODEMO"] == "1" else { return }
         if active == nil {
@@ -749,7 +753,7 @@ public final class AppEnvironment: ObservableObject {
     /// ~10s) so the app is playable almost immediately, then the full library in
     /// the same task. On a populated catalog (a re-sync / "Sync Now") it's just
     /// the full sync — the content is already there, so no quick start is needed.
-    public func startSync() {
+    public func startSync(resumeInterrupted: Bool = false) {
         guard !isSyncing, active != nil else { return }
         isSyncing = true
         syncProgress = nil
@@ -778,6 +782,7 @@ public final class AppEnvironment: ObservableObject {
             // quick start skips straight to the full sync.
             let maxAttempts = 4
             var attempt = 0
+            var shouldResume = resumeInterrupted
             while !Task.isCancelled {
                 attempt += 1
                 do {
@@ -790,10 +795,18 @@ public final class AppEnvironment: ObservableObject {
                     // server (see SyncPlan.quickStart), so this is the sweet spot
                     // between "instant" and "enough to browse".
                     if isEmpty {
-                        _ = try await runSync(plan: .quickStart(tracks: 150), progress: emitProgress)
+                        _ = try await runSync(
+                            plan: .quickStart(tracks: 150),
+                            startMode: .restart,
+                            progress: emitProgress
+                        )
                     }
                     // Tier 2 (always): the full library + housekeeping + prune.
-                    _ = try await syncNow(progress: emitProgress)
+                    let startMode: SyncStartMode = shouldResume ? .resumeIfPossible : .restart
+                    // Any retry belongs to the run this attempt just started. Flip
+                    // before awaiting so a thrown page fetch preserves its cursor.
+                    shouldResume = true
+                    _ = try await runSync(plan: .full, startMode: startMode, progress: emitProgress)
                     break   // success
                 } catch is CancellationError {
                     break   // user cancelled — leave the partial catalog
@@ -840,7 +853,7 @@ public final class AppEnvironment: ObservableObject {
 
     @discardableResult
     public func syncNow(progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
-        try await runSync(plan: .full, progress: progress)
+        try await runSync(plan: .full, startMode: .restart, progress: progress)
     }
 
     // MARK: Automatic catch-up
@@ -909,7 +922,11 @@ public final class AppEnvironment: ObservableObject {
     /// runs only for a full plan — the quick-start slice just populates recent
     /// content fast, and the following full sync does the housekeeping.
     @discardableResult
-    private func runSync(plan: SyncPlan, progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+    private func runSync(
+        plan: SyncPlan,
+        startMode: SyncStartMode,
+        progress: (@Sendable (SyncProgress) -> Void)? = nil
+    ) async throws -> SyncSummary {
         guard active != nil else { throw MozzError.unsupported("No active server") }
         // Plex can't browse without a music-library section id. Resolve it now if
         // activation didn't (self-healing), so a plain "Sync Now" recovers without
@@ -932,10 +949,16 @@ public final class AppEnvironment: ObservableObject {
         let pageSize = plan.pageSize ?? 1000
         let diagLog = SyncDiagnosticsLog()
         diagLog.append("SYNC START server=\(active.connection.kind.rawValue) page=\(pageSize) plan=\(plan.prune ? "full" : "quick") parentId=\(musicLibraryId ?? "none")")
-        let engine = LibrarySyncEngine(backend: backend, database: database, pageSize: pageSize, diag: diagLog.sink)
+        let engine = LibrarySyncEngine(
+            backend: backend,
+            database: database,
+            pageSize: pageSize,
+            enumerationScope: musicLibraryId,
+            diag: diagLog.sink
+        )
         let summary: SyncSummary
         do {
-            summary = try await engine.sync(plan: plan, progress: progress)
+            summary = try await engine.sync(plan: plan, startMode: startMode, progress: progress)
         } catch is CancellationError {
             diagLog.append("SYNC CANCELLED")
             throw CancellationError()
@@ -1158,6 +1181,22 @@ public final class AppEnvironment: ObservableObject {
         await lyricsService.captureForOffline(
             track: record.toDomain(), backend: active?.backend, useLRCLIB: useLRCLIB
         )
+    }
+
+    /// Save one high-resolution album cover after a track download succeeds.
+    /// Best-effort like lyrics: audio is already safe and never waits on this.
+    private func captureOfflineArtwork(trackInternalId: Int64) async {
+        while isRestoring, active == nil {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard let record = try? await repository.track(id: trackInternalId),
+              let artworkKey = record.artworkKey,
+              let active,
+              active.connection.id == record.serverId,
+              let url = active.backend.artworkURL(
+                for: ArtworkRef(key: artworkKey), size: 1_200
+              ) else { return }
+        await ArtworkDataLoader.shared.captureForOffline(url)
     }
 
     /// Like or unlike a track. On a favorites backend this toggles the boolean
@@ -1575,9 +1614,10 @@ public final class AppEnvironment: ObservableObject {
 
     /// Feed the lock screen / Control Center album art. The engine fires
     /// `onNeedsArtwork` whenever the current track changes; we resolve the active
-    /// backend's artwork URL, fetch the bytes, and hand them back via
-    /// `provideArtwork`. The engine drops stale results (it checks the track id),
-    /// so a rapid skip can never leave the previous track's art on screen.
+    /// backend's artwork URL, resolve the original bytes through the shared cache,
+    /// and hand them back via `provideArtwork`. The engine drops stale results (it
+    /// checks the track id), so a rapid skip can never leave the previous track's
+    /// art on screen.
     private func wireNowPlayingArtwork() {
         playback.onNeedsArtwork = { [weak self] track in
             guard let self else { return }
@@ -1589,7 +1629,7 @@ public final class AppEnvironment: ObservableObject {
         guard let artwork = track.artwork,
               let backend = active?.backend,
               let url = backend.artworkURL(for: artwork, size: 600) else { return }
-        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+        guard let data = await ArtworkDataLoader.shared.data(for: url) else { return }
         playback.provideArtwork(data, for: track.id)
         // Also stash it for the widgets and refresh their snapshots with the art.
         guard track.id == playback.currentTrack?.id else { return }
@@ -2045,12 +2085,18 @@ public final class AppEnvironment: ObservableObject {
                 MozzAppDelegate.backgroundSessionCompletionHandler = nil
             }
         }
-        // Save a downloaded track's lyrics alongside it, so music kept for
-        // offline listening reads offline too. Fire-and-forget: it runs after the
-        // audio is already safely on disk and can never fail a download.
+        // Save enrichment alongside downloaded audio. Fire-and-forget: it runs
+        // after the audio is already safely on disk and can never fail a download.
         downloads.onTrackDownloaded = { [weak self] trackInternalId in
             Task { @MainActor in
-                await self?.captureOfflineLyrics(trackInternalId: trackInternalId)
+                guard let self else { return }
+                async let lyrics: Void = self.captureOfflineLyrics(
+                    trackInternalId: trackInternalId
+                )
+                async let artwork: Void = self.captureOfflineArtwork(
+                    trackInternalId: trackInternalId
+                )
+                _ = await (lyrics, artwork)
             }
         }
         #endif

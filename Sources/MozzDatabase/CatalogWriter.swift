@@ -33,7 +33,11 @@ public struct CatalogWriter: Sendable {
 
     // MARK: Catalog batches
 
-    public func upsertArtists(_ artists: [Artist], serverId: ServerID) async throws {
+    public func upsertArtists(
+        _ artists: [Artist],
+        serverId: ServerID,
+        syncCheckpoint: CatalogSyncCheckpoint? = nil
+    ) async throws {
         guard !artists.isEmpty else { return }
         try await database.write { db in
             let stmt = try db.makeStatement(sql: Self.artistUpsertSQL)
@@ -43,6 +47,9 @@ public struct CatalogWriter: Sendable {
                     artist.artwork?.key, artist.albumCount, artist.isFavorite,
                     Self.jsonText(artist.genres),
                 ])
+            }
+            if let syncCheckpoint {
+                try CatalogSyncStore.save(syncCheckpoint, in: db)
             }
         }
     }
@@ -73,7 +80,11 @@ public struct CatalogWriter: Sendable {
         }
     }
 
-    public func upsertAlbums(_ albums: [Album], serverId: ServerID) async throws {
+    public func upsertAlbums(
+        _ albums: [Album],
+        serverId: ServerID,
+        syncCheckpoint: CatalogSyncCheckpoint? = nil
+    ) async throws {
         guard !albums.isEmpty else { return }
         try await database.write { db in
             let stmt = try db.makeStatement(sql: Self.albumUpsertSQL)
@@ -88,10 +99,17 @@ public struct CatalogWriter: Sendable {
                     album.addedAt?.timeIntervalSince1970, Self.jsonText(album.genres), groupKey,
                 ])
             }
+            if let syncCheckpoint {
+                try CatalogSyncStore.save(syncCheckpoint, in: db)
+            }
         }
     }
 
-    public func upsertTracks(_ tracks: [Track], serverId: ServerID) async throws {
+    public func upsertTracks(
+        _ tracks: [Track],
+        serverId: ServerID,
+        syncCheckpoint: CatalogSyncCheckpoint? = nil
+    ) async throws {
         guard !tracks.isEmpty else { return }
         try await database.write { db in
             let stmt = try db.makeStatement(sql: Self.trackUpsertSQL)
@@ -139,10 +157,17 @@ public struct CatalogWriter: Sendable {
                     try stmt.execute(arguments: [row.ref, row.artist, now])
                 }
             }
+            if let syncCheckpoint {
+                try CatalogSyncStore.save(syncCheckpoint, in: db)
+            }
         }
     }
 
-    public func upsertPlaylists(_ playlists: [Playlist], serverId: ServerID) async throws {
+    public func upsertPlaylists(
+        _ playlists: [Playlist],
+        serverId: ServerID,
+        syncCheckpoint: CatalogSyncCheckpoint? = nil
+    ) async throws {
         guard !playlists.isEmpty else { return }
         try await database.write { db in
             let stmt = try db.makeStatement(sql: Self.playlistUpsertSQL)
@@ -151,6 +176,50 @@ public struct CatalogWriter: Sendable {
                     serverId, playlist.id, playlist.title, playlist.trackCount,
                     playlist.durationSeconds, playlist.artwork?.key, playlist.isSmart,
                 ])
+            }
+            if let syncCheckpoint {
+                try CatalogSyncStore.save(syncCheckpoint, in: db)
+            }
+        }
+    }
+
+    /// Commit a playlist page, its expanded memberships, and the page cursor as
+    /// one unit. The item ids are fetched before entering SQLite; track upserts
+    /// performed while fetching them are harmless if this transaction never lands.
+    public func upsertPlaylistPage(
+        _ playlists: [Playlist],
+        itemIDsByPlaylist: [String: [String]],
+        serverId: ServerID,
+        syncCheckpoint: CatalogSyncCheckpoint?
+    ) async throws {
+        guard !playlists.isEmpty else { return }
+        try await database.write { db in
+            let playlistStatement = try db.makeStatement(sql: Self.playlistUpsertSQL)
+            let findPlaylist = try db.makeStatement(sql: """
+                SELECT id FROM playlist WHERE serverId = ? AND remoteId = ?
+                """)
+            let deleteItems = try db.makeStatement(sql: "DELETE FROM playlistItem WHERE playlistId = ?")
+            let insertItem = try db.makeStatement(sql: """
+                INSERT INTO playlistItem (playlistId, trackRemoteId, position) VALUES (?, ?, ?)
+                """)
+            for playlist in playlists {
+                try playlistStatement.execute(arguments: [
+                    serverId, playlist.id, playlist.title, playlist.trackCount,
+                    playlist.durationSeconds, playlist.artwork?.key, playlist.isSmart,
+                ])
+                guard let playlistPK = try Int64.fetchOne(
+                    findPlaylist,
+                    arguments: [serverId, playlist.id]
+                ) else {
+                    continue
+                }
+                try deleteItems.execute(arguments: [playlistPK])
+                for (position, trackRemoteId) in (itemIDsByPlaylist[playlist.id] ?? []).enumerated() {
+                    try insertItem.execute(arguments: [playlistPK, trackRemoteId, position])
+                }
+            }
+            if let syncCheckpoint {
+                try CatalogSyncStore.save(syncCheckpoint, in: db)
             }
         }
     }

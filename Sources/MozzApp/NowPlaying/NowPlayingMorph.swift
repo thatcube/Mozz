@@ -1476,19 +1476,20 @@ struct NowPlayingMorphContainer: View {
     }
 
     private var transport: some View {
-        let playing = playback.snapshot.status == .playing
+        let snapshot = playback.snapshot
+        let playing = snapshot.status == .playing
         return HStack(spacing: 44) {
-            PlayerIconButton(glyph: .skipBack,
-                             glyphSize: PlayerControlMetrics.skipGlyph,
-                             hitSize: PlayerControlMetrics.skipHit,
-                             isEnabled: playback.snapshot.hasPrevious,
-                             label: "Previous") { playback.previous() }
+            TransportSkipButton(travel: .backward,
+                                direction: snapshot.transportDirection,
+                                generation: snapshot.transportGeneration,
+                                isEnabled: snapshot.hasPrevious,
+                                label: "Previous") { playback.previous() }
             PlayPauseButton(playing: playing) { playback.togglePlayPause() }
-            PlayerIconButton(glyph: .skipForward,
-                             glyphSize: PlayerControlMetrics.skipGlyph,
-                             hitSize: PlayerControlMetrics.skipHit,
-                             isEnabled: playback.snapshot.hasNext,
-                             label: "Next") { playback.next() }
+            TransportSkipButton(travel: .forward,
+                                direction: snapshot.transportDirection,
+                                generation: snapshot.transportGeneration,
+                                isEnabled: snapshot.hasNext,
+                                label: "Next") { playback.next() }
         }
     }
 
