@@ -12,9 +12,20 @@ import UIKit
 /// would ever tell someone that asking a speaker for music off their own server
 /// is possible in the first place.
 struct SiriSettingsSection: View {
-    @State private var status = INPreferences.siriAuthorizationStatus()
+    /// Resolved on appear rather than at init: reading the status is itself a
+    /// SiriKit call, and a build without the entitlement must make none.
+    @State private var status: INSiriAuthorizationStatus = .notDetermined
 
     var body: some View {
+        // Without `com.apple.developer.siri` — every branch build, which signs
+        // with the team wildcard profile — SiriKit raises rather than returns,
+        // and none of what this section offers would work anyway. Offer nothing.
+        if SiriMediaSuggestions.isAvailable {
+            section
+        }
+    }
+
+    private var section: some View {
         Section {
             switch status {
             case .authorized:
@@ -43,6 +54,7 @@ struct SiriSettingsSection: View {
         } header: {
             Text("Siri & HomePod")
         }
+        .onAppear { status = INPreferences.siriAuthorizationStatus() }
     }
 
     private static let explanation = """

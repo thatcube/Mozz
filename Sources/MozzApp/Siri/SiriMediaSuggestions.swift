@@ -13,6 +13,36 @@ import MozzDatabase
 /// turns "play music on Mozz" into plain "play music".
 @MainActor
 enum SiriMediaSuggestions {
+    /// Whether this build was actually signed with `com.apple.developer.siri`.
+    ///
+    /// SiriKit does not go quietly without it: `INVocabulary` raises an
+    /// Objective-C exception — which Swift cannot catch — so an unentitled build
+    /// dies on launch rather than simply doing without Siri. Branch builds are
+    /// signed with the team wildcard profile, which can't carry the entitlement,
+    /// so the only safe move is to ask before touching SiriKit at all.
+    ///
+    /// The embedded provisioning profile is the one readable record of what the
+    /// build may do. When there isn't one to read — a simulator build — assume
+    /// the entitlement is present and behave exactly as before, so this can
+    /// never quietly strip Siri out of a real release.
+    static let isAvailable: Bool = {
+        guard let url = Bundle.main.url(forResource: "embedded",
+                                        withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url)
+        else { return true }
+        // A .mobileprovision is CMS-signed binary with an XML plist buried in it.
+        guard let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8),
+                                   in: start.lowerBound..<data.endIndex),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: Data(data[start.lowerBound..<end.upperBound]),
+                  options: [], format: nil
+              ),
+              let entitlements = (plist as? [String: Any])?["Entitlements"] as? [String: Any]
+        else { return true }
+        return entitlements["com.apple.developer.siri"] as? Bool ?? false
+    }()
+
     /// Record that this is what someone chose to listen to.
     ///
     /// Apple asks for the container rather than the song where there is one — the
@@ -20,6 +50,7 @@ enum SiriMediaSuggestions {
     /// donated one at a time says far less about what the user actually wanted
     /// than one donation naming the playlist.
     static func donate(_ resolution: MediaIntentResolution) {
+        guard isAvailable else { return }
         let item = INMediaItem(identifier: resolution.subject.rawValue,
                                title: resolution.title,
                                type: resolution.type,
@@ -62,6 +93,7 @@ enum SiriMediaSuggestions {
     /// their own server, which is what `subscribed` means here — the system uses
     /// it to avoid routing requests to an app that would only refuse them.
     static func updateUserContext(libraryItemCount: Int?, isSignedIn: Bool) {
+        guard isAvailable else { return }
         let context = INMediaUserContext()
         context.numberOfLibraryItems = libraryItemCount
         context.subscriptionStatus = isSignedIn ? .subscribed : .notSubscribed
@@ -75,6 +107,7 @@ enum SiriMediaSuggestions {
     /// come first — they are the names people invent themselves, and so the ones
     /// Siri is most likely to mangle.
     static func registerVocabulary(playlists: [String], artists: [String]) {
+        guard isAvailable else { return }
         let playlists = Self.distinct(playlists, limit: 100)
         let artists = Self.distinct(artists, limit: 200)
         // Off the main thread: this hands potentially hundreds of strings to
