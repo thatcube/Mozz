@@ -45,6 +45,10 @@ targets:
         # re-minted once through the Xcode GUI — headless xcodebuild cannot
         # create a profile for a newly-added capability.
         com.apple.developer.carplay-audio: true
+        # SiriKit. Required for the media intents the app handles in-process
+        # (App/…/MozzAppDelegate). Like CarPlay above, adding it needs the
+        # provisioning profile re-minted once through the Xcode GUI.
+        com.apple.developer.siri: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Mozz
@@ -122,6 +126,24 @@ targets:
           - com.thatcube.mozz.playlist
           - com.thatcube.mozz.genre
           - com.thatcube.mozz.library
+        # Siri. `INIntentsSupported` is what makes these intents eligible for
+        # *in-app* handling — no extension — which is what lets Siri start
+        # playback in the background with the phone locked.
+        #
+        # A HomePod has no apps of its own: it parses the request and forwards the
+        # intent to the iPhone, where Mozz plays and the audio is AirPlayed back to
+        # the speaker. So this is the whole HomePod story, and it costs nothing
+        # extra beyond what CarPlay and the Siri button already use.
+        INIntentsSupported:
+          - INPlayMediaIntent
+          - INAddMediaIntent
+          - INUpdateMediaAffinityIntent
+        # Without at least one category Siri will not offer the app for media
+        # requests at all. Music only — Mozz is not a podcast or audiobook player,
+        # and claiming otherwise would have Siri route requests it can't answer.
+        INSupportedMediaCategories:
+          - INMediaCategoryMusic
+        NSSiriUsageDescription: "Siri needs access to your library so you can ask for music by name — including from a HomePod, which hands the request to your iPhone and plays through the speaker."
 
   MozzWidget:
     type: app-extension

@@ -14,6 +14,9 @@ import MozzSubsonic
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
+#if os(iOS)
+import Intents
+#endif
 
 /// A resolver whose delegate can be swapped at runtime. The ``PlaybackEngine``
 /// is created once at launch, but the active server (and therefore the offline/
@@ -592,6 +595,12 @@ public final class AppEnvironment: ObservableObject {
         Task { await enrichment.cancel() }
         SessionPersistence.clear(credentials)
         active = nil
+        lastDonatedSubject = nil
+        #if os(iOS)
+        // Stop Siri offering this library to someone who has signed out of it.
+        SiriMediaSuggestions.updateUserContext(libraryItemCount: nil, isSignedIn: false)
+        SiriMediaSuggestions.registerVocabulary(playlists: [], artists: [])
+        #endif
     }
 
     /// Launch-time automation for headless verification in the simulator (the
@@ -889,6 +898,8 @@ public final class AppEnvironment: ObservableObject {
             // genres off-main, rate-limited. Fire-and-forget and single-flight inside
             // the actor, so it never delays this sync.
             await enrichment.enrich(serverId: active.connection.id)
+            // Playlist and artist names have just changed; teach Siri the new ones.
+            await refreshSiriMediaContext()
         }
         return summary
     }
@@ -1556,7 +1567,10 @@ public final class AppEnvironment: ObservableObject {
             .sink { [weak self] track in
                 self?.updateNowPlayingWidget()
                 self?.persistPlaybackState()
-                if let track { self?.recordRecentlyPlayed(track) }
+                if let track {
+                    self?.recordRecentlyPlayed(track)
+                    self?.donateSiriPlay(track)
+                }
             }
             .store(in: &widgetCancellables)
 
@@ -1632,6 +1646,75 @@ public final class AppEnvironment: ObservableObject {
             deepLink: "mozz://tab/library")
         WidgetSnapshotStore.writeNowPlaying(snapshot)
         reloadWidget(MozzWidget.nowPlayingKind)
+    }
+
+    /// The container most recently donated to Siri, so putting on an album
+    /// doesn't donate the same thing once per track.
+    private var lastDonatedSubject: String?
+
+    /// Tell the system what is being listened to in the app.
+    ///
+    /// This is the larger half of what teaches Siri's App Selection that music
+    /// requests belong to Mozz — the mechanism that eventually lets a bare "play
+    /// music" on a HomePod reach this library without the app ever being named.
+    /// Someone who never says "on Mozz" still trains it every time they tap an
+    /// album, and that is exactly the person who will expect it to work.
+    ///
+    /// Donated per album rather than per song, as Apple asks: forty tracks
+    /// donated one at a time say far less about what someone actually wanted than
+    /// a single donation naming the record they put on.
+    private func donateSiriPlay(_ track: Track) {
+        #if os(iOS)
+        let subject: MediaIntentSubject
+        let title: String
+        let artist: String?
+        let type: INMediaItemType
+        if let albumID = track.albumID, let albumTitle = track.albumTitle {
+            subject = .album(albumID)
+            title = albumTitle
+            artist = track.albumArtistName ?? track.artistName
+            type = .album
+        } else {
+            // A loose track with no album of its own is still worth donating.
+            subject = .song(track.id)
+            title = track.title
+            artist = track.artistName
+            type = .song
+        }
+        guard lastDonatedSubject != subject.rawValue else { return }
+        lastDonatedSubject = subject.rawValue
+        SiriMediaSuggestions.donatePlayedInApp(title: title, artist: artist,
+                                               subject: subject, type: type)
+        #endif
+    }
+
+    /// Refresh what Siri knows about this library: how much music it holds, and
+    /// the playlist and artist names that speech recognition would otherwise have
+    /// no chance with.
+    ///
+    /// Both matter for requests that never name the app. The library size tells
+    /// App Selection whether Mozz can actually answer a music request; the
+    /// vocabulary is what lets "play Weeknight Kitchen" survive being spoken to a
+    /// speaker across the room. Cheap reads, so this runs after each sync, when
+    /// those names are exactly what has changed.
+    public func refreshSiriMediaContext() async {
+        #if os(iOS)
+        guard let serverId = active?.connection.id else {
+            SiriMediaSuggestions.updateUserContext(libraryItemCount: nil, isSignedIn: false)
+            return
+        }
+        let count = try? await repository.trackCount(serverId: serverId)
+        SiriMediaSuggestions.updateUserContext(libraryItemCount: count, isSignedIn: true)
+
+        let playlists = (try? await repository.allPlaylists(serverId: serverId)) ?? []
+        // Artists the user has actually liked lead the list — Siri weights the
+        // order — with the rest of the catalog filling in behind them.
+        let liked = (try? await repository.likedTracks(serverId: serverId, limit: 300)) ?? []
+        let browsed = (try? await repository.artistsPage(serverId: serverId, offset: 0, limit: 200)) ?? []
+        SiriMediaSuggestions.registerVocabulary(
+            playlists: playlists.map(\.title),
+            artists: liked.map(\.artistName) + browsed.map(\.name))
+        #endif
     }
 
     private func recordRecentlyPlayed(_ track: Track) {
@@ -1786,6 +1869,41 @@ public final class AppEnvironment: ObservableObject {
             self.playback.startStation(tracks) { [weak self] in
                 await self?.nextRadioBatch(station: station) ?? []
             }
+        }
+    }
+
+    /// Keep playing past the end of the current queue with music like `track`,
+    /// without disturbing what is playing right now.
+    ///
+    /// Siri is asked for one specific song far more often than the app's own UI
+    /// is — "play <song> on Mozz" — and on a speaker in another room a queue that
+    /// falls silent after three minutes is a poor answer. Unlike
+    /// ``startRadio(fromTrack:)``, which fetches a batch and then replaces the
+    /// queue with it, this starts nothing: the song is already playing, and the
+    /// station simply forms behind it.
+    public func continueStation(fromTrack track: Track) {
+        guard let serverId = active?.connection.id else { return }
+        let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
+        seedPrepTask?.cancel()
+        let enrichment = self.enrichment
+        let durationMs = track.duration > 0 ? track.duration * 1000 : nil
+        seedPrepTask = Task {
+            _ = await enrichment.prepareSeedSimilarity(
+                trackRef: ref, artistName: track.artistName, title: track.title,
+                durationMs: durationMs, artistMBID: track.artistMbid)
+        }
+        // Installed synchronously — there's no batch to fetch first — so this only
+        // has to claim the counters rather than re-check them against a newer
+        // start the way the fetching path must.
+        radioIntent += 1
+        activeStationID += 1
+        let station = activeStationID
+        activeRadioSeed = RadioSeed(title: track.title, genres: track.genres,
+                                    artistIds: [track.artistID].compactMap { $0 },
+                                    seedTrackRef: ref)
+        radioSeenIDs = [track.id]
+        playback.continueAsStation { [weak self] in
+            await self?.nextRadioBatch(station: station) ?? []
         }
     }
 

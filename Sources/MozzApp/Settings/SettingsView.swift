@@ -101,6 +101,10 @@ struct SettingsView: View {
                         Text("Recommendations")
                     }
 
+                    #if os(iOS)
+                    SiriSettingsSection()
+                    #endif
+
                     Section {
                         NavigationLink {
                             AppearanceSettingsView()
