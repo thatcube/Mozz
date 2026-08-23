@@ -30,11 +30,11 @@ public final class DownloadManager: NSObject, ObservableObject {
     public var backgroundCompletionHandler: (@Sendable () -> Void)?
 
     /// Called with the internal track id once a track is safely on disk, so the
-    /// app can capture anything else that ought to be available offline — lyrics,
-    /// today. Deliberately a hook rather than a dependency: downloading is about
-    /// moving bytes into place and has no business knowing how lyrics are
-    /// resolved. Never blocks the download, and a failure in it is not a download
-    /// failure.
+    /// app can capture anything else that ought to be available offline, such as
+    /// lyrics and artwork. Deliberately a hook rather than a dependency:
+    /// downloading is about moving bytes into place and has no business knowing
+    /// how enrichment is resolved. Never blocks the download, and a failure in it
+    /// is not a download failure.
     public var onTrackDownloaded: (@Sendable (Int64) -> Void)?
 
     private let store: DownloadStore

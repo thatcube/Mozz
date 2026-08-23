@@ -22,25 +22,25 @@ Mozz is licensed under **GPL-3.0** (see [`LICENSE`](LICENSE)).
 - **Your servers, one library.** Plex, Jellyfin, and Subsonic/OpenSubsonic sit
   behind a single `MusicBackend` abstraction, with per-server capability
   detection so each server exposes exactly what it supports.
-- **Everything is local first.** Your catalog is synced into an on-device
-  SQLite database that the whole UI reads from, so browsing and search stay fast
-  even on a large library and work with the server unreachable.
-- **Gapless playback.** An `AVQueuePlayer` engine with a real play queue,
+- **The catalog lives on-device.** Your library is synced into a local SQLite
+  database that the whole UI reads from, so browsing and search stay fast even
+  on a large library and work with the server unreachable.
+- **Near-gapless playback.** An `AVQueuePlayer` engine with a real play queue,
   shuffle and repeat, volume normalization, and a graphic equalizer.
 - **Offline downloads.** Save albums and tracks over a background transfer and
-  play them with no network at all — lyrics included.
+  play them with no network at all; Mozz can save lyrics with downloaded tracks.
 - **Lyrics.** Synced (karaoke-style) and plain lyrics, from your server first and
   LRCLIB as a fallback, cached and stored with your downloads, plus a
   full-screen immersive mode.
-- **CarPlay.** Browse your whole library and control Now Playing from the car,
-  driven by the same playback engine as the phone.
+- **CarPlay.** Home and Library tabs in the car mirror the phone app's layout,
+  with downloaded tracks marked and playable without reaching your server.
 - **Now Playing that morphs.** A single view that expands from a docked island
   into the full-screen player, with drag-to-dismiss and a reorderable queue.
-- **System integration.** Home and Lock Screen widgets, Handoff between devices,
+- **System integration.** Home Screen widgets, Handoff between devices,
   `mozz://` deep links, and iCloud Keychain sign-in that carries your server to
   your other devices.
 - **Discovery.** On-device recommendations ("Mozz Weekly") and open metadata
-  enrichment via MusicBrainz.
+  enrichment via MusicBrainz and ListenBrainz.
 
 ---
 
@@ -50,8 +50,10 @@ Mozz is licensed under **GPL-3.0** (see [`LICENSE`](LICENSE)).
 - A media server to connect to: Plex, Jellyfin, or a Subsonic / OpenSubsonic
   server (Navidrome is the QA'd target; other OpenSubsonic servers are
   best-effort).
-- No account with anyone, no server of ours, no telemetry. Mozz talks only to
-  your server (and, for lyrics/metadata, to LRCLIB and MusicBrainz).
+- No Mozz account, no server of ours, no telemetry. Mozz connects to your media
+  server, to Plex sign-in/discovery services when you use Plex, and, when you
+  enable lyrics or recommendation enrichment, to LRCLIB, MusicBrainz, and
+  ListenBrainz.
 
 ---
 
@@ -67,8 +69,9 @@ as you type. Artwork is requested at the exact pixel size the screen needs, so
 scrolling never pulls full-resolution images.
 
 Sign in with the flow each backend expects: Plex PIN/OAuth with connection
-discovery, Jellyfin Quick Connect (or username/password), and Subsonic token
-auth. Plex's music section is resolved for you during sign-in.
+discovery, Jellyfin Quick Connect (or username/password), and Subsonic MD5 token
+auth or an OpenSubsonic API key. Plex's music section is resolved for you during
+sign-in.
 
 ### Playback
 
@@ -95,10 +98,10 @@ database, and reports live per-track progress; `downloadAlbum` queues a whole
 album at once. Because downloads are keyed to stable internal ids, a re-sync of
 your library never orphans them.
 
-At playback time an offline-first resolver checks for a downloaded file that
-still exists and plays it directly from disk, never touching the network;
-otherwise it falls back to streaming. Combined with the local catalog, browsing
-and playback work fully in airplane mode.
+At playback time the resolver checks for a downloaded file that still exists and
+plays it directly from disk, never touching the network; otherwise it falls back
+to streaming. Combined with the local catalog, browsing and downloaded playback
+work fully in airplane mode.
 
 ### Lyrics
 
@@ -114,16 +117,22 @@ words.
 
 ### CarPlay
 
-Mozz brings the full library to CarPlay: recently played, playlists, albums,
-artists, and a library tab holding songs, genres and your downloads. Albums and
-playlists lead with a Shuffle row, tapping a song plays the list it came from
-starting there, and Now Playing has an Up Next screen you can jump around in.
+Mozz's CarPlay app has two tabs: **Home** and **Library**. Home contains Liked
+Songs and Recently Played. Library uses the same categories, in the same order,
+as the phone's Library tab: Songs, Liked Songs, Playlists, Artists, Albums,
+Genres, and Downloaded.
+
+Track rows, album rows, and artist rows show artwork where the server provides
+it. Albums, playlists, and long lists lead with a Shuffle row; tapping a song
+plays the list it came from starting there; and Now Playing has an Up Next screen
+you can jump around in.
 
 Browsing reads the on-device database rather than the network, so it stays
-responsive and keeps working where there is no signal — for downloaded tracks the
-whole session needs no connection at all. It shares the same playback engine and
-queue as the phone, so what you start in the car and what you start in your hand
-are the same session.
+responsive where signal is poor. Downloaded tracks are marked in CarPlay and
+remain playable when the server is unreachable; tracks that still need the
+server are disabled if the app knows the connection is down. There is no CarPlay
+search by design: Apple's CarPlay audio templates do not allow `CPSearchTemplate`,
+so Siri is the intended search path in the car.
 
 ### Now Playing experience
 
@@ -136,7 +145,7 @@ straight to the artist or album.
 ### Widgets and system integration
 
 A WidgetKit extension renders Now Playing and recently played widgets for the
-Home and Lock Screens. The app writes compact snapshots (and downsized artwork)
+Home Screen. The app writes compact snapshots (and downsized artwork)
 into a shared App Group and reloads the widget timelines, so the widgets render
 instantly without reaching into the app's database. `mozz://` deep links open
 straight to a tab, album, artist, playlist, genre, or one of the library
@@ -145,11 +154,12 @@ can pick up on another device.
 
 ### Discovery and metadata
 
-"Mozz Weekly" is an on-device, offline recommendation set that rediscovers music
-already in your library — no server round-trip required. Open metadata enrichment
-resolves MusicBrainz IDs (from your server's embedded ids first, then a
-rate-limited MusicBrainz lookup) to sharpen radio, mixes, and shuffle. On-device
-listening history feeds the recommenders and is the foundation for scrobbling.
+"Mozz Weekly" is an on-device recommendation set that rediscovers music already
+in your library. Open metadata enrichment resolves MusicBrainz IDs (from your
+server's embedded ids first, then a rate-limited MusicBrainz lookup), canonical
+recording IDs, and ListenBrainz similarity data to sharpen radio, mixes, and
+shuffle. You can turn that enrichment off in Settings; local genre-based
+recommendations still work.
 
 ### Ratings and favourites
 
@@ -179,13 +189,13 @@ import UI, and the backends never import the database. The iOS app target
 | **MozzDatabase** | The GRDB + FTS5 source-of-truth store: schema/migrations, records, the read repository the UI binds to, the single write API sync uses, and the performance harness. |
 | **MozzPlex** | `PlexBackend` — PIN/OAuth auth, connection discovery, DTOs/mapper, and signed request headers. |
 | **MozzJellyfin** | `JellyfinBackend` — Quick Connect / password auth, DTOs, and mapper. |
-| **MozzSubsonic** | `SubsonicBackend` — generic Subsonic / OpenSubsonic backend with MD5 token auth (Navidrome QA'd). |
+| **MozzSubsonic** | `SubsonicBackend` — generic Subsonic / OpenSubsonic backend with MD5 token auth and OpenSubsonic API-key auth (Navidrome QA'd). |
 | **MozzSync** | `LibrarySyncEngine` — mirrors a backend's catalog into the database, paged and off-main, with stable ids and pruning. |
-| **MozzPlayback** | The gapless `AVQueuePlayer` engine, the pure `PlayQueue` (shuffle/repeat), the equalizer DSP, Now Playing / remote commands, and audio-session handling. |
-| **MozzDownloads** | Background `URLSession` downloads, on-disk file store, download-state and storage accounting, and the offline-first track resolver. |
+| **MozzPlayback** | The near-gapless `AVQueuePlayer` engine, the pure `PlayQueue` (shuffle/repeat), the equalizer DSP, Now Playing / remote commands, and audio-session handling. |
+| **MozzDownloads** | Background `URLSession` downloads, on-disk file store, download-state and storage accounting, and the download-aware track resolver. |
 | **MozzRecommend** | On-device recommenders and the blender behind "Mozz Weekly"; network-free at its core. |
-| **MozzEnrichment** | Open-metadata clients and orchestration: MusicBrainz IDs, LRCLIB lyrics, and the lyrics cache. |
-| **MozzApp** | The SwiftUI feature layer (onboarding, browse, Now Playing, search, downloads, settings, widgets bridge) and the `AppEnvironment` composition root. |
+| **MozzEnrichment** | Open-metadata clients and orchestration: MusicBrainz IDs, ListenBrainz similarity, LRCLIB lyrics, and the lyrics cache. |
+| **MozzApp** | The SwiftUI feature layer (onboarding, Home, Library, Search, CarPlay, Now Playing, downloads, settings, widgets bridge) and the `AppEnvironment` composition root. |
 
 Feature differences between servers are expressed through `ServerCapabilities`
 (transcoding, original-file download, favourites, ratings, lyrics, synced lyrics,
@@ -207,7 +217,9 @@ it before opening the project in Xcode.
 
 **Prerequisites**
 
-- Xcode 16 or later.
+- Xcode with an iOS 26 SDK (currently Xcode beta) because the code compiles
+  SwiftUI iOS 26 Liquid Glass APIs behind availability checks. The deployment
+  target remains iOS / iPadOS 17.
 - XcodeGen: `brew install xcodegen`.
 
 **Generate the project and build**
@@ -222,6 +234,11 @@ tools/build-ios.sh                 # simulator compile check (no signing needed)
 `tools/build-ios.sh` regenerates the project first, so it always reflects
 `project.yml`. Override the destination with `MOZZ_DEST` if needed, for example
 `MOZZ_DEST="generic/platform=iOS Simulator" tools/build-ios.sh`.
+
+For a local run, use `tools/run-ios.sh` to build, install, and launch on an iOS
+Simulator. Use `tools/run-carplay-sim.sh` for the CarPlay simulator flow, or
+`tools/deploy-device.sh` for a signed iPhone/iPad device build; `--build-only`
+compiles without installing.
 
 ## Testing
 
@@ -267,7 +284,9 @@ the database, in keeping with the architecture above.
 ## Privacy
 
 Mozz has no backend of its own and collects nothing. It connects to your media
-server and, for lyrics and metadata, to LRCLIB and MusicBrainz. See
+server, to Plex sign-in/discovery services when you use Plex, and, when enabled,
+to LRCLIB, MusicBrainz, and ListenBrainz for lyrics, metadata, and
+recommendations. See
 [`docs/PRIVACY.md`](docs/PRIVACY.md).
 
 ## License
@@ -277,5 +296,6 @@ an additional permission under section 7 allowing distribution through Apple's A
 Store despite its DRM and code-signing requirements. See [`LICENSE`](LICENSE) for
 the full terms.
 
-Mozz is not affiliated with or endorsed by Plex, Jellyfin, Navidrome, MusicBrainz,
-or LRCLIB. All trademarks belong to their respective owners.
+Mozz is not affiliated with or endorsed by Plex, Jellyfin, Navidrome,
+Subsonic/OpenSubsonic, MusicBrainz, ListenBrainz, or LRCLIB. All trademarks
+belong to their respective owners.

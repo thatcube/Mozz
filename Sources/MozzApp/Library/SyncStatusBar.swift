@@ -14,9 +14,12 @@ import MozzSync
 /// view that's already mounted.
 struct SyncStatusBar: View {
     @EnvironmentObject private var env: AppEnvironment
+    /// Status glyphs are sized in scaled points so they keep their proportion to
+    /// the label beside them instead of shrivelling as the text grows.
+    @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 11
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 9) {
             header
             if let details = env.syncProgress?.details, !details.isEmpty {
                 breakdown(details)
@@ -32,24 +35,30 @@ struct SyncStatusBar: View {
         // up with the grid and shelves below it.
         .padding(.horizontal, 20)
         .transition(.opacity.combined(with: .move(edge: .top)))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(env.syncStatusText ?? "Syncing your library"))
+        // `.contain`, not `.combine`: the phase rows carry their own spoken state
+        // ("Albums, done"), and combining would flatten the whole checklist into
+        // one summary — losing exactly the detail this card exists to give.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Library sync"))
+        .accessibilityValue(Text(env.syncStatusText ?? "Syncing your library"))
     }
 
     // MARK: Header — title, %, progress bar
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 9) {
-                ProgressView().controlSize(.small)
-                Text("Syncing your library")
-                    .font(.footnote.weight(.semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(overallText)
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
+            // Title and total sit side by side when they fit and stack when they
+            // don't, rather than the total squeezing the title into an ellipsis.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 9) {
+                    titleLine
+                    Spacer(minLength: 8)
+                    totalLabel
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    titleLine
+                    totalLabel
+                }
             }
             if let fraction = env.syncFraction {
                 ProgressView(value: fraction)
@@ -60,6 +69,22 @@ struct SyncStatusBar: View {
                 IndeterminateBar().frame(height: 3)
             }
         }
+    }
+
+    private var titleLine: some View {
+        HStack(spacing: 9) {
+            ProgressView().controlSize(.small)
+            Text("Syncing your library")
+                .font(.footnote.weight(.semibold))
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var totalLabel: some View {
+        Text(overallText)
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .contentTransition(.numericText())
     }
 
     /// "42%" once a total is known, else a live item count so the number always
@@ -76,39 +101,75 @@ struct SyncStatusBar: View {
 
     // MARK: Per-phase breakdown
 
+    /// The phases as a vertical checklist, one per line.
+    ///
+    /// This used to be a single horizontal row. It fitted at the default text
+    /// size and fell apart above it: four labels and their counts competing for
+    /// one line meant everything truncated to "Albu… 1k/6…", which is worse than
+    /// useless — and it was worst at exactly the sizes chosen by people who need
+    /// the text bigger. Stacked, each phase gets a full line at any size, and the
+    /// list doubles as a progress checklist: what's done, what's happening, and
+    /// what's still to come.
     private func breakdown(_ details: [SyncProgress.PhaseDetail]) -> some View {
-        HStack(spacing: 10) {
-            ForEach(details) { d in
-                HStack(spacing: 4) {
-                    switch d.state {
-                    case .done:
-                        Image(mozz: "checkmark.circle.fill")
-                            .resizable().scaledToFit().frame(width: 9, height: 9)
-                            .foregroundStyle(.green)
-                    case .syncing:
-                        // small active dot
-                        Circle().fill(.tint).frame(width: 5, height: 5)
-                    case .pending:
-                        Image(mozz: "circle")
-                            .resizable().scaledToFit().frame(width: 8, height: 8)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(d.phase.label)
-                        .foregroundStyle(.secondary)
-                    if d.state != .pending {
-                        Text(count(d))
-                            .foregroundStyle(d.state == .done ? .secondary : .primary)
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                    }
-                }
-                .font(.caption2)
-                .opacity(opacity(for: d.state))
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(details) { detail in
+                phaseRow(detail)
             }
-            Spacer(minLength: 0)
         }
-        .lineLimit(1)
-        .minimumScaleFactor(0.65)
+    }
+
+    private func phaseRow(_ detail: SyncProgress.PhaseDetail) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            statusGlyph(detail.state)
+                // Reserve one glyph's width for every row so the labels align in a
+                // column regardless of which state each row is in.
+                .frame(width: glyph, alignment: .center)
+            Text(detail.phase.label)
+                .foregroundStyle(detail.state == .pending ? .tertiary : .secondary)
+            Spacer(minLength: 6)
+            if detail.state != .pending {
+                Text(count(detail))
+                    .foregroundStyle(detail.state == .done ? .secondary : .primary)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+        }
+        .font(.caption)
+        // Long labels wrap rather than truncate now that each has its own line.
+        .fixedSize(horizontal: false, vertical: true)
+        .opacity(opacity(for: detail.state))
+        .animation(.easeInOut(duration: 0.25), value: detail.state)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel(detail))
+    }
+
+    @ViewBuilder
+    private func statusGlyph(_ state: SyncProgress.PhaseDetail.State) -> some View {
+        switch state {
+        case .done:
+            Image(mozz: "checkmark.circle.fill")
+                .resizable().scaledToFit()
+                .frame(width: glyph, height: glyph)
+                .foregroundStyle(.green)
+        case .syncing:
+            Circle()
+                .fill(.tint)
+                .frame(width: glyph * 0.55, height: glyph * 0.55)
+        case .pending:
+            Image(mozz: "circle")
+                .resizable().scaledToFit()
+                .frame(width: glyph * 0.85, height: glyph * 0.85)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Spoken as a state rather than a bare number, so the checklist reads as one.
+    private func accessibilityLabel(_ detail: SyncProgress.PhaseDetail) -> Text {
+        switch detail.state {
+        case .done: return Text("\(detail.phase.label), done")
+        case .syncing: return Text("\(detail.phase.label), \(count(detail))")
+        case .pending: return Text("\(detail.phase.label), waiting")
+        }
     }
 
     private func opacity(for state: SyncProgress.PhaseDetail.State) -> Double {

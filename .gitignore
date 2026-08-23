@@ -26,6 +26,11 @@ App/MozzWidget/Info.plist
 # fastlane / secrets (never commit)
 .env.fastlane
 *.p8
+# fastlane run artifacts
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+WHAT_TO_TEST.txt
 
 # Editor
 *.swp

@@ -10,8 +10,10 @@ typealias PlatformImage = NSImage
 
 /// A thread-safe in-memory image cache keyed by resolved URL. Backends produce
 /// deterministic artwork URLs (stable token, no nonce), so the URL string is a
-/// safe cache key across token rotation within a session. `NSCache` is itself
-/// thread-safe, so this is safe to read from any isolation context.
+/// safe cache key within a session. The disk layers strip credential parameters
+/// before hashing because tokens can rotate between launches; the remaining host,
+/// path, artwork id/tag, and user still scope the bytes safely. `NSCache` is
+/// itself thread-safe, so this is safe to read from any isolation context.
 final class ArtworkMemoryCache: @unchecked Sendable {
     private let cache = NSCache<NSURL, PlatformImage>()
     init() { cache.countLimit = 512 }
@@ -44,7 +46,7 @@ actor ArtworkImageLoader {
         if let existing = inFlight[url] { return await existing.value }
 
         let task = Task<PlatformImage?, Never>.detached(priority: .utility) {
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
+            guard let data = await ArtworkDataLoader.shared.data(for: url),
                   let decoded = PlatformImage(data: data) else { return nil }
             return decoded
         }
@@ -76,7 +78,7 @@ private extension Image {
     }
 }
 
-/// Loads and displays remote artwork with an in-memory cache.
+/// Loads and displays artwork with memory, offline, and evictable disk caches.
 ///
 /// This replaces `AsyncImage`, which has **no cache** and reloads (flashing its
 /// placeholder) on every re-render of the view tree. The now-playing bar

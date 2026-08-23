@@ -154,6 +154,13 @@ public struct SyncPlan: Sendable {
         )
     }
 }
+
+/// Whether a full mirror may continue a durable interrupted run. User-requested
+/// refreshes restart deliberately; launch recovery and in-process retries resume.
+public enum SyncStartMode: Sendable {
+    case restart
+    case resumeIfPossible
+}
 ///
 /// Design:
 /// - **Backend-agnostic.** It drives the ``MusicBackend`` paging API; Plex vs
@@ -169,22 +176,30 @@ public struct SyncPlan: Sendable {
 public struct LibrarySyncEngine: Sendable {
     private let backend: any MusicBackend
     private let writer: CatalogWriter
+    private let syncStore: CatalogSyncStore
     private let pageSize: Int
+    private let enumerationScope: String?
     /// Optional diagnostic sink for detailed per-page timing (fetch vs write),
     /// written to a file the debugger pulls off-device. `nil` in tests/normal use.
     private let diag: (@Sendable (String) -> Void)?
 
     private var serverId: ServerID { backend.connection.id }
+    /// A cursor older than a day is cheaper to replay than to trust: offset
+    /// pagination cannot prove that an old library ordering still has no holes.
+    static let maximumCheckpointAge: TimeInterval = 24 * 60 * 60
 
     public init(
         backend: any MusicBackend,
         database: MusicDatabase,
         pageSize: Int = 500,
+        enumerationScope: String? = nil,
         diag: (@Sendable (String) -> Void)? = nil
     ) {
         self.backend = backend
         self.writer = CatalogWriter(database)
+        self.syncStore = CatalogSyncStore(database)
         self.pageSize = pageSize
+        self.enumerationScope = enumerationScope
         self.diag = diag
     }
 
@@ -199,13 +214,33 @@ public struct LibrarySyncEngine: Sendable {
     /// two instead of waiting for the entire artist listing to enumerate, so a
     /// huge library becomes browsable almost immediately.
     @discardableResult
-    public func sync(plan: SyncPlan = .full, progress: (@Sendable (SyncProgress) -> Void)? = nil) async throws -> SyncSummary {
+    public func sync(
+        plan: SyncPlan = .full,
+        startMode: SyncStartMode = .restart,
+        progress: (@Sendable (SyncProgress) -> Void)? = nil
+    ) async throws -> SyncSummary {
         let started = Date()
 
         try await writer.saveServer(backend.connection)
         progress?(SyncProgress(phase: .capabilities, itemsSynced: 0))
         let capabilities = try await backend.detectCapabilities()
         try await writer.saveCapabilities(capabilities, serverId: serverId)
+        let isResumableMirror = plan.prune
+            && plan.maxArtistPages == nil
+            && plan.maxAlbumPages == nil
+            && plan.maxTrackPages == nil
+            && plan.includePlaylists
+        let resumedRun: Bool
+        if isResumableMirror {
+            resumedRun = try await syncStore.beginRun(
+                serverId: serverId,
+                sourceFingerprint: sourceFingerprint(capabilities: capabilities),
+                resumeIfPossible: startMode == .resumeIfPossible,
+                maximumAge: Self.maximumCheckpointAge
+            )
+        } else {
+            resumedRun = false
+        }
 
         // The progress breakdown lists exactly the phases this plan will run.
         var plannedPhases: [SyncProgress.Phase] = []
@@ -220,7 +255,7 @@ public struct LibrarySyncEngine: Sendable {
         // Mark a phase done (drives the breakdown's queued→syncing→done state;
         // called even for 0-item phases so they don't look stuck "queued").
         let complete: @Sendable (PagedEnumeration) async -> Void = { e in
-            await aggregator?.complete(phase: e.phase, finalCount: e.seen.count)
+            await aggregator?.complete(phase: e.phase, finalCount: e.committedOffset)
         }
 
         // Artists (light, dedicated endpoint) and playlists (few) run
@@ -234,12 +269,18 @@ public struct LibrarySyncEngine: Sendable {
         async let artistsTask = syncPages(
             phase: .artists, maxPages: plan.maxArtistPages,
             fetch: { try await backend.fetchArtists(offset: $0, limit: $1) },
-            write: { try await writer.upsertArtists($0, serverId: serverId) },
+            write: { try await writer.upsertArtists($0, serverId: serverId, syncCheckpoint: $1) },
             id: \.id,
+            resumeFromCheckpoint: resumedRun,
+            persistCheckpoint: isResumableMirror,
             report: report
         )
         async let playlistsTask = plan.includePlaylists
-            ? syncPlaylists(report: report)
+            ? syncPlaylists(
+                resumeFromCheckpoint: resumedRun,
+                persistCheckpoint: isResumableMirror,
+                report: report
+            )
             : PagedEnumeration(seen: [], reportedTotal: nil, phase: .playlists, elapsed: 0)
 
         let artistIDs: PagedEnumeration
@@ -250,8 +291,10 @@ public struct LibrarySyncEngine: Sendable {
             albumIDs = try await syncPages(
                 phase: .albums, maxPages: plan.maxAlbumPages,
                 fetch: { try await backend.fetchAlbums(offset: $0, limit: $1) },
-                write: { try await writer.upsertAlbums($0, serverId: serverId) },
+                write: { try await writer.upsertAlbums($0, serverId: serverId, syncCheckpoint: $1) },
                 id: \.id,
+                resumeFromCheckpoint: resumedRun,
+                persistCheckpoint: isResumableMirror,
                 report: report
             )
             await complete(albumIDs)
@@ -267,8 +310,10 @@ public struct LibrarySyncEngine: Sendable {
                 trackIDs = try await syncPages(
                     phase: .tracks, maxPages: plan.maxTrackPages,
                     fetch: { try await backend.fetchTracks(offset: $0, limit: $1) },
-                    write: { try await writer.upsertTracks($0, serverId: serverId) },
+                    write: { try await writer.upsertTracks($0, serverId: serverId, syncCheckpoint: $1) },
                     id: \.id,
+                    resumeFromCheckpoint: resumedRun,
+                    persistCheckpoint: isResumableMirror,
                     report: report
                 )
             }
@@ -319,13 +364,16 @@ public struct LibrarySyncEngine: Sendable {
         }
         let summary = SyncSummary(
             artists: artistTotal,
-            albums: albumIDs.seen.count,
-            tracks: trackIDs.seen.count,
-            playlists: playlistIDs.seen.count,
+            albums: albumIDs.committedOffset,
+            tracks: trackIDs.committedOffset,
+            playlists: playlistIDs.committedOffset,
             deleted: deleted,
             duration: Date().timeIntervalSince(started),
             phaseTimings: timings
         )
+        if isResumableMirror {
+            try await syncStore.finishRun(serverId: serverId)
+        }
         progress?(SyncProgress(phase: .done, itemsSynced: summary.tracks, totalCount: summary.tracks))
         syncLog.notice("sync complete: \(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists, \(summary.playlists) playlists, \(summary.deleted) pruned in \(String(format: "%.1f", summary.duration))s")
         return summary
@@ -345,6 +393,10 @@ public struct LibrarySyncEngine: Sendable {
     /// that deletes those missed-but-still-present tracks. Comparing unique ids
     /// makes completeness a true coverage guarantee regardless of page ordering.
     static func phaseCompleted(_ enumeration: PagedEnumeration) -> Bool {
+        // A resumed phase's in-memory keep-set contains only the suffix fetched
+        // after its checkpoint. Even a proven total cannot make that partial set
+        // safe for deletion; the next deliberate uninterrupted refresh may prune.
+        guard !enumeration.resumedFromCheckpoint else { return false }
         if let total = enumeration.reportedTotal {
             return Set(enumeration.seen).count >= total
         }
@@ -369,6 +421,8 @@ public struct LibrarySyncEngine: Sendable {
         var reportedTotal: Int?
         var phase: SyncProgress.Phase = .syncing
         var elapsed: TimeInterval = 0
+        var committedOffset: Int = 0
+        var resumedFromCheckpoint: Bool = false
         /// When true, the prune guard requires a reached ``reportedTotal`` to
         /// authorize pruning this phase; a nil total means "not provably
         /// complete → do not prune" (see ``phaseCompleted``). Set by the bulk
@@ -394,8 +448,10 @@ public struct LibrarySyncEngine: Sendable {
         phase: SyncProgress.Phase,
         maxPages: Int? = nil,
         fetch: @Sendable @escaping (Int, Int) async throws -> CatalogPage<Item>,
-        write: @Sendable ([Item]) async throws -> Void,
+        write: @Sendable ([Item], CatalogSyncCheckpoint?) async throws -> Void,
         id: @Sendable (Item) -> String,
+        resumeFromCheckpoint: Bool,
+        persistCheckpoint: Bool,
         report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
     ) async throws -> PagedEnumeration {
         // maxPages == 0 → phase skipped entirely (bounded plan).
@@ -404,9 +460,38 @@ public struct LibrarySyncEngine: Sendable {
         }
         let started = Date()
         let pageSize = self.pageSize
-        var offset = 0
+        var checkpoint: CatalogSyncCheckpoint?
+        if resumeFromCheckpoint {
+            checkpoint = try await syncStore.checkpoint(serverId: serverId, phase: phase.rawValue)
+            if let saved = checkpoint,
+               Date().timeIntervalSince(saved.updatedAt) > Self.maximumCheckpointAge {
+                try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                checkpoint = nil
+            }
+            // A checkpoint with no reported total is unresumable, because there is
+            // then no signal that could ever invalidate it. Backends that don't
+            // report one (Subsonic's album list) would validate a stored offset on
+            // fingerprint and age alone — so an album inserted before that offset
+            // between the two runs silently shifts the window and the resumed run
+            // skips exactly one album per insertion. A resumed run never prunes, so
+            // nothing would surface the gap: the sync reports success and the
+            // library is quietly missing rows until a manual full refresh.
+            //
+            // Re-walking from zero costs a little time on those backends and is
+            // always correct. This is the same "if it can't be proven, don't do it"
+            // rule the prune guard applies below.
+            if let saved = checkpoint, saved.reportedTotal == nil {
+                try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                checkpoint = nil
+            }
+        }
+        var offset = checkpoint?.committedOffset ?? 0
         var seen: [String] = []
-        var reportedTotal: Int?
+        var reportedTotal = checkpoint?.reportedTotal
+        var resumedFromCheckpoint = checkpoint != nil
+        if checkpoint != nil {
+            await report(phase, offset, reportedTotal)
+        }
         // Because the next page is prefetched while the current one is written,
         // the time spent *awaiting* the prefetch vs. the time spent writing is a
         // clean bottleneck signal: near-zero fetch-wait ⇒ write-bound; large
@@ -414,7 +499,7 @@ public struct LibrarySyncEngine: Sendable {
         var fetchWait: TimeInterval = 0
         var writeTime: TimeInterval = 0
         var pageNo = 0
-        diag?("\(phase.rawValue): phase start")
+        diag?("\(phase.rawValue): phase start off=\(offset)")
         // Prefetch the next page while writing the current one. Awaiting the
         // detached task via `withTaskCancellationHandler` (rather than a bare
         // `await pending.value`, which is NOT a cancellation point and doesn't
@@ -422,7 +507,7 @@ public struct LibrarySyncEngine: Sendable {
         // the app is backgrounded and a request freezes — the in-flight fetch is
         // actually torn down instead of hanging silently until the ~1200s
         // resource timeout. So a stalled page surfaces promptly as an error.
-        var pending = Task { try await fetch(0, pageSize) }
+        var pending = Task { try await fetch(offset, pageSize) }
         func awaitPage(_ task: Task<CatalogPage<Item>, Error>) async throws -> CatalogPage<Item> {
             try await withTaskCancellationHandler {
                 try await task.value
@@ -437,10 +522,53 @@ public struct LibrarySyncEngine: Sendable {
                 let page = try await awaitPage(pending)
                 let waited = Date().timeIntervalSince(waitStart)
                 fetchWait += waited
+                // A changed total only invalidates a CHECKPOINT — an offset we
+                // trusted without having fetched what came before it. Once this run
+                // is doing its own paging there is nothing to invalidate, and a
+                // total that moves mid-run is ordinary: someone added an album, or
+                // the server's own scan finished. That case is already handled
+                // safely by refusing to prune (see `phaseCompleted`), so it must
+                // not restart the phase and certainly must not fail the sync.
+                //
+                // Restarting on every drift was actively harmful on the very case
+                // resume exists for: a multi-hour first Jellyfin sync, where the
+                // total moving twice would throw away hours of paging and then
+                // abort the run — and because the checkpoint was cleared first,
+                // every retry started from zero too.
+                let validatingCheckpoint = resumedFromCheckpoint && seen.isEmpty
+                if validatingCheckpoint,
+                   let total = page.totalCount, let expected = reportedTotal, total != expected {
+                    // The library changed while we were away, so the stored offset
+                    // may no longer point at the same item. Drop it and walk from
+                    // the start; correctness is worth the re-fetch.
+                    pending.cancel()
+                    try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                    diag?("\(phase.rawValue): checkpoint stale (total \(expected)→\(total)), restarting")
+                    offset = 0
+                    seen.removeAll(keepingCapacity: true)
+                    reportedTotal = nil
+                    resumedFromCheckpoint = false
+                    pageNo = 0
+                    pending = Task { try await fetch(0, pageSize) }
+                    continue
+                }
+                // Keep the high-water mark: a total that dips mid-run shouldn't be
+                // able to make an incomplete enumeration look complete to the prune
+                // guard, which compares distinct-seen against this number.
                 if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
                 diag?("\(phase.rawValue): page \(pageNo) off=\(offset) got=\(page.items.count) total=\(reportedTotal.map(String.init) ?? "?") fetch=\(String(format: "%.1f", waited))s")
                 pageNo += 1
-                if page.items.isEmpty { break }
+                if page.items.isEmpty {
+                    if persistCheckpoint {
+                        try await syncStore.completePhase(
+                            serverId: serverId,
+                            phase: phase.rawValue,
+                            committedOffset: offset,
+                            reportedTotal: reportedTotal
+                        )
+                    }
+                    break
+                }
                 // Bounded plan (quick start): stop after `maxPages`. Don't prefetch
                 // beyond the limit. The phase is intentionally incomplete, so the
                 // prune guard (phaseCompleted) will correctly refuse to prune.
@@ -450,10 +578,19 @@ public struct LibrarySyncEngine: Sendable {
                     pending = Task { try await fetch(nextOffset, pageSize) }
                 }
                 let writeStart = Date()
-                try await write(page.items)
+                let nextCheckpoint = persistCheckpoint
+                    ? CatalogSyncCheckpoint(
+                        serverId: serverId,
+                        phase: phase.rawValue,
+                        committedOffset: nextOffset,
+                        reportedTotal: reportedTotal,
+                        completed: false
+                    )
+                    : nil
+                try await write(page.items, nextCheckpoint)
                 writeTime += Date().timeIntervalSince(writeStart)
                 seen.append(contentsOf: page.items.map(id))
-                await report(phase, seen.count, reportedTotal)
+                await report(phase, nextOffset, reportedTotal)
                 offset = nextOffset
                 if reachedLimit { break }
             }
@@ -467,7 +604,14 @@ public struct LibrarySyncEngine: Sendable {
         let rate = elapsed > 0 ? Double(seen.count) / elapsed : 0
         syncLog.notice("phase \(phase.rawValue, privacy: .public): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s)")
         diag?("\(phase.rawValue): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(Int(rate.rounded()))/s) — fetch-wait \(String(format: "%.1f", fetchWait))s, write \(String(format: "%.1f", writeTime))s")
-        return PagedEnumeration(seen: seen, reportedTotal: reportedTotal, phase: phase, elapsed: elapsed)
+        return PagedEnumeration(
+            seen: seen,
+            reportedTotal: reportedTotal,
+            phase: phase,
+            elapsed: elapsed,
+            committedOffset: offset,
+            resumedFromCheckpoint: resumedFromCheckpoint
+        )
     }
 
     /// Consume a backend's prune-safe bulk track enumeration (see
@@ -504,37 +648,116 @@ public struct LibrarySyncEngine: Sendable {
         syncLog.notice("phase \(phase.rawValue, privacy: .public) (enumerator): \(seen.count) items in \(String(format: "%.1f", elapsed))s (\(String(format: "%.0f", rate))/s), total \(reportedTotal.map(String.init) ?? "?", privacy: .public)")
         return PagedEnumeration(
             seen: seen, reportedTotal: reportedTotal, phase: phase,
-            elapsed: elapsed, requiresReportedTotalForPrune: true
+            elapsed: elapsed, committedOffset: seen.count,
+            requiresReportedTotalForPrune: true
         )
     }
 
     private func write(_ tracks: [Track]) async throws {
         try await writer.upsertTracks(tracks, serverId: serverId)
     }
-    private func syncPlaylists(report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void) async throws -> PagedEnumeration {
+    private func syncPlaylists(
+        resumeFromCheckpoint: Bool,
+        persistCheckpoint: Bool,
+        report: @Sendable (SyncProgress.Phase, Int, Int?) async -> Void
+    ) async throws -> PagedEnumeration {
         let started = Date()
-        var offset = 0
-        var playlists: [Playlist] = []
-        var reportedTotal: Int?
+        let phase = SyncProgress.Phase.playlists
+        var checkpoint: CatalogSyncCheckpoint?
+        if resumeFromCheckpoint {
+            checkpoint = try await syncStore.checkpoint(serverId: serverId, phase: phase.rawValue)
+            if let saved = checkpoint,
+               Date().timeIntervalSince(saved.updatedAt) > Self.maximumCheckpointAge {
+                try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                checkpoint = nil
+            }
+            // A checkpoint with no reported total is unresumable, because there is
+            // then no signal that could ever invalidate it. Backends that don't
+            // report one (Subsonic's album list) would validate a stored offset on
+            // fingerprint and age alone — so an album inserted before that offset
+            // between the two runs silently shifts the window and the resumed run
+            // skips exactly one album per insertion. A resumed run never prunes, so
+            // nothing would surface the gap: the sync reports success and the
+            // library is quietly missing rows until a manual full refresh.
+            //
+            // Re-walking from zero costs a little time on those backends and is
+            // always correct. This is the same "if it can't be proven, don't do it"
+            // rule the prune guard applies below.
+            if let saved = checkpoint, saved.reportedTotal == nil {
+                try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                checkpoint = nil
+            }
+        }
+        var offset = checkpoint?.committedOffset ?? 0
+        var playlistsSeen: [Playlist] = []
+        var reportedTotal = checkpoint?.reportedTotal
+        var resumedFromCheckpoint = checkpoint != nil
+        if checkpoint != nil {
+            await report(phase, offset, reportedTotal)
+        }
         while true {
             try Task.checkCancellation()
             let page = try await backend.fetchPlaylists(offset: offset, limit: pageSize)
+            // Same rule as the catalog pager: a moving total only invalidates a
+            // checkpoint we haven't yet verified. Mid-run drift is normal and is
+            // handled by refusing to prune, not by restarting or failing.
+            let validatingCheckpoint = resumedFromCheckpoint && playlistsSeen.isEmpty
+            if validatingCheckpoint,
+               let total = page.totalCount, let expected = reportedTotal, total != expected {
+                try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                offset = 0
+                playlistsSeen.removeAll(keepingCapacity: true)
+                reportedTotal = nil
+                resumedFromCheckpoint = false
+                continue
+            }
             if let total = page.totalCount { reportedTotal = max(reportedTotal ?? 0, total) }
-            if page.items.isEmpty { break }
-            try await writer.upsertPlaylists(page.items, serverId: serverId)
-            playlists.append(contentsOf: page.items)
-            await report(.playlists, playlists.count, reportedTotal)
-            offset += page.items.count
-        }
-
-        for playlist in playlists {
-            try Task.checkCancellation()
-            let itemIDs = try await fetchPlaylistItemIDs(playlistID: playlist.id)
-            try await writer.replacePlaylistItems(playlistRemoteId: playlist.id, trackRemoteIds: itemIDs, serverId: serverId)
+            if page.items.isEmpty {
+                if persistCheckpoint {
+                    try await syncStore.completePhase(
+                        serverId: serverId,
+                        phase: phase.rawValue,
+                        committedOffset: offset,
+                        reportedTotal: reportedTotal
+                    )
+                }
+                break
+            }
+            var itemIDsByPlaylist: [String: [String]] = [:]
+            for playlist in page.items {
+                try Task.checkCancellation()
+                itemIDsByPlaylist[playlist.id] = try await fetchPlaylistItemIDs(playlistID: playlist.id)
+            }
+            let nextOffset = offset + page.items.count
+            let nextCheckpoint = persistCheckpoint
+                ? CatalogSyncCheckpoint(
+                    serverId: serverId,
+                    phase: phase.rawValue,
+                    committedOffset: nextOffset,
+                    reportedTotal: reportedTotal,
+                    completed: false
+                )
+                : nil
+            try await writer.upsertPlaylistPage(
+                page.items,
+                itemIDsByPlaylist: itemIDsByPlaylist,
+                serverId: serverId,
+                syncCheckpoint: nextCheckpoint
+            )
+            playlistsSeen.append(contentsOf: page.items)
+            offset = nextOffset
+            await report(phase, offset, reportedTotal)
         }
         let elapsed = Date().timeIntervalSince(started)
-        syncLog.notice("phase playlists: \(playlists.count) items in \(String(format: "%.1f", elapsed))s")
-        return PagedEnumeration(seen: playlists.map(\.id), reportedTotal: reportedTotal, phase: .playlists, elapsed: elapsed)
+        syncLog.notice("phase playlists: \(playlistsSeen.count) items in \(String(format: "%.1f", elapsed))s")
+        return PagedEnumeration(
+            seen: playlistsSeen.map(\.id),
+            reportedTotal: reportedTotal,
+            phase: phase,
+            elapsed: elapsed,
+            committedOffset: offset,
+            resumedFromCheckpoint: resumedFromCheckpoint
+        )
     }
 
     private func fetchPlaylistItemIDs(playlistID: String) async throws -> [String] {
@@ -550,6 +773,36 @@ public struct LibrarySyncEngine: Sendable {
             offset += page.items.count
         }
         return ids
+    }
+
+    /// Length-prefixing keeps the identity unambiguous without relying on
+    /// Swift's process-randomized `Hashable`. No credential enters this value.
+    /// Version of the client-side enumeration contract (query shape + ordering).
+    /// See its use in `sourceFingerprint`.
+    static let enumerationFormatVersion = 1
+
+    private func sourceFingerprint(capabilities: ServerCapabilities) -> String {
+        let connection = backend.connection
+        let fields = [
+            connection.id,
+            connection.kind.rawValue,
+            connection.baseURL.absoluteString,
+            connection.userID ?? "",
+            connection.musicSectionID ?? "",
+            capabilities.backend.rawValue,
+            capabilities.serverVersion ?? "",
+            capabilities.serverProduct ?? "",
+            enumerationScope ?? "",
+            // An offset is only meaningful against the same query in the same
+            // order. Everything above describes the SERVER; this describes us.
+            // Changing a backend's page query, sort or filters reorders the
+            // enumeration while leaving every server-side field identical — and an
+            // app update landing between an interrupted sync and the next launch is
+            // exactly when that happens. Bump this whenever the catalog paging
+            // query or its ordering changes in ANY backend.
+            String(Self.enumerationFormatVersion),
+        ]
+        return fields.map { "\($0.utf8.count):\($0)" }.joined(separator: "|")
     }
 }
 

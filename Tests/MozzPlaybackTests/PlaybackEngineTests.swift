@@ -310,3 +310,77 @@ final class PlaybackSeekTests: XCTestCase {
                        "the incoming track must not inherit the previous seek target")
     }
 }
+
+/// A resolver that refuses some tracks, standing in for a server that can't be
+/// reached for anything the user hasn't downloaded.
+private final class SelectiveResolver: TrackURLResolver, @unchecked Sendable {
+    private let playableIDs: Set<String>
+    init(playable: Set<String>) { self.playableIDs = playable }
+
+    func resolve(_ track: Track) async throws -> ResolvedTrackURL {
+        try await resolve(track, startSeconds: 0)
+    }
+
+    func resolve(_ track: Track, startSeconds: TimeInterval) async throws -> ResolvedTrackURL {
+        guard playableIDs.contains(track.id) else { throw MozzError.serverUnreachable }
+        return ResolvedTrackURL(url: URL(fileURLWithPath: "/dev/null/\(track.id).m4a"), isLocal: true)
+    }
+}
+
+/// A track that won't load used to leave the engine paused and silent, which in
+/// the car is indistinguishable from the tap not registering at all.
+@MainActor
+final class PlaybackLoadFailureTests: XCTestCase {
+    private func tracks(_ count: Int) -> [Track] {
+        (0..<count).map { Track(id: "t\($0)", title: "T\($0)", artistName: "A") }
+    }
+
+    /// Step over a gap rather than stopping on it: the user asked for this queue,
+    /// so continuing through it is far less surprising than silence.
+    func testSkipsPastUnplayableTracksToTheNextPlayableOne() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: ["t3"]))
+        engine.play(tracks: tracks(5))
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertEqual(engine.currentTrack?.id, "t3", "playback should land on the playable track")
+    }
+
+    /// A queue where nothing plays must say so, not churn silently through
+    /// thousands of tracks each making its own failing request.
+    func testReportsFailureWhenNothingInTheQueueCanPlay() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: []))
+        engine.play(tracks: tracks(4))
+        await engine.awaitPendingLoadsForTesting()
+
+        let failure = engine.lastFailure
+        XCTAssertNotNil(failure, "a failed play must be observable, not silent")
+        XCTAssertEqual(failure?.reason, .serverUnreachable)
+        XCTAssertTrue(failure?.isConnectivity == true)
+        XCTAssertNotEqual(engine.snapshot.status, .playing)
+    }
+
+    /// The bound exists so an unplayable library can't be walked end to end.
+    func testStopsSkippingAfterTooManyConsecutiveFailures() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: []))
+        engine.play(tracks: tracks(500))
+        await engine.awaitPendingLoadsForTesting()
+
+        XCTAssertNotNil(engine.lastFailure)
+        // Far short of the 500 queued, i.e. it gave up rather than grinding on.
+        let landedIndex = Int(engine.currentTrack?.id.dropFirst() ?? "0") ?? 0
+        XCTAssertLessThan(landedIndex, 20, "must not walk the whole queue")
+    }
+
+    /// A successful play clears the last failure, so stale bad news can't linger
+    /// on screen after things start working again.
+    func testSuccessfulPlaybackClearsThePreviousFailure() async {
+        let engine = PlaybackEngine(resolver: SelectiveResolver(playable: []))
+        engine.play(tracks: tracks(2))
+        await engine.awaitPendingLoadsForTesting()
+        XCTAssertNotNil(engine.lastFailure)
+
+        let working = PlaybackEngine(resolver: StubResolver())
+        working.play(tracks: tracks(2))
+        await working.awaitPendingLoadsForTesting()
+        XCTAssertNil(working.lastFailure)
+    }
+}

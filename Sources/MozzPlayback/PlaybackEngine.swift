@@ -36,6 +36,14 @@ public struct PlaybackPersistentState: Codable, Sendable {
 @Observable
 public final class PlaybackEngine {
     public private(set) var snapshot = PlaybackSnapshot()
+    /// The most recent reason playback couldn't start, or `nil` once anything
+    /// plays successfully.
+    ///
+    /// Exists because a failed load used to do nothing observable at all — it set
+    /// the status to paused and returned, so tapping a track the server can't
+    /// serve looked exactly like tapping nothing. The surfaces that can say
+    /// something (the player, CarPlay) need to know it happened.
+    public private(set) var lastFailure: PlaybackFailure?
     public private(set) var currentTrack: Track?
     public private(set) var upNext: [Track] = []
     /// Tracks played before the current one (oldest first) — the queue's history.
@@ -147,6 +155,17 @@ public final class PlaybackEngine {
     /// loaded items (a hard requirement for gapless: all queued items must be
     /// homogeneously tapped or untapped).
     public let equalizer = EqualizerProcessor()
+
+    /// How many unplayable tracks in a row we'll skip past before giving up.
+    ///
+    /// The point is to step over a gap — a few tracks in an album that aren't
+    /// downloaded — not to hunt through the library for something that works. A
+    /// queue where nothing plays (the server is unreachable and nothing is
+    /// downloaded) must stop and say so rather than churn silently through
+    /// thousands of tracks, each with its own failing network request.
+    private static let maxConsecutiveLoadFailures = 8
+    /// Reset by any successful load.
+    private var consecutiveLoadFailures = 0
 
     private let player = AVQueuePlayer()
     private let resolver: TrackURLResolver
@@ -543,6 +562,8 @@ public final class PlaybackEngine {
                 } else {
                     self.pendingSeek = nil
                 }
+                self.consecutiveLoadFailures = 0
+                self.lastFailure = nil
                 if autoplay {
                     self.player.play()
                     self.publish(status: .playing)
@@ -551,9 +572,11 @@ public final class PlaybackEngine {
                     self.publish(status: .paused)
                 }
                 await self.refillLookaheadAsync(generation: generation)
+            } catch is CancellationError {
+                return
             } catch {
                 guard generation == self.loadGeneration else { return }
-                self.publish(status: .paused)
+                self.handleLoadFailure(track: track, error: error, autoplay: autoplay)
             }
         }
     }
@@ -632,6 +655,39 @@ public final class PlaybackEngine {
             self.recoveryTask = nil
             self.reloadCurrent(atElapsed: targetElapsed, reason: .recovery)
         }
+    }
+
+    /// A track that wouldn't load at all — most often the server being
+    /// unreachable for something that isn't downloaded.
+    ///
+    /// Rather than stopping dead on the first gap, step over it: the user asked
+    /// for this queue, and skipping to the next track they chose is far less
+    /// surprising than silence (and much less than substituting something they
+    /// didn't choose). Bounded by `maxConsecutiveLoadFailures`, so a queue where
+    /// nothing is playable reports the failure instead of grinding through it.
+    private func handleLoadFailure(track: Track, error: Error, autoplay: Bool) {
+        consecutiveLoadFailures += 1
+        let reason = PlaybackFailure.Reason(error)
+        // Only skip while playback was actually meant to be running. A paused
+        // session restore that fails should just stay put.
+        guard autoplay,
+              consecutiveLoadFailures < Self.maxConsecutiveLoadFailures,
+              queue.peekNext != nil else {
+            lastFailure = PlaybackFailure(
+                track: track, reason: reason, skippedTracks: consecutiveLoadFailures - 1
+            )
+            consecutiveLoadFailures = 0
+            publish(status: .paused)
+            return
+        }
+        lastFailure = PlaybackFailure(track: track, reason: reason, skippedTracks: 0)
+        logTerminal(.skipped, position: 0)
+        guard queue.advance() != nil else {
+            publish(status: .paused)
+            return
+        }
+        reload(autoplay: true)
+        maybeExtendQueue()
     }
 
     /// Recovery is exhausted (or the error isn't a transient network blip): treat

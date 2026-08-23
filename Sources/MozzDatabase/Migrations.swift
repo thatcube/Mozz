@@ -21,6 +21,7 @@ enum Schema {
         registerV13(&migrator)
         registerV14(&migrator)
         registerV15(&migrator)
+        registerV16(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -566,6 +567,33 @@ enum Schema {
                 t.column("ref", .text).notNull()        // remoteId of the track / artist
                 t.column("createdAt", .double).notNull()
                 t.primaryKey(["serverId", "scope", "ref"])
+            }
+        }
+    }
+
+    /// v16 — durable catalog-sync cursors. The run row distinguishes an
+    /// interrupted mirror from ordinary completed history; phase rows advance
+    /// only with their catalog page transaction, so launch-time recovery can
+    /// never skip a page SQLite did not commit.
+    private static func registerV16(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v16.catalogSyncProgress") { db in
+            try db.create(table: "catalogSyncRun") { t in
+                t.primaryKey("serverId", .text)
+                    .references("server", onDelete: .cascade)
+                t.column("sourceFingerprint", .text).notNull()
+                t.column("inProgress", .boolean).notNull()
+                t.column("updatedAt", .double).notNull()
+            }
+
+            try db.create(table: "catalogSyncProgress") { t in
+                t.column("serverId", .text).notNull()
+                    .references("server", onDelete: .cascade)
+                t.column("phase", .text).notNull()
+                t.column("committedOffset", .integer).notNull()
+                t.column("reportedTotal", .integer)
+                t.column("completed", .boolean).notNull()
+                t.column("updatedAt", .double).notNull()
+                t.primaryKey(["serverId", "phase"])
             }
         }
     }
