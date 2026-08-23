@@ -216,16 +216,19 @@ enum TransportTravel {
 ///
 /// The arrow slides forward and disappears *under* the bar — hard-clipped at the
 /// bar's leading face, so it is progressively swallowed the way a card slides
-/// under a door. The bar flexes as it passes beneath. The replacement then
-/// sweeps in from off the left, and the two arrows can never overlap: the
-/// outgoing one has always travelled further than an arrow's width by the time
-/// the incoming one is visible, so there is no cross-fade and no double image.
+/// under a door — fading out as it goes, and completely gone while it is still a
+/// clear wedge. The bar flexes as it passes beneath. The replacement then sweeps
+/// in from off the left, and the two arrows can never overlap: the outgoing one
+/// has always travelled further than an arrow's width by the time the incoming
+/// one is visible, so there is no cross-fade and no double image.
 ///
-/// Two details do the work. The clip sits *flush* with the bar's face: an
-/// earlier version cut the arrow a unit short of it, and the tall sliver of the
-/// arrow's flat back edge stranded in that gap is what read as a second line.
-/// Touching the bar, that same sliver reads as the bar itself. And neither
-/// arrow fades in — the mask reveals them — so nothing ever ghosts.
+/// The details that matter are all about the last moments of the departing
+/// arrow. The clip sits *flush* with the bar's face: cut a unit short of it, the
+/// tall sliver of the arrow's flat back edge is stranded in the gap and reads as
+/// a second line. And the fade is timed against the arrow's own width rather
+/// than the clock, because a clip left to run pares it down to a two-unit,
+/// full-height remnant sitting on the bar — which reads as the bar thickening
+/// rather than as an arrow going under it.
 ///
 /// Driven by the engine's transport counter rather than by this button's own
 /// tap, so a skip from the Lock Screen, CarPlay, a headphone remote, or a track
@@ -292,18 +295,36 @@ struct TransportGlyph: View {
         .scaleEffect(x: travel.sign, y: 1)
     }
 
-    /// The departing arrow and its replacement. Neither changes opacity: they
-    /// are revealed and hidden purely by the slot they travel through, so an
-    /// arrow is always either solid or absent, never a ghost.
+    /// The departing arrow and its replacement.
+    ///
+    /// The departing one fades as it goes under, and the fade is timed against
+    /// its own geometry rather than the clock: it is fully gone by the time the
+    /// slot has narrowed it to about five units, while it is still a clear
+    /// wedge. Left to run, the clip pares it down to a two-unit, full-height
+    /// remnant sitting flush on the bar — which stops reading as an arrow going
+    /// under and starts reading as the bar thickening.
+    ///
+    /// The replacement never fades. It is revealed by the slot as it sweeps in,
+    /// so an arriving arrow is always solid.
     private var arrows: some View {
         ZStack {
             AppIcon.skipArrow.styled(size: size)
-                .offset(x: Self.exit * unit * ramp(handover, from: 0, to: Self.exitEnds))
+                .offset(x: Self.exit * unit * exitProgress)
+                .opacity(1 - ramp(exitProgress, from: Self.fadeFrom, to: Self.fadeTo))
             AppIcon.skipArrow.styled(size: size)
                 .offset(x: -Self.entry * unit
                     * (1 - ramp(handover, from: Self.entryBegins, to: 1)))
         }
     }
+
+    /// How far along its run the departing arrow is, 0→1.
+    private var exitProgress: Double { ramp(handover, from: 0, to: Self.exitEnds) }
+
+    /// The fade window, in fractions of the exit travel. Ends at 0.68 because
+    /// that is where the slot has cut the arrow down to roughly five units —
+    /// the point past which the remnant reads as part of the bar.
+    private static let fadeFrom: Double = 0.25
+    private static let fadeTo: Double = 0.68
 
     /// The slot the arrows run through: open across the glyph, and cut dead at
     /// the bar's leading face so an arrow reaching it slides underneath rather
