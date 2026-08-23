@@ -7,10 +7,10 @@ public struct MozzRootScene: Scene {
     @Environment(\.scenePhase) private var scenePhase
 
     public init() {
-        // Fall back to an in-memory environment if the on-disk one can't open,
-        // so the app always launches.
-        let environment = (try? AppEnvironment.makeDefault()) ?? AppEnvironment.makeInMemoryFallback()
-        _env = StateObject(wrappedValue: environment)
+        // The environment is owned by the process, not by this scene — CarPlay can
+        // launch the app without this window ever being created, and both scenes
+        // must share one database and one playback engine. See `SharedEnvironment`.
+        _env = StateObject(wrappedValue: SharedEnvironment.shared)
     }
 
     public var body: some Scene {
@@ -21,8 +21,10 @@ public struct MozzRootScene: Scene {
                 .environmentObject(env.downloads)
                 .environmentObject(env.toasts)
                 .task {
-                    await env.restoreSession()
-                    await env.runLaunchAutomationIfNeeded()
+                    // Idempotent: if CarPlay already started the session on a cold
+                    // start from the car, this awaits that same work instead of
+                    // repeating it.
+                    await SharedEnvironment.start()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Returning to the foreground resumes the enrichment crawl so an

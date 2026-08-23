@@ -98,16 +98,28 @@ path = sys.argv[1]
 text = open(path).read()
 # Drop the whole MozzWidget target (last block in the file).
 text = text.split("\n  MozzWidget:")[0].rstrip() + "\n"
-# Drop the app's widget dependency + app-group entitlements block.
+# Drop the app's widget dependency.
 text = text.replace("      - target: MozzWidget\n", "")
-text = text.replace(
-    "    entitlements:\n"
-    "      path: App/Mozz/Mozz.entitlements\n"
-    "      properties:\n"
-    "        com.apple.security.application-groups:\n"
-    "          - group.com.thatcube.Mozz\n",
-    "")
-open(path, "w").write(text)
+# Drop the app target's whole `entitlements:` block, whatever is in it.
+#
+# Structural rather than a literal string match on purpose: this used to spell
+# out the app-group lines verbatim, so the moment another capability was added
+# (CarPlay) the match silently failed, the entitlements survived into a
+# wildcard-signed branch build, and provisioning failed with no clue why.
+lines = text.split("\n")
+out, skipping = [], False
+for line in lines:
+    if skipping:
+        # The block ends at the next line indented no deeper than `entitlements:`.
+        if line.strip() and not line.startswith("      "):
+            skipping = False
+        else:
+            continue
+    if line == "    entitlements:":
+        skipping = True
+        continue
+    out.append(line)
+open(path, "w").write("\n".join(out))
 PY
 }
 

@@ -40,6 +40,11 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.thatcube.Mozz
+        # Granted by Apple as a managed capability, so it rides the normal
+        # provisioning profile like any other. Adding it needs the profile
+        # re-minted once through the Xcode GUI — headless xcodebuild cannot
+        # create a profile for a newly-added capability.
+        com.apple.developer.carplay-audio: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Mozz
@@ -56,8 +61,26 @@ targets:
           UIColorName: SplashBackground
           UIImageName: MozzLogo
           UIImageRespectsSafeAreaInsets: true
+        # CarPlay requires multi-scene support and its own scene role. Only the
+        # CarPlay role is declared: the SwiftUI `WindowGroup` continues to
+        # provide the phone window implicitly, and declaring the window role
+        # here as well would take that over and break it.
         UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            # The phone window must be declared too. Once UISceneConfigurations
+            # exists, iOS stops synthesising a configuration for any role that
+            # isn't listed — so a CarPlay-only manifest left the app with no
+            # window scene and it was refused launch outright. No delegate class:
+            # that's SwiftUI's job, and naming one here takes the window over.
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneClassName: CPTemplateApplicationScene
+                UISceneConfigurationName: Mozz CarPlay
+                # The ObjC name registered by @objc(MozzCarPlaySceneDelegate), so
+                # the plist needn't know which module the class lives in.
+                UISceneDelegateClassName: MozzCarPlaySceneDelegate
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
