@@ -216,14 +216,15 @@ enum TransportTravel {
 ///
 /// That split is the whole point. The bar is a stop, so it never moves at all —
 /// sliding it away with the arrow made the motion read as an effect playing
-/// *over* the icon instead of the icon itself moving. Only the arrow travels:
-/// it nudges the way it points and fades, and a fresh one comes in behind it.
+/// *over* the icon instead of the icon itself moving. Only the arrow travels: it
+/// drives most of the way across the glyph, passing behind the bar and fading
+/// out, while a fresh one comes in from behind. The two barely overlap, so what
+/// you read is one arrow leaving and another arriving.
 ///
-/// The arrow fades as a whole rather than being wiped away at the bar. Its back
-/// edge is flat and full height, so clipping it left-to-right left a tall
-/// sliver standing next to the bar — which read as a second line rather than as
-/// an arrow leaving. Fading the whole shape keeps it a triangle the entire way
-/// out, and means it never draws over the bar either.
+/// Nothing is ever clipped. The arrow's back edge is flat and full height, so
+/// wiping it away at a boundary leaves a tall sliver standing beside the bar,
+/// which reads as a second line rather than as an arrow departing; fading the
+/// whole shape keeps it a triangle the entire way out.
 ///
 /// Driven by the engine's transport counter rather than by this button's own
 /// tap, so a skip from the Lock Screen, CarPlay, a headphone remote, or a track
@@ -245,20 +246,24 @@ struct TransportGlyph: View {
     // where the arrow occupies x 3–16.5 and the bar x 19–21), so the motion is
     // expressed in the glyph's geometry rather than in arbitrary points.
     private var unit: CGFloat { size / 24 }
-    /// How far the arrow travels on its way out. Short and deliberate: a shove
-    /// in the direction of travel, not a journey across the button. Sized so the
-    /// arrow has faded out by the time it would reach the bar, which is what
-    /// lets the two never overlap without any clipping.
-    private static let exit: CGFloat = 5.5
+    /// How far the arrow travels on its way out — most of the glyph's width, so
+    /// the move is unmistakable at a glance. It passes *behind* the bar, which
+    /// is drawn over it, and is gone before it gets far enough out to intrude on
+    /// the neighbouring control.
+    ///
+    /// Deliberately generous. An earlier pass shortened this to a nudge in the
+    /// course of removing a clipping artefact and left the skip almost
+    /// impossible to see; the artefact came from the clipping, not the distance.
+    private static let exit: CGFloat = 15
     /// Where the replacement starts, mirroring the exit so both halves of the
     /// motion carry the same weight.
-    private static let entry: CGFloat = 5.5
+    private static let entry: CGFloat = 15
 
     var body: some View {
         Color.clear
             .frame(width: size, height: size)
-            // An overlay so the arrow can ride slightly outside the glyph box
-            // without widening it and pushing the transport row apart.
+            // An overlay so the arrow can ride outside the glyph box without
+            // widening it and pushing the transport row apart.
             .overlay { glyph }
             .onChange(of: generation) { _, _ in
                 guard travel.matches(direction) else { return }
@@ -269,37 +274,37 @@ struct TransportGlyph: View {
     private var glyph: some View {
         ZStack {
             arrows
-            // Last, so it sits above the arrows: a solid, stationary stop that
-            // a departing arrow passes behind rather than through.
+            // Last, so it sits above the arrows: a solid, stationary stop that a
+            // departing arrow passes behind rather than through.
             AppIcon.skipBar.styled(size: size)
         }
         // Drawn facing forward; the back button is the same thing mirrored.
         .scaleEffect(x: travel.sign, y: 1)
     }
 
-    /// The outgoing arrow and its replacement, crossing over. Their opacities
-    /// are exact complements across one shared window, so the pair always adds
-    /// up to a whole arrow's worth of ink — the control never thins out mid-skip
-    /// — and at the halfway point the two shapes still overlap by well over half
-    /// their width, which reads as one arrow moving rather than two dissolving.
+    /// The outgoing arrow and its replacement. They barely overlap: by the time
+    /// the new one is legible the old one has cleared out, so the eye reads one
+    /// arrow leaving and another arriving rather than a single shape blurring.
+    ///
+    /// Both fade as whole shapes and nothing is ever clipped — the arrow's back
+    /// edge is flat and full height, so wiping it away at a boundary would leave
+    /// a tall sliver standing next to the bar, reading as a second line.
     private var arrows: some View {
         ZStack {
             AppIcon.skipArrow.styled(size: size)
                 .offset(x: Self.exit * unit * handover)
-                .opacity(1 - ramp(handover))
+                .opacity(1 - ramp(handover, from: 0.08, to: 0.72))
             AppIcon.skipArrow.styled(size: size)
                 .offset(x: -Self.entry * unit * (1 - handover))
-                .opacity(ramp(handover))
+                .opacity(ramp(handover, from: 0.18, to: 0.80))
         }
     }
 
-    /// The cross-fade window. Ends early enough that the departing arrow is
-    /// fully gone before it would reach the bar, so the two never overlap.
-    private static let crossFade: Double = 0.45
-
-    /// A 0→1 ramp across the cross-fade window, clamped at both ends.
-    private func ramp(_ value: Double) -> Double {
-        min(1, max(0, value / Self.crossFade))
+    /// A 0→1 ramp across a window of the hand-over, clamped at both ends. The
+    /// two windows overlap enough that the control never drops below about four
+    /// fifths of an arrow's worth of ink, so it reads as busy, not as blinking.
+    private func ramp(_ value: Double, from start: Double, to end: Double) -> Double {
+        min(1, max(0, (value - start) / (end - start)))
     }
 
     private func skip() {
@@ -308,7 +313,7 @@ struct TransportGlyph: View {
         // Restart from rest so a rapid double-skip sends a second arrow rather
         // than continuing the first one's run.
         handover = 0
-        withAnimation(.spring(response: 0.36, dampingFraction: 0.78),
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.75),
                       completionCriteria: .logicallyComplete) {
             handover = 1
         } completion: {
