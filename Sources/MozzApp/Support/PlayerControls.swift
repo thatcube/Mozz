@@ -218,17 +218,22 @@ enum TransportTravel {
 /// bar's leading face, so it is progressively swallowed the way a card slides
 /// under a door — shrinking toward its own tip as it goes, and gone before it
 /// reaches the far side. The bar flexes as it passes beneath. The replacement
-/// then sweeps in from off the left, growing from nothing, and the two arrows
-/// can never overlap: the outgoing one has always travelled further than an
-/// arrow's width by the time the incoming one is visible, so there is no
+/// then sweeps in whole from off the left, growing from nothing, and the two
+/// arrows can never overlap: the outgoing one has always travelled further than
+/// an arrow's width by the time the incoming one is visible, so there is no
 /// cross-fade and no double image.
 ///
-/// The details that matter are all about the last moments of the departing
-/// arrow. The clip sits *flush* with the bar's face: cut a unit short of it, the
-/// tall sliver of the arrow's flat back edge is stranded in the gap and reads as
-/// a second line. And it shrinks on *both* axes on the way out, because a clip
-/// alone only narrows it — leaving a tall, thin remnant that reads as the bar
-/// thickening rather than as an arrow going under it.
+/// Only the departing arrow is clipped, and only on the bar's edge. The arriving
+/// one is deliberately left whole — cut from the same slot, it was uncovered
+/// edge-first as though sliding out from behind something, when what it should
+/// look like is an arrow arriving from off to the side.
+///
+/// The rest of the detail is about the departing arrow's last moments. The clip
+/// sits *flush* with the bar's face: cut a unit short of it, the tall sliver of
+/// the arrow's flat back edge is stranded in the gap and reads as a second line.
+/// And it shrinks on *both* axes on the way out, because a clip alone only
+/// narrows it — leaving a tall, thin remnant that reads as the bar thickening
+/// rather than as an arrow going under it.
 ///
 /// Driven by the engine's transport counter rather than by this button's own
 /// tap, so a skip from the Lock Screen, CarPlay, a headphone remote, or a track
@@ -288,41 +293,51 @@ struct TransportGlyph: View {
 
     private var glyph: some View {
         ZStack {
-            // Framed before masking: a bare stack sizes to its children, which
-            // would scale every stop below into the wrong place.
-            arrows
-                .frame(width: size, height: size)
-                .mask { slot }
-            // Outside the mask, so the stop itself is never clipped.
+            departingArrow
+            // Unmasked, so it arrives whole.
+            arrivingArrow
             endBar
         }
         // Drawn facing forward; the back button is the same thing mirrored.
         .scaleEffect(x: travel.sign, y: 1)
     }
 
-    /// The departing arrow and its replacement, each scaling as it travels.
+    /// The arrow on its way out: sliding forward, shrinking toward its own tip —
+    /// the edge leading into the bar — so it looks drawn through the stop rather
+    /// than dimming where it stands.
     ///
-    /// The departing one collapses toward its own tip — the edge leading into
-    /// the bar — so it looks drawn through the stop rather than shrinking away
-    /// on the spot. The arriving one grows from nothing as it sweeps in.
+    /// This is the only part that is clipped, and only on one edge: the bar's
+    /// leading face, so the arrow slides underneath rather than across it.
+    /// Scaling both axes is what keeps that clean. The clip alone only narrows
+    /// the arrow, leaving a tall thin remnant that reads as the bar thickening;
+    /// shrinking its height in step keeps it arrow-proportioned all the way
+    /// down until it is simply small. A light fade smooths away the last of it.
+    private var departingArrow: some View {
+        AppIcon.skipArrow.styled(size: size)
+            .scaleEffect(1 - ramp(exitProgress, from: 0.15, to: 0.9),
+                         anchor: Self.tipAnchor)
+            .offset(x: Self.exit * unit * exitProgress)
+            .opacity(1 - ramp(exitProgress, from: 0.55, to: 0.88))
+            // Framed before masking: a bare glyph would size the mask to itself
+            // rather than to the grid the bar's position is measured on.
+            .frame(width: size, height: size)
+            .mask { barClip }
+    }
+
+    /// The replacement, growing from nothing as it sweeps in.
     ///
-    /// Scaling both axes is also what keeps the exit clean. The clip only
-    /// narrows the arrow, leaving a tall thin remnant that reads as the bar
-    /// thickening; scaling shrinks its height in step, so it stays
-    /// arrow-proportioned all the way down and simply becomes small. A light
-    /// fade at the very end just smooths the last of it away.
-    private var arrows: some View {
-        ZStack {
-            AppIcon.skipArrow.styled(size: size)
-                .scaleEffect(1 - ramp(exitProgress, from: 0.15, to: 0.9),
-                             anchor: Self.tipAnchor)
-                .offset(x: Self.exit * unit * exitProgress)
-                .opacity(1 - ramp(exitProgress, from: 0.55, to: 0.88))
-            AppIcon.skipArrow.styled(size: size)
-                .scaleEffect(ramp(handover, from: Self.entryBegins, to: 0.94))
-                .offset(x: -Self.entry * unit
-                    * (1 - ramp(handover, from: Self.entryBegins, to: 1)))
-        }
+    /// Deliberately unclipped. Revealing it through the same slot as the
+    /// departing arrow meant it was uncovered edge-first, as though sliding out
+    /// from behind something — when what it should look like is an arrow
+    /// arriving, whole, from off to the side. It is free to overhang the glyph
+    /// box while it travels: at that point it is still small, it stays well
+    /// inside the button's own touch target, and the two arrows never come
+    /// close enough to overlap.
+    private var arrivingArrow: some View {
+        AppIcon.skipArrow.styled(size: size)
+            .scaleEffect(ramp(handover, from: Self.entryBegins, to: 0.94))
+            .offset(x: -Self.entry * unit
+                * (1 - ramp(handover, from: Self.entryBegins, to: 1)))
     }
 
     /// The arrow's own tip on the glyph grid, as a fraction of the frame — the
@@ -332,23 +347,20 @@ struct TransportGlyph: View {
     /// How far along its run the departing arrow is, 0→1.
     private var exitProgress: Double { ramp(handover, from: 0, to: Self.exitEnds) }
 
-    /// The slot the arrows run through: open across the glyph, and cut dead at
-    /// the bar's leading face so an arrow reaching it slides underneath rather
-    /// than across it.
+    /// Solid up to the bar's leading face and nothing beyond it, so a departing
+    /// arrow is progressively swallowed as it slides under.
     ///
     /// Flush with the bar, deliberately. An earlier version cut a unit short of
     /// it, and the tall sliver of the arrow's flat back edge stranded in that
     /// gap is what read as a second line; touching the bar, the same sliver
-    /// reads as the bar. The near edge is softened so an arrival emerges rather
-    /// than appearing at a hard line, and finishes at the arrow's resting back
-    /// edge so a glyph standing still is never touched by it.
-    private var slot: some View {
+    /// reads as the bar itself.
+    private var barClip: some View {
         LinearGradient(
             stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: Double(Self.arrowBack / 24)),
+                .init(color: .black, location: 0),
                 .init(color: .black, location: Double(Self.barFace / 24)),
                 .init(color: .clear, location: Double(Self.barFace / 24)),
+                .init(color: .clear, location: 1),
             ],
             startPoint: .leading, endPoint: .trailing
         )
