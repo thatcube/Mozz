@@ -51,7 +51,7 @@ struct SettingsView: View {
 
                     Section("Playback") {
                         Toggle(isOn: $normalizationEnabled) {
-                            Label("Volume Normalization", mozz: "waveform")
+                            Label("Volume Normalization", mozz: "speaker.wave.2.fill")
                         }
                         NavigationLink {
                             EqualizerSettingsView()
