@@ -256,6 +256,21 @@ public final class PlaybackEngine {
         maybeExtendQueue()
     }
 
+    /// Turn the queue that is *already* playing into an endless station, without
+    /// touching the current track or its position.
+    ///
+    /// ``startStation(_:onNearEnd:)`` replaces the queue, which is right when
+    /// someone asks for radio but wrong when the content itself was the request.
+    /// A spoken "play <song>" has to start that song *now*; grafting a station on
+    /// a second later by reloading the queue would restart it audibly. This
+    /// attaches only the refill hook, so the song plays through and similar music
+    /// follows rather than the queue falling silent.
+    public func continueAsStation(onNearEnd: @escaping @Sendable () async -> [Track]) {
+        guard !queue.isEmpty else { return }
+        onQueueNearEnd = onNearEnd
+        maybeExtendQueue()
+    }
+
     /// Load a set of tracks and start playing a freshly balanced shuffle. The
     /// single "Shuffle" entry point for every browse/detail surface: it turns
     /// shuffle on and picks a random-feeling first track, so behavior is

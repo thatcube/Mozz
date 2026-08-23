@@ -51,6 +51,10 @@ enum SharedEnvironment {
         let task = Task { @MainActor in
             await environment.restoreSession()
             await environment.runLaunchAutomationIfNeeded()
+            // Deliberately not awaited: a Siri request waits on `start()` before it
+            // can play anything, and refreshing what the system knows about the
+            // library must never sit in front of the music.
+            Task { await environment.refreshSiriMediaContext() }
         }
         startTask = task
         await task.value
