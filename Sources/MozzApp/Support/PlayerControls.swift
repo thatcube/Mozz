@@ -191,15 +191,15 @@ struct PlayerButtonStyle: ButtonStyle {
     }
 }
 
-/// Which way a transport control sends the queue. Its glyph always travels the
+/// Which way a transport control sends the queue. Its arrow always travels the
 /// way it points.
 enum TransportTravel {
     case forward, backward
 
-    /// Screen direction of travel: forward throws right, backward throws left.
+    /// Screen direction of travel. The whole control is drawn facing forward and
+    /// mirrored for the back button — the two glyphs are exact mirrors of each
+    /// other, so one set of artwork and one set of motion covers both.
     var sign: CGFloat { self == .forward ? 1 : -1 }
-
-    var glyph: AppIcon { self == .forward ? .skipForward : .skipBack }
 
     /// Whether a transport move the engine reported belongs to this control.
     /// Tapping Next must never twitch the Previous button.
@@ -211,10 +211,15 @@ enum TransportTravel {
     }
 }
 
-/// A skip glyph that hands itself over when the queue actually moves: the arrow
-/// throws off the way it points, fading as it goes, while a fresh one rides in
-/// behind it. The motion carries the direction, so a skip is legible from the
-/// corner of your eye without reading the icon.
+/// The skip control, drawn as its two real parts rather than as one picture: an
+/// arrow, and the end bar it runs into.
+///
+/// That split is the whole point. The bar is a stop — the end of the track — so
+/// it must never travel; sliding it away with the arrow is what made an earlier
+/// version feel like an animation playing *over* the icon instead of the icon
+/// itself moving. Here the arrow drives forward and is swallowed by the bar,
+/// which takes the hit and rings; a fresh arrow then rides in behind it. Nothing
+/// moves that shouldn't, and the motion is the glyph's own geometry.
 ///
 /// Driven by the engine's transport counter rather than by this button's own
 /// tap, so a skip from the Lock Screen, CarPlay, a headphone remote, or a track
@@ -226,72 +231,104 @@ struct TransportGlyph: View {
     let direction: TransportDirection
     let generation: Int
 
-    /// 0 = at rest, 1 = fully handed over. Both ends draw one glyph centred, so
+    /// 0 = at rest, 1 = fully handed over. Both ends draw the glyph whole, so
     /// snapping back to 0 after a run is invisible.
     @State private var handover: Double = 0
-    /// Guards the completion of a run that a newer skip has already replaced.
+    /// Guards the completion of a run a newer skip has already replaced.
     @State private var run = 0
 
-    /// How far the arrow throws — a little under its own width, so the outgoing
-    /// and incoming glyphs overlap for a beat instead of the control blinking empty.
-    private var distance: CGFloat { size * 0.8 }
+    // The artwork's own 24pt grid (see `player-skip-arrow.svg`): the arrow
+    // occupies x 3–16.5, the end bar x 19–21. Expressing the motion in those
+    // units is what keeps it locked to the glyph instead of approximating it.
+    private var unit: CGFloat { size / 24 }
+    /// Where the arrow is cut off — the gap between arrow tip and bar.
+    private static let barEdge: CGFloat = 18
+    /// Exactly far enough that the arrow's trailing edge (x 3) reaches the bar,
+    /// so it ends the run perfectly consumed rather than merely faded out.
+    private static let exit: CGFloat = barEdge - 3
+    /// How far back the replacement arrow starts. Shorter than the exit — it has
+    /// less ground to cover because nothing is eating it on the way in.
+    private static let entry: CGFloat = 11
 
     var body: some View {
         Color.clear
             .frame(width: size, height: size)
-            // An overlay so the glyphs can ride outside the control's bounds
+            // An overlay so the arrow can ride outside the control's bounds
             // without widening it and pushing the transport row apart.
-            .overlay { conveyor }
+            .overlay { glyph }
             .onChange(of: generation) { _, _ in
                 guard travel.matches(direction) else { return }
-                throwGlyph()
+                skip()
             }
     }
 
-    private var conveyor: some View {
+    private var glyph: some View {
         ZStack {
-            copy(phase: handover)       // the arrow that was here: leaves
-            copy(phase: handover - 1)   // its replacement: arrives
+            arrows.mask { arrowMask }
+            endBar
         }
         .frame(width: size * 2, height: size)
-        // Soften the edges so the glyphs slide out of view rather than being
-        // cut off at a hard boundary.
-        .mask {
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .black, location: 0.22),
-                    .init(color: .black, location: 0.78),
-                    .init(color: .clear, location: 1),
-                ],
-                startPoint: .leading, endPoint: .trailing
-            )
+        // Drawn facing forward; the back button is the same thing mirrored.
+        .scaleEffect(x: travel.sign, y: 1)
+    }
+
+    /// The outgoing arrow and its replacement. The outgoing one isn't faded — it
+    /// is *eaten* by the mask as it reaches the bar, which is what makes it read
+    /// as going behind a solid object rather than dissolving in mid-air.
+    private var arrows: some View {
+        ZStack {
+            AppIcon.skipArrow.styled(size: size)
+                .offset(x: Self.exit * unit * handover)
+            AppIcon.skipArrow.styled(size: size)
+                .offset(x: -Self.entry * unit * (1 - handover))
+                .opacity(min(1, max(0, handover * 1.9 - 0.25)))
         }
     }
 
-    /// One arrow at a point in its journey. `phase` is 0 dead centre, ±1 a full
-    /// throw away — the outgoing and incoming copies are the same view a throw
-    /// apart, which is what makes the hand-off read as one object replacing another.
-    private func copy(phase: Double) -> some View {
-        let travelled = min(1, abs(phase))
-        return travel.glyph.styled(size: size)
-            .offset(x: distance * travel.sign * phase)
-            // Gone well before the full throw, so the two never look like a pair.
-            .opacity(1 - min(1, travelled / 0.62))
-            .scaleEffect(1 - 0.16 * travelled)
+    /// The end bar. It holds its ground — all it does is take the impact and
+    /// ring, like a stop that's just been struck.
+    private var endBar: some View {
+        let hit = impact
+        return AppIcon.skipBar.styled(size: size)
+            .offset(x: 1.4 * unit * hit)
+            .scaleEffect(x: 1 - 0.1 * hit, y: 1 + 0.09 * hit)
     }
 
-    private func throwGlyph() {
+    /// How hard the bar is being struck right now. Peaks early — the arrow meets
+    /// it almost immediately — then settles.
+    private var impact: Double {
+        guard handover > 0, handover < 0.6 else { return 0 }
+        return sin(.pi * (handover / 0.6))
+    }
+
+    /// Solid across the arrow's run, cut dead at the bar so the arrow vanishes
+    /// *into* it, and softened at the far edge so the replacement emerges rather
+    /// than popping into being outside the button.
+    private var arrowMask: some View {
+        let cut = 0.25 + 0.5 * (Self.barEdge / 24)
+        return LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0.14),
+                .init(color: .black, location: 0.29),
+                .init(color: .black, location: cut),
+                .init(color: .clear, location: cut),
+            ],
+            startPoint: .leading, endPoint: .trailing
+        )
+    }
+
+    private func skip() {
         run &+= 1
         let token = run
         // Restart from rest so a rapid double-skip throws a second arrow rather
-        // than continuing the first one's arc.
+        // than continuing the first one's run.
         handover = 0
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.72),
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.7),
                       completionCriteria: .logicallyComplete) {
             handover = 1
         } completion: {
-            // Invisible: phase 1 and phase 0 both draw a single centred glyph.
+            // Invisible: at 1 the outgoing arrow is fully consumed and its
+            // replacement is home, which is exactly what 0 draws.
             guard run == token else { return }
             handover = 0
         }
@@ -299,7 +336,7 @@ struct TransportGlyph: View {
 }
 
 /// A transport skip button: the tactile press every player control shares, plus
-/// a glyph that hands itself over in the direction the queue actually moved.
+/// an arrow that drives into the end bar when the queue actually moves.
 struct TransportSkipButton: View {
     let travel: TransportTravel
     let direction: TransportDirection
@@ -324,11 +361,15 @@ struct TransportSkipButton: View {
     }
 }
 
-/// The primary play / pause button. The two glyphs cross-fade, scale and tilt
-/// into one another on every toggle (a clean morph rather than an instant icon
-/// swap), while `PlayerButtonStyle` adds the press-down feedback. Custom
-/// template glyphs can't use `.symbolEffect(.replace)`, so the morph is built
-/// from a stacked pair.
+/// The primary play / pause button. The two glyphs cross-fade and scale into one
+/// another on every toggle (a clean morph rather than an instant icon swap),
+/// while `PlayerButtonStyle` adds the press-down feedback. Custom template
+/// glyphs can't use `.symbolEffect(.replace)`, so the morph is built from a
+/// stacked pair.
+///
+/// Deliberately no rotation: spinning a play triangle says nothing about
+/// becoming a pause, and reads as an effect running over the icon rather than
+/// the icon changing. Scale and fade are the honest description of a swap.
 struct PlayPauseButton: View {
     let playing: Bool
     let action: () -> Void
@@ -338,12 +379,10 @@ struct PlayPauseButton: View {
             ZStack {
                 AppIcon.play.styled(size: PlayerControlMetrics.playGlyph)
                     .opacity(playing ? 0 : 1)
-                    .scaleEffect(playing ? 0.6 : 1)
-                    .rotationEffect(.degrees(playing ? -12 : 0))
+                    .scaleEffect(playing ? 0.62 : 1)
                 AppIcon.pause.styled(size: PlayerControlMetrics.playGlyph)
                     .opacity(playing ? 1 : 0)
-                    .scaleEffect(playing ? 1 : 0.6)
-                    .rotationEffect(.degrees(playing ? 0 : 12))
+                    .scaleEffect(playing ? 1 : 0.62)
             }
             // Enough bounce to feel alive; the incoming glyph settles just past
             // its mark and back, which is what sells it as a physical switch.
