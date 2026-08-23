@@ -238,14 +238,28 @@ struct TransportGlyph: View {
     @State private var run = 0
 
     // The artwork's own 24pt grid (see `player-skip-arrow.svg`): the arrow
-    // occupies x 3–16.5, the end bar x 19–21. Expressing the motion in those
-    // units is what keeps it locked to the glyph instead of approximating it.
+    // occupies x 3–16.5, the end bar x 19–21.
+    //
+    // The arrow layer is twice the glyph wide so a departing or arriving arrow
+    // has somewhere to be, which puts the glyph's 24-unit grid centred in a
+    // 48-unit lane starting at 12. Every mask stop below is derived from those
+    // real coordinates rather than eyeballed as a fraction — getting that wrong
+    // is precisely what clipped the triangle's back edge and tip once already.
+    private static let laneUnits: CGFloat = 48
+    private static let glyphOrigin: CGFloat = 12
+    /// A position on the glyph's own grid, as a fraction of the arrow lane.
+    private static func lane(_ glyphX: CGFloat) -> Double {
+        Double((glyphOrigin + glyphX) / laneUnits)
+    }
+
     private var unit: CGFloat { size / 24 }
+    /// The arrow's flat back edge, at rest.
+    private static let arrowBack: CGFloat = 3
     /// Where the arrow is cut off — the gap between arrow tip and bar.
     private static let barEdge: CGFloat = 18
-    /// Exactly far enough that the arrow's trailing edge (x 3) reaches the bar,
-    /// so it ends the run perfectly consumed rather than merely faded out.
-    private static let exit: CGFloat = barEdge - 3
+    /// Exactly far enough that the arrow's trailing edge reaches the bar, so it
+    /// ends the run perfectly consumed rather than merely faded out.
+    private static let exit: CGFloat = barEdge - arrowBack
     /// How far back the replacement arrow starts. Shorter than the exit — it has
     /// less ground to cover because nothing is eating it on the way in.
     private static let entry: CGFloat = 11
@@ -264,7 +278,12 @@ struct TransportGlyph: View {
 
     private var glyph: some View {
         ZStack {
-            arrows.mask { arrowMask }
+            // The frame has to be pinned BEFORE the mask: a bare ZStack sizes to
+            // its children (one glyph wide), which would squeeze the whole lane's
+            // worth of mask stops into half the space.
+            arrows
+                .frame(width: size * 2, height: size)
+                .mask { arrowMask }
             endBar
         }
         .frame(width: size * 2, height: size)
@@ -301,17 +320,17 @@ struct TransportGlyph: View {
         return sin(.pi * (handover / 0.6))
     }
 
-    /// Solid across the arrow's run, cut dead at the bar so the arrow vanishes
-    /// *into* it, and softened at the far edge so the replacement emerges rather
-    /// than popping into being outside the button.
+    /// Cut dead at the bar so the arrow vanishes *into* it, and softened on the
+    /// approach so a replacement emerges rather than popping into being. The
+    /// soft edge finishes exactly at the arrow's resting back edge, so a glyph
+    /// sitting still is never touched by it.
     private var arrowMask: some View {
-        let cut = 0.25 + 0.5 * (Self.barEdge / 24)
-        return LinearGradient(
+        LinearGradient(
             stops: [
-                .init(color: .clear, location: 0.14),
-                .init(color: .black, location: 0.29),
-                .init(color: .black, location: cut),
-                .init(color: .clear, location: cut),
+                .init(color: .clear, location: Self.lane(-7)),
+                .init(color: .black, location: Self.lane(Self.arrowBack)),
+                .init(color: .black, location: Self.lane(Self.barEdge)),
+                .init(color: .clear, location: Self.lane(Self.barEdge)),
             ],
             startPoint: .leading, endPoint: .trailing
         )
