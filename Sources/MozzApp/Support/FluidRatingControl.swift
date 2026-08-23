@@ -483,13 +483,19 @@ struct FluidRatingControl: View {
                 // Read before the press transform, so a squashed star can't
                 // shift where a drag thinks the strip is.
                 .background(starFrameReader)
-                // The tap's press feedback, borrowing the transport buttons'
-                // springs. Deliberately absent from the Reduce Motion path
-                // above. Applied before the overlay so the reveal bubble, which
-                // replaces this feedback once a hold engages, never inherits it.
-                .scaleEffect(pressed ? 0.84 : 1)
-                .opacity(pressed ? 0.6 : 1)
+                // The press. Every value here is the transport buttons' own, so
+                // this feels identical under the finger despite being driven by
+                // a drag gesture rather than a button. Deliberately absent from
+                // the Reduce Motion path above. Applied before the overlay so
+                // the reveal bubble, which replaces this once a hold engages,
+                // never inherits it.
+                .background { pressWash }
+                .scaleEffect(pressed ? PlayerButtonStyle.pressScale : 1)
+                .opacity(pressed ? PlayerButtonStyle.pressOpacity : 1)
                 .animation(PlayerButtonStyle.spring(down: pressed), value: pressed)
+                .sensoryFeedback(trigger: pressed) { _, down in
+                    down ? PlayerButtonStyle.pressHaptic : nil
+                }
                 .overlay(alignment: .center) {
                     if isDragging && !hostReveal { revealStrip.offset(y: RatingTuning.revealYOffset) }
                 }
@@ -498,6 +504,23 @@ struct FluidRatingControl: View {
                 .contentShape(Rectangle())
                 .gesture(rateGesture)
         }
+    }
+
+    /// The press wash, matching the one every player button draws.
+    ///
+    /// A capsule rather than a circle only because the content it sits behind
+    /// isn't always square: unrated it is a lone star and the capsule renders as
+    /// exactly the heart's circle, rated it stretches to take in the number.
+    /// Inset from the glyph itself rather than given a fixed diameter, since
+    /// that width changes with the rating.
+    private var pressWash: some View {
+        Capsule()
+            .fill(.primary.opacity(PlayerButtonStyle.washOpacity))
+            .padding(-PlayerButtonStyle.washInset)
+            .scaleEffect(pressed ? 1 : PlayerButtonStyle.washRestScale)
+            .opacity(pressed ? 1 : 0)
+            .animation(PlayerButtonStyle.washSpring, value: pressed)
+            .allowsHitTesting(false)
     }
 
     /// Records the collapsed star's frame (in the gesture's coordinate space) and

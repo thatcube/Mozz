@@ -131,6 +131,26 @@ struct PlayerButtonStyle: ButtonStyle {
     /// Asymmetric on purpose — see the two springs above.
     static func spring(down: Bool) -> Animation { down ? downSpring : upSpring }
 
+    // The look of a press. Shared so that controls which can't use this style —
+    // the rating star, which needs its own drag gesture — still feel identical
+    // under the finger rather than merely similar.
+
+    /// How far a control compresses under the finger.
+    static let pressScale: CGFloat = 0.82
+    /// How far it dims.
+    static let pressOpacity: Double = 0.6
+    /// The tap felt on contact.
+    static let pressHaptic = SensoryFeedback.impact(weight: .medium, intensity: 0.9)
+    /// The wash's fill, its resting size, and the spring it grows on.
+    static let washOpacity: Double = 0.13
+    static let washRestScale: CGFloat = 0.6
+    static let washSpring = Animation.spring(response: 0.28, dampingFraction: 0.72)
+    /// How far the wash reaches beyond the glyph it sits behind. The explicit
+    /// `washDiameter` above exists because a button's label includes its hit
+    /// target, so a wash that simply hugged the label would balloon to 44pt or
+    /// more; controls that pass their bare glyph can inset by this instead.
+    static let washInset: CGFloat = 10
+
     func makeBody(configuration: Configuration) -> some View {
         PressBody(configuration: configuration, haptic: haptic, washDiameter: washDiameter)
     }
@@ -148,8 +168,8 @@ struct PlayerButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .scaleEffect(down ? 0.82 : 1)
-                .opacity(down ? 0.6 : 1)
+                .scaleEffect(down ? PlayerButtonStyle.pressScale : 1)
+                .opacity(down ? PlayerButtonStyle.pressOpacity : 1)
                 .background { wash }
                 .animation(PlayerButtonStyle.spring(down: down), value: down)
                 .onChange(of: configuration.isPressed) { _, pressed in
@@ -158,7 +178,7 @@ struct PlayerButtonStyle: ButtonStyle {
                 // Fire only on press-down (nil on release), so the tap lands the
                 // instant the finger makes contact.
                 .sensoryFeedback(trigger: configuration.isPressed) { _, pressed in
-                    (haptic && pressed) ? .impact(weight: .medium, intensity: 0.9) : nil
+                    (haptic && pressed) ? PlayerButtonStyle.pressHaptic : nil
                 }
         }
 
@@ -167,11 +187,11 @@ struct PlayerButtonStyle: ButtonStyle {
         /// a new kind of decoration.
         private var wash: some View {
             Circle()
-                .fill(.primary.opacity(0.13))
+                .fill(.primary.opacity(PlayerButtonStyle.washOpacity))
                 .frame(width: washDiameter, height: washDiameter)
-                .scaleEffect(down ? 1 : 0.6)
+                .scaleEffect(down ? 1 : PlayerButtonStyle.washRestScale)
                 .opacity(down ? 1 : 0)
-                .animation(.spring(response: 0.28, dampingFraction: 0.72), value: down)
+                .animation(PlayerButtonStyle.washSpring, value: down)
                 .allowsHitTesting(false)
         }
 
