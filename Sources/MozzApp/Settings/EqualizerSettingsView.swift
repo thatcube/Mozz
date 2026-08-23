@@ -23,8 +23,6 @@ struct EqualizerSettingsView: View {
                     Label("Equalizer", mozz: "waveform")
                 }
                 .onChange(of: enabled) { _, on in env.setEqualizerEnabled(on) }
-                Text("Shapes the tone of everything you play. Works on streamed and downloaded tracks alike.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Preset") {
@@ -36,7 +34,7 @@ struct EqualizerSettingsView: View {
             } header: {
                 Text("Bands")
             } footer: {
-                Text("Drag a band to boost or cut it (±12 dB). Double-tap a band to zero it.")
+                Text("Drag to adjust ±12 dB. Double-tap to reset a band.")
             }
 
             Section("Preamp") {
@@ -152,7 +150,7 @@ struct EqualizerSettingsView: View {
                     set: { newValue in update { $0.setPreamp(newValue) } }),
                 in: EqualizerSettings.gainRange,
                 step: 0.5)
-            Text("Lower the preamp a few dB if boosting bands makes playback distort.")
+            Text("Lower this if boosting distorts.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .opacity(enabled ? 1 : 0.5)
