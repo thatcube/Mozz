@@ -58,6 +58,14 @@ public final class PlaybackEngine {
     /// position tick, so it stays a genuine signal that something changed.
     public private(set) var queueRevision = 0
 
+    /// Which way the *next* track change is travelling. Set by whichever
+    /// transport path is about to move the queue, then consumed by ``publish()``
+    /// when it sees the current track actually change. Defaults to `.forward`
+    /// so an unattributed advance (a track ending, a failure skip) reads as
+    /// forward motion, which is what it is.
+    @ObservationIgnored
+    private var pendingTransportDirection: TransportDirection = .forward
+
     // MARK: Combine bridge (for non-SwiftUI observers)
 
     /// `AppEnvironment`'s now-playing-widget + session-persistence pipeline is
@@ -377,6 +385,7 @@ public final class PlaybackEngine {
     public func next() {
         // User left this track before its natural end → a skip (negative signal).
         logTerminal(.skipped, position: snapshot.elapsed)
+        pendingTransportDirection = .forward
         guard queue.advance() != nil else {
             // End of a non-repeating queue.
             stop()
@@ -390,9 +399,13 @@ public final class PlaybackEngine {
         // Restart the current track if we're more than 3s in (standard behavior).
         if snapshot.elapsed > 3 {
             seek(to: 0)
+            // No track change, but the user did move the transport backwards —
+            // signal it so the control animates instead of sitting inert.
+            noteTransport(.backward)
             return
         }
         logTerminal(.skipped, position: snapshot.elapsed)
+        pendingTransportDirection = .backward
         _ = queue.previous()
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
     }
@@ -405,6 +418,7 @@ public final class PlaybackEngine {
         // phantom skip (which would bias shuffle history).
         guard orderPosition != queue.position else { return }
         logTerminal(.skipped, position: snapshot.elapsed)
+        pendingTransportDirection = orderPosition > queue.position ? .forward : .backward
         _ = queue.jump(toOrderPosition: orderPosition)
         reload(autoplay: snapshot.status == .playing || snapshot.status == .buffering)
         maybeExtendQueue()
@@ -695,6 +709,7 @@ public final class PlaybackEngine {
     private func advanceAfterUnrecoverableFailure() {
         cancelRecovery()
         logTerminal(.skipped, position: snapshot.elapsed)
+        pendingTransportDirection = .forward
         guard queue.advance() != nil else { stop(); return }
         reload(autoplay: true)
         maybeExtendQueue()
@@ -1043,6 +1058,7 @@ public final class PlaybackEngine {
         report(.stopped)
         // The track reached its natural end → a completion (positive signal).
         logTerminal(.completed, position: currentTrack?.duration)
+        pendingTransportDirection = .forward
         let advanced = queue.trackDidFinish()
         if !loaded.isEmpty { loaded.removeFirst() }
 
@@ -1109,7 +1125,15 @@ public final class PlaybackEngine {
         snap.hasPrevious = queue.hasPrevious
         if queue.current?.id != snapshot.currentTrackID {
             snap.duration = queue.current?.duration ?? 0
+            // A move between two tracks is a transport event the UI animates.
+            // Starting playback from nothing isn't — there's no outgoing glyph
+            // to hand over from, so the player would animate on first play.
+            if snapshot.currentTrackID != nil, queue.current != nil {
+                snap.transportDirection = pendingTransportDirection
+                snap.transportGeneration &+= 1
+            }
         }
+        pendingTransportDirection = .forward
         snapshot = snap
         nowPlaying.setSkipEnabled(next: queue.hasNext, previous: true)
         if let track = currentTrack {
@@ -1118,6 +1142,15 @@ public final class PlaybackEngine {
                 isPlaying: snapshot.status == .playing
             )
         }
+    }
+
+    /// Record a transport move that didn't change the current track (a skip-back
+    /// that restarts the song), so the UI still animates the control.
+    private func noteTransport(_ direction: TransportDirection) {
+        var snap = snapshot
+        snap.transportDirection = direction
+        snap.transportGeneration &+= 1
+        snapshot = snap
     }
 
     private func report(_ state: PlaybackState) {

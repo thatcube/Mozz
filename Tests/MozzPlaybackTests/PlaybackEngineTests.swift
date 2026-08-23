@@ -148,6 +148,84 @@ final class PlaybackEngineTests: XCTestCase {
         engine.append([Track(id: "b", title: "B", artistName: "X")])
         XCTAssertEqual(engine.transportEpoch, e1)
     }
+
+    // MARK: Transport direction signal
+
+    /// The player animates a skip in the direction the queue actually moved, so
+    /// every path that moves it has to report that direction — not just the
+    /// on-screen buttons. A skip from CarPlay, the Lock Screen, a headphone
+    /// remote or a track simply ending all land here.
+
+    func testStartingPlaybackDoesNotSignalATransportMove() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        XCTAssertEqual(engine.snapshot.transportGeneration, 0,
+                       "first play has no outgoing track to hand over from")
+    }
+
+    func testNextSignalsForward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        engine.next()
+        XCTAssertEqual(engine.snapshot.transportDirection, .forward)
+        XCTAssertEqual(engine.snapshot.transportGeneration, 1)
+    }
+
+    func testPreviousSignalsBackward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") },
+                    startAt: 2)
+        engine.previous()
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.transportDirection, .backward)
+        XCTAssertEqual(engine.snapshot.transportGeneration, 1)
+    }
+
+    /// Skipping back more than 3s into a track restarts it rather than changing
+    /// tracks. The user still moved the transport backwards, so it still has to
+    /// signal — otherwise the control sits inert and looks broken mid-song.
+    func testPreviousSignalsBackwardEvenWhenItOnlyRestartsTheTrack() {
+        let tracks = (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") }
+        let source = PlaybackEngine(resolver: StubResolver())
+        source.play(tracks: tracks)
+        guard let saved = source.persistentState else {
+            return XCTFail("expected a persistable session")
+        }
+        source.stop()
+
+        // Restoring parks the playhead well into the track synchronously, which
+        // is all `previous()` reads to choose restart over skip.
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.restore(PlaybackPersistentState(queue: saved.queue, elapsed: 42))
+        XCTAssertEqual(engine.snapshot.elapsed, 42)
+
+        engine.previous()
+
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t0", "the track must not change")
+        XCTAssertEqual(engine.snapshot.transportDirection, .backward)
+        XCTAssertGreaterThan(engine.snapshot.transportGeneration, 0)
+        engine.stop()
+    }
+
+    /// A track ending on its own is forward motion, and hands over like a skip.
+    func testNaturalFinishSignalsForward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<3).map { Track(id: "t\($0)", title: "T", artistName: "A") })
+        engine.handleNaturalFinish()
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.transportDirection, .forward)
+        XCTAssertEqual(engine.snapshot.transportGeneration, 1)
+    }
+
+    func testJumpBackwardsInTheQueueSignalsBackward() {
+        let engine = PlaybackEngine(resolver: StubResolver())
+        engine.play(tracks: (0..<5).map { Track(id: "t\($0)", title: "T", artistName: "A") },
+                    startAt: 3)
+        engine.jump(toOrderPosition: 1)
+        XCTAssertEqual(engine.snapshot.currentTrackID, "t1")
+        XCTAssertEqual(engine.snapshot.transportDirection, .backward)
+    }
+
 }
 
 /// Thread-safe counter for the station auto-extend test's `@Sendable` closure.

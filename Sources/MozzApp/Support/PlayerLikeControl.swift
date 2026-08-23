@@ -39,7 +39,7 @@ struct PlayerLikeControl: View {
                 .foregroundStyle(isFavorite ? Color.pink : Color.primary)
                 .playerHitTarget()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerButtonStyle(washDiameter: glyphSize + 20))
         .accessibilityLabel(isFavorite ? "Unlike" : "Like")
     }
 }

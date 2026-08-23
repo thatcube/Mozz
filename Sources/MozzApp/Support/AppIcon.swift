@@ -13,11 +13,17 @@ import SwiftUI
 enum AppIcon {
     case skipBack, skipForward, play, pause, shuffle, repeatTracks
     case lyrics, queue, overflow
+    /// The two halves of the skip glyph, on a shared grid so they compose back
+    /// into `skipForward`. Split so the player can drive the arrow into the end
+    /// bar on a skip while the bar holds still — see `TransportGlyph`.
+    case skipArrow, skipBar
 
     private var customName: String? {
         switch self {
         case .skipBack: return "player-skip-back"
         case .skipForward: return "player-skip-forward"
+        case .skipArrow: return "player-skip-arrow"
+        case .skipBar: return "player-skip-bar"
         case .play: return "player-play"
         case .pause: return "player-pause"
         case .shuffle: return "arrows-shuffle"
