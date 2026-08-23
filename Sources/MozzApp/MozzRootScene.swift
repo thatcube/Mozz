@@ -30,7 +30,12 @@ public struct MozzRootScene: Scene {
                     // Returning to the foreground resumes the enrichment crawl so an
                     // already-synced library keeps filling in without a manual sync.
                     // No-op when disabled or already running.
-                    if phase == .active { env.resumeEnrichmentIfNeeded() }
+                    if phase == .active {
+                        env.resumeEnrichmentIfNeeded()
+                        // The one trigger for automatic catch-up. Nothing runs on a
+                        // timer, so a backgrounded app costs nothing at all.
+                        env.catchUpOnNewMusic()
+                    }
                 }
         }
     }

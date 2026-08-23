@@ -125,6 +125,44 @@ public struct PlexBackend: MusicBackend {
         try await sectionPage(type: PlexType.track, offset: offset, limit: limit, map: PlexMapper.track)
     }
 
+    // MARK: Incremental catch-up
+
+    public func libraryTrackCount() async throws -> Int? {
+        let sections = musicSectionIDs.isEmpty ? (sectionID.isEmpty ? [] : [sectionID]) : musicSectionIDs
+        guard !sections.isEmpty else { return nil }
+        // `X-Plex-Container-Size: 0` returns a section's totalSize and no rows —
+        // the cheapest question Plex can be asked, and the reason the common
+        // "nothing new" case costs a few hundred bytes instead of a page of songs.
+        var total = 0
+        for section in sections {
+            let response = try await client.send(
+                Endpoint(path: "library/sections/\(section)/all", query: [
+                    URLQueryItem(name: "type", value: "\(PlexType.track)"),
+                    URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+                    URLQueryItem(name: "X-Plex-Container-Size", value: "0"),
+                ]),
+                as: PlexContainerResponse.self
+            )
+            guard let sectionTotal = response.MediaContainer.totalSize else { return nil }
+            total += sectionTotal
+        }
+        return total
+    }
+
+    public func fetchRecentlyAddedTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track>? {
+        // The catalog pages sort `titleSort:asc` for stable full enumeration;
+        // catching up needs the opposite end of the library, so ask for date-added
+        // descending instead. Plex indexes `addedAt`, so this is as cheap as the
+        // alphabetical sort it replaces.
+        try await sectionPage(type: PlexType.track, offset: offset, limit: limit,
+                              sort: "addedAt:desc", map: PlexMapper.track)
+    }
+
+    public func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>? {
+        try await sectionPage(type: PlexType.album, offset: offset, limit: limit,
+                              sort: "addedAt:desc", map: PlexMapper.album)
+    }
+
     public func fetchPlaylists(offset: Int, limit: Int) async throws -> CatalogPage<Playlist> {
         let response = try await client.send(
             Endpoint(path: "playlists", query: [
@@ -305,6 +343,7 @@ public struct PlexBackend: MusicBackend {
         type: Int,
         offset: Int,
         limit: Int,
+        sort: String = "titleSort:asc",
         map: (PlexMetadata) -> T?
     ) async throws -> CatalogPage<T> {
         let sections = musicSectionIDs.isEmpty ? (sectionID.isEmpty ? [] : [sectionID]) : musicSectionIDs
@@ -329,7 +368,7 @@ public struct PlexBackend: MusicBackend {
             let response = try await client.send(
                 Endpoint(path: "library/sections/\(section)/all", query: [
                     URLQueryItem(name: "type", value: "\(type)"),
-                    URLQueryItem(name: "sort", value: "titleSort:asc"),
+                    URLQueryItem(name: "sort", value: sort),
                 ] + containerQuery(offset: max(0, skip), limit: want)),
                 as: PlexContainerResponse.self
             )

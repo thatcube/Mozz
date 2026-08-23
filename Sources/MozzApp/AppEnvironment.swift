@@ -843,6 +843,67 @@ public final class AppEnvironment: ObservableObject {
         try await runSync(plan: .full, progress: progress)
     }
 
+    // MARK: Automatic catch-up
+
+    /// When the last catch-up probe ran, so returning to the app repeatedly
+    /// (switching tabs, answering a message) doesn't re-ask the server each time.
+    private var lastCatchUpAt: Date?
+    /// Single-flight guard: a probe already in flight is left to finish.
+    private var isCatchingUp = false
+    /// Minimum spacing between probes.
+    private static let catchUpInterval: TimeInterval = 60
+
+    /// Quietly pull in music added since the last sync.
+    ///
+    /// Deliberately event-driven rather than timed. A repeating poll is the
+    /// expensive thing on a phone — not the bytes, but dragging the cellular
+    /// radio out of idle, which then stays in a high-power state for seconds
+    /// after each request. Running only when the app comes to the foreground
+    /// means the radio is already awake for artwork and browsing, so the probe
+    /// adds no wake of its own; a phone in a pocket does nothing at all.
+    ///
+    /// Silent by design: it never touches `isSyncing`/`syncProgress`, so no
+    /// progress bar appears for work the user didn't ask for. New songs simply
+    /// turn up in the library.
+    public func catchUpOnNewMusic(force: Bool = false) {
+        Task { await catchUpOnNewMusicAndWait(force: force) }
+    }
+
+    /// The awaitable form, for pull-to-refresh — where the spinner should last as
+    /// long as the work does. `force` skips the throttle and the Low Power Mode
+    /// opt-out, because an explicit pull is the user asking for it directly.
+    @discardableResult
+    public func catchUpOnNewMusicAndWait(force: Bool = false) async -> CatchUpSummary {
+        guard let active, !isCatchingUp, !isSyncing else { return CatchUpSummary() }
+        // Someone conserving battery has said, explicitly, that background
+        // niceties should stop. An automatic probe is exactly that; an explicit
+        // pull-to-refresh still goes through.
+        if !force && ProcessInfo.processInfo.isLowPowerModeEnabled { return CatchUpSummary() }
+        if !force, let last = lastCatchUpAt,
+           Date().timeIntervalSince(last) < Self.catchUpInterval { return CatchUpSummary() }
+
+        isCatchingUp = true
+        lastCatchUpAt = Date()
+        defer { isCatchingUp = false }
+
+        let serverId = active.connection.id
+        let engine = LibrarySyncEngine(backend: active.backend, database: database)
+        guard let summary = try? await engine.catchUp(), !summary.isEmpty else { return CatchUpSummary() }
+
+        // Only now is there anything to react to: refresh the derived views the
+        // new songs belong in. Skipped entirely on the common no-op path.
+        startMediaBackfillIfNeeded()
+        await regenerateHomeMixes()
+        catalogRevision += 1
+        Task { [enrichment] in await enrichment.enrich(serverId: serverId) }
+        return summary
+    }
+
+    /// Bumped whenever a silent catch-up actually added something, so views can
+    /// reload without watching `isSyncing` (which a catch-up deliberately leaves
+    /// alone).
+    @Published public private(set) var catalogRevision = 0
+
     /// The core catalog-sync routine, scoped by `plan` (full vs. a bounded
     /// quick-start slice). Post-sync work (mixes, outbox flush, media backfill)
     /// runs only for a full plan — the quick-start slice just populates recent

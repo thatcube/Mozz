@@ -346,6 +346,29 @@ public struct JellyfinBackend: MusicBackend {
         return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
     }
 
+    // MARK: Incremental catch-up
+
+    public func libraryTrackCount() async throws -> Int? {
+        // `Limit=0` returns the count with no items at all. The server still pays
+        // for the COUNT(*), but the response is a few hundred bytes rather than a
+        // page of songs — which is the whole point of asking before fetching.
+        var query = pageQuery(offset: 0, limit: 0).filter { $0.name != "EnableTotalRecordCount" }
+        query.append(URLQueryItem(name: "EnableTotalRecordCount", value: "true"))
+        query.append(URLQueryItem(name: "IncludeItemTypes", value: "Audio"))
+        let response = try await client.send(Endpoint(path: "Items", query: query), as: JFItemsResponse.self)
+        return response.TotalRecordCount
+    }
+
+    public func fetchRecentlyAddedTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track>? {
+        // Every catalog page here is already sorted DateCreated descending (see
+        // `pageQuery`), so "newest first" is simply the ordinary track page.
+        try await fetchTracks(offset: offset, limit: limit)
+    }
+
+    public func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>? {
+        try await fetchAlbums(offset: offset, limit: limit)
+    }
+
     /// Backfill audio format + file size for specific tracks (the data omitted
     /// from `fetchTracks` for speed) by fetching them with `MediaSources`.
     public func fetchTrackDetails(ids: [String]) async throws -> [Track] {

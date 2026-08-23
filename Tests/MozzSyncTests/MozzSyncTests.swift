@@ -19,6 +19,12 @@ struct MockBackend: MusicBackend {
     /// page (simulate a server that returns fewer than `limit` mid-enumeration).
     var trackTotalOverride: Int?
     var trackShortFirstPage = false
+    /// Whether this backend can count cheaply and sort by date added — true for
+    /// Plex/Jellyfin, false for a Subsonic-style server that can do neither.
+    var supportsRecentlyAdded = true
+    /// Shared by every copy of the struct, so a test can prove how much network
+    /// work a catch-up actually did.
+    let calls = CallCounts()
 
     init(serverId: String = "srv") {
         self.connection = ServerConnection(
@@ -69,6 +75,54 @@ struct MockBackend: MusicBackend {
         guard offset < all.count else { return CatalogPage(items: [], totalCount: all.count) }
         let end = min(offset + limit, all.count)
         return CatalogPage(items: Array(all[offset..<end]), totalCount: all.count)
+    }
+
+    // MARK: Incremental catch-up
+    //
+    // The arrays are treated as newest-first, matching a real server's
+    // `addedAt`/`DateCreated` descending order, so prepending simulates an add.
+
+    func libraryTrackCount() async throws -> Int? {
+        guard supportsRecentlyAdded else { return nil }
+        calls.countProbes += 1
+        return tracks.count
+    }
+
+    func fetchRecentlyAddedTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track>? {
+        guard supportsRecentlyAdded else { return nil }
+        calls.trackPages += 1
+        return Self.page(tracks, offset: offset, limit: limit)
+    }
+
+    func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>? {
+        guard supportsRecentlyAdded else { return nil }
+        calls.albumPages += 1
+        return Self.page(albums, offset: offset, limit: limit)
+    }
+}
+
+/// Request tally shared across copies of ``MockBackend``.
+final class CallCounts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _countProbes = 0
+    private var _trackPages = 0
+    private var _albumPages = 0
+
+    var countProbes: Int {
+        get { lock.lock(); defer { lock.unlock() }; return _countProbes }
+        set { lock.lock(); _countProbes = newValue; lock.unlock() }
+    }
+    var trackPages: Int {
+        get { lock.lock(); defer { lock.unlock() }; return _trackPages }
+        set { lock.lock(); _trackPages = newValue; lock.unlock() }
+    }
+    var albumPages: Int {
+        get { lock.lock(); defer { lock.unlock() }; return _albumPages }
+        set { lock.lock(); _albumPages = newValue; lock.unlock() }
+    }
+
+    func reset() {
+        lock.lock(); _countProbes = 0; _trackPages = 0; _albumPages = 0; lock.unlock()
     }
 }
 
@@ -277,5 +331,137 @@ final class LibrarySyncEngineTests: XCTestCase {
         let repository = LibraryRepository(database)
         let items = try await repository.tracks(forPlaylistRemoteId: "pl1", serverId: "srv")
         XCTAssertEqual(items.map(\.remoteId), ["t3", "t1", "t2"])
+    }
+
+    // MARK: - Incremental catch-up
+
+    /// Songs added to the server turn up without a full re-sync.
+    func testCatchUpAddsOnlyTheNewTracks() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.albums = makeAlbums(2)
+        backend.tracks = makeTracks(20)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+
+        // Five songs land on the server. Newest sort first, as a real server does.
+        let fresh = (0..<5).map {
+            Track(id: "new\($0)", title: "New \($0)", albumID: "al0", artistName: "Artist 0")
+        }
+        backend.tracks = fresh + backend.tracks
+
+        let summary = try await LibrarySyncEngine(backend: backend, database: database)
+            .catchUp(pageSize: 10, maxPages: 8)
+
+        XCTAssertEqual(summary.tracks, 5)
+        let repository = LibraryRepository(database)
+        let count = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(count, 25, "the 20 existing tracks must not be duplicated")
+    }
+
+    /// The stop condition — and the reason this is cheap enough to run on every
+    /// foreground. One new song must not page through the whole library.
+    func testCatchUpStopsAtTheFirstFullyKnownPage() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.albums = makeAlbums(2)
+        backend.tracks = makeTracks(200)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 200).sync()
+
+        backend.tracks = [Track(id: "newest", title: "Newest", albumID: "al0", artistName: "Artist 0")]
+            + backend.tracks
+        backend.calls.reset()
+
+        let summary = try await LibrarySyncEngine(backend: backend, database: database)
+            .catchUp(pageSize: 10, maxPages: 8)
+
+        XCTAssertEqual(summary.tracks, 1)
+        // Page one holds the new song, page two proves everything older is known.
+        XCTAssertEqual(backend.calls.trackPages, 2,
+                       "the walk must stop once a page adds nothing, not read all 20 pages")
+    }
+
+    /// The common case: nothing was added, so the count probe answers it and not a
+    /// single page of songs is fetched.
+    func testCatchUpFetchesNothingWhenTheLibraryIsUnchanged() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.albums = makeAlbums(2)
+        backend.tracks = makeTracks(30)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+        backend.calls.reset()
+
+        let summary = try await LibrarySyncEngine(backend: backend, database: database).catchUp()
+
+        XCTAssertTrue(summary.isEmpty)
+        XCTAssertEqual(backend.calls.countProbes, 1)
+        XCTAssertEqual(backend.calls.trackPages, 0, "an unchanged library must cost only the count")
+        XCTAssertEqual(backend.calls.albumPages, 0)
+    }
+
+    /// A catch-up sees only a slice, so it must never delete — a prune here would
+    /// cascade through `download` and take the user's offline files with it.
+    func testCatchUpNeverRemovesTracks() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.albums = makeAlbums(2)
+        backend.tracks = makeTracks(20)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+
+        // Six new songs arrive and five old ones are deleted server-side. The count
+        // still grew, so the walk runs — but nothing may be removed locally.
+        let fresh = (0..<6).map {
+            Track(id: "new\($0)", title: "New \($0)", albumID: "al0", artistName: "Artist 0")
+        }
+        backend.tracks = fresh + Array(makeTracks(20).dropFirst(5))
+
+        let summary = try await LibrarySyncEngine(backend: backend, database: database)
+            .catchUp(pageSize: 10, maxPages: 8)
+
+        XCTAssertEqual(summary.tracks, 6)
+        let repository = LibraryRepository(database)
+        let count = try await repository.trackCount(serverId: "srv")
+        XCTAssertEqual(count, 26, "the five server-side deletions must survive until a full sync")
+    }
+
+    /// New songs usually mean a new album, which needs a row of its own or it is
+    /// unreachable from the Albums tab.
+    func testCatchUpAlsoPicksUpTheNewAlbum() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.albums = makeAlbums(2)
+        backend.tracks = makeTracks(10)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+
+        let newAlbum = Album(id: "alNew", title: "Brand New", artistName: "Artist 0", artistID: "ar0")
+        backend.albums = [newAlbum] + backend.albums
+        backend.tracks = [Track(id: "nt1", title: "New Track", albumID: "alNew", artistName: "Artist 0")]
+            + backend.tracks
+
+        let summary = try await LibrarySyncEngine(backend: backend, database: database)
+            .catchUp(pageSize: 10, maxPages: 8)
+
+        XCTAssertEqual(summary.tracks, 1)
+        XCTAssertEqual(summary.albums, 1)
+        let repository = LibraryRepository(database)
+        let album = try await repository.album(serverId: "srv", remoteId: "alNew")
+        XCTAssertNotNil(album, "the new album must be browsable, not just its songs")
+    }
+
+    /// A backend that can neither count cheaply nor sort by date added sits the
+    /// catch-up out rather than falling back to something expensive.
+    func testCatchUpIsANoOpForABackendThatCannotSupportIt() async throws {
+        let database = try MusicDatabase.inMemory()
+        var backend = MockBackend()
+        backend.tracks = makeTracks(10)
+        _ = try await LibrarySyncEngine(backend: backend, database: database, pageSize: 50).sync()
+
+        backend.supportsRecentlyAdded = false
+        backend.tracks = makeTracks(20)
+        backend.calls.reset()
+
+        let summary = try await LibrarySyncEngine(backend: backend, database: database).catchUp()
+
+        XCTAssertTrue(summary.isEmpty)
+        XCTAssertEqual(backend.calls.trackPages, 0)
     }
 }

@@ -74,7 +74,15 @@ struct HomeView: View {
             .mozzScreenBackground()
             .appRouteDestinations()
             .task { await load() }
-            .refreshable { await load() }
+            // An explicit pull is the user asking directly, so it forces a check
+            // past the throttle (and past Low Power Mode).
+            .refreshable {
+                await env.catchUpOnNewMusicAndWait(force: true)
+                await load()
+            }
+            // A silent catch-up leaves `isSyncing` alone by design, so Home watches
+            // this instead to pick up songs that appeared without any UI.
+            .onChange(of: env.catalogRevision) { _, _ in Task { await load() } }
             // Live-refresh as the initial/any sync writes: coarse phase changes
             // fill Home in progressively, and completion does a final refresh —
             // so a freshly-synced library populates without manual reload.

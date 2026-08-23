@@ -489,6 +489,36 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// Which of `remoteIds` the catalog already holds.
+    ///
+    /// The stop condition for the incremental catch-up: walking newest-first, the
+    /// first page that contributes nothing new means everything older is already
+    /// known, so the walk ends there instead of paging through the whole library.
+    public func existingTrackRemoteIds(_ remoteIds: [String], serverId: ServerID) async throws -> Set<String> {
+        guard !remoteIds.isEmpty else { return [] }
+        return try await database.read { db in
+            let placeholders = databaseQuestionMarks(count: remoteIds.count)
+            let rows = try String.fetchAll(db, sql: """
+                SELECT remoteId FROM track
+                WHERE serverId = ? AND remoteId IN (\(placeholders))
+                """, arguments: StatementArguments([serverId] + remoteIds))
+            return Set(rows)
+        }
+    }
+
+    /// Which of `remoteIds` the catalog already holds as albums.
+    public func existingAlbumRemoteIds(_ remoteIds: [String], serverId: ServerID) async throws -> Set<String> {
+        guard !remoteIds.isEmpty else { return [] }
+        return try await database.read { db in
+            let placeholders = databaseQuestionMarks(count: remoteIds.count)
+            let rows = try String.fetchAll(db, sql: """
+                SELECT remoteId FROM album
+                WHERE serverId = ? AND remoteId IN (\(placeholders))
+                """, arguments: StatementArguments([serverId] + remoteIds))
+            return Set(rows)
+        }
+    }
+
     // MARK: Downloads (read)
 
     public func download(trackId: Int64) async throws -> DownloadRecord? {

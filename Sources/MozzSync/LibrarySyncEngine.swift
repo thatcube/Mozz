@@ -68,6 +68,18 @@ public struct SyncProgress: Sendable, Hashable {
     }
 }
 
+/// What an incremental catch-up added. Nothing is ever removed by one.
+public struct CatchUpSummary: Sendable, Hashable {
+    public var tracks: Int
+    public var albums: Int
+    public var isEmpty: Bool { tracks == 0 && albums == 0 }
+
+    public init(tracks: Int = 0, albums: Int = 0) {
+        self.tracks = tracks
+        self.albums = albums
+    }
+}
+
 /// What a completed sync wrote.
 public struct SyncSummary: Sendable, Hashable {
     /// Timing for one phase, for the Diagnostics "last sync" report.
@@ -169,6 +181,7 @@ public struct SyncPlan: Sendable {
 public struct LibrarySyncEngine: Sendable {
     private let backend: any MusicBackend
     private let writer: CatalogWriter
+    private let repository: LibraryRepository
     private let pageSize: Int
     /// Optional diagnostic sink for detailed per-page timing (fetch vs write),
     /// written to a file the debugger pulls off-device. `nil` in tests/normal use.
@@ -184,6 +197,7 @@ public struct LibrarySyncEngine: Sendable {
     ) {
         self.backend = backend
         self.writer = CatalogWriter(database)
+        self.repository = LibraryRepository(database)
         self.pageSize = pageSize
         self.diag = diag
     }
@@ -329,6 +343,96 @@ public struct LibrarySyncEngine: Sendable {
         progress?(SyncProgress(phase: .done, itemsSynced: summary.tracks, totalCount: summary.tracks))
         syncLog.notice("sync complete: \(summary.tracks) tracks, \(summary.albums) albums, \(summary.artists) artists, \(summary.playlists) playlists, \(summary.deleted) pruned in \(String(format: "%.1f", summary.duration))s")
         return summary
+    }
+
+    // MARK: - Incremental catch-up
+
+    /// Pull in music added since the last sync, without re-reading the library.
+    ///
+    /// Two things make this cheap enough to run whenever the app comes to the
+    /// foreground. It asks the server for a *count* first, and stops right there
+    /// unless the count grew — which is the common case, and costs a few hundred
+    /// bytes. When something did change it walks the newest-added items and stops
+    /// at the first page holding nothing the catalog is missing, so one new album
+    /// costs a page or two rather than a full mirror.
+    ///
+    /// It only ever upserts. A slice must never authorize a prune: deleting rows
+    /// it simply didn't look at would cascade through `download` and take the
+    /// user's offline files with it.
+    ///
+    /// Returns an empty summary when the backend can't count or sort by date
+    /// added — those libraries refresh on the explicit "Sync Now" instead.
+    @discardableResult
+    public func catchUp(pageSize catchUpPageSize: Int = 100, maxPages: Int = 8) async throws -> CatchUpSummary {
+        guard let serverTracks = try await backend.libraryTrackCount() else { return CatchUpSummary() }
+        let localTracks = try await repository.trackCount(serverId: serverId)
+        // Only a genuine growth is worth a walk. Equal counts mean nothing was
+        // added; FEWER on the server means tracks were deleted, which a catch-up
+        // deliberately doesn't handle — walking would fetch a page every single
+        // time and never reconcile, burning the radio for nothing. "Sync Now"
+        // remains the way to pick up deletions.
+        guard serverTracks > localTracks else { return CatchUpSummary() }
+
+        var summary = CatchUpSummary()
+        summary.tracks = try await walkRecentlyAdded(
+            maxPages: maxPages, pageSize: catchUpPageSize,
+            fetch: { try await backend.fetchRecentlyAddedTracks(offset: $0, limit: $1) },
+            known: { try await repository.existingTrackRemoteIds($0, serverId: serverId) },
+            write: { try await writer.upsertTracks($0, serverId: serverId) },
+            id: \.id
+        )
+        guard summary.tracks > 0 else { return summary }
+
+        // New songs almost always arrive as new albums, and a track whose album
+        // has no row is unreachable from the Albums tab. Albums are far fewer than
+        // tracks, so this is a page or two at most.
+        summary.albums = try await walkRecentlyAdded(
+            maxPages: max(1, maxPages / 2), pageSize: catchUpPageSize,
+            fetch: { try await backend.fetchRecentlyAddedAlbums(offset: $0, limit: $1) },
+            known: { try await repository.existingAlbumRemoteIds($0, serverId: serverId) },
+            write: { try await writer.upsertAlbums($0, serverId: serverId) },
+            id: \.id
+        )
+
+        // Same local housekeeping the full sync does, so the new rows are as
+        // browsable as synced ones: album-artists that no artist listing returns,
+        // and the track counts that split an artist's albums from their singles.
+        _ = try await writer.synthesizeMissingAlbumArtists(serverId: serverId)
+        try await writer.deriveAlbumTrackCounts(serverId: serverId)
+
+        syncLog.notice("catch-up: +\(summary.tracks) tracks, +\(summary.albums) albums")
+        return summary
+    }
+
+    /// Walk newest-first pages, writing only what the catalog is missing, and
+    /// stop at the first page that adds nothing.
+    ///
+    /// The stop condition is what bounds the cost: because the server orders by
+    /// date added, a page where everything is already known means everything
+    /// older is too.
+    private func walkRecentlyAdded<Item: Sendable>(
+        maxPages: Int,
+        pageSize: Int,
+        fetch: (Int, Int) async throws -> CatalogPage<Item>?,
+        known: ([String]) async throws -> Set<String>,
+        write: ([Item]) async throws -> Void,
+        id: KeyPath<Item, String>
+    ) async throws -> Int {
+        var added = 0
+        var offset = 0
+        for _ in 0..<maxPages {
+            try Task.checkCancellation()
+            guard let page = try await fetch(offset, pageSize), !page.items.isEmpty else { break }
+            let existing = try await known(page.items.map { $0[keyPath: id] })
+            let fresh = page.items.filter { !existing.contains($0[keyPath: id]) }
+            if fresh.isEmpty { break }
+            try await write(fresh)
+            added += fresh.count
+            offset += page.items.count
+            // A short page means the server has no more to give.
+            if page.items.count < pageSize { break }
+        }
+        return added
     }
 
     /// Whether a phase enumerated completely, which is the precondition for the

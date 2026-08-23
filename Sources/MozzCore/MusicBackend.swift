@@ -146,6 +146,37 @@ public protocol MusicBackend: Sendable {
     /// reached-by-exhaustion count (never an estimate).
     func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>?
 
+    // MARK: Incremental catch-up
+
+    /// How many tracks the server holds, asked as cheaply as the protocol allows
+    /// — a count with no rows attached.
+    ///
+    /// This is the "is there anything new?" probe, and it is deliberately the
+    /// entire cost of the common case where there isn't. A few hundred bytes
+    /// answers the question; re-downloading a page of songs already in the
+    /// catalog to discover the same thing would cost tens of kilobytes and, far
+    /// more expensively on a phone, hold the cellular radio awake to do it.
+    ///
+    /// `nil` means the backend cannot count cheaply. Callers must then skip the
+    /// incremental path rather than fall back to something costlier — a guess
+    /// that burns battery is worse than not checking.
+    func libraryTrackCount() async throws -> Int?
+
+    /// A page of tracks ordered newest-added first, or `nil` when the backend
+    /// has no notion of "recently added" it can sort on.
+    ///
+    /// Paired with the count probe this gives a catch-up sync: walk back from the
+    /// newest track and stop at the first page holding nothing the catalog is
+    /// missing. It enumerates a slice by design, so — like the quick start — it
+    /// never reports a total and can never authorize a prune.
+    func fetchRecentlyAddedTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track>?
+
+    /// A page of albums ordered newest-added first, or `nil` when unsupported.
+    ///
+    /// Catching up on tracks alone would leave a newly-added album with songs in
+    /// the catalog but no album row to browse to, so the walk covers both.
+    func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>?
+
     // MARK: Playback & downloads
 
     /// Resolve a playable stream URL for a track.
@@ -239,6 +270,16 @@ public extension MusicBackend {
     /// Default: no specialized bulk enumeration; the sync engine uses the flat
     /// ``fetchTracks(offset:limit:)`` pager instead.
     func enumerateAllTracks(pageSize: Int) -> AsyncThrowingStream<CatalogPage<Track>, any Error>? { nil }
+
+    /// Default: no cheap count, so the incremental catch-up sits this backend out
+    /// and its library refreshes on the explicit "Sync Now" instead.
+    func libraryTrackCount() async throws -> Int? { nil }
+
+    /// Default: no date-added ordering to walk.
+    func fetchRecentlyAddedTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track>? { nil }
+
+    /// Default: no date-added ordering to walk.
+    func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>? { nil }
 
     /// Default: no user photo. Correct for every server that doesn't store one
     /// (and for the offline demo backend).
