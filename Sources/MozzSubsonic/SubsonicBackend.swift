@@ -459,6 +459,35 @@ public struct SubsonicBackend: MusicBackend {
         return (albums.map { $0.id?.value ?? "" }, albums.map { $0.songCount }, raw.count)
     }
 
+    // MARK: Incremental catch-up
+    //
+    // Subsonic has no song-level "date added" ordering to walk, but it does list
+    // newest-added ALBUMS — which is how music actually arrives. So the catch-up
+    // here is album-driven: read the newest albums and pull the songs of any that
+    // are new or have grown.
+
+    public func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>? {
+        let size = min(max(limit, 1), 500)
+        let body = try await client.send("getAlbumList2", query: [
+            // `newest` is Subsonic's recently-added ordering — the same list its
+            // own clients show as "Recently Added".
+            URLQueryItem(name: "type", value: "newest"),
+            URLQueryItem(name: "size", value: "\(size)"),
+            URLQueryItem(name: "offset", value: "\(offset)"),
+        ] + musicFolderQuery(), as: SubsonicAlbumList2Payload.self)
+        let albums = (body.payload.albumList2?.album ?? [])
+            .map(SubsonicMapper.album)
+            .filter { !$0.id.isEmpty }
+        // No total: this is a slice by design and must never authorize a prune.
+        return CatalogPage(items: albums, totalCount: nil)
+    }
+
+    public func fetchAlbumTracks(albumID: String) async throws -> [Track]? {
+        try await albumSongs(albumID: albumID)
+            .map(SubsonicMapper.track)
+            .filter { !$0.id.isEmpty }
+    }
+
     private func albumSongs(albumID: String) async throws -> [SubsonicChild] {
         let body = try await client.send(
             "getAlbum",

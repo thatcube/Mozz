@@ -177,6 +177,14 @@ public protocol MusicBackend: Sendable {
     /// the catalog but no album row to browse to, so the walk covers both.
     func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>?
 
+    /// Every track on one album, for backends whose "recently added" unit is the
+    /// album rather than the song.
+    ///
+    /// Subsonic can list newest-added albums but has no song-level ordering to
+    /// walk, so its catch-up reads the albums that changed and pulls their songs
+    /// from here. `nil` means the backend has no such lookup.
+    func fetchAlbumTracks(albumID: String) async throws -> [Track]?
+
     // MARK: Playback & downloads
 
     /// Resolve a playable stream URL for a track.
@@ -280,6 +288,9 @@ public extension MusicBackend {
 
     /// Default: no date-added ordering to walk.
     func fetchRecentlyAddedAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album>? { nil }
+
+    /// Default: no per-album track lookup (the track-level walk covers it).
+    func fetchAlbumTracks(albumID: String) async throws -> [Track]? { nil }
 
     /// Default: no user photo. Correct for every server that doesn't store one
     /// (and for the offline demo backend).

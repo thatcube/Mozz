@@ -519,6 +519,15 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// How many tracks the catalog holds for one album.
+    public func trackCount(forAlbumRemoteId albumRemoteId: String, serverId: ServerID) async throws -> Int {
+        try await database.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM track WHERE serverId = ? AND albumRemoteId = ?
+                """, arguments: [serverId, albumRemoteId]) ?? 0
+        }
+    }
+
     // MARK: Downloads (read)
 
     public func download(trackId: Int64) async throws -> DownloadRecord? {

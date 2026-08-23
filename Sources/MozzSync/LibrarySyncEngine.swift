@@ -364,35 +364,42 @@ public struct LibrarySyncEngine: Sendable {
     /// added — those libraries refresh on the explicit "Sync Now" instead.
     @discardableResult
     public func catchUp(pageSize catchUpPageSize: Int = 100, maxPages: Int = 8) async throws -> CatchUpSummary {
-        guard let serverTracks = try await backend.libraryTrackCount() else { return CatchUpSummary() }
-        let localTracks = try await repository.trackCount(serverId: serverId)
-        // Only a genuine growth is worth a walk. Equal counts mean nothing was
-        // added; FEWER on the server means tracks were deleted, which a catch-up
-        // deliberately doesn't handle — walking would fetch a page every single
-        // time and never reconcile, burning the radio for nothing. "Sync Now"
-        // remains the way to pick up deletions.
-        guard serverTracks > localTracks else { return CatchUpSummary() }
+        // The cheapest gate there is, for the servers that can answer it. Equal
+        // counts mean nothing was added; FEWER on the server means tracks were
+        // deleted, which a catch-up deliberately doesn't handle — walking would
+        // fetch a page every single time and never reconcile, burning the radio
+        // for nothing. "Sync Now" remains the way to pick up deletions.
+        if let serverTracks = try await backend.libraryTrackCount() {
+            let localTracks = try await repository.trackCount(serverId: serverId)
+            guard serverTracks > localTracks else { return CatchUpSummary() }
+        }
 
         var summary = CatchUpSummary()
-        summary.tracks = try await walkRecentlyAdded(
-            maxPages: maxPages, pageSize: catchUpPageSize,
-            fetch: { try await backend.fetchRecentlyAddedTracks(offset: $0, limit: $1) },
-            known: { try await repository.existingTrackRemoteIds($0, serverId: serverId) },
-            write: { try await writer.upsertTracks($0, serverId: serverId) },
-            id: \.id
-        )
-        guard summary.tracks > 0 else { return summary }
 
-        // New songs almost always arrive as new albums, and a track whose album
-        // has no row is unreachable from the Albums tab. Albums are far fewer than
-        // tracks, so this is a page or two at most.
-        summary.albums = try await walkRecentlyAdded(
-            maxPages: max(1, maxPages / 2), pageSize: catchUpPageSize,
-            fetch: { try await backend.fetchRecentlyAddedAlbums(offset: $0, limit: $1) },
-            known: { try await repository.existingAlbumRemoteIds($0, serverId: serverId) },
-            write: { try await writer.upsertAlbums($0, serverId: serverId) },
-            id: \.id
-        )
+        // Preferred: a song-level walk, where every added track is visible
+        // directly (Plex, Jellyfin).
+        if let addedTracks = try await walkRecentlyAddedTracks(
+            maxPages: maxPages, pageSize: catchUpPageSize
+        ) {
+            summary.tracks = addedTracks
+            if addedTracks > 0 {
+                // New songs almost always arrive as new albums, and a track whose
+                // album has no row is unreachable from the Albums tab. Albums are
+                // far fewer than tracks, so this is a page or two at most.
+                summary.albums = try await walkRecentlyAdded(
+                    maxPages: max(1, maxPages / 2), pageSize: catchUpPageSize,
+                    fetch: { try await backend.fetchRecentlyAddedAlbums(offset: $0, limit: $1) },
+                    known: { try await repository.existingAlbumRemoteIds($0, serverId: serverId) },
+                    write: { try await writer.upsertAlbums($0, serverId: serverId) },
+                    id: \.id
+                ) ?? 0
+            }
+        } else {
+            // Fallback: the server orders albums, not songs (Subsonic).
+            summary = try await catchUpByAlbum(maxPages: maxPages, pageSize: 50)
+        }
+
+        guard !summary.isEmpty else { return summary }
 
         // Same local housekeeping the full sync does, so the new rows are as
         // browsable as synced ones: album-artists that no artist listing returns,
@@ -404,8 +411,63 @@ public struct LibrarySyncEngine: Sendable {
         return summary
     }
 
+    private func walkRecentlyAddedTracks(maxPages: Int, pageSize: Int) async throws -> Int? {
+        try await walkRecentlyAdded(
+            maxPages: maxPages, pageSize: pageSize,
+            fetch: { try await backend.fetchRecentlyAddedTracks(offset: $0, limit: $1) },
+            known: { try await repository.existingTrackRemoteIds($0, serverId: serverId) },
+            write: { try await writer.upsertTracks($0, serverId: serverId) },
+            id: \.id
+        )
+    }
+
+    /// Catch up on a server that can only order albums by date added.
+    ///
+    /// Reads the newest albums and pulls the songs of any that are new — or that
+    /// the server says hold more songs than the catalog does, which is how an
+    /// album that arrived half-imported finishes turning up. Stops at the first
+    /// page where nothing changed, exactly like the song-level walk.
+    private func catchUpByAlbum(maxPages: Int, pageSize: Int) async throws -> CatchUpSummary {
+        var summary = CatchUpSummary()
+        var offset = 0
+        for _ in 0..<maxPages {
+            try Task.checkCancellation()
+            guard let page = try await backend.fetchRecentlyAddedAlbums(offset: offset, limit: pageSize),
+                  !page.items.isEmpty else { break }
+            let knownAlbums = try await repository.existingAlbumRemoteIds(page.items.map(\.id), serverId: serverId)
+
+            var changed: [Album] = []
+            for album in page.items {
+                if !knownAlbums.contains(album.id) {
+                    changed.append(album)
+                } else if let serverCount = album.trackCount,
+                          try await repository.trackCount(forAlbumRemoteId: album.id, serverId: serverId) < serverCount {
+                    changed.append(album)
+                }
+            }
+            if changed.isEmpty { break }
+
+            try await writer.upsertAlbums(changed, serverId: serverId)
+            summary.albums += changed.count { !knownAlbums.contains($0.id) }
+            for album in changed {
+                guard let tracks = try await backend.fetchAlbumTracks(albumID: album.id), !tracks.isEmpty
+                else { continue }
+                let knownTracks = try await repository.existingTrackRemoteIds(tracks.map(\.id), serverId: serverId)
+                let fresh = tracks.filter { !knownTracks.contains($0.id) }
+                guard !fresh.isEmpty else { continue }
+                try await writer.upsertTracks(fresh, serverId: serverId)
+                summary.tracks += fresh.count
+            }
+
+            offset += page.items.count
+            if page.items.count < pageSize { break }
+        }
+        return summary
+    }
+
     /// Walk newest-first pages, writing only what the catalog is missing, and
-    /// stop at the first page that adds nothing.
+    /// stop at the first page that adds nothing. `nil` means the backend has no
+    /// such ordering.
     ///
     /// The stop condition is what bounds the cost: because the server orders by
     /// date added, a page where everything is already known means everything
@@ -417,20 +479,23 @@ public struct LibrarySyncEngine: Sendable {
         known: ([String]) async throws -> Set<String>,
         write: ([Item]) async throws -> Void,
         id: KeyPath<Item, String>
-    ) async throws -> Int {
+    ) async throws -> Int? {
         var added = 0
         var offset = 0
-        for _ in 0..<maxPages {
+        for page in 0..<maxPages {
             try Task.checkCancellation()
-            guard let page = try await fetch(offset, pageSize), !page.items.isEmpty else { break }
-            let existing = try await known(page.items.map { $0[keyPath: id] })
-            let fresh = page.items.filter { !existing.contains($0[keyPath: id]) }
+            guard let result = try await fetch(offset, pageSize) else {
+                return page == 0 ? nil : added   // unsupported by this backend
+            }
+            if result.items.isEmpty { break }
+            let existing = try await known(result.items.map { $0[keyPath: id] })
+            let fresh = result.items.filter { !existing.contains($0[keyPath: id]) }
             if fresh.isEmpty { break }
             try await write(fresh)
             added += fresh.count
-            offset += page.items.count
+            offset += result.items.count
             // A short page means the server has no more to give.
-            if page.items.count < pageSize { break }
+            if result.items.count < pageSize { break }
         }
         return added
     }
