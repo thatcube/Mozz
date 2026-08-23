@@ -46,11 +46,8 @@ struct SiriSettingsSection: View {
     }
 
     private static let explanation = """
-        Ask for music by name — "Play Miles Davis on Mozz". A HomePod can do it \
-        too: it hands the request to this iPhone, which plays and sends the audio \
-        back to the speaker. They need to be on the same Wi-Fi, and Recognize My \
-        Voice must be on for you in the Home app. Ask a few times and Siri may \
-        start choosing Mozz even when you don't say its name.
+        Ask by name — "Play Miles Davis on Mozz." Works from a HomePod too, \
+        with Recognize My Voice on in the Home app.
         """
 
     private func requestAuthorization() {

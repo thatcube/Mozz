@@ -53,7 +53,7 @@ struct SettingsView: View {
                         Toggle(isOn: $normalizationEnabled) {
                             Label("Volume Normalization", mozz: "waveform")
                         }
-                        Text("Plays tracks at a consistent loudness using each track's normalization gain, when available.")
+                        Text("Evens out loudness between tracks.")
                             .font(.caption).foregroundStyle(.secondary)
                         NavigationLink {
                             EqualizerSettingsView()
@@ -66,12 +66,12 @@ struct SettingsView: View {
                         Toggle(isOn: $lyricsOnlineLookup) {
                             Label("Look Up Lyrics Online", mozz: "quote.bubble")
                         }
-                        Text("When your server has no lyrics for a song, Mozz can check LRCLIB, a free community lyrics database. Only the song title, artist and length are sent, no account or personal data. Turn this off to use your server's lyrics only.")
+                        Text("Checks LRCLIB when your server has none. Only title, artist and length are sent.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle(isOn: $lyricsOfflineCapture) {
                             Label("Save Lyrics with Downloads", mozz: "arrow.down.circle")
                         }
-                        Text("Downloading a song also saves its lyrics, so they're there when you have no signal.")
+                        Text("Keeps lyrics with you offline.")
                             .font(.caption).foregroundStyle(.secondary)
                     } header: {
                         Text("Lyrics")
@@ -87,7 +87,7 @@ struct SettingsView: View {
                             // goes out (the "fully offline" promise).
                             env.setEnrichmentEnabled(enabled)
                         }
-                        Text("Looks up open music data from MusicBrainz to make radio and mixes more accurate. Only song and artist names are sent, no account or personal data. Turn this off to keep the app fully offline.")
+                        Text("Sharpens radio and mixes using MusicBrainz. Only song and artist names are sent — off means fully offline.")
                             .font(.caption).foregroundStyle(.secondary)
                         if enrichmentEnabled, let c = recCoverage, c.total > 0 {
                             EnrichmentCoverageRow(coverage: c)
@@ -152,7 +152,7 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("A free, open-source app under GPL-3.0. If you enjoy Mozz, a GitHub star, a review, or a small tip means a lot — thank you!")
+                    Text("Free and open source, GPL-3.0. A star or a tip means a lot — thanks!")
                 }
             }
             .mozzReadableWidth()
@@ -246,11 +246,8 @@ private struct EnrichmentCoverageRow: View {
     }
 
     private func caption(_ c: (total: Int, matched: Int, genreTagged: Int), done: Bool) -> String {
-        let matched = "\(fmt(c.matched)) of \(fmt(c.total)) songs matched to MusicBrainz"
-        if done {
-            return "All songs matched. Radio and mixes use the improved engine."
-        }
-        return matched + ". This keeps improving in the background as you listen."
+        if done { return "All songs matched" }
+        return "\(fmt(c.matched)) of \(fmt(c.total)) songs matched"
     }
 
     private func percent(_ c: (total: Int, matched: Int, genreTagged: Int)) -> Int {

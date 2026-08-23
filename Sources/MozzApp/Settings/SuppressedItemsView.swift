@@ -66,7 +66,7 @@ struct SuppressedItemsView: View {
                 .foregroundStyle(.tertiary)
             Text("Nothing hidden")
                 .font(.headline)
-            Text("Tracks and artists you tell Mozz not to recommend show up here, where you can restore them.")
+            Text("Anything you hide from recommendations lands here.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
