@@ -53,8 +53,6 @@ struct SettingsView: View {
                         Toggle(isOn: $normalizationEnabled) {
                             Label("Volume Normalization", mozz: "waveform")
                         }
-                        Text("Evens out loudness between tracks.")
-                            .font(.caption).foregroundStyle(.secondary)
                         NavigationLink {
                             EqualizerSettingsView()
                         } label: {

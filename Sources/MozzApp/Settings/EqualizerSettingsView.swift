@@ -23,8 +23,6 @@ struct EqualizerSettingsView: View {
                     Label("Equalizer", mozz: "waveform")
                 }
                 .onChange(of: enabled) { _, on in env.setEqualizerEnabled(on) }
-                Text("Applies to everything you play.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("Preset") {
