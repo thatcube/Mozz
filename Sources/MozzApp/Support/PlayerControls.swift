@@ -264,7 +264,12 @@ struct TransportGlyph: View {
     /// The exit is quick and finishes early — the arrow is gone under the bar
     /// long before the replacement is home — which is what stops the pair
     /// reading as a cross-fade.
-    private static let exitEnds: Double = 0.5
+    ///
+    /// It gets a slightly larger share of the run than it strictly needs, so
+    /// that on a 60Hz screen the departure still lands across a comfortable
+    /// number of frames. It is the shortest phase of the animation and so the
+    /// first to look stepped where there is no ProMotion.
+    private static let exitEnds: Double = 0.55
     /// The entry starts while the exit is still finishing. They can safely run
     /// together because they are always more than an arrow's width apart.
     private static let entryBegins: Double = 0.3
@@ -378,7 +383,7 @@ struct TransportGlyph: View {
         // Restart from rest so a rapid double-skip sends a second arrow rather
         // than continuing the first one's run.
         handover = 0
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.8),
+        withAnimation(.spring(response: 0.425, dampingFraction: 0.8),
                       completionCriteria: .logicallyComplete) {
             handover = 1
         } completion: {
@@ -441,7 +446,10 @@ struct PlayPauseButton: View {
             }
             // Enough bounce to feel alive; the incoming glyph settles just past
             // its mark and back, which is what sells it as a physical switch.
-            .animation(.spring(response: 0.34, dampingFraction: 0.62), value: playing)
+            // Kept a touch quicker than the skip's hand-over: this is direct
+            // feedback on a toggle, where the skip is a transition between two
+            // tracks. Close enough that the row still reads as one family.
+            .animation(.spring(response: 0.4, dampingFraction: 0.62), value: playing)
             .playerHitTarget(PlayerControlMetrics.playHit)
         }
         .buttonStyle(PlayerButtonStyle(washDiameter: PlayerControlMetrics.playGlyph + 22))
