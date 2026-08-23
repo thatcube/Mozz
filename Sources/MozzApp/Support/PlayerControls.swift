@@ -120,6 +120,17 @@ struct PlayerButtonStyle: ButtonStyle {
     /// `nil` lets it fill the button's own hit target.
     var washDiameter: CGFloat?
 
+    /// How long a press stays on screen even once the finger has lifted. Short
+    /// enough to never feel laggy, long enough to be seen.
+    static let minimumHold: TimeInterval = 0.13
+    /// Going down: immediate and firm.
+    static let downSpring = Animation.spring(response: 0.15, dampingFraction: 0.9)
+    /// Coming back: looser, and overshooting, so letting go reads as a pop
+    /// rather than a slow deflate.
+    static let upSpring = Animation.spring(response: 0.4, dampingFraction: 0.5)
+    /// Asymmetric on purpose — see the two springs above.
+    static func spring(down: Bool) -> Animation { down ? downSpring : upSpring }
+
     func makeBody(configuration: Configuration) -> some View {
         PressBody(configuration: configuration, haptic: haptic, washDiameter: washDiameter)
     }
@@ -135,21 +146,12 @@ struct PlayerButtonStyle: ButtonStyle {
         @State private var pressedAt = Date.now
         @State private var pendingLift: DispatchWorkItem?
 
-        /// How long the pressed state stays on screen even once the finger has
-        /// lifted. Short enough to never feel laggy, long enough to be seen.
-        private static let minimumHold: TimeInterval = 0.13
-
         var body: some View {
             configuration.label
                 .scaleEffect(down ? 0.82 : 1)
                 .opacity(down ? 0.6 : 1)
                 .background { wash }
-                // Asymmetric on purpose: the press is immediate and firm, the
-                // return is a looser spring that overshoots slightly, so letting
-                // go reads as a pop rather than a slow deflate.
-                .animation(down ? .spring(response: 0.15, dampingFraction: 0.9)
-                                : .spring(response: 0.4, dampingFraction: 0.5),
-                           value: down)
+                .animation(PlayerButtonStyle.spring(down: down), value: down)
                 .onChange(of: configuration.isPressed) { _, pressed in
                     if pressed { press() } else { lift() }
                 }
@@ -182,7 +184,8 @@ struct PlayerButtonStyle: ButtonStyle {
 
         /// Let go — but not before the press has been on screen long enough to see.
         private func lift() {
-            let remaining = Self.minimumHold - Date.now.timeIntervalSince(pressedAt)
+            let remaining = PlayerButtonStyle.minimumHold
+                - Date.now.timeIntervalSince(pressedAt)
             guard remaining > 0 else { down = false; return }
             let work = DispatchWorkItem { down = false }
             pendingLift = work
