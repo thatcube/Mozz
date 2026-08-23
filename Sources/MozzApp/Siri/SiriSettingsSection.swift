@@ -12,9 +12,23 @@ import UIKit
 /// would ever tell someone that asking a speaker for music off their own server
 /// is possible in the first place.
 struct SiriSettingsSection: View {
-    @State private var status = INPreferences.siriAuthorizationStatus()
+    // Deliberately not initialised inline: a stored property's default value is
+    // evaluated when the view is *constructed*, which happens whether or not
+    // `body` decides to show anything — and `INPreferences` raises without the
+    // entitlement. It is read only once the gate below has passed.
+    @State private var status: INSiriAuthorizationStatus?
 
     var body: some View {
+        // `INPreferences` itself raises without the Siri entitlement, so even
+        // reading the authorization status has to be gated.
+        if SiriMediaSuggestions.isAvailable {
+            section.onAppear {
+                if status == nil { status = INPreferences.siriAuthorizationStatus() }
+            }
+        }
+    }
+
+    private var section: some View {
         Section {
             switch status {
             case .authorized:

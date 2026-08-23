@@ -13,6 +13,20 @@ import MozzDatabase
 /// turns "play music on Mozz" into plain "play music".
 @MainActor
 enum SiriMediaSuggestions {
+    /// Whether Siri can safely be talked to from this build.
+    ///
+    /// Parts of SiriKit raise an Objective-C exception rather than returning an
+    /// error when the entitlement is missing, and a raised `NSException` cannot be
+    /// caught from Swift — the app dies on launch. Per-branch builds are signed
+    /// with a wildcard profile that strips the capability, and anyone who clones
+    /// this GPL project without provisioning Siri is in the same position, so this
+    /// has to be checked rather than assumed.
+    ///
+    /// Note that even `INPreferences.siriAuthorizationStatus()` raises, so the
+    /// answer cannot come from the Intents framework at all. It comes from the
+    /// entitlements `codesign` embedded in this binary.
+    static let isAvailable = CodeSignEntitlements.hasEntitlement("com.apple.developer.siri")
+
     /// Record that this is what someone chose to listen to.
     ///
     /// Apple asks for the container rather than the song where there is one — the
@@ -20,6 +34,7 @@ enum SiriMediaSuggestions {
     /// donated one at a time says far less about what the user actually wanted
     /// than one donation naming the playlist.
     static func donate(_ resolution: MediaIntentResolution) {
+        guard isAvailable else { return }
         let item = INMediaItem(identifier: resolution.subject.rawValue,
                                title: resolution.title,
                                type: resolution.type,
@@ -62,6 +77,7 @@ enum SiriMediaSuggestions {
     /// their own server, which is what `subscribed` means here — the system uses
     /// it to avoid routing requests to an app that would only refuse them.
     static func updateUserContext(libraryItemCount: Int?, isSignedIn: Bool) {
+        guard isAvailable else { return }
         let context = INMediaUserContext()
         context.numberOfLibraryItems = libraryItemCount
         context.subscriptionStatus = isSignedIn ? .subscribed : .notSubscribed
@@ -75,6 +91,7 @@ enum SiriMediaSuggestions {
     /// come first — they are the names people invent themselves, and so the ones
     /// Siri is most likely to mangle.
     static func registerVocabulary(playlists: [String], artists: [String]) {
+        guard isAvailable else { return }
         let playlists = Self.distinct(playlists, limit: 100)
         let artists = Self.distinct(artists, limit: 200)
         // Off the main thread: this hands potentially hundreds of strings to
