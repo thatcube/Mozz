@@ -20,7 +20,8 @@ Everything else is ordinary C#.
 
 ## Getting a build
 
-Every push builds both platforms. Download from the **Desktop app** workflow run:
+Every push builds all three platforms. Download from the **Desktop app**
+workflow run:
 
 ```
 gh run list --workflow "Desktop app" --limit 1
@@ -33,6 +34,30 @@ or from the run's page in the browser under **Artifacts**.
   install: .NET, the Swift runtime and FFmpeg are all in the zip.
 - `mozz-desktop-macos-arm64` — unzip and run. macOS provides the Swift runtime;
   FFmpeg comes from `brew install ffmpeg`.
+- `mozz-desktop-linux-x64` — untar and run `./Mozz.Desktop`. The Swift runtime is
+  bundled (it is no more ABI-stable on Linux than on Windows); FFmpeg comes from
+  your package manager. Needs ALSA/PulseAudio/PipeWire, which any desktop has.
+
+Windows is the only one of the three that carries its own FFmpeg, because it is
+the only one with no package manager to get it from.
+
+### Why every platform, and what that costs
+
+The goal is that Mozz runs wherever you do. That is affordable only because the
+expensive part — the database, the server clients, sync, search, history — is
+one Swift core that is *proven* to build and run off Apple rather than assumed
+to: Windows x64 and Android (arm64 and x86_64) both run the same gate battery as
+iOS in CI, including FTS5 search, HPKE pairing and byte-identical continuity
+hashes. See `docs/adr/ADR-0014-android-support.md`.
+
+Adding a platform is therefore a UI shell and an audio backend, not a rewrite.
+Both of those were chosen with that in mind: Avalonia runs on all three
+desktops, and miniaudio covers WASAPI, CoreAudio and ALSA/PulseAudio/JACK/
+PipeWire behind one callback.
+
+What is genuinely per-platform is small and known: secret storage (DPAPI /
+Keychain / a mode-0600 file), the OS "now playing" surface, and whether the
+Swift runtime has to ship in the package.
 
 ## Building it yourself
 
