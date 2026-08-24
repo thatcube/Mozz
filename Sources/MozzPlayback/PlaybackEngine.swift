@@ -17,6 +17,39 @@ public struct PlaybackPersistentState: Codable, Sendable {
     }
 }
 
+/// Why a checkpoint was emitted. Lets a consumer debounce cheaply — a periodic
+/// tick can be coalesced or dropped, while a track change or a backgrounding is
+/// worth a write immediately.
+public enum PlaybackCheckpointReason: String, Sendable, Hashable {
+    case trackChanged
+    case seeked
+    case transportChanged
+    case queueChanged
+    case periodic
+}
+
+/// A point-in-time record of the current playback run, for cross-device
+/// continuity (ADR-0010).
+///
+/// Emitted through ``PlaybackEngine/onCheckpoint``. Deliberately expressed in
+/// this module's own types: `MozzPlayback` does not depend on `MozzContinuity`,
+/// so `MozzApp` — the one module that sees both — maps this onto the wire
+/// format.
+public struct PlaybackCheckpoint: Sendable {
+    /// Identifies one continuous run of playback.
+    ///
+    /// Not to be confused with `PlaybackReport.sessionID`, which is the
+    /// *stream* session (Jellyfin's `PlaySessionId`) used for scrobbling a
+    /// particular transcode.
+    public var runID: UUID
+    /// Monotonic within `runID`; orders this device's own updates.
+    public var sequence: UInt64
+    public var queue: PlayQueue
+    public var elapsed: TimeInterval
+    public var status: PlaybackStatus
+    public var reason: PlaybackCheckpointReason
+}
+
 /// The playback engine. Wraps an `AVQueuePlayer` to get **gapless** playback
 /// (the player pre-rolls the next item so there is no silence at track
 /// boundaries), while a pure ``PlayQueue`` owns ordering / shuffle / repeat.
@@ -120,6 +153,30 @@ public final class PlaybackEngine {
     /// `MusicBackend.reportPlayback`. Never blocks playback.
     @ObservationIgnored
     public var onReport: (@Sendable (PlaybackReport) -> Void)?
+
+    /// Cross-device continuity hook (ADR-0010). Fires on track changes, seeks,
+    /// transport changes, queue mutations, and periodically while playing.
+    ///
+    /// Deliberately separate from ``onReport``, which is scrobble-shaped: it
+    /// only fires on play/pause/stop transitions, never on a seek, and never
+    /// during steady playback — so a checkpoint written from it would sit at a
+    /// stale position for the whole of a long track.
+    @ObservationIgnored
+    public var onCheckpoint: (@Sendable (PlaybackCheckpoint) -> Void)?
+
+    /// Identifies the current run of playback for continuity. Re-minted whenever
+    /// a genuinely new run starts.
+    @ObservationIgnored
+    public private(set) var playbackRunID = UUID()
+    @ObservationIgnored
+    private var checkpointSequence: UInt64 = 0
+    /// Wall-clock of the last periodic checkpoint, for throttling.
+    @ObservationIgnored
+    private var lastPeriodicCheckpoint: Date = .distantPast
+    /// How often a steadily-playing track re-checkpoints.
+    @ObservationIgnored
+    public var checkpointInterval: TimeInterval = 20
+
     /// Listening-history hook. The app wires this to append to the on-device
     /// `play_event` log. Fires `started` when a track begins, then exactly one
     /// terminal event per track — `completed` (natural end) or `skipped` (the
@@ -261,6 +318,7 @@ public final class PlaybackEngine {
     public func play(tracks: [Track], startAt startIndex: Int = 0) {
         invalidateStation()   // a fresh explicit play ends any active station
         logTerminal(.skipped, position: snapshot.elapsed)
+        beginPlaybackRun()
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
         reload(autoplay: true)
@@ -337,6 +395,45 @@ public final class PlaybackEngine {
         reload(autoplay: false, initialElapsed: state.elapsed)
     }
 
+    /// Restore a queue that arrived from **another device** (ADR-0010).
+    ///
+    /// Distinct from ``restore(_:)``, which is the cold-launch path and
+    /// deliberately no-ops when anything is already loaded. A handoff happens
+    /// while the app is live and usually *does* have a restored local session
+    /// showing, so this clears first — otherwise "Continue here" would silently
+    /// do nothing.
+    ///
+    /// `order` is applied verbatim: a queue shuffled on another device cannot be
+    /// re-derived here, because the balanced shuffle is biased by that device's
+    /// own recency/taste scores.
+    public func restoreFromContinuity(
+        tracks: [Track],
+        realizedOrder order: [Int],
+        position: Int,
+        elapsed: TimeInterval,
+        repeatMode: RepeatMode,
+        isShuffled: Bool,
+        autoplay: Bool
+    ) {
+        guard !tracks.isEmpty else { return }
+        invalidateStation()
+        logTerminal(.skipped, position: snapshot.elapsed)
+        beginPlaybackRun()
+        player.pause()
+        player.removeAllItems()
+        loaded.removeAll()
+        currentTrack = nil
+        queue = PlayQueue()
+        queue.setItems(
+            tracks, realizedOrder: order, position: position,
+            repeatMode: repeatMode, isShuffled: isShuffled
+        )
+        queue.rebuildTransientState()
+        pendingSeek = elapsed > 1 ? elapsed : nil
+        if autoplay { try? session.activate() }
+        reload(autoplay: autoplay, initialElapsed: elapsed)
+    }
+
     /// Enqueue tracks to play after the current track.
     public func playNext(_ tracks: [Track]) {
         let wasEmpty = queue.isEmpty
@@ -371,6 +468,7 @@ public final class PlaybackEngine {
         player.play()
         publish(status: .playing)
         report(.playing)
+        emitCheckpoint(.transportChanged)
         // Covers the paused-load case (e.g. `previous()` while paused): the
         // track was loaded without a `.started`, so log it now that it plays.
         if loggedTrackID == nil { logStart(track) }
@@ -380,6 +478,7 @@ public final class PlaybackEngine {
         player.pause()
         publish(status: .paused)
         report(.paused)
+        emitCheckpoint(.transportChanged)
     }
 
     public func next() {
@@ -465,7 +564,10 @@ public final class PlaybackEngine {
             return
         }
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600)) { [weak self] _ in
-            Task { @MainActor in self?.publish() }
+            Task { @MainActor in
+                self?.publish()
+                self?.emitCheckpoint(.seeked)
+            }
         }
     }
 
@@ -550,6 +652,7 @@ public final class PlaybackEngine {
         currentTrack = track
         publish(status: .buffering)
         onNeedsArtwork?(track)
+        emitCheckpoint(.trackChanged)
         // Emit `.started` on intent (synchronously), so it's paired correctly
         // with the terminal event even if the async URL resolve below is slow
         // or fails. A paused load (autoplay == false) logs its start on resume.
@@ -1108,6 +1211,13 @@ public final class PlaybackEngine {
                 isPlaying: snapshot.status == .playing
             )
         }
+        // Steady playback produces no other signal, so the periodic checkpoint
+        // has to come from here — otherwise a long track's stored position stays
+        // where it was when the track started.
+        if snapshot.status == .playing,
+           Date().timeIntervalSince(lastPeriodicCheckpoint) >= checkpointInterval {
+            emitCheckpoint(.periodic)
+        }
     }
 
     // MARK: Publishing
@@ -1161,6 +1271,30 @@ public final class PlaybackEngine {
             sessionID: loaded.first?.sessionID
         )
         onReport(report)
+    }
+
+    /// Emit a continuity checkpoint. Cheap and non-blocking; the consumer owns
+    /// debouncing and any network write.
+    func emitCheckpoint(_ reason: PlaybackCheckpointReason) {
+        guard let onCheckpoint, !queue.isEmpty else { return }
+        checkpointSequence &+= 1
+        if reason == .periodic { lastPeriodicCheckpoint = Date() }
+        onCheckpoint(PlaybackCheckpoint(
+            runID: playbackRunID,
+            sequence: checkpointSequence,
+            queue: queue,
+            elapsed: snapshot.elapsed,
+            status: snapshot.status,
+            reason: reason
+        ))
+    }
+
+    /// Start a new continuity run. Called when playback begins from a genuinely
+    /// new source rather than continuing the current one.
+    private func beginPlaybackRun() {
+        playbackRunID = UUID()
+        checkpointSequence = 0
+        lastPeriodicCheckpoint = .distantPast
     }
 
     // MARK: Listening history (play_event log)

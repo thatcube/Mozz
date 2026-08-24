@@ -1,4 +1,5 @@
 import Foundation
+import MozzContinuity
 import MozzCore
 import MozzNetworking
 
@@ -88,8 +89,28 @@ public struct SubsonicBackend: MusicBackend {
             supportsSyncedLyrics: extensions.contains("songLyrics"),
             supportsNormalizationGain: openSubsonic, // replayGain is OpenSubsonic
             supportsProgressReporting: true,  // scrobble
+            supportsIndexBasedQueue: extensions.contains("indexBasedQueue"),
             serverProduct: product,
             isOpenSubsonic: openSubsonic
+        )
+    }
+
+    /// A cross-device continuity store backed by `savePlayQueue`/`getPlayQueue`
+    /// (ADR-0010).
+    ///
+    /// `accountID` folds the username into the fingerprint because generic
+    /// Subsonic exposes no server UUID — two accounts on one server must not
+    /// share a checkpoint identity. No cross-URL correlation is claimed; see
+    /// `ServerAccountFingerprint.isComparableAcross`.
+    public func makeContinuityStore(supportsIndexBasedQueue: Bool) -> any ContinuityStore {
+        SubsonicContinuityStore(
+            client: client,
+            fingerprint: ServerAccountFingerprint(
+                backend: .subsonic,
+                serverID: "",
+                accountID: connection.userID ?? ""
+            ),
+            supportsIndexBasedQueue: supportsIndexBasedQueue
         )
     }
 

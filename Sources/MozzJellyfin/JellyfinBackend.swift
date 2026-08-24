@@ -1,4 +1,5 @@
 import Foundation
+import MozzContinuity
 import MozzCore
 import MozzNetworking
 
@@ -73,7 +74,25 @@ public struct JellyfinBackend: MusicBackend {
             supportsLyrics: SemanticVersion.isAtLeast(version, "10.8"),
             supportsSyncedLyrics: SemanticVersion.isAtLeast(version, "10.8"),
             supportsNormalizationGain: SemanticVersion.isAtLeast(version, "10.7"),
-            supportsProgressReporting: true
+            supportsProgressReporting: true,
+            // Captured for cross-device continuity (ADR-0010): this is the
+            // server's own stable id, which — unlike the base URL — is the same
+            // whether we reached it over the LAN or from outside.
+            serverIdentity: info.Id
+        )
+    }
+
+    /// A cross-device continuity store backed by this user's `DisplayPreferences`
+    /// (ADR-0010).
+    public func makeContinuityStore(serverIdentity: String?) -> any ContinuityStore {
+        JellyfinContinuityStore(
+            client: client,
+            userID: userID,
+            fingerprint: ServerAccountFingerprint(
+                backend: .jellyfin,
+                serverID: serverIdentity ?? "",
+                accountID: userID
+            )
         )
     }
 
