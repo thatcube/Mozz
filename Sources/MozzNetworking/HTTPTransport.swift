@@ -44,7 +44,14 @@ public struct URLSessionTransport: HTTPTransport {
             config.timeoutIntervalForRequest = 180
             config.timeoutIntervalForResource = 1200
         }
+        #if canImport(Darwin)
+        // Off-Apple, swift-corelibs-foundation exposes this read-only — and
+        // defaults it to false, which is what we want anyway. The setter exists
+        // only on Apple's Foundation, where the default is also false but a
+        // future change to it would matter: a sync that silently waits for
+        // connectivity instead of failing looks to the user like a hang.
         config.waitsForConnectivity = false
+        #endif
         config.httpAdditionalHeaders = ["Accept-Encoding": "gzip, deflate"]
         self.session = URLSession(configuration: config)
     }
