@@ -222,19 +222,23 @@ public func mozz_session_call(
     _ requestJSON: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>? {
     guard let json = requestJSON.map({ String(cString: $0) }) else {
-        return sessionFailure(nil, "", "no request")
+        return copySessionString(sessionFailure(nil, "", "no request"))
     }
     guard let request = try? JSONDecoder().decode(SessionRequest.self, from: Data(json.utf8)) else {
-        return sessionFailure(nil, "", "malformed request")
+        return copySessionString(sessionFailure(nil, "", "malformed request"))
     }
     guard let session = SessionRegistry.shared.session(handle) else {
-        return sessionFailure(request.id, request.cmd, "unknown session handle")
+        return copySessionString(sessionFailure(request.id, request.cmd, "unknown session handle"))
     }
 
+    // The dispatch layer deals only in `String`; the single C allocation happens
+    // here, at the ABI edge. That also keeps the value crossing `runBlockingSession`
+    // Sendable — an `UnsafeMutablePointer` is not, and hoisting it through the
+    // task boundary is an error under the Swift 6 language mode.
     do {
-        return try runBlockingSession { try await dispatch(request, session) }
+        return copySessionString(try runBlockingSession { try await dispatch(request, session) })
     } catch {
-        return sessionFailure(request.id, request.cmd, String(describing: error))
+        return copySessionString(sessionFailure(request.id, request.cmd, String(describing: error)))
     }
 }
 
@@ -243,7 +247,7 @@ public func mozz_session_call(
 private func dispatch(
     _ request: SessionRequest,
     _ session: MozzSession
-) async throws -> UnsafeMutablePointer<CChar>? {
+) async throws -> String {
     let repo = session.repository
     let serverId = request.serverId
     let offset = max(0, request.offset ?? 0)
@@ -371,7 +375,7 @@ private func dispatch(
 private func sessionSuccess<P: Encodable>(
     _ request: SessionRequest,
     _ payload: P
-) -> UnsafeMutablePointer<CChar>? {
+) -> String {
     encodeSession(SessionResponse(id: request.id, ok: true, cmd: request.cmd,
                                   payload: payload, error: nil))
 }
@@ -380,19 +384,19 @@ private func sessionFailure(
     _ id: Int?,
     _ cmd: String,
     _ message: String
-) -> UnsafeMutablePointer<CChar>? {
+) -> String {
     encodeSession(SessionResponse<String>(id: id, ok: false, cmd: cmd,
                                           payload: nil, error: message))
 }
 
-private func encodeSession<P: Encodable>(_ response: SessionResponse<P>) -> UnsafeMutablePointer<CChar>? {
+private func encodeSession<P: Encodable>(_ response: SessionResponse<P>) -> String {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     guard let data = try? encoder.encode(response),
           let json = String(data: data, encoding: .utf8) else {
-        return copySessionString(#"{"ok":false,"error":"failed to encode response"}"#)
+        return #"{"ok":false,"error":"failed to encode response"}"#
     }
-    return copySessionString(json)
+    return json
 }
 
 private func copySessionString(_ string: String) -> UnsafeMutablePointer<CChar>? {

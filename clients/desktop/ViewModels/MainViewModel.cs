@@ -39,8 +39,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Artist> Artists { get; } = [];
     public ObservableCollection<Playlist> Playlists { get; } = [];
 
-    public bool ShowTracks => Section is LibrarySection.Home or LibrarySection.Songs or LibrarySection.Search;
-    public bool ShowAlbums => Section is LibrarySection.Albums;
+    public bool IsHomeSelected => Section == LibrarySection.Home;
+    public bool IsSongsSelected => Section == LibrarySection.Songs;
+    public bool IsAlbumsSelected => Section == LibrarySection.Albums;
+    public bool IsArtistsSelected => Section == LibrarySection.Artists;
+    public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
+
+    public bool ShowTracks => Section is LibrarySection.Songs or LibrarySection.Search;
+    public bool ShowAlbums => Section is LibrarySection.Home or LibrarySection.Albums;
     public bool ShowArtists => Section is LibrarySection.Artists;
 
     /// <summary>Nothing loaded, so the pane shows its empty state.</summary>
@@ -137,6 +143,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             switch (section)
             {
                 case LibrarySection.Home:
+                    // Home leads with album art, the way Apple Music and Spotify
+                    // both open. A wall of covers reads as a library; a list of
+                    // song titles reads as a spreadsheet.
+                    await LoadAlbumsAsync();
+                    break;
                 case LibrarySection.Songs:
                     await LoadTracksAsync();
                     break;
@@ -245,6 +256,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private void RaiseDerived()
     {
+        OnPropertyChanged(nameof(IsHomeSelected));
+        OnPropertyChanged(nameof(IsSongsSelected));
+        OnPropertyChanged(nameof(IsAlbumsSelected));
+        OnPropertyChanged(nameof(IsArtistsSelected));
+        OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(ShowTracks));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));

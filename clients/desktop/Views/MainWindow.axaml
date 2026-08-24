@@ -1,67 +1,79 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Mozz.Desktop.ViewModels"
+        xmlns:core="using:Mozz.Desktop.Core"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="820"
+        mc:Ignorable="d" d:DesignWidth="1360" d:DesignHeight="880"
         x:Class="Mozz.Desktop.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Width="1280" Height="820"
-        MinWidth="900" MinHeight="600"
+        Width="1360" Height="880"
+        MinWidth="940" MinHeight="620"
         Background="{DynamicResource AppBackground}"
-        TransparencyLevelHint="AcrylicBlur"
         Title="Mozz">
 
     <Design.DataContext>
         <vm:MainViewModel />
     </Design.DataContext>
 
+    <Window.Resources>
+        <core:ArtworkPlaceholderConverter x:Key="Artwork" />
+        <core:InitialConverter x:Key="Initial" />
+    </Window.Resources>
+
     <!--
-      Three bands, the shape every desktop music player converges on because it
-      works: a sidebar that never moves, a content area that scrolls, and a
-      now-playing bar pinned to the bottom so transport is always one click away
-      regardless of how deep you've browsed.
+      Three bands, the arrangement every desktop player converges on because it
+      works: a sidebar that never moves, content that scrolls, and transport
+      pinned to the bottom so it stays reachable however deep you've browsed.
     -->
     <Grid RowDefinitions="*,Auto">
 
-        <Grid Grid.Row="0" ColumnDefinitions="240,*">
+        <Grid Grid.Row="0" ColumnDefinitions="248,*">
 
             <!-- Sidebar -->
             <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}">
-                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="12,16,12,12">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14,18,14,14">
 
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="8,0,0,18">
-                        <Border Width="26" Height="26" CornerRadius="6"
-                                Background="{DynamicResource AccentDeep}" />
-                        <TextBlock Text="Mozz" FontSize="20" FontWeight="Bold"
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="11" Margin="6,0,0,20">
+                        <Border Width="28" Height="28" CornerRadius="7"
+                                Background="{DynamicResource AccentDeep}">
+                            <TextBlock Text="M" FontSize="16" FontWeight="Bold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Mozz" FontSize="21" FontWeight="Bold"
                                    Foreground="{DynamicResource TextPrimary}"
                                    VerticalAlignment="Center" />
                     </StackPanel>
 
                     <TextBox Grid.Row="1"
                              Text="{Binding SearchText}"
-                             Watermark="Search"
-                             Margin="0,0,0,16"
-                             CornerRadius="7"
+                             Watermark="Search your library"
+                             Margin="0,0,0,18"
+                             CornerRadius="8"
                              FontSize="13"
                              Background="{DynamicResource SurfaceRaised}"
                              BorderThickness="0"
-                             Padding="10,8" />
+                             Padding="11,9" />
 
-                    <StackPanel Grid.Row="2" Spacing="2">
-                        <Button Classes="nav" Content="Home"
+                    <StackPanel Grid.Row="2" Spacing="3">
+                        <Button Classes="nav" Classes.selected="{Binding IsHomeSelected}"
+                                Content="Home"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Home}" />
-                        <Button Classes="nav" Content="Songs"
+                        <Button Classes="nav" Classes.selected="{Binding IsSongsSelected}"
+                                Content="Songs"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Songs}" />
-                        <Button Classes="nav" Content="Albums"
+                        <Button Classes="nav" Classes.selected="{Binding IsAlbumsSelected}"
+                                Content="Albums"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Albums}" />
-                        <Button Classes="nav" Content="Artists"
+                        <Button Classes="nav" Classes.selected="{Binding IsArtistsSelected}"
+                                Content="Artists"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Artists}" />
-                        <Button Classes="nav" Content="Playlists"
+                        <Button Classes="nav" Classes.selected="{Binding IsPlaylistsSelected}"
+                                Content="Playlists"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Playlists}" />
                     </StackPanel>
@@ -71,14 +83,14 @@
                                Classes="secondary"
                                FontSize="11.5"
                                TextWrapping="Wrap"
-                               Margin="8,12,8,4" />
+                               Margin="6,12,6,4" />
                 </Grid>
             </Border>
 
             <!-- Content -->
-            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="28,22,20,0">
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="32,26,24,0">
 
-                <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,18">
+                <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,20">
                     <TextBlock Text="{Binding PageTitle}" Classes="pageTitle" />
                     <TextBlock Text="{Binding StatusMessage}" Classes="secondary"
                                IsVisible="{Binding StatusMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
@@ -86,41 +98,53 @@
 
                 <Panel Grid.Row="1">
 
-                    <!-- Empty state -->
                     <StackPanel IsVisible="{Binding IsLibraryEmpty}"
                                 HorizontalAlignment="Center" VerticalAlignment="Center"
-                                Spacing="10" MaxWidth="420">
+                                Spacing="11" MaxWidth="430">
                         <TextBlock Text="Nothing here yet" Classes="sectionTitle"
                                    HorizontalAlignment="Center" />
                         <TextBlock Classes="secondary" TextAlignment="Center" TextWrapping="Wrap"
-                                   Text="Connect a Plex, Jellyfin or Subsonic server and Mozz will sync your library. Set MOZZ_LIBRARY to point at an existing one." />
+                                   Text="Connect a Plex, Jellyfin or Subsonic server and Mozz will sync your library." />
                     </StackPanel>
 
-                    <!-- Songs / search results -->
-                    <ScrollViewer IsVisible="{Binding ShowTracks}">
-                        <ItemsControl ItemsSource="{Binding Tracks}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Classes="trackRow" Margin="0,1">
-                                        <Grid ColumnDefinitions="40,*,180,60" Height="46">
-                                            <Border Grid.Column="0" Classes="albumArt"
-                                                    Width="34" Height="34" />
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center"
-                                                        Margin="12,0" Spacing="1">
-                                                <TextBlock Text="{Binding Title}" Classes="primary" />
-                                                <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
-                                            </StackPanel>
-                                            <TextBlock Grid.Column="2" Text="{Binding AlbumTitle}"
-                                                       Classes="secondary" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="3" Text="{Binding Duration}"
-                                                       Classes="secondary" VerticalAlignment="Center"
-                                                       HorizontalAlignment="Right" Margin="0,0,8,0" />
-                                        </Grid>
+                    <!-- Songs / search results.
+                         ListBox rather than ItemsControl: it virtualizes, which is
+                         what keeps a hundred thousand rows scrolling smoothly. -->
+                    <ListBox IsVisible="{Binding ShowTracks}"
+                             ItemsSource="{Binding Tracks}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Padding="0,0,8,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="44,*,200,64" Height="50">
+                                    <Border Grid.Column="0" Width="38" Height="38"
+                                            CornerRadius="6" ClipToBounds="True"
+                                            Background="{Binding AlbumTitle, Converter={StaticResource Artwork}}">
+                                        <TextBlock Text="{Binding AlbumTitle, Converter={StaticResource Initial}}"
+                                                   FontSize="15" FontWeight="SemiBold"
+                                                   Foreground="#88FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center"
+                                                Margin="13,0" Spacing="2">
+                                        <TextBlock Text="{Binding Title}" Classes="primary" />
+                                        <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding AlbumTitle}"
+                                               Classes="secondary" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Duration}"
+                                               Classes="secondary" VerticalAlignment="Center"
+                                               HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
 
                     <!-- Albums -->
                     <ScrollViewer IsVisible="{Binding ShowAlbums}">
@@ -132,9 +156,16 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Width="168" Margin="0,0,18,22" Spacing="8">
-                                        <Border Classes="albumArt" Width="168" Height="168" />
-                                        <StackPanel Spacing="1">
+                                    <StackPanel Width="176" Margin="0,0,20,24" Spacing="9">
+                                        <Border Width="176" Height="176" CornerRadius="8"
+                                                ClipToBounds="True"
+                                                Background="{Binding Title, Converter={StaticResource Artwork}}">
+                                            <TextBlock Text="{Binding Title, Converter={StaticResource Initial}}"
+                                                       FontSize="52" FontWeight="Bold"
+                                                       Foreground="#55FFFFFF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Spacing="2">
                                             <TextBlock Text="{Binding Title}" Classes="primary" />
                                             <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
                                         </StackPanel>
@@ -154,11 +185,16 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Width="150" Margin="0,0,18,22" Spacing="8"
-                                                HorizontalAlignment="Center">
-                                        <Border Width="130" Height="130" CornerRadius="65"
-                                                Background="{DynamicResource SurfaceRaised}"
-                                                HorizontalAlignment="Center" />
+                                    <StackPanel Width="158" Margin="0,0,20,24" Spacing="10">
+                                        <Border Width="138" Height="138" CornerRadius="69"
+                                                ClipToBounds="True"
+                                                HorizontalAlignment="Center"
+                                                Background="{Binding Name, Converter={StaticResource Artwork}}">
+                                            <TextBlock Text="{Binding Name, Converter={StaticResource Initial}}"
+                                                       FontSize="44" FontWeight="Bold"
+                                                       Foreground="#55FFFFFF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
                                         <TextBlock Text="{Binding Name}" Classes="primary"
                                                    TextAlignment="Center" />
                                     </StackPanel>
@@ -171,16 +207,21 @@
         </Grid>
 
         <!-- Now playing -->
-        <Border Grid.Row="1" Height="84"
+        <Border Grid.Row="1" Height="88"
                 Background="{DynamicResource BarBackground}"
                 BorderBrush="{DynamicResource Divider}"
                 BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="*,Auto,*" Margin="20,0">
+            <Grid ColumnDefinitions="*,Auto,*" Margin="22,0">
 
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12"
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="13"
                             VerticalAlignment="Center">
-                    <Border Classes="albumArt" Width="54" Height="54" />
-                    <StackPanel VerticalAlignment="Center" Spacing="2" MaxWidth="260">
+                    <Border Width="56" Height="56" CornerRadius="7" ClipToBounds="True"
+                            Background="{Binding NowPlaying.AlbumTitle, Converter={StaticResource Artwork}}">
+                        <TextBlock Text="{Binding NowPlaying.AlbumTitle, Converter={StaticResource Initial}}"
+                                   FontSize="20" FontWeight="SemiBold" Foreground="#66FFFFFF"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
                         <TextBlock Classes="primary" FontWeight="Medium"
                                    Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
                         <TextBlock Classes="secondary"
@@ -188,20 +229,19 @@
                     </StackPanel>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="10"
-                                HorizontalAlignment="Center">
-                        <Button Classes="transport" Content="⇄" FontSize="15" />
-                        <Button Classes="transport" Content="◀◀" FontSize="13" />
-                        <Button Classes="play" Content="▶" FontSize="15"
+                <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
+                        <Button Classes="transport" Content="⤨" FontSize="15" />
+                        <Button Classes="transport" Content="⏮" FontSize="15" />
+                        <Button Classes="play" Content="⏵" FontSize="17"
                                 Command="{Binding TogglePlayPauseCommand}" />
-                        <Button Classes="transport" Content="▶▶" FontSize="13" />
-                        <Button Classes="transport" Content="↻" FontSize="15" />
+                        <Button Classes="transport" Content="⏭" FontSize="15" />
+                        <Button Classes="transport" Content="⟳" FontSize="15" />
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="9" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                         <TextBlock Text="0:00" Classes="secondary" FontSize="11"
                                    VerticalAlignment="Center" />
-                        <Border Width="380" Height="4" CornerRadius="2"
+                        <Border Width="420" Height="4" CornerRadius="2"
                                 Background="{DynamicResource SurfaceHover}"
                                 VerticalAlignment="Center" />
                         <TextBlock Text="{Binding NowPlaying.Duration, FallbackValue='0:00'}"
@@ -209,11 +249,11 @@
                     </StackPanel>
                 </StackPanel>
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Button Classes="transport" Content="☰" FontSize="14" />
-                    <Button Classes="transport" Content="🔊" FontSize="13" />
-                    <Border Width="90" Height="4" CornerRadius="2"
+                    <Button Classes="transport" Content="🔉" FontSize="13" />
+                    <Border Width="96" Height="4" CornerRadius="2"
                             Background="{DynamicResource SurfaceHover}"
                             VerticalAlignment="Center" />
                 </StackPanel>
