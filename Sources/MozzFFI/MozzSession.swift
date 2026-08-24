@@ -31,7 +31,7 @@ import MozzDatabase
 
 // MARK: - Envelope
 
-private struct SessionRequest: Decodable {
+struct SessionRequest: Decodable {
     var id: Int?
     var cmd: String
     var serverId: String?
@@ -41,7 +41,29 @@ private struct SessionRequest: Decodable {
     var remoteId: String?
     var groupKey: String?
     var genre: String?
+
+    // Server connection / sync / streaming. See `MozzSessionServer.swift`.
+    var kind: String?
+    var baseURL: String?
+    var username: String?
+    var password: String?
+    var apiKey: String?
+    var token: String?
+    var userID: String?
+    var serverName: String?
+    var clientIdentifier: String?
+    var musicSectionID: String?
+    var pinId: Int?
+    var code: String?
+    var artworkKey: String?
+    var size: Int?
+    var maxBitrateKbps: Int?
+    var forceTranscode: Bool?
 }
+
+/// The server commands take the same envelope; the alias only keeps the two
+/// files readable about which half of it they are using.
+typealias ServerRequest = SessionRequest
 
 private struct SessionResponse<Payload: Encodable>: Encodable {
     var id: Int?
@@ -159,13 +181,36 @@ private func wire(_ r: PlaylistRecord) -> WirePlaylist {
 // MARK: - Session
 
 /// One open library, owning the database pool for its lifetime.
-private final class MozzSession: @unchecked Sendable {
+final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
+    /// Servers this session has been given credentials for. Empty until the
+    /// host calls `attach`; browsing a previously-synced library needs none.
+    let backends = BackendTable()
 
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
+    }
+}
+
+/// What a command handler is allowed to touch. Response encoding lives here so
+/// the two dispatch files cannot disagree about the envelope.
+protocol SessionContext: AnyObject {
+    var database: MusicDatabase { get }
+    var repository: LibraryRepository { get }
+    var backends: BackendTable { get }
+}
+
+extension MozzSession: SessionContext {}
+
+extension SessionContext {
+    func success<P: Encodable>(_ request: SessionRequest, _ payload: P) -> String {
+        sessionSuccess(request, payload)
+    }
+
+    func failure(_ request: SessionRequest, _ message: String) -> String {
+        sessionFailure(request.id, request.cmd, message)
     }
 }
 
@@ -366,13 +411,16 @@ private func dispatch(
         ))
 
     default:
+        // Not a catalog command — try the server/sync/streaming table before
+        // declaring it unknown, so both halves share one envelope and one error.
+        if let response = try await dispatchServerCommand(request, session) { return response }
         return sessionFailure(request.id, request.cmd, "unknown command '\(request.cmd)'")
     }
 }
 
 // MARK: - Response helpers
 
-private func sessionSuccess<P: Encodable>(
+func sessionSuccess<P: Encodable>(
     _ request: SessionRequest,
     _ payload: P
 ) -> String {
@@ -380,7 +428,7 @@ private func sessionSuccess<P: Encodable>(
                                   payload: payload, error: nil))
 }
 
-private func sessionFailure(
+func sessionFailure(
     _ id: Int?,
     _ cmd: String,
     _ message: String

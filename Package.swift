@@ -196,6 +196,11 @@ let package = Package(
             name: "MozzFFI",
             dependencies: [
                 "MozzCore", "MozzDatabase", "MozzContinuity",
+                // The session facade signs in, mirrors a catalog and resolves
+                // stream URLs, so it needs every backend and the sync engine.
+                // These are the same modules the iOS app links; nothing here is
+                // a desktop-only fork.
+                "MozzNetworking", "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
@@ -223,7 +228,7 @@ let package = Package(
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
         .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
-        .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore"]),
+        .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
