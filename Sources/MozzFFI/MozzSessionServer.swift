@@ -369,9 +369,23 @@ private func connect(_ request: ServerRequest, _ session: SessionContext) async 
     }
 }
 
-private func wire(_ authenticated: AuthenticatedSession) -> WireSession {
+/// Internal rather than private so a test can assert the contract that matters:
+/// that this agrees with `attach` about a server's identity.
+func wire(_ authenticated: AuthenticatedSession) -> WireSession {
     WireSession(
-        serverId: mozzServerId(kind: authenticated.kind, baseURL: authenticated.baseURL),
+        // Subsonic scopes a server id by username, because one server can hold
+        // several accounts with genuinely different libraries. `attach` derives
+        // it that way, so `connect` must too: a client persists the id it gets
+        // back here and passes it to every later call, and if the two halves
+        // disagree then the backend is registered under one id and looked up
+        // under another — sync, streaming and artwork all fail with "needs an
+        // attached serverId" while plain browsing still works, because that
+        // queries across every backend.
+        serverId: mozzServerId(
+            kind: authenticated.kind,
+            baseURL: authenticated.baseURL,
+            username: authenticated.kind == .subsonic ? authenticated.userID : nil
+        ),
         kind: authenticated.kind.rawValue,
         baseURL: authenticated.baseURL.absoluteString,
         token: authenticated.token,

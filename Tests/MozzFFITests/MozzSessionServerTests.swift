@@ -323,8 +323,70 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(response["error"] as? String).lowercased().contains("pin"))
     }
 
-    // MARK: Envelope
+    // MARK: Identity
+    //
+    // `connect` and `attach` derive the server id independently, and a client
+    // persists the one `connect` returned and passes it to every later call. If
+    // the two disagree the backend is registered under one id and looked up
+    // under another: sync, streaming and artwork all fail with "needs an
+    // attached serverId" while plain browsing still works, because that queries
+    // across every backend. That is a maddening bug to diagnose from the
+    // symptoms, so it gets a test rather than a comment.
 
+    func testConnectAndAttachAgreeOnTheSubsonicServerId() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let attachId = try attachSubsonic(handle)
+        let connectId = wire(AuthenticatedSession(
+            kind: .subsonic,
+            baseURL: URL(string: "https://music.example.com")!,
+            token: subsonicToken,
+            // Subsonic's authenticator puts the username here.
+            userID: "brandon",
+            serverName: "Test Navidrome",
+            clientIdentifier: "test-client"
+        )).serverId
+
+        XCTAssertEqual(connectId, attachId)
+    }
+
+    /// Only Subsonic scopes by username. Folding a Jellyfin or Plex user id into
+    /// the id would silently orphan every catalog row the iOS app has written,
+    /// because iOS derives those without one.
+    func testOnlySubsonicScopesTheServerIdByUser() {
+        let jellyfin = wire(AuthenticatedSession(
+            kind: .jellyfin,
+            baseURL: URL(string: "https://jf.example.com")!,
+            token: "t", userID: "user-guid-1234",
+            serverName: "JF", clientIdentifier: "c"))
+        XCTAssertEqual(jellyfin.serverId, "jellyfin-https://jf.example.com")
+
+        let plex = wire(AuthenticatedSession(
+            kind: .plex,
+            baseURL: URL(string: "https://plex.example.com")!,
+            token: "t", userID: "12345",
+            serverName: "Plex", clientIdentifier: "c"))
+        XCTAssertEqual(plex.serverId, "plex-https://plex.example.com")
+    }
+
+    /// A Subsonic server with two accounts is two libraries, and they must not
+    /// be mirrored on top of each other.
+    func testTwoSubsonicAccountsOnOneServerGetDistinctIds() {
+        func identity(_ user: String) -> String {
+            wire(AuthenticatedSession(
+                kind: .subsonic,
+                baseURL: URL(string: "https://music.example.com")!,
+                token: "t", userID: user,
+                serverName: "N", clientIdentifier: "c")).serverId
+        }
+        XCTAssertNotEqual(identity("brandon"), identity("guest"))
+        // Case-insensitive, matching the iOS derivation.
+        XCTAssertEqual(identity("Brandon"), identity("brandon"))
+    }
+
+    // MARK: Envelope
     func testUnknownCommandStillReportsUnknownAfterTheServerTable() throws {
         let path = try makeLibrary()
         let handle = try open(path)
