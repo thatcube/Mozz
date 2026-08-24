@@ -64,6 +64,13 @@ jobs:
             8.0.x
             10.0.x
 
+      # Before the long Swift build: these test the platform-native credential
+      # store against the real OS facility, and need nothing else. DPAPI cannot
+      # be exercised on a developer's Mac at all, so this job is the only place
+      # the Windows credential path is ever run before a user signs in.
+      - name: Test the credential store
+        run: dotnet test clients/desktop/Mozz.Desktop.Tests/Mozz.Desktop.Tests.csproj -c Release
+
       # Same amalgamation build as the spike, and for the same reason: GRDB's
       # GRDBSQLite is a systemLibrary target and Windows ships no SQLite. Static,
       # so the header declares plain symbols rather than __declspec(dllimport)
@@ -223,6 +230,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+
+      - name: Test the credential store
+        run: dotnet test clients/desktop/Mozz.Desktop.Tests/Mozz.Desktop.Tests.csproj -c Release
 
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI
