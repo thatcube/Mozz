@@ -94,6 +94,31 @@ Each carries the input, the expected canonical bytes (hex) and the expected uid.
 The intermediate bytes are included on purpose: when two implementations
 disagree, the bytes are where the difference is. SHA-256 is never what's wrong.
 
+## How it travels (ADR-0011)
+
+**Device to device, not through the music server.** No backend offers a
+universal place to keep this: Jellyfin has a real per-user KV store, Subsonic has
+only a play queue (~1 KB of usable playlist comment is two orders of magnitude
+short), and **Plex has nothing client-writable at all**. Stuffing app state into
+a playlist description was considered and rejected — it is user-visible clutter,
+user-deletable, too small on Subsonic, and Plex cannot even create an empty
+playlist to hold it.
+
+The deeper reason: **a scrobble is the server's record; a skip is Mozz's
+observation.** Servers have no schema for it because it was never theirs.
+
+So the transport is the authenticated pairing channel (mDNS + framed TCP + HPKE
+with a commit/reveal SAS), which behaves identically on every backend. That works
+for history where it would not have worked for continuity, because of one
+asymmetry: a resume point is worthless if it arrives late, while **a play
+recorded a day late lands in exactly the same taste profile and the same month of
+the same year.** History is latency-tolerant; continuity is not.
+
+Where a server *does* offer a genuine KV store, it may additionally act as a
+store-and-forward relay so peers need not be awake at the same moment. That is an
+availability optimization layered on a feature that already works everywhere —
+not a capability some users get and others do not.
+
 ## Batches
 
 History is written **one slot per device**, never one shared slot. Two devices

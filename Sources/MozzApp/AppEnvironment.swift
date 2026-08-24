@@ -1752,6 +1752,13 @@ public final class AppEnvironment: ObservableObject {
         // History rides the same activation and the same device id: a phone is
         // one device in both systems, and the id already avoids leaking the
         // identifier presented to the server.
+        //
+        // The store is an OPTIONAL relay, not the mechanism (ADR-0011). No server
+        // offers a universal place for this — Plex has nothing client-writable at
+        // all — so history syncs device to device, and per-server storage only
+        // buys asynchrony where a real KV store happens to exist. A nil store
+        // here costs other devices' contributions, never the feature: the
+        // coordinator still maintains the local log and builds the year.
         var historyStore: (any HistoryStore)?
         if let jellyfin = backend as? JellyfinBackend {
             historyStore = jellyfin.makeHistoryStore()
