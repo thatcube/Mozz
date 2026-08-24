@@ -432,13 +432,16 @@ jobs:
         run: |
           set -euo pipefail
           out=publish/linux-x64
-          missing=0
+          manifest="$RUNNER_TEMP/swift-runtime-libs.txt"
+          : > "$manifest"
+
           resolve() {
             ldd "$1" 2>/dev/null | awk '/=>/ {print $1, $3}' | while read -r name path; do
               case "$name" in
-                libswift*|libFoundation*|lib_Foundation*|libdispatch*|libBlocksRuntime*|lib_Concurrency*|lib_StringProcessing*|lib_RegexParser*)
+                libswift*|libFoundation*|lib_Foundation*|libdispatch*|libBlocksRuntime*)
                   if [ -f "$path" ] && [ ! -f "$out/$name" ]; then
                     cp "$path" "$out/"
+                    echo "$name" >> "$manifest"
                     echo "  + $name"
                     resolve "$path"
                   fi
@@ -447,12 +450,20 @@ jobs:
             done
           }
           resolve "$out/libMozzFFI.so"
-          count=$(find "$out" -maxdepth 1 -name 'libswift*' -o -maxdepth 1 -name 'libFoundation*' | wc -l)
-          if [ "$count" -eq 0 ]; then
+
+          # Record exactly which files are Swift's. The verify step must copy
+          # these and ONLY these beside the harness: this directory also holds a
+          # complete self-contained .NET runtime, and a `lib*.so` glob drops .NET
+          # 10's libcoreclr.so on top of the harness's .NET 8 one, which fails as
+          # "Could not load type 'System.Runtime.EH'" — a message that points
+          # nowhere near the cause.
+          echo "libMozzFFI.so" >> "$manifest"
+          count=$(wc -l < "$manifest")
+          if [ "$count" -le 1 ]; then
             echo "no Swift runtime libraries were bundled - ldd output did not parse" >&2
             exit 1
           fi
-          echo "bundled $count Swift runtime libraries"
+          echo "bundled $((count - 1)) Swift runtime libraries"
 
       # The same standalone check the Windows job runs: strip the toolchain out
       # of the loader's view, then drive the C ABI for real. A bundle that is
@@ -462,7 +473,10 @@ jobs:
           set -euo pipefail
           dotnet publish spike/windows-ffi/Harness/Harness.csproj -c Release \
             -r linux-x64 --self-contained true -o harness-out
-          cp publish/linux-x64/lib*.so harness-out/
+          # Only the Swift libraries — see the manifest note in the bundling step.
+          while read -r lib; do
+            cp "publish/linux-x64/$lib" harness-out/
+          done < "$RUNNER_TEMP/swift-runtime-libs.txt"
           # LD_LIBRARY_PATH is REPLACED with just the harness directory, not
           # appended to: the toolchain install puts its own runtime on that
           # variable, and leaving it there would let the harness succeed on
