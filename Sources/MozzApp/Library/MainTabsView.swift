@@ -35,6 +35,10 @@ struct MainTabsView: View {
     /// 0 = expanded tab bar, 1 = minimized (blob split). TEMP: toggled by a
     /// long-press on the bar for visual iteration; wired to scroll next.
     @State private var minimize: CGFloat = 0
+    /// Top edge of the dock, in the `dockSpace` coordinate space, and the height
+    /// of that space. Together they say how far above the bottom the dock starts.
+    @State private var dockTop: CGFloat = .infinity
+    @State private var dockContainerHeight: CGFloat = 0
     /// Per-tab navigation paths (value-based routing). Each tab's `NavigationStack`
     /// binds to its path, so pop-to-root is an animated `path.removeAll()` and the
     /// path is programmatic (future deep links / state restoration). Switching tabs
@@ -123,16 +127,38 @@ struct MainTabsView: View {
 
     /// Where the cross-device resume banner sits above the dock.
     ///
-    /// The dock has two shapes: expanded it is two stacked rows (the now-playing
-    /// island above the tab bar), and on scroll it collapses into a single row
-    /// of blobs. A fixed inset computed from the expanded layout left the banner
-    /// stranded high above the collapsed dock, so this interpolates with
-    /// `minimize` (0 = expanded, 1 = collapsed) and rides the same spring.
+    /// Where the cross-device resume banner sits: just above whatever the dock
+    /// currently is.
+    ///
+    /// This is **measured**, not calculated. The dock changes height for a lot of
+    /// reasons — it collapses to blobs on scroll, it grows a now-playing island,
+    /// its labels scale with Dynamic Type, and its metrics differ per device — so
+    /// every attempt to predict its top from constants has been wrong somewhere:
+    /// too high when collapsed, then overlapping the dock on iPad because the
+    /// spacing assumed an iPhone's home indicator. The dock reports where its top
+    /// actually is and the banner sits `continueBannerGap` above that, which is
+    /// correct in every state without knowing anything about them.
+    ///
+    /// The constants are kept only as a first-frame fallback, before the
+    /// measurement arrives.
     private var continueBannerInset: CGFloat {
-        let expanded = BottomBar.reserved(hasTrack: hasTrack) + 12
-        let collapsed = BottomBar.reservedMinimized + 12
-        return expanded + (collapsed - expanded) * min(max(minimize, 0), 1)
+        // A dock top in the upper half of the screen is not the dock — it is the
+        // now-playing container mid-expansion into the full player, which reports
+        // from the same place. Fall back rather than chase it.
+        guard dockTop.isFinite, dockContainerHeight > 0,
+              dockTop < dockContainerHeight,
+              dockTop > dockContainerHeight * 0.5 else {
+            let expanded = BottomBar.dockTopFromEdge(hasTrack: hasTrack) + Self.continueBannerGap
+            let collapsed = BottomBar.dockTopFromEdgeMinimized + Self.continueBannerGap
+            return expanded + (collapsed - expanded) * min(max(minimize, 0), 1)
+        }
+        return dockContainerHeight - dockTop + Self.continueBannerGap
     }
+
+    /// Breathing room between the dock and the banner above it.
+    private static let continueBannerGap: CGFloat = 12
+    /// Coordinate space the dock and the banner are both measured in.
+    static let dockSpace = "mozz.dock"
 
     /// Tab shown in the LEFT blob when minimized: the selected tab normally, or
     /// the last active non-Search tab while Search is selected.
@@ -155,8 +181,10 @@ struct MainTabsView: View {
                 // keyboard rises over it instead of shoving it up.
                 .ignoresSafeArea(.container, edges: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
+                .measuringDockTop()
             if hasTrack {
                 NowPlayingMorphContainer(playback: playback, ui: ui, minimize: minimize)
+                    .measuringDockTop()
                     .zIndex(100)
             }
             ToastOverlayView(hasTrack: hasTrack)
@@ -169,10 +197,23 @@ struct MainTabsView: View {
                                isPlayerPresented: ui.isFullPresented)
                 .padding(.bottom, continueBannerInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                // Deliberately does NOT ignore the bottom container inset: the
+                // inset above is measured in this container's coordinate space,
+                // so the banner has to be positioned in the same one.
                 .ignoresSafeArea(.keyboard, edges: .bottom)
                 .animation(Self.expandSpring, value: minimize)
                 .zIndex(90)
         }
+        // One space that both the dock and the banner are measured in, so the
+        // banner's offset is expressed in the same terms the dock reported.
+        .coordinateSpace(name: MainTabsView.dockSpace)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: DockContainerHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .onPreferenceChange(DockTopKey.self) { dockTop = $0 }
+        .onPreferenceChange(DockContainerHeightKey.self) { dockContainerHeight = $0 }
         // NOTE: the sync status card is deliberately NOT a top safe-area inset
         // here any more. As an inset it sat over every tab's tight header, and
         // that header carries the Settings avatar — so a running sync covered the
@@ -347,17 +388,23 @@ enum BottomBar {
     }
     /// Distance from the screen's bottom edge up to the island's top edge.
     static let islandTopFromEdge: CGFloat = edgeMargin + tabHeight + islandGap + islandHeight
+    /// Distance from the screen's bottom edge up to the top of the whole dock.
+    ///
+    /// Measured from the true edge, not the safe area, because that is how the
+    /// dock itself is positioned (it ignores the bottom container inset). Anything
+    /// aligning to the dock has to use the same reference or it drifts by the
+    /// size of the home indicator — which differs between iPhone and iPad.
+    static func dockTopFromEdge(hasTrack: Bool) -> CGFloat {
+        hasTrack ? islandTopFromEdge : edgeMargin + tabHeight
+    }
+    /// The same, for the collapsed dock — one row of blobs, no separate island.
+    static var dockTopFromEdgeMinimized: CGFloat { edgeMargin + minElementH }
     /// Height reserved above the safe-area bottom so scrolled content clears the
     /// floating tab bar (and, when playing, the island above it). Approximate
     /// (assumes a ~34pt home-indicator inset); extra clearance is harmless.
     static func reserved(hasTrack: Bool) -> CGFloat {
         hasTrack ? islandTopFromEdge - 26 : edgeMargin + tabHeight - 26
     }
-
-    /// The same measurement for the *collapsed* dock, where the island and tab
-    /// bar have merged into one row of blobs. Same -26 safe-area convention as
-    /// ``reserved(hasTrack:)`` so the two interpolate cleanly.
-    static var reservedMinimized: CGFloat { edgeMargin + minElementH - 26 }
 }
 
 private extension View {
@@ -901,5 +948,48 @@ private struct ScrollToTopOnSignalModern<Content: View>: View {
                     position.scrollTo(edge: .top)
                 }
             }
+    }
+}
+
+
+// MARK: - Measuring the dock
+
+/// The top edge of the floating dock, in ``MainTabsView/dockSpace``.
+///
+/// Several views make up the dock (the tab bar, and the now-playing island when
+/// something is playing), so the smallest reported value — the highest on screen
+/// — is the one that matters.
+private struct DockTopKey: PreferenceKey {
+    static let defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = min(value, nextValue())
+    }
+}
+
+/// Height of the space the dock is measured in, so a reported top edge can be
+/// turned into a distance from the bottom.
+private struct DockContainerHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    /// Report this view's top edge as part of the dock.
+    ///
+    /// Anything aligning to the dock reads the result instead of recomputing it
+    /// from layout constants, which is what keeps it correct as the dock
+    /// collapses, grows an island, scales with Dynamic Type, or moves between an
+    /// iPhone and an iPad.
+    func measuringDockTop() -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: DockTopKey.self,
+                    value: proxy.frame(in: .named(MainTabsView.dockSpace)).minY
+                )
+            }
+        )
     }
 }
