@@ -38,6 +38,7 @@ let package = Package(
         .library(name: "MozzSync", targets: ["MozzSync"]),
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzContinuity", targets: ["MozzContinuity"]),
+        .library(name: "MozzHistory", targets: ["MozzHistory"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
         .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
         .library(name: "MozzEnrichment", targets: ["MozzEnrichment"]),
@@ -86,7 +87,7 @@ let package = Package(
         // used by the performance harness.
         .target(
             name: "MozzDatabase",
-            dependencies: ["MozzCore", .product(name: "GRDB", package: "GRDB.swift")]
+            dependencies: ["MozzCore", "MozzHistory", .product(name: "GRDB", package: "GRDB.swift")]
         ),
 
         // MARK: Backends (one `MusicBackend` conformer each)
@@ -116,6 +117,20 @@ let package = Package(
         // so it cannot depend on an Apple-only framework.
         .target(
             name: "MozzContinuity",
+            dependencies: ["MozzCore", .product(name: "Crypto", package: "swift-crypto")]
+        ),
+
+        // MARK: Portable listening history (cross-device taste sync)
+        //
+        // Continuity carries the queue; this carries the *log*. No server records
+        // skips or partial plays, so the local play_event log is the only copy of
+        // the signal `TasteProfile` scores against — without this, listening on a
+        // second device is permanently lost and the devices' recommendations
+        // diverge. Events are immutable and append-only, which makes the merge a
+        // G-Set union: no ordering, no locking, no compare-and-swap (which
+        // ADR-0010 established no backend offers).
+        .target(
+            name: "MozzHistory",
             dependencies: ["MozzCore", .product(name: "Crypto", package: "swift-crypto")]
         ),
 
@@ -182,7 +197,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),
         .testTarget(name: "MozzNetworkingTests", dependencies: ["MozzNetworking"]),
-        .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", .product(name: "GRDB", package: "GRDB.swift")]),
+        .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", "MozzHistory", .product(name: "GRDB", package: "GRDB.swift")]),
         .testTarget(
             name: "MozzPlexTests",
             dependencies: ["MozzPlex", "MozzNetworking"],
@@ -201,6 +216,7 @@ let package = Package(
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
+        .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),

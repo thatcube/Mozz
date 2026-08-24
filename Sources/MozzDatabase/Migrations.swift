@@ -22,6 +22,7 @@ enum Schema {
         registerV14(&migrator)
         registerV15(&migrator)
         registerV16(&migrator)
+        registerV17(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -597,4 +598,36 @@ enum Schema {
             }
         }
     }
+
+    /// v17 — a stable, cross-device identity for each play event.
+    ///
+    /// The table's `id` is a local autoincrement, so device A and device B both
+    /// call their first event `1`. Merging two devices' history therefore needs
+    /// an identity both sides derive the same way; `event_uid` is that, content-
+    /// derived in `MozzHistory.HistoryEvent.makeUID` from the fields that define
+    /// an event.
+    ///
+    /// Existing rows are backfilled in Swift rather than SQL: the derivation
+    /// hashes a canonical encoding, which SQLite cannot express, and — more
+    /// importantly — a second implementation of it would be a second thing to
+    /// keep in step with the spec.
+    ///
+    /// The index is UNIQUE so a re-imported event cannot be inserted twice, and
+    /// PARTIAL so the rows still awaiting backfill (uid IS NULL) do not collide
+    /// with each other in the meantime.
+    private static func registerV17(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v17.playEventUID") { db in
+            try db.alter(table: "play_event") { t in
+                t.add(column: "event_uid", .text)
+            }
+            try db.create(
+                index: "idx_play_event_uid",
+                on: "play_event",
+                columns: ["event_uid"],
+                unique: true,
+                condition: Column("event_uid") != nil
+            )
+        }
+    }
+
 }
