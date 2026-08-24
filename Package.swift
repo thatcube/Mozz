@@ -192,7 +192,13 @@ let package = Package(
         // Exists to answer, on real target hardware: does the core build
         // off-Apple, does the linked SQLite have FTS5, does the C ABI hold, and
         // what does marshalling cost? See spike/windows-ffi/README.md.
-        .target(name: "MozzFFI", dependencies: ["MozzCore", "MozzDatabase", "MozzContinuity"]),
+        .target(
+            name: "MozzFFI",
+            dependencies: [
+                "MozzCore", "MozzDatabase", "MozzContinuity",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
 
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),

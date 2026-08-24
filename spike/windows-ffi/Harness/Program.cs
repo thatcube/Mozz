@@ -34,6 +34,9 @@ internal static class Native
         [MarshalAs(UnmanagedType.LPUTF8Str)] string fixturesJson);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr mozz_ffi_probe_hpke();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void mozz_ffi_free_string(IntPtr pointer);
 
     /// Marshal a returned C string and hand the buffer straight back to Swift.
@@ -79,6 +82,8 @@ internal static class Native
 
     public static JsonElement VerifyContinuityHashes(string fixturesJson) =>
         Unwrap(Consume(mozz_ffi_verify_continuity_hashes(fixturesJson)), "verifyContinuityHashes");
+
+    public static JsonElement ProbeHpke() => Unwrap(Consume(mozz_ffi_probe_hpke()), "probeHpke");
 }
 
 internal static class Program
@@ -188,7 +193,30 @@ internal static class Program
             try { File.Delete(dbPath); } catch { /* best effort */ }
 
             Console.WriteLine();
-            Console.WriteLine("=== 4. Continuity hashes: does this platform agree with spec/continuity? ===");
+            Console.WriteLine("=== 4. HPKE: can the pairing crypto live in the shared core? ===");
+            var hpke = Native.ProbeHpke();
+            var hpkeOk = hpke.GetProperty("available").GetBoolean();
+            Console.WriteLine($"  suite                 : {hpke.GetProperty("suite").GetString()}");
+            Console.WriteLine($"  seal/open round trip  : {hpke.GetProperty("roundTripped").GetBoolean()}");
+            Console.WriteLine($"  wrong key rejected    : {hpke.GetProperty("rejectsWrongRecipient").GetBoolean()}");
+            if (hpke.TryGetProperty("error", out var hpkeErr) && hpkeErr.ValueKind == JsonValueKind.String)
+            {
+                Console.WriteLine($"  error                 : {hpkeErr.GetString()}");
+            }
+
+            if (hpkeOk)
+            {
+                Console.WriteLine("  => ADR-0013 holds: one pairing implementation for every platform.");
+            }
+            else
+            {
+                // Not fatal to the run, but it changes the shape of the project:
+                // pairing crypto would need a separate implementation per platform.
+                failures.Add("HPKE is unavailable here — ADR-0013 cannot put pairing crypto in the shared core");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("=== 5. Continuity hashes: does this platform agree with spec/continuity? ===");
             var fixturesPath = FindSpecFixtures();
             if (fixturesPath is null)
             {

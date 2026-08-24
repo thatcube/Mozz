@@ -1,3 +1,8 @@
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 import GRDB
 import MozzContinuity
@@ -486,7 +491,95 @@ public func mozz_ffi_verify_continuity_hashes(
     }
 }
 
-// MARK: - 5. Lifetime
+// MARK: - 5. HPKE availability
+
+private struct HPKEProbe: Encodable {
+    var available: Bool
+    var suite: String
+    var roundTripped: Bool
+    var rejectsWrongRecipient: Bool
+    var error: String?
+}
+
+/// Determine whether HPKE (RFC 9180) actually works on this platform.
+///
+/// ADR-0013 puts the pairing crypto in the shared Swift core so there is one
+/// implementation for iOS, macOS, Windows and Android. That rests on an
+/// assumption: swift-crypto *contains* HPKE, but parts of its surface are gated
+/// on platform primitives, and whether it functions off-Apple is not documented.
+///
+/// If this returns `available: false` on Windows, the pairing crypto cannot live
+/// in the core and each platform needs its own implementation — which is a very
+/// different project. Exactly the shape of the FTS5 question, and settled the
+/// same way: by running it.
+///
+/// Two things are checked, because "it compiled" is not the question:
+///   1. A seal/open round trip returns the original plaintext.
+///   2. A *different* recipient key fails to open it — so the test cannot pass
+///      by accident on a stub that returns its input.
+@_cdecl("mozz_ffi_probe_hpke")
+public func mozz_ffi_probe_hpke() -> UnsafeMutablePointer<CChar>? {
+    let suiteName = "Curve25519_SHA256_ChachaPoly"
+    let plaintext = Data("mozz-pairing-probe".utf8)
+    let info = Data("mozz-pairing-probe-info-v1".utf8)
+    let aad = Data("mozz-pairing-probe-aad-v1".utf8)
+
+    do {
+        let suite = HPKE.Ciphersuite.Curve25519_SHA256_ChachaPoly
+
+        let recipientKey = Curve25519.KeyAgreement.PrivateKey()
+        var sender = try HPKE.Sender(
+            recipientKey: recipientKey.publicKey,
+            ciphersuite: suite,
+            info: info
+        )
+        let ciphertext = try sender.seal(plaintext, authenticating: aad)
+        let encapsulated = sender.encapsulatedKey
+
+        var recipient = try HPKE.Recipient(
+            privateKey: recipientKey,
+            ciphersuite: suite,
+            info: info,
+            encapsulatedKey: encapsulated
+        )
+        let opened = try recipient.open(ciphertext, authenticating: aad)
+        let roundTripped = opened == plaintext
+
+        // A wrong key must fail. Without this the probe would pass against an
+        // implementation that quietly did nothing.
+        var rejected = false
+        do {
+            let wrongKey = Curve25519.KeyAgreement.PrivateKey()
+            var wrong = try HPKE.Recipient(
+                privateKey: wrongKey,
+                ciphersuite: suite,
+                info: info,
+                encapsulatedKey: encapsulated
+            )
+            _ = try wrong.open(ciphertext, authenticating: aad)
+        } catch {
+            rejected = true
+        }
+
+        return success(HPKEProbe(
+            available: roundTripped && rejected,
+            suite: suiteName,
+            roundTripped: roundTripped,
+            rejectsWrongRecipient: rejected,
+            error: nil
+        ))
+    } catch {
+        return success(HPKEProbe(
+            available: false,
+            suite: suiteName,
+            roundTripped: false,
+            rejectsWrongRecipient: false,
+            error: String(describing: error)
+        ))
+    }
+}
+
+// MARK: - 6. Lifetime
 
 /// Release a string returned by any function above. Every returned pointer must
 /// be passed here exactly once.

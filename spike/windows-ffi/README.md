@@ -17,6 +17,8 @@ most likely to sink the effort: a SQLite build without FTS5.
 | 3 | **SQLite has FTS5** | Apple's system SQLite always does. Others may not — and Mozz's entire search story dies without it |
 | 4 | Search p95 < 100 ms at 100k tracks | The hard product requirement |
 | 5 | JSON encode time vs query time | Is a JSON boundary cheap enough to keep? |
+| 6 | **HPKE (RFC 9180) works** | ADR-0013 puts the pairing crypto in the shared core. swift-crypto *contains* HPKE but gates parts of its surface on platform primitives — if it doesn't work here, pairing needs a separate implementation per platform |
+| 7 | Continuity hashes match `spec/` | A non-Apple peer must derive byte-identical queue hashes, or cross-device resume fails silently |
 
 Gate 3 is the important one. `MusicDatabase.open()` runs migrations that
 `CREATE VIRTUAL TABLE ... USING fts5`, so a missing FTS5 fails immediately
@@ -137,5 +139,7 @@ cancellation.
 | Stage 2 fails | `@_cdecl`/linking problem, or a dynamic-product issue on the platform |
 | `DllNotFoundException` | The DLL or the Swift runtime DLLs aren't beside the harness / on PATH |
 | `fts5CreateSucceeded: false` | **The big one.** The linked SQLite lacks FTS5 — GRDB's SQLite dependency has to be rebuilt or replaced before anything else matters |
+| HPKE `available: false` | swift-crypto's HPKE doesn't function on this platform. ADR-0013's "one pairing implementation everywhere" is off; each platform needs its own (hpke-rs, hpke-js, or pure Swift) |
+| A continuity hash mismatch | Compare the reported bytes, not the digests — the encoding is where the difference is |
 | search p95 way over iOS | Investigate before writing any UI — likely index or configuration drift, not the boundary |
 | encode ≥ 25% of query time | Reconsider a binary boundary format (FlatBuffers/CBOR) instead of JSON |
