@@ -14,9 +14,14 @@ import SwiftUI
 struct ContinueHereBanner: View {
     @EnvironmentObject private var env: AppEnvironment
     @ObservedObject var continuity: ContinuityCoordinator
+    /// Suppressed while the full-screen player is open: the banner floats above
+    /// the tab bar, which is exactly where the expanded player's transport
+    /// controls sit. The offer is state, not a transient toast, so it simply
+    /// reappears when the player is dismissed.
+    var isPlayerPresented: Bool
 
     var body: some View {
-        if let offer = continuity.offer {
+        if let offer = continuity.offer, !isPlayerPresented {
             card(for: offer)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
@@ -60,14 +65,14 @@ struct ContinueHereBanner: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.separator.opacity(0.5))
-        )
-        .padding(.horizontal, 12)
+        // Capsule + the tab bar's own side inset, so the banner reads as part of
+        // the same floating dock stack rather than a differently-shaped card
+        // sitting slightly proud of it.
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.separator.opacity(0.5)))
+        .padding(.horizontal, BottomBar.hMargin)
         .accessibilityElement(children: .contain)
     }
 

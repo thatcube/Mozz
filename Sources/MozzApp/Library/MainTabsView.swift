@@ -150,7 +150,8 @@ struct MainTabsView: View {
                 .zIndex(110)
             // Cross-device resume offer (ADR-0010). Sits above the tab bar and
             // the now-playing island so it can't be hidden behind either.
-            ContinueHereBanner(continuity: env.continuity)
+            ContinueHereBanner(continuity: env.continuity,
+                               isPlayerPresented: ui.isFullPresented)
                 .padding(.bottom, BottomBar.reserved(hasTrack: hasTrack) + 12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
