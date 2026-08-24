@@ -142,17 +142,18 @@ struct MainTabsView: View {
     /// The constants are kept only as a first-frame fallback, before the
     /// measurement arrives.
     private var continueBannerInset: CGFloat {
-        // A dock top in the upper half of the screen is not the dock — it is the
-        // now-playing container mid-expansion into the full player, which reports
-        // from the same place. Fall back rather than chase it.
-        guard dockTop.isFinite, dockContainerHeight > 0,
-              dockTop < dockContainerHeight,
-              dockTop > dockContainerHeight * 0.5 else {
-            let expanded = BottomBar.dockTopFromEdge(hasTrack: hasTrack) + Self.continueBannerGap
-            let collapsed = BottomBar.dockTopFromEdgeMinimized + Self.continueBannerGap
-            return expanded + (collapsed - expanded) * min(max(minimize, 0), 1)
+        guard dockTop.isFinite, dockContainerHeight > 0, dockTop < dockContainerHeight else {
+            // First frame only, before the measurement arrives.
+            return BottomBar.dockTopFromEdge(hasTrack: hasTrack) + Self.continueBannerGap
         }
-        return dockContainerHeight - dockTop + Self.continueBannerGap
+        // The measured value is the top of the tab bar. When a track is playing
+        // the island sits above it — a fixed-height pill, so its offset is a
+        // constant — and that offset shrinks to nothing as the dock collapses and
+        // the island merges into the bar's centre blob.
+        let islandLift = hasTrack
+            ? (BottomBar.islandGap + BottomBar.islandHeight) * (1 - min(max(minimize, 0), 1))
+            : 0
+        return dockContainerHeight - dockTop + islandLift + Self.continueBannerGap
     }
 
     /// Breathing room between the dock and the banner above it.
@@ -175,16 +176,22 @@ struct MainTabsView: View {
                        onPressTab: pressTab)
                 .padding(.horizontal, BottomBar.hMargin)
                 .padding(.bottom, BottomBar.edgeMargin)
+                // Measured HERE, on the bar itself — before the full-height frame
+                // below, which would otherwise report the top of the screen
+                // instead of the top of the bar.
+                .measuringDockTop()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 // Ignore the bottom container inset AND the keyboard, so the
                 // floating bar stays pinned to the screen's bottom edge and the
                 // keyboard rises over it instead of shoving it up.
                 .ignoresSafeArea(.container, edges: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
-                .measuringDockTop()
             if hasTrack {
+                // Deliberately NOT measured: this container is full-screen (it
+                // morphs into the whole player), so its frame says nothing about
+                // where the docked island sits. The island is a fixed-height pill
+                // above the bar, so its offset is added to the measurement below.
                 NowPlayingMorphContainer(playback: playback, ui: ui, minimize: minimize)
-                    .measuringDockTop()
                     .zIndex(100)
             }
             ToastOverlayView(hasTrack: hasTrack)
