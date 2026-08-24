@@ -356,7 +356,11 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
           disable-animations: true
           script: |
-            set -euo pipefail
+            # This runs under the emulator-runner's shell, which is dash — no
+            # `pipefail` (dash rejects it outright). The one pipe below doesn't
+            # need it: adb never forwards the remote exit code, so success is
+            # judged solely by the __RC__=0 sentinel grep, not the pipe status.
+            set -eu
             DEV=/data/local/tmp/mozz
             adb wait-for-device
             adb shell "rm -rf $DEV && mkdir -p $DEV"
