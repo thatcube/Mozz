@@ -45,8 +45,10 @@ struct ContinueHereBanner: View {
             Button("Listen here") {
                 Task { await env.continueHere(offer) }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            // NOT `.borderedProminent`: that draws a white label over the accent
+            // color, and Mozz's accent is an adaptive near-white in dark mode —
+            // which is how this button ended up white-on-white.
+            .buttonStyle(.mozzProminentCompact)
 
             Button {
                 withAnimation { continuity.dismissOffer() }

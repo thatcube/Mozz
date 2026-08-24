@@ -452,14 +452,18 @@ extension View {
 /// (white text on a near-white pill).
 struct MozzProminentButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    /// Sized to sit inline beside text (a banner action, a row accessory)
+    /// rather than filling the width as a primary CTA. Same scheme-proof color
+    /// pairing either way — that is the whole point of sharing the style.
+    var isCompact: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline)
+            .font(isCompact ? .subheadline.weight(.semibold) : .headline)
             .foregroundStyle(Color.mozzProminentLabel)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .padding(.horizontal, 20)
+            .frame(maxWidth: isCompact ? nil : .infinity)
+            .padding(.vertical, isCompact ? 7 : 14)
+            .padding(.horizontal, isCompact ? 14 : 20)
             .background(Capsule().fill(Color.mozzProminentFill))
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
             .contentShape(Capsule())
@@ -470,4 +474,9 @@ extension ButtonStyle where Self == MozzProminentButtonStyle {
     /// A legible, scheme-proof solid pill for primary CTAs. Use instead of
     /// `.borderedProminent`, which assumes a colored fill with a white label.
     static var mozzProminent: MozzProminentButtonStyle { MozzProminentButtonStyle() }
+
+    /// The same pill, sized to sit inline next to text.
+    static var mozzProminentCompact: MozzProminentButtonStyle {
+        MozzProminentButtonStyle(isCompact: true)
+    }
 }
