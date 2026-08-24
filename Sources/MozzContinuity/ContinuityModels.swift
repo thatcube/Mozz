@@ -74,14 +74,11 @@ public enum ContinuityPlaybackState: String, Codable, Sendable, Hashable {
 
 /// Repeat mode as stored in a checkpoint.
 ///
-/// A local copy of the playback engine's `RepeatMode` on purpose: `RepeatMode`
-/// lives in `MozzPlayback`, and importing that here would invert the dependency
-/// this module was created to keep clean. `MozzApp` maps between the two.
-public enum ContinuityRepeatMode: String, Codable, Sendable, Hashable {
-    case off
-    case one
-    case all
-}
+/// Uses `MozzCore`'s domain enum rather than introducing a third copy. The
+/// playback engine has its own `RepeatMode` for historical reasons; `MozzApp`
+/// maps between the two, which is why this module still needs no dependency on
+/// `MozzPlayback`.
+public typealias ContinuityRepeatMode = RepeatMode
 
 /// Where a queue came from, so a device that cannot read the queue verbatim can
 /// still rebuild something sensible — and so a truncated queue can be extended

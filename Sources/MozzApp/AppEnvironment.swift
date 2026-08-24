@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import CryptoKit
+import MozzContinuity
 import MozzCore
 import MozzDatabase
 import MozzDownloads
@@ -13,6 +15,9 @@ import MozzJellyfin
 import MozzSubsonic
 #if canImport(WidgetKit)
 import WidgetKit
+#endif
+#if canImport(UIKit)
+import UIKit
 #endif
 #if os(iOS)
 import Intents
@@ -80,6 +85,8 @@ public final class AppEnvironment: ObservableObject {
     public let fileStore: DownloadFileStore
     public let downloads: DownloadManager
     public let playback: PlaybackEngine
+    /// Cross-device playback continuity (ADR-0010).
+    public let continuity = ContinuityCoordinator()
     public let playEvents: PlayEventStore
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
@@ -452,6 +459,9 @@ public final class AppEnvironment: ObservableObject {
             invalidateRadio()
         }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
+        // Point cross-device continuity (ADR-0010) at the new server and read
+        // back whatever another device left behind.
+        activateContinuity(backend: backend, capabilities: capabilities)
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
@@ -1549,6 +1559,102 @@ public final class AppEnvironment: ObservableObject {
                 try? await backend.reportPlayback(report)
             }
         }
+        // Cross-device continuity (ADR-0010). Separate from the scrobble hook
+        // above, which only fires on transport transitions and so would leave a
+        // long track's stored position sitting where the track started.
+        playback.onCheckpoint = { [weak self] checkpoint in
+            guard let self else { return }
+            Task { @MainActor in
+                guard let fingerprint = self.continuityFingerprint else { return }
+                self.continuity.record(checkpoint, fingerprint: fingerprint)
+            }
+        }
+    }
+
+    /// The identity a checkpoint written right now would carry, or nil when no
+    /// server is active.
+    var continuityFingerprint: ServerAccountFingerprint? {
+        guard let active else { return nil }
+        switch active.connection.kind {
+        case .jellyfin:
+            return ServerAccountFingerprint(
+                backend: .jellyfin,
+                serverID: active.capabilities.serverIdentity ?? "",
+                accountID: active.connection.userID ?? ""
+            )
+        case .subsonic:
+            // No protocol-level server UUID exists, so this makes no cross-URL
+            // correlation claim — see `ServerAccountFingerprint.isComparableAcross`.
+            return ServerAccountFingerprint(
+                backend: .subsonic,
+                serverID: "",
+                accountID: active.connection.userID ?? ""
+            )
+        case .plex:
+            return nil          // no durable store yet (ADR-0010 phase 3)
+        }
+    }
+
+    /// Build the continuity store for a freshly activated server and reconcile.
+    private func activateContinuity(backend: any MusicBackend, capabilities: ServerCapabilities) {
+        var store: (any ContinuityStore)?
+        switch backend {
+        case let subsonic as SubsonicBackend:
+            store = subsonic.makeContinuityStore(
+                supportsIndexBasedQueue: capabilities.supportsIndexBasedQueue ?? false
+            )
+        case let jellyfin as JellyfinBackend:
+            store = jellyfin.makeContinuityStore(serverIdentity: capabilities.serverIdentity)
+        default:
+            store = nil
+        }
+        continuity.activate(
+            store: store,
+            deviceID: Self.continuityDeviceID(from: clientIdentifier),
+            deviceName: Self.localDeviceName
+        )
+        Task { @MainActor in
+            await self.continuity.reconcile(
+                isPlayingLocally: self.playback.snapshot.status == .playing
+            )
+        }
+    }
+
+    /// Re-read the remote checkpoint when the app comes back to the foreground.
+    ///
+    /// An idle device must refresh: a phone that was paused in a pocket while
+    /// another device took over otherwise resurfaces showing stale state and
+    /// overwrites the newer session on its next write.
+    public func reconcileContinuity() {
+        Task { @MainActor in
+            await self.continuity.reconcile(
+                isPlayingLocally: self.playback.snapshot.status == .playing
+            )
+        }
+    }
+
+    /// Flush any pending checkpoint — the app may not run again.
+    public func flushContinuity() {
+        Task { @MainActor in await self.continuity.flushNow() }
+    }
+
+    /// A stable per-install id that never leaks the identifier presented to the
+    /// server. Domain-separated so the two cannot be correlated by a third party.
+    static func continuityDeviceID(from clientIdentifier: String) -> String {
+        let salted = "mozz.continuity.device\u{1}" + clientIdentifier
+        return SHA256.hash(data: Data(salted.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+            .prefix(32)
+            .description
+    }
+
+    static var localDeviceName: String {
+        #if canImport(UIKit)
+        return UIDevice.current.name
+        #else
+        return ProcessInfo.processInfo.hostName
+        #endif
     }
 
     /// Feed the lock screen / Control Center album art. The engine fires

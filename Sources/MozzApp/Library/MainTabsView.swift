@@ -148,6 +148,13 @@ struct MainTabsView: View {
             }
             ToastOverlayView(hasTrack: hasTrack)
                 .zIndex(110)
+            // Cross-device resume offer (ADR-0010). Sits above the tab bar and
+            // the now-playing island so it can't be hidden behind either.
+            ContinueHereBanner(continuity: env.continuity)
+                .padding(.bottom, BottomBar.reserved(hasTrack: hasTrack) + 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
+                .zIndex(120)
         }
         // NOTE: the sync status card is deliberately NOT a top safe-area inset
         // here any more. As an inset it sat over every tab's tight header, and
