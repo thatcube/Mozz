@@ -10,7 +10,7 @@ struct SongsView: View {
     @StateObject private var list: PagedList<TrackRecord>
 
     init() {
-        _list = StateObject(wrappedValue: PagedList { _, _ in [] })
+        _list = StateObject(wrappedValue: PagedList { _, _ in .empty })
     }
 
     var body: some View {
@@ -93,8 +93,8 @@ struct SongsView: View {
         let repo = env.repository
         let serverId = env.active?.connection.id
         await MainActor.run {
-            list.rebind { offset, limit in
-                try await repo.tracksPage(serverId: serverId, offset: offset, limit: limit)
+            list.rebind { cursor, limit in
+                try await repo.tracksPage(serverId: serverId, after: cursor, limit: limit)
             }
         }
         await list.loadInitial()

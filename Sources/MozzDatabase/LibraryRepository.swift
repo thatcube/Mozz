@@ -254,6 +254,15 @@ public struct LibraryRepository: Sendable {
         /// `nil` when this was the last page. A client that stops on nil cannot
         /// loop forever, which an offset-based caller has to reason about itself.
         public var next: PageCursor?
+
+        public init(rows: [Row], next: PageCursor? = nil) {
+            self.rows = rows
+            self.next = next
+        }
+
+        /// An already-exhausted page, for a view's placeholder data source
+        /// before the real repository is injected.
+        public static var empty: Page<Row> { Page(rows: [], next: nil) }
     }
 
     public func artistsPage(
