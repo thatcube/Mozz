@@ -76,8 +76,14 @@ public struct LRCLIBLyricsProvider: Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 30
+        #if canImport(Darwin)
+        // Both are get-only in swift-corelibs-foundation. `waitsForConnectivity`
+        // already defaults to false there, and constrained-network awareness is
+        // an Apple concept — Low Data Mode has no counterpart on Windows,
+        // Linux or Android, so the request simply goes out as normal.
         config.waitsForConnectivity = false
         config.allowsConstrainedNetworkAccess = false
+        #endif
         config.httpAdditionalHeaders = ["Accept-Encoding": "gzip, deflate"]
         return URLSessionTransport(session: URLSession(configuration: config))
     }()
