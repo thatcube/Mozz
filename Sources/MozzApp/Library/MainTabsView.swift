@@ -121,6 +121,19 @@ struct MainTabsView: View {
 
     private var hasTrack: Bool { playback.currentTrack != nil }
 
+    /// Where the cross-device resume banner sits above the dock.
+    ///
+    /// The dock has two shapes: expanded it is two stacked rows (the now-playing
+    /// island above the tab bar), and on scroll it collapses into a single row
+    /// of blobs. A fixed inset computed from the expanded layout left the banner
+    /// stranded high above the collapsed dock, so this interpolates with
+    /// `minimize` (0 = expanded, 1 = collapsed) and rides the same spring.
+    private var continueBannerInset: CGFloat {
+        let expanded = BottomBar.reserved(hasTrack: hasTrack) + 12
+        let collapsed = BottomBar.reservedMinimized + 12
+        return expanded + (collapsed - expanded) * min(max(minimize, 0), 1)
+    }
+
     /// Tab shown in the LEFT blob when minimized: the selected tab normally, or
     /// the last active non-Search tab while Search is selected.
     private var leftTab: AppTab { selectedTab == .search ? lastNonSearchTab : selectedTab }
@@ -148,14 +161,17 @@ struct MainTabsView: View {
             }
             ToastOverlayView(hasTrack: hasTrack)
                 .zIndex(110)
-            // Cross-device resume offer (ADR-0010). Sits above the tab bar and
-            // the now-playing island so it can't be hidden behind either.
+            // Cross-device resume offer (ADR-0010). Sits BELOW the now-playing
+            // morph on purpose: dismissing the full player animates it back down
+            // to the island, and it should pass over this notice rather than
+            // slide under it.
             ContinueHereBanner(continuity: env.continuity,
                                isPlayerPresented: ui.isFullPresented)
-                .padding(.bottom, BottomBar.reserved(hasTrack: hasTrack) + 12)
+                .padding(.bottom, continueBannerInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
-                .zIndex(120)
+                .animation(Self.expandSpring, value: minimize)
+                .zIndex(90)
         }
         // NOTE: the sync status card is deliberately NOT a top safe-area inset
         // here any more. As an inset it sat over every tab's tight header, and
@@ -337,6 +353,11 @@ enum BottomBar {
     static func reserved(hasTrack: Bool) -> CGFloat {
         hasTrack ? islandTopFromEdge - 26 : edgeMargin + tabHeight - 26
     }
+
+    /// The same measurement for the *collapsed* dock, where the island and tab
+    /// bar have merged into one row of blobs. Same -26 safe-area convention as
+    /// ``reserved(hasTrack:)`` so the two interpolate cleanly.
+    static var reservedMinimized: CGFloat { edgeMargin + minElementH - 26 }
 }
 
 private extension View {
