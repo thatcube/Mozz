@@ -179,7 +179,8 @@ jobs:
           # file-local (nm type 't') and so never reach the shared object's
           # *dynamic* symbol table. If this passes and the runtime probe later
           # reports fts5CreateSucceeded, search is real on Android.
-          "$NDK_BIN/llvm-nm" "$root/lib/libsqlite3.a" | grep -qi 'fts5' \
+          fts5n="$("$NDK_BIN/llvm-nm" "$root/lib/libsqlite3.a" | grep -ci 'fts5' || true)"
+          test "${fts5n:-0}" -gt 0 \
             || { echo "the amalgamation was built without FTS5 — Mozz search would be dead on arrival"; exit 1; }
           pub="$("$NDK_BIN/llvm-nm" "$root/lib/libsqlite3.a" | grep -c 'sqlite3_' || true)"
           echo "built libsqlite3.a (${pub} sqlite3_* symbols, FTS5 present)"
@@ -233,7 +234,7 @@ jobs:
           for s in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string \
                    mozz_ffi_probe mozz_ffi_benchmark mozz_ffi_search mozz_ffi_probe_hpke \
                    mozz_ffi_verify_continuity_hashes; do
-            if printf '%s\n' "$defined" | grep -qE "[[:space:]]${s}\$"; then
+            if [ "$(printf '%s\n' "$defined" | grep -cE "[[:space:]]${s}\$" || true)" -gt 0 ]; then
               echo "  ok   $s"
             else
               echo "  MISSING  $s"; missing=1
@@ -252,7 +253,7 @@ jobs:
           # strips them from every symbol table — their absence here is not a failure.
           # FTS5 was already proven present in libsqlite3.a at the build step, and is
           # confirmed decisively on the emulator by fts5CreateSucceeded. This is a report.
-          if "$nm" "$SO_PATH" 2>/dev/null | grep -qi 'fts5'; then
+          if [ "$("$nm" "$SO_PATH" 2>/dev/null | grep -ci 'fts5' || true)" -gt 0 ]; then
             echo "  fts5 symbols retained in the object"
           else
             echo "  fts5 symbols are file-local and stripped from the .so — proven in libsqlite3.a, verified at runtime"
