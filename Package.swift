@@ -201,12 +201,19 @@ let package = Package(
                 // These are the same modules the iOS app links; nothing here is
                 // a desktop-only fork.
                 "MozzNetworking", "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
-                // Recommendations, artwork/metadata enrichment and offline
-                // downloads import nothing Apple-only, so linking them here is
-                // what makes them available to a Windows or Android client at
-                // all — and, just as usefully, puts them under the portability
-                // CI that already covers everything else in this graph.
-                "MozzRecommend", "MozzEnrichment", "MozzDownloads",
+                // Recommendations and artwork/metadata enrichment are portable,
+                // so linking them here is what makes them available to a Windows
+                // or Android client at all — and puts them under the portability
+                // CI that covers everything else in this graph.
+                //
+                // MozzDownloads is deliberately NOT here. It is built on a
+                // background `URLSession` — `background(withIdentifier:)`,
+                // `sessionSendsLaunchEvents` — which exists so transfers survive
+                // the app being suspended, an iOS lifecycle concern with no
+                // counterpart elsewhere, and it publishes progress with Combine.
+                // A desktop client wants a plain download queue, not a port of
+                // this. See ARCHITECTURE.md §0.
+                "MozzRecommend", "MozzEnrichment",
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
