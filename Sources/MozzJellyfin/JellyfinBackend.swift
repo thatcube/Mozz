@@ -362,6 +362,21 @@ public struct JellyfinBackend: MusicBackend {
         }
     }
 
+    /// Whether a paged query at `offset` actually asked the server to count the
+    /// whole set (see `pageQuery`).
+    ///
+    /// This matters far more than it looks. With `EnableTotalRecordCount=false`
+    /// Jellyfin still populates `TotalRecordCount` — with the size of the page
+    /// it just returned. Passing that straight through as a catalog total meant
+    /// a resumed sync, which by definition starts at a non-zero offset, reported
+    /// "6480 → 0" or "9495 → 1000" and looked exactly like a library that had
+    /// been emptied. The sync engine dutifully threw away the checkpoint and
+    /// re-walked the whole phase, so resuming a long sync never actually
+    /// resumed. A count we did not ask for is not a count: report `nil`.
+    private func reportedTotal(_ raw: Int?, offset: Int) -> Int? {
+        (includeTotalCount && offset == 0) ? raw : nil
+    }
+
     public func fetchArtists(offset: Int, limit: Int) async throws -> CatalogPage<Artist> {
         let response = try await client.send(
             Endpoint(path: "Artists", query: pageQuery(offset: offset, limit: limit) + [
@@ -370,7 +385,8 @@ public struct JellyfinBackend: MusicBackend {
             ]),
             as: JFItemsResponse.self
         )
-        return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.artist), totalCount: response.TotalRecordCount)
+        return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.artist),
+                           totalCount: reportedTotal(response.TotalRecordCount, offset: offset))
     }
 
     public func fetchAlbums(offset: Int, limit: Int) async throws -> CatalogPage<Album> {
@@ -384,7 +400,8 @@ public struct JellyfinBackend: MusicBackend {
             Endpoint(path: "Items", query: itemsQuery(type: "MusicAlbum", offset: offset, limit: limit, fields: "Genres,DateCreated")),
             as: JFItemsResponse.self
         )
-        return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.album), totalCount: response.TotalRecordCount)
+        return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.album),
+                           totalCount: reportedTotal(response.TotalRecordCount, offset: offset))
     }
 
     public func fetchTracks(offset: Int, limit: Int) async throws -> CatalogPage<Track> {
@@ -405,7 +422,8 @@ public struct JellyfinBackend: MusicBackend {
             Endpoint(path: "Items", query: itemsQuery(type: "Audio", offset: offset, limit: limit, fields: "Genres,DateCreated,NormalizationGain,ProviderIds")),
             as: JFItemsResponse.self
         )
-        return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track), totalCount: response.TotalRecordCount)
+        return CatalogPage(items: (response.Items ?? []).map(JellyfinMapper.track),
+                           totalCount: reportedTotal(response.TotalRecordCount, offset: offset))
     }
 
     /// Backfill audio format + file size for specific tracks (the data omitted

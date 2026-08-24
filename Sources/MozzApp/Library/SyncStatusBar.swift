@@ -208,9 +208,16 @@ struct SyncStatusBar: View {
     @ViewBuilder
     private func phaseCount(_ detail: SyncProgress.PhaseDetail) -> some View {
         // A phase the sync hasn't reached reports 0 of 0. Rendering that as
-        // "0/0" reads as an error — as though it ran and found nothing — so an
-        // empty phase shows no count at all until there is something to say.
-        if detail.state != .pending, !(detail.synced == 0 && (detail.total ?? 0) == 0) {
+        // "0/0" reads as an error — as though it ran and found nothing — so a
+        // phase with nothing to say shows no count at all.
+        //
+        // A *finished* empty phase is the opposite problem: a bare green check
+        // with no number looks like it was skipped or wrongly marked done. It
+        // did run, there was simply nothing there, so it says "None".
+        if detail.state == .done, detail.synced == 0 {
+            Text("None")
+                .foregroundStyle(.secondary)
+        } else if detail.state != .pending, !(detail.synced == 0 && (detail.total ?? 0) == 0) {
             Text(count(detail))
                 .foregroundStyle(detail.state == .done ? .secondary : .primary)
                 .monospacedDigit()
@@ -241,6 +248,8 @@ struct SyncStatusBar: View {
     /// Spoken as a state rather than a bare number, so the checklist reads as one.
     private func accessibilityLabel(_ detail: SyncProgress.PhaseDetail) -> Text {
         switch detail.state {
+        case .done where detail.synced == 0:
+            return Text("\(detail.phase.label), none")
         case .done: return Text("\(detail.phase.label), done")
         // The *real* count, not the eased one: the smoothing exists to make the
         // screen feel alive, and reading a deliberately-lagging number aloud
