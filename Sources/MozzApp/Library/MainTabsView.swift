@@ -153,7 +153,13 @@ struct MainTabsView: View {
         let islandLift = hasTrack
             ? (BottomBar.islandGap + BottomBar.islandHeight) * (1 - min(max(minimize, 0), 1))
             : 0
-        return dockContainerHeight - dockTop + islandLift + Self.continueBannerGap
+        // The bar keeps a full-height frame while its blobs shrink to circles and
+        // sit centred in it, so once collapsed there is empty frame above what you
+        // can actually see. Without this the banner spaces itself off the
+        // invisible edge and the gap looks bigger when collapsed than expanded.
+        let barTopSlack = (BottomBar.tabHeight - BottomBar.minElementH) / 2
+            * min(max(minimize, 0), 1)
+        return dockContainerHeight - dockTop - barTopSlack + islandLift + Self.continueBannerGap
     }
 
     /// Breathing room between the dock and the banner above it.

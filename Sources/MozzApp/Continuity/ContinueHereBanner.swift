@@ -103,8 +103,16 @@ struct ContinueHereBanner: View {
         // and a blur would sample the background and wash the inversion out.
         // Under the flipped scheme this resolves light in dark mode and dark in
         // light mode.
-        .background(Capsule().fill(Color.mozzBannerSurface))
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 12, y: 4)
+        //
+        // The shadow belongs to the capsule, so it is attached INSIDE the
+        // background. Applied to the card as a whole it also shadowed the card's
+        // contents — giving the "Listen here" pill and the text a drop shadow of
+        // their own, which read as a smudge around the button.
+        .background(
+            Capsule()
+                .fill(Color.mozzBannerSurface)
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 12, y: 4)
+        )
         .padding(.horizontal, BottomBar.hMargin)
         .accessibilityElement(children: .contain)
     }
