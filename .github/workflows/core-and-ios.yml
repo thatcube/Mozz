@@ -39,14 +39,22 @@ concurrency:
 jobs:
   test:
     name: Core tests
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Swift version
-        run: swift --version
+      # macos-26, not macos-15: the app uses the iOS 26 Liquid Glass APIs
+      # (`GlassEffectContainer`, `.glassEffect`) behind `#available` guards. Those
+      # guards are a RUNTIME check — the symbols still have to exist at compile
+      # time — so an older SDK cannot build MozzApp at all, and since `swift test`
+      # builds every target, it could not run the suite either. macos-15 ships
+      # Xcode 26.5 at newest; macos-26 defaults to 26.6.
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       # Debug, not release, and that is forced rather than chosen: the playback
       # tests call helpers that live behind `#if DEBUG` — deliberately, so
@@ -74,7 +82,7 @@ jobs:
 
   ios:
     name: iOS build
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     # Only worth a runner if the core is sound.
     needs: test
