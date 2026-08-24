@@ -6,44 +6,108 @@ import MozzSync
 ///
 /// The sync writes in pages (500 items at a time), so the true counts arrive in
 /// big steps with long gaps between them — which reads as "frozen" even though
-/// the sync is fine. This walks the displayed numbers up to each new target
-/// instead of snapping, so there is always motion.
+/// the sync is fine.
 ///
-/// It is deliberately **never optimistic**: the displayed value only ever chases
-/// a number the sync has actually reported, so it can't run ahead and then stall
-/// waiting for reality to catch up. When a big step lands it closes most of the
-/// gap quickly, then eases in — fast when there's ground to make up, still
-/// moving when there isn't.
+/// The pacing is the whole trick. A fixed easing rate is barely better than the
+/// raw numbers on a slow server: it sprints through the 500 in about a second
+/// and then sits still for the twenty-odd seconds until the next page lands. So
+/// this **measures how long pages actually take on this server** and spreads
+/// each step over roughly that long, which keeps the number climbing
+/// continuously whatever pace the server sets.
+///
+/// It stays strictly **un-optimistic**: the displayed value only ever chases a
+/// number the sync has already reported, and is clamped to it, so it can never
+/// run ahead of reality. If a page lands early the remaining gap grows and the
+/// rate is recomputed upward, so it catches up rather than falling behind.
 @MainActor
 final class SyncProgressSmoother: ObservableObject {
     @Published private(set) var counts: [SyncProgress.Phase: Int] = [:]
     @Published private(set) var fraction: Double = 0
 
+    /// Sub-integer positions, so a slow phase (a handful of items spread over
+    /// half a minute) still advances instead of rounding to nothing each tick.
+    private var positions: [SyncProgress.Phase: Double] = [:]
+    private var rates: [SyncProgress.Phase: Double] = [:]
     private var targetCounts: [SyncProgress.Phase: Int] = [:]
+
+    private var fractionPosition: Double = 0
+    private var fractionRate: Double = 0
     private var targetFraction: Double = 0
+
+    /// Rolling estimate of the seconds between page arrivals on this server.
+    /// The first real interval corrects the seed.
+    private var pageInterval: Double = 6
+    private var lastArrival: Date?
     private var timer: Timer?
 
-    /// Fraction of the remaining gap closed each tick. At 30fps this covers most
-    /// of a 500-item step in about a second — brisk, but still visibly counting
-    /// rather than snapping.
-    private let approach = 0.08
     private let tick = 1.0 / 30.0
+    /// Aim to take slightly *longer* than the measured gap between pages, so the
+    /// counter is usually still climbing when the next one lands rather than
+    /// parked and waiting for it.
+    private let stretch = 1.2
+    /// Guard rails, so one freak interval can't freeze the counter for a minute
+    /// or send it sprinting.
+    private let minimumSpread = 1.5
+    private let maximumSpread = 45.0
 
     deinit { timer?.invalidate() }
 
     /// Point the smoother at the latest real progress.
     func update(from progress: SyncProgress?) {
         guard let progress else { return }
-        for detail in progress.details {
-            targetCounts[detail.phase] = detail.synced
-            // A finished phase should read exactly, not approach forever.
-            if detail.state == .done { counts[detail.phase] = detail.synced }
-            // Seed on first sight so a phase doesn't count up from zero after
-            // the app was reopened mid-sync.
-            if counts[detail.phase] == nil { counts[detail.phase] = detail.synced }
+
+        // Only a real page arrival should feed the interval estimate — the card
+        // re-renders for plenty of other reasons.
+        let advanced = progress.details.contains { detail in
+            detail.synced > (targetCounts[detail.phase] ?? 0)
         }
+        if advanced {
+            let now = Date()
+            if let last = lastArrival {
+                let elapsed = now.timeIntervalSince(last)
+                // Ignore absurd gaps (backgrounded app, first paint) so they
+                // can't poison the average.
+                if elapsed > 0.25, elapsed < 120 {
+                    pageInterval = pageInterval * 0.6 + elapsed * 0.4
+                }
+            }
+            lastArrival = now
+        }
+
+        let spread = min(max(pageInterval * stretch, minimumSpread), maximumSpread)
+
+        for detail in progress.details {
+            let previousTarget = targetCounts[detail.phase]
+            targetCounts[detail.phase] = detail.synced
+
+            // Seed on first sight so a phase doesn't count up from zero when the
+            // app is reopened mid-sync.
+            if positions[detail.phase] == nil {
+                positions[detail.phase] = Double(detail.synced)
+                counts[detail.phase] = detail.synced
+            }
+            // A finished phase reads exactly rather than approaching forever.
+            if detail.state == .done {
+                positions[detail.phase] = Double(detail.synced)
+                counts[detail.phase] = detail.synced
+                rates[detail.phase] = 0
+                continue
+            }
+            // Re-pace whenever the target moves: spread the *current* remaining
+            // gap over roughly one page interval.
+            if previousTarget != detail.synced {
+                let gap = Double(detail.synced) - (positions[detail.phase] ?? 0)
+                rates[detail.phase] = gap > 0 ? gap / spread : 0
+            }
+        }
+
         if let total = progress.totalCount, total > 0 {
-            targetFraction = min(Double(progress.itemsSynced) / Double(total), 1)
+            let newTarget = min(Double(progress.itemsSynced) / Double(total), 1)
+            if newTarget != targetFraction {
+                targetFraction = newTarget
+                let gap = targetFraction - fractionPosition
+                fractionRate = gap > 0 ? gap / spread : 0
+            }
         }
         start()
     }
@@ -52,9 +116,15 @@ final class SyncProgressSmoother: ObservableObject {
     /// numbers.
     func reset() {
         counts = [:]
+        positions = [:]
+        rates = [:]
         targetCounts = [:]
         fraction = 0
+        fractionPosition = 0
+        fractionRate = 0
         targetFraction = 0
+        lastArrival = nil
+        pageInterval = 6
         stop()
     }
 
@@ -73,35 +143,36 @@ final class SyncProgressSmoother: ObservableObject {
     }
 
     private func step() {
-        var moved = false
+        var moving = false
 
         for (phase, target) in targetCounts {
-            let current = counts[phase] ?? 0
-            guard current != target else { continue }
-            if current > target {
-                counts[phase] = target        // a restart; don't crawl downward
-            } else {
-                let gap = target - current
-                // At least one per tick, so a small gap still ticks over instead
-                // of rounding to a standstill just short of the target.
-                let stride = max(1, Int((Double(gap) * approach).rounded(.up)))
-                counts[phase] = min(current + stride, target)
+            let goal = Double(target)
+            var position = positions[phase] ?? goal
+
+            if position > goal {
+                position = goal                  // a restart; don't crawl downward
+            } else if position < goal {
+                position = min(position + (rates[phase] ?? 0) * tick, goal)
+                // Still short of the target means there is more to show, even if
+                // this tick's movement rounded to the same integer.
+                moving = moving || position < goal
             }
-            moved = true
+            positions[phase] = position
+
+            let shown = Int(position.rounded(.down))
+            if counts[phase] != shown { counts[phase] = shown }
         }
 
-        if abs(fraction - targetFraction) > 0.0005 {
-            if fraction > targetFraction {
-                fraction = targetFraction
-            } else {
-                let gap = targetFraction - fraction
-                fraction = min(fraction + max(0.001, gap * approach), targetFraction)
-            }
-            moved = true
+        if fractionPosition < targetFraction {
+            fractionPosition = min(fractionPosition + fractionRate * tick, targetFraction)
+            fraction = fractionPosition
+            moving = moving || fractionPosition < targetFraction
+        } else if fractionPosition > targetFraction {
+            fractionPosition = targetFraction
+            fraction = fractionPosition
         }
 
-        // Nothing left to animate — stop burning a timer until the next page
-        // lands.
-        if !moved { stop() }
+        // Caught up — stop burning a timer until the next page lands.
+        if !moving { stop() }
     }
 }
