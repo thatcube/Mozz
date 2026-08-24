@@ -23,6 +23,7 @@
   -->
   <ItemGroup>
     <Compile Include="..\desktop\Core\SecretStore.cs" />
+    <Compile Include="..\desktop\ViewModels\GridRows.cs" />
   </ItemGroup>
 
   <!--

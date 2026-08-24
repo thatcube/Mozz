@@ -74,6 +74,33 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Artist> Artists { get; } = [];
     public ObservableCollection<Playlist> Playlists { get; } = [];
 
+    /// The album and artist walls, chunked into rows so a VirtualizingStackPanel
+    /// can own them — see GridRows for why that indirection exists.
+    public GridRows<Album> AlbumGrid { get; } = new();
+    public GridRows<Artist> ArtistGrid { get; } = new();
+
+    /// Width available to the content pane, set by the view on layout. Drives
+    /// how many tiles fit across.
+    public double ContentWidth
+    {
+        get => _contentWidth;
+        set
+        {
+            if (Math.Abs(value - _contentWidth) < 1) return;
+            _contentWidth = value;
+            AlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
+            ArtistGrid.SetColumns(ColumnsFor(ArtistTilePitch));
+        }
+    }
+
+    private double _contentWidth;
+
+    // Tile width plus its right margin, matching the templates.
+    private const double AlbumTilePitch = 196;
+    private const double ArtistTilePitch = 178;
+
+    private int ColumnsFor(double pitch) => Math.Max(1, (int)(_contentWidth / pitch));
+
     public bool IsHomeSelected => Section == LibrarySection.Home;
     public bool IsSongsSelected => Section == LibrarySection.Songs;
     public bool IsAlbumsSelected => Section == LibrarySection.Albums;
@@ -302,6 +329,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var page = await _core.CallPageAsync<List<Album>>(
             new CoreRequest("albums") { Limit = PageSize });
         Replace(Albums, page.Rows);
+        AlbumGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
     }
 
@@ -310,6 +338,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var page = await _core.CallPageAsync<List<Artist>>(
             new CoreRequest("artists") { Limit = PageSize });
         Replace(Artists, page.Rows);
+        ArtistGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
     }
 
@@ -366,6 +395,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (page.Rows is { Count: > 0 })
         {
             foreach (var row in page.Rows) target.Add(row);
+            // Keep the chunked view in step without rebuilding it — see GridRows.
+            if (page.Rows is List<Album> albums) AlbumGrid.Append(albums);
+            else if (page.Rows is List<Artist> artists) ArtistGrid.Append(artists);
         }
         _nextCursor = page.NextCursor;
         RaiseDerived();

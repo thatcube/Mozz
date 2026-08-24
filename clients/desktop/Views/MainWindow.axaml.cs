@@ -26,6 +26,17 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Tell the view model how much width the tiles have, so it can chunk the
+    /// album and artist walls into rows of the right length. Layout drives this
+    /// rather than the view model guessing, and the setter ignores sub-pixel
+    /// churn so a resize does not rebuild the grid on every frame.
+    /// </summary>
+    private void OnContentResized(object? sender, SizeChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm) vm.ContentWidth = e.NewSize.Width;
+    }
+
+    /// <summary>
     /// Append the next page as the reader nears the end of a list.
     ///
     /// Wired to every scrolling pane's <c>ScrollChanged</c>. The threshold is a
