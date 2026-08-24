@@ -26,8 +26,20 @@ public struct SyncDiagnosticsLog: Sendable {
         return f
     }()
 
+    /// Serializes appends.
+    ///
+    /// The sync runs several phases concurrently and they all log here, so
+    /// without this two lines interleave mid-string and the file reads as
+    /// `albums: resuming at 6480/6480 (complete[…] artists: …`. A diagnostics
+    /// log that garbles itself under exactly the concurrency it exists to
+    /// diagnose is worse than none. `DateFormatter` is not thread-safe either,
+    /// so formatting happens inside the lock too.
+    private static let lock = NSLock()
+
     /// Append one line, timestamped. Best-effort; never throws into a sync.
     public func append(_ line: String) {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
         let entry = "[\(Self.stamp.string(from: Date()))] \(line)\n"
         guard let data = entry.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: fileURL) {
