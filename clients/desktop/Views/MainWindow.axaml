@@ -19,6 +19,7 @@
     <Window.Resources>
         <core:ArtworkPlaceholderConverter x:Key="Artwork" />
         <core:InitialConverter x:Key="Initial" />
+        <core:EnumMatchConverter x:Key="EnumMatch" />
     </Window.Resources>
 
     <!--
@@ -76,6 +77,10 @@
                                 Content="Playlists"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Playlists}" />
+                        <Button Classes="nav" Classes.selected="{Binding IsConnectSelected}"
+                                Content="Servers"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Connect}" />
                     </StackPanel>
 
                     <TextBlock Grid.Row="3"
@@ -105,6 +110,11 @@
                                    HorizontalAlignment="Center" />
                         <TextBlock Classes="secondary" TextAlignment="Center" TextWrapping="Wrap"
                                    Text="Connect a Plex, Jellyfin or Subsonic server and Mozz will sync your library." />
+                        <Button Content="Connect a server"
+                                HorizontalAlignment="Center"
+                                Classes="accent"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Connect}" />
                     </StackPanel>
 
                     <!-- Songs / search results.
@@ -203,6 +213,112 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- Servers: sign in, and mirror a catalog. -->
+                    <ScrollViewer IsVisible="{Binding ShowConnect}">
+                      <StackPanel Spacing="26" MaxWidth="560" HorizontalAlignment="Left">
+
+                        <!-- Already signed in -->
+                        <StackPanel Spacing="12" IsVisible="{Binding Connect.HasAccounts}">
+                          <TextBlock Text="Your servers" Classes="sectionTitle" />
+                          <ItemsControl ItemsSource="{Binding Connect.Accounts}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Border Background="{DynamicResource SurfaceRaised}"
+                                        CornerRadius="10" Padding="15,13" Margin="0,0,0,9">
+                                  <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                      <TextBlock Text="{Binding ServerName}" Classes="primary" />
+                                      <TextBlock Text="{Binding BaseUrl}" Classes="secondary" FontSize="11.5" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Sync" Margin="0,0,8,0"
+                                            Command="{Binding $parent[ScrollViewer].DataContext.Connect.SyncAccountCommand}"
+                                            CommandParameter="{Binding}" />
+                                    <Button Grid.Column="2" Content="Sign out"
+                                            Command="{Binding $parent[ScrollViewer].DataContext.Connect.ForgetAccountCommand}"
+                                            CommandParameter="{Binding}" />
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+
+                        <!-- Add one -->
+                        <StackPanel Spacing="13">
+                          <TextBlock Text="Add a server" Classes="sectionTitle" />
+
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <RadioButton Content="Jellyfin" GroupName="kind"
+                                         IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Jellyfin}" />
+                            <RadioButton Content="Plex" GroupName="kind"
+                                         IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Plex}" />
+                            <RadioButton Content="Subsonic" GroupName="kind"
+                                         IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Subsonic}" />
+                          </StackPanel>
+
+                          <StackPanel Spacing="9" IsVisible="{Binding Connect.NeedsCredentials}">
+                            <TextBox Text="{Binding Connect.ServerUrl}"
+                                     PlaceholderText="192.168.1.10:8096"
+                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                     Background="{DynamicResource SurfaceRaised}" />
+                            <TextBox Text="{Binding Connect.Username}"
+                                     PlaceholderText="Username"
+                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                     Background="{DynamicResource SurfaceRaised}" />
+                            <TextBox Text="{Binding Connect.Password}"
+                                     PasswordChar="•"
+                                     PlaceholderText="Password"
+                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                     Background="{DynamicResource SurfaceRaised}" />
+                          </StackPanel>
+
+                          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                                     IsVisible="{Binding Connect.IsPlex}"
+                                     Text="Plex signs in through plex.tv rather than a password. Press Sign in and Mozz will give you a link to approve." />
+
+                          <!-- Plex link.
+                               The link, not the code: Mozz requests a "strong"
+                               PIN, which is a 25-character token that app.plex.tv
+                               requires and that nobody is meant to type. Showing
+                               it large invites exactly the wrong thing. -->
+                          <Border IsVisible="{Binding Connect.PlexLinkUrl, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                  Background="{DynamicResource SurfaceRaised}"
+                                  CornerRadius="10" Padding="15,14">
+                            <StackPanel Spacing="11">
+                              <TextBlock Text="Approve Mozz in your browser"
+                                         Classes="primary" FontWeight="SemiBold" />
+                              <TextBlock Classes="secondary" FontSize="11.5" TextWrapping="Wrap"
+                                         Text="This opens plex.tv. Sign in there and Mozz will connect by itself — nothing to type back here." />
+                              <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Open Plex" Classes="accent"
+                                        Command="{Binding Connect.OpenPlexLinkCommand}" />
+                                <Button Content="Copy link"
+                                        Command="{Binding Connect.CopyPlexLinkCommand}" />
+                                <Button Content="Cancel"
+                                        Command="{Binding Connect.CancelPlexCommand}" />
+                              </StackPanel>
+                            </StackPanel>
+                          </Border>
+
+                          <Button Content="Sign in" Classes="accent" HorizontalAlignment="Left"
+                                  IsEnabled="{Binding !Connect.IsBusy}"
+                                  Command="{Binding Connect.SignInCommand}" />
+
+                          <TextBlock Text="{Binding Connect.Message}" Classes="secondary" TextWrapping="Wrap"
+                                     IsVisible="{Binding Connect.Message, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                          <StackPanel Spacing="7" IsVisible="{Binding Connect.IsSyncing}">
+                            <ProgressBar Value="{Binding Connect.SyncProgress}" Maximum="1"
+                                         IsIndeterminate="{Binding !Connect.SyncProgress}"
+                                         Height="4" CornerRadius="2" />
+                            <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5" />
+                          </StackPanel>
+                          <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5"
+                                     IsVisible="{Binding !Connect.IsSyncing}" />
+                        </StackPanel>
+                      </StackPanel>
                     </ScrollViewer>
                 </Panel>
             </Grid>

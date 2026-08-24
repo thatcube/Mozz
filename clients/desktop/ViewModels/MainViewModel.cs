@@ -18,12 +18,17 @@ public enum LibrarySection
     Artists,
     Playlists,
     Search,
+    Connect,
 }
 
 public sealed partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly MozzCore _core = new();
     private CancellationTokenSource? _searchCts;
+
+    /// Sign-in and sync. Its own view model because it is its own job — see the
+    /// note on the type.
+    public ConnectViewModel Connect { get; }
 
     // Playback engine. Null in the designer (we never open an audio device there).
     private readonly IAudioEngine? _engine;
@@ -74,13 +79,19 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsAlbumsSelected => Section == LibrarySection.Albums;
     public bool IsArtistsSelected => Section == LibrarySection.Artists;
     public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
+    public bool IsConnectSelected => Section == LibrarySection.Connect;
 
     public bool ShowTracks => Section is LibrarySection.Songs or LibrarySection.Search;
     public bool ShowAlbums => Section is LibrarySection.Home or LibrarySection.Albums;
     public bool ShowArtists => Section is LibrarySection.Artists;
+    public bool ShowConnect => Section is LibrarySection.Connect;
 
-    /// <summary>Nothing loaded, so the pane shows its empty state.</summary>
-    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy;
+    /// <summary>
+    /// Nothing loaded, so the pane shows its empty state — but never on the
+    /// Servers pane, which is where someone goes precisely because the library
+    /// is empty and would otherwise be told so on top of the sign-in form.
+    /// </summary>
+    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && Section != LibrarySection.Connect;
 
     public string LibrarySummary =>
         TrackCount == 0
@@ -89,6 +100,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public MainViewModel()
     {
+        // Constructed before the design-mode bail-out because the previewer binds
+        // to it. Nothing here touches the disk or the network until a command runs.
+        Connect = new ConnectViewModel(
+            new MozzServer(_core, SecretStore.ForCurrentPlatform()),
+            onLibraryChanged: ReloadAfterSyncAsync);
+
         // The previewer builds view models with no library present; don't try to
         // open a database from the designer.
         if (Avalonia.Controls.Design.IsDesignMode) return;
@@ -113,6 +130,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _seekDebounce.Tick += OnSeekDebounceTick;
 
         _ = InitializeAsync();
+    }
+
+    /// Called when a sync finishes: the counts and whatever page is showing are
+    /// both stale, and the empty-library message may no longer be true.
+    private async Task ReloadAfterSyncAsync()
+    {
+        await RefreshCountsAsync();
+        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Home : Section);
+        StatusMessage = TrackCount > 0 ? null : StatusMessage;
     }
 
     private async Task InitializeAsync()
@@ -195,6 +221,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             LibrarySection.Artists => "Artists",
             LibrarySection.Playlists => "Playlists",
             LibrarySection.Search => "Search",
+            LibrarySection.Connect => "Servers",
             _ => "Mozz",
         };
         RaiseDerived();
@@ -527,7 +554,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var stream = _core.Call<StreamSource>(new CoreRequest("streamUrl")
+            var stream = _core.Call<StreamSource>(new CoreRequest("streamURL")
             {
                 RemoteId = track.RemoteId,
                 ServerId = track.ServerId,
@@ -632,9 +659,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsAlbumsSelected));
         OnPropertyChanged(nameof(IsArtistsSelected));
         OnPropertyChanged(nameof(IsPlaylistsSelected));
+        OnPropertyChanged(nameof(IsConnectSelected));
         OnPropertyChanged(nameof(ShowTracks));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
+        OnPropertyChanged(nameof(ShowConnect));
         OnPropertyChanged(nameof(IsLibraryEmpty));
         OnPropertyChanged(nameof(LibrarySummary));
     }

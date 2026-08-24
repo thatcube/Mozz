@@ -400,6 +400,42 @@ final class MozzSessionServerTests: XCTestCase {
         )
     }
 
+    /// A wrong command name is a mistake only makeable across the FFI boundary,
+    /// and it is invisible: `streamUrl` for `streamURL` is one capital letter
+    /// and produces nothing but "unknown command". It cost real time once.
+    func testACaseMistakeNamesTheCommandItMeant() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "streamUrl"])
+        let error = try XCTUnwrap(response["error"] as? String)
+        XCTAssertTrue(error.contains("streamURL"), "unhelpful: \(error)")
+        XCTAssertTrue(error.contains("case"), "should say case matters: \(error)")
+    }
+
+    /// The command list backing that message is hand-maintained, because Swift
+    /// cannot enumerate a switch. This keeps it honest: every listed command must
+    /// actually dispatch, so a renamed or deleted case cannot leave the list
+    /// advertising something that no longer exists.
+    func testEveryAdvertisedCommandActuallyDispatches() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        for cmd in mozzSessionCommands {
+            let response = try call(handle, ["cmd": cmd])
+            // Most will fail for want of arguments — that is fine and expected.
+            // What must never happen is the dispatcher not recognising the name.
+            if let error = response["error"] as? String {
+                XCTAssertFalse(
+                    error.contains("unknown command"),
+                    "'\(cmd)' is advertised but does not dispatch"
+                )
+            }
+        }
+    }
+
     func testHostIdentityIsPopulatedOnEveryPlatform() {
         XCTAssertFalse(mozzHostPlatform.isEmpty)
         XCTAssertNotEqual(mozzHostPlatform, "Unknown")

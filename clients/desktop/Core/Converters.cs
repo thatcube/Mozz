@@ -1,5 +1,6 @@
 using System.Globalization;
 using Avalonia.Data.Converters;
+using Avalonia.Data;
 using Avalonia.Media;
 
 namespace Mozz.Desktop.Core;
@@ -92,4 +93,33 @@ public sealed class InitialConverter : IValueConverter
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Two-way binding between an enum property and a set of radio buttons.
+///
+/// `IsChecked="{Binding Kind, Converter=EnumMatch, ConverterParameter=Plex}"`
+/// reads true when the property equals that member, and writes that member back
+/// when the button is checked. Without this each option needs its own bool
+/// property and its own command, which is three of each for three backends and
+/// a fourth thing to forget when a backend is added.
+/// </summary>
+public sealed class EnumMatchConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is not null
+           && parameter is string name
+           && string.Equals(value.ToString(), name, StringComparison.OrdinalIgnoreCase);
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        // Only the button being *checked* carries information; the one being
+        // unchecked would otherwise write a second, conflicting value.
+        if (value is not true || parameter is not string name) return BindingOperations.DoNothing;
+
+        var enumType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        return enumType.IsEnum && Enum.TryParse(enumType, name, ignoreCase: true, out var parsed)
+            ? parsed
+            : BindingOperations.DoNothing;
+    }
 }

@@ -414,8 +414,41 @@ private func dispatch(
         // Not a catalog command — try the server/sync/streaming table before
         // declaring it unknown, so both halves share one envelope and one error.
         if let response = try await dispatchServerCommand(request, session) { return response }
-        return sessionFailure(request.id, request.cmd, "unknown command '\(request.cmd)'")
+        return sessionFailure(request.id, request.cmd, unknownCommandMessage(request.cmd))
     }
+}
+
+/// Every command the dispatcher accepts.
+///
+/// Kept beside the error rather than derived from the switch, because Swift
+/// cannot enumerate a switch — so the honest thing is to admit the list is
+/// hand-maintained and make the failure it protects against loud.
+let mozzSessionCommands = [
+    "ping", "servers", "counts", "artists", "albums", "tracks",
+    "artistAlbums", "albumTracks", "playlists", "playlistTracks",
+    "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
+    "genres", "genreAlbums", "search",
+    "connect", "plexPin", "plexPinCheck", "attach", "libraries",
+    "sync", "syncStatus", "streamURL", "artworkURL",
+].sorted()
+
+/// A wrong command name is one of the few mistakes that can only be made across
+/// the FFI boundary, and it is invisible: a client written in another language
+/// gets "unknown command" and no indication that it is one capital letter away
+/// from working. `streamUrl` for `streamURL` cost real time, so the error now
+/// names the near miss.
+func unknownCommandMessage(_ cmd: String) -> String {
+    let lowered = cmd.lowercased()
+    if let match = mozzSessionCommands.first(where: { $0.lowercased() == lowered }) {
+        return "unknown command '\(cmd)' — did you mean '\(match)'? (case matters)"
+    }
+    let prefixed = mozzSessionCommands.filter {
+        $0.lowercased().hasPrefix(lowered.prefix(4)) || lowered.hasPrefix($0.lowercased().prefix(4))
+    }
+    if !prefixed.isEmpty {
+        return "unknown command '\(cmd)' — did you mean \(prefixed.map { "'\($0)'" }.joined(separator: " or "))?"
+    }
+    return "unknown command '\(cmd)' — known commands: \(mozzSessionCommands.joined(separator: ", "))"
 }
 
 // MARK: - Response helpers
