@@ -55,6 +55,10 @@ struct RootView: View {
         Group {
             if env.isRestoring {
                 SplashView()
+            } else if !env.libraryChoice.isEmpty {
+                // Sign-in is parked waiting for a library choice; this takes
+                // precedence over the setup screen it interrupts.
+                OnboardingLibraryChoiceView()
             } else if env.isSettingUp {
                 SetupView()
             } else if env.active == nil {

@@ -143,6 +143,12 @@ public final class AppEnvironment: ObservableObject {
     /// can't cancel it; `RootView` shows a setup screen while this is true and
     /// `active` isn't ready yet.
     @Published public private(set) var isSettingUp = false
+    /// Non-empty while sign-in is waiting for the user to choose a music
+    /// library. Only ever populated when the server reports more than one.
+    @Published public private(set) var libraryChoice: [MusicLibraryOption] = []
+    /// The activation generation parked on that choice, so a superseded sign-in
+    /// can't resume the wrong setup.
+    private var pendingSetupGeneration: Int?
     /// True once the first sync has produced something playable, so the setup
     /// screen can offer a "Browse now" button while the rest syncs in background.
     @Published public private(set) var canEnterEarly = false
@@ -323,6 +329,45 @@ public final class AppEnvironment: ObservableObject {
     /// Retry the last failed setup, or a fresh one.
     public func retryActivation(session: AuthenticatedSession) { activate(session: session) }
 
+    /// Record the library chosen during sign-in and let setup finish.
+    ///
+    /// Deliberately does not go through `setSelectedMusicLibraries`, which kicks
+    /// its own sync — here the first sync is still to come and is gated so the
+    /// user isn't dropped onto an empty Home.
+    public func applyOnboardingLibraryChoice(_ ids: [String]) {
+        let generation = pendingSetupGeneration ?? activationGeneration
+        pendingSetupGeneration = nil
+        libraryChoice = []
+
+        if !ids.isEmpty, var stored = SessionPersistence.load(credentials) {
+            stored.selectedMusicSectionIDs = ids
+            if active?.connection.kind != .plex {
+                stored.musicSectionID = ids.first
+                cachedMusicLibraryId = nil
+            }
+            SessionPersistence.save(stored, to: credentials)
+        }
+
+        activationTask = Task { @MainActor in
+            // Subsonic reads `musicFolderId` when the backend is constructed, so
+            // it needs rebuilding before the first sync runs. Jellyfin resolves
+            // its scope per sync and Plex reads the list directly.
+            if self.active?.connection.kind == .subsonic,
+               let stored = SessionPersistence.load(self.credentials),
+               let rebuilt = try? await self.buildBackend(from: stored) {
+                self.finishActivation(
+                    connection: rebuilt.0,
+                    backend: rebuilt.1,
+                    capabilities: self.active?.capabilities ?? ServerCapabilities(backend: .subsonic)
+                )
+            }
+            await self.gateInitialSync()
+            guard generation == self.activationGeneration else { return }
+            self.setupError = nil
+            self.isSettingUp = false
+        }
+    }
+
     private func performActivation(_ session: AuthenticatedSession, generation: Int) async {
         canEnterEarly = false
         let stored = StoredSession(
@@ -337,6 +382,17 @@ public final class AppEnvironment: ObservableObject {
         SessionPersistence.save(stored, to: credentials)
         do {
             try await activate(stored)
+            // Before the first sync, let the user say which library to pull — but
+            // only when the server has more than one. Syncing first and asking
+            // after would mean indexing the wrong library and then throwing it
+            // away. Setup pauses here; the chooser resumes it.
+            let options = await musicLibraries()
+            if !options.isEmpty {
+                guard generation == activationGeneration else { return }
+                pendingSetupGeneration = generation
+                libraryChoice = options
+                return                          // `isSettingUp` stays true
+            }
             // First real sign-in → run the initial sync and stay on the setup
             // screen until there's enough to browse (or the user taps "Browse
             // now"), so we don't drop them onto an empty Home.
@@ -348,6 +404,8 @@ public final class AppEnvironment: ObservableObject {
             // Don't clobber a newer activation's freshly-saved session/state.
             guard generation == activationGeneration else { return }
             SessionPersistence.clear(credentials)
+            libraryChoice = []
+            pendingSetupGeneration = nil
             isSettingUp = false                 // cancelled → leave setup
         } catch {
             guard generation == activationGeneration else { return }
@@ -583,6 +641,9 @@ public final class AppEnvironment: ObservableObject {
 
     public func signOut() {
         activationTask?.cancel()
+        // A parked library choice belongs to the account being left.
+        libraryChoice = []
+        pendingSetupGeneration = nil
         cancelSync()                 // stop any in-flight catalog sync for the old account
         mediaBackfillTask?.cancel()  // and the background format backfill
         isSettingUp = false
