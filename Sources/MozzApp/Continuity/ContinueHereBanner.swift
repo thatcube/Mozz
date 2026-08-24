@@ -14,10 +14,14 @@ import SwiftUI
 struct ContinueHereBanner: View {
     @EnvironmentObject private var env: AppEnvironment
     @ObservedObject var continuity: ContinuityCoordinator
-    /// Suppressed while the full-screen player is open: the banner floats above
-    /// the tab bar, which is exactly where the expanded player's transport
-    /// controls sit. The offer is state, not a transient toast, so it simply
-    /// reappears when the player is dismissed.
+    /// Whether the full-screen player is covering this.
+    ///
+    /// The banner deliberately stays mounted while the player is open rather
+    /// than removing itself: it sits below the player in z-order, so the player
+    /// simply expands over it and shrinks back off it. Animating the banner away
+    /// at the same time meant two things moving at once and neither reading as
+    /// deliberate. It is hidden from VoiceOver while covered, so there is no
+    /// control announced that nobody can see.
     var isPlayerPresented: Bool
 
     @Environment(\.colorScheme) private var colorScheme
@@ -34,10 +38,11 @@ struct ContinueHereBanner: View {
     private var flipped: ColorScheme { colorScheme == .dark ? .light : .dark }
 
     var body: some View {
-        if let offer = continuity.offer, !isPlayerPresented {
+        if let offer = continuity.offer {
             card(for: offer)
                 .environment(\.colorScheme, flipped)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityHidden(isPlayerPresented)
         }
     }
 
@@ -98,8 +103,16 @@ struct ContinueHereBanner: View {
         // and a blur would sample the background and wash the inversion out.
         // Under the flipped scheme this resolves light in dark mode and dark in
         // light mode.
-        .background(Capsule().fill(Color.mozzBannerSurface))
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 12, y: 4)
+        //
+        // The shadow belongs to the capsule, so it is attached INSIDE the
+        // background. Applied to the card as a whole it also shadowed the card's
+        // contents — giving the "Listen here" pill and the text a drop shadow of
+        // their own, which read as a smudge around the button.
+        .background(
+            Capsule()
+                .fill(Color.mozzBannerSurface)
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 12, y: 4)
+        )
         .padding(.horizontal, BottomBar.hMargin)
         .accessibilityElement(children: .contain)
     }

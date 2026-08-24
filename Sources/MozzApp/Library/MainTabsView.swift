@@ -35,6 +35,10 @@ struct MainTabsView: View {
     /// 0 = expanded tab bar, 1 = minimized (blob split). TEMP: toggled by a
     /// long-press on the bar for visual iteration; wired to scroll next.
     @State private var minimize: CGFloat = 0
+    /// Top edge of the dock, in the `dockSpace` coordinate space, and the height
+    /// of that space. Together they say how far above the bottom the dock starts.
+    @State private var dockTop: CGFloat = .infinity
+    @State private var dockContainerHeight: CGFloat = 0
     /// Per-tab navigation paths (value-based routing). Each tab's `NavigationStack`
     /// binds to its path, so pop-to-root is an animated `path.removeAll()` and the
     /// path is programmatic (future deep links / state restoration). Switching tabs
@@ -121,6 +125,52 @@ struct MainTabsView: View {
 
     private var hasTrack: Bool { playback.currentTrack != nil }
 
+    /// Where the cross-device resume banner sits above the dock.
+    ///
+    /// Where the cross-device resume banner sits: just above whatever the dock
+    /// currently is.
+    ///
+    /// This is **measured**, not calculated. The dock changes height for a lot of
+    /// reasons — it collapses to blobs on scroll, it grows a now-playing island,
+    /// its labels scale with Dynamic Type, and its metrics differ per device — so
+    /// every attempt to predict its top from constants has been wrong somewhere:
+    /// too high when collapsed, then overlapping the dock on iPad because the
+    /// spacing assumed an iPhone's home indicator. The dock reports where its top
+    /// actually is and the banner sits `continueBannerGap` above that, which is
+    /// correct in every state without knowing anything about them.
+    ///
+    /// The constants are kept only as a first-frame fallback, before the
+    /// measurement arrives.
+    private var continueBannerInset: CGFloat {
+        guard dockTop.isFinite, dockContainerHeight > 0, dockTop < dockContainerHeight else {
+            // First frame only, before the measurement arrives.
+            return BottomBar.dockTopFromEdge(hasTrack: hasTrack) + Self.continueBannerGap
+        }
+        // The measured value is the top of the tab bar. When a track is playing
+        // the island sits above it — a fixed-height pill, so its offset is a
+        // constant — and that offset shrinks to nothing as the dock collapses and
+        // the island merges into the bar's centre blob.
+        let islandLift = hasTrack
+            ? (BottomBar.islandGap + BottomBar.islandHeight) * (1 - min(max(minimize, 0), 1))
+            : 0
+        // The bar keeps a full-height frame while its blobs shrink to circles and
+        // sit centred in it, so once collapsed there is empty frame above what you
+        // can actually see. Without this the banner spaces itself off the
+        // invisible edge and the gap looks bigger when collapsed than expanded.
+        let barTopSlack = (BottomBar.tabHeight - BottomBar.minElementH) / 2
+            * min(max(minimize, 0), 1)
+        return dockContainerHeight - dockTop - barTopSlack + islandLift + Self.continueBannerGap
+    }
+
+    /// Breathing room between the dock and the banner above it.
+    ///
+    /// Deliberately the dock's own internal spacing rather than a number picked
+    /// by eye, so the banner joins the same rhythm as the island sitting above
+    /// the tab bar instead of hovering at some unrelated distance.
+    private static var continueBannerGap: CGFloat { BottomBar.islandGap }
+    /// Coordinate space the dock and the banner are both measured in.
+    static let dockSpace = "mozz.dock"
+
     /// Tab shown in the LEFT blob when minimized: the selected tab normally, or
     /// the last active non-Search tab while Search is selected.
     private var leftTab: AppTab { selectedTab == .search ? lastNonSearchTab : selectedTab }
@@ -136,6 +186,10 @@ struct MainTabsView: View {
                        onPressTab: pressTab)
                 .padding(.horizontal, BottomBar.hMargin)
                 .padding(.bottom, BottomBar.edgeMargin)
+                // Measured HERE, on the bar itself — before the full-height frame
+                // below, which would otherwise report the top of the screen
+                // instead of the top of the bar.
+                .measuringDockTop()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 // Ignore the bottom container inset AND the keyboard, so the
                 // floating bar stays pinned to the screen's bottom edge and the
@@ -143,20 +197,40 @@ struct MainTabsView: View {
                 .ignoresSafeArea(.container, edges: .bottom)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
             if hasTrack {
+                // Deliberately NOT measured: this container is full-screen (it
+                // morphs into the whole player), so its frame says nothing about
+                // where the docked island sits. The island is a fixed-height pill
+                // above the bar, so its offset is added to the measurement below.
                 NowPlayingMorphContainer(playback: playback, ui: ui, minimize: minimize)
                     .zIndex(100)
             }
             ToastOverlayView(hasTrack: hasTrack)
                 .zIndex(110)
-            // Cross-device resume offer (ADR-0010). Sits above the tab bar and
-            // the now-playing island so it can't be hidden behind either.
+            // Cross-device resume offer (ADR-0010). Sits BELOW the now-playing
+            // morph on purpose: dismissing the full player animates it back down
+            // to the island, and it should pass over this notice rather than
+            // slide under it.
             ContinueHereBanner(continuity: env.continuity,
                                isPlayerPresented: ui.isFullPresented)
-                .padding(.bottom, BottomBar.reserved(hasTrack: hasTrack) + 12)
+                .padding(.bottom, continueBannerInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                // Deliberately does NOT ignore the bottom container inset: the
+                // inset above is measured in this container's coordinate space,
+                // so the banner has to be positioned in the same one.
                 .ignoresSafeArea(.keyboard, edges: .bottom)
-                .zIndex(120)
+                .animation(Self.expandSpring, value: minimize)
+                .zIndex(90)
         }
+        // One space that both the dock and the banner are measured in, so the
+        // banner's offset is expressed in the same terms the dock reported.
+        .coordinateSpace(name: MainTabsView.dockSpace)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: DockContainerHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .onPreferenceChange(DockTopKey.self) { dockTop = $0 }
+        .onPreferenceChange(DockContainerHeightKey.self) { dockContainerHeight = $0 }
         // NOTE: the sync status card is deliberately NOT a top safe-area inset
         // here any more. As an inset it sat over every tab's tight header, and
         // that header carries the Settings avatar — so a running sync covered the
@@ -331,6 +405,17 @@ enum BottomBar {
     }
     /// Distance from the screen's bottom edge up to the island's top edge.
     static let islandTopFromEdge: CGFloat = edgeMargin + tabHeight + islandGap + islandHeight
+    /// Distance from the screen's bottom edge up to the top of the whole dock.
+    ///
+    /// Measured from the true edge, not the safe area, because that is how the
+    /// dock itself is positioned (it ignores the bottom container inset). Anything
+    /// aligning to the dock has to use the same reference or it drifts by the
+    /// size of the home indicator — which differs between iPhone and iPad.
+    static func dockTopFromEdge(hasTrack: Bool) -> CGFloat {
+        hasTrack ? islandTopFromEdge : edgeMargin + tabHeight
+    }
+    /// The same, for the collapsed dock — one row of blobs, no separate island.
+    static var dockTopFromEdgeMinimized: CGFloat { edgeMargin + minElementH }
     /// Height reserved above the safe-area bottom so scrolled content clears the
     /// floating tab bar (and, when playing, the island above it). Approximate
     /// (assumes a ~34pt home-indicator inset); extra clearance is harmless.
@@ -880,5 +965,48 @@ private struct ScrollToTopOnSignalModern<Content: View>: View {
                     position.scrollTo(edge: .top)
                 }
             }
+    }
+}
+
+
+// MARK: - Measuring the dock
+
+/// The top edge of the floating dock, in ``MainTabsView/dockSpace``.
+///
+/// Several views make up the dock (the tab bar, and the now-playing island when
+/// something is playing), so the smallest reported value — the highest on screen
+/// — is the one that matters.
+private struct DockTopKey: PreferenceKey {
+    static let defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = min(value, nextValue())
+    }
+}
+
+/// Height of the space the dock is measured in, so a reported top edge can be
+/// turned into a distance from the bottom.
+private struct DockContainerHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    /// Report this view's top edge as part of the dock.
+    ///
+    /// Anything aligning to the dock reads the result instead of recomputing it
+    /// from layout constants, which is what keeps it correct as the dock
+    /// collapses, grows an island, scales with Dynamic Type, or moves between an
+    /// iPhone and an iPad.
+    func measuringDockTop() -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: DockTopKey.self,
+                    value: proxy.frame(in: .named(MainTabsView.dockSpace)).minY
+                )
+            }
+        )
     }
 }
