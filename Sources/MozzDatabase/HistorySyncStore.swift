@@ -35,7 +35,22 @@ public struct HistorySyncStore: Sendable {
     /// failing the migration for everyone.
     @discardableResult
     public func backfillUIDs(localDeviceID: String, limit: Int = 5_000) async throws -> Int {
-        let rows: [(Int64, String, String, Double, Double?, Double?)] = try await database.read { db in
+        // A named type rather than a tuple: a six-element tuple of mixed
+        // optionals is expensive enough to type-check that the release compiler
+        // gives up on it ("unable to type-check this expression in reasonable
+        // time"), while debug builds squeak through. It is also what lets these
+        // rows leave the database's concurrency domain, since GRDB's `Row` is
+        // not Sendable.
+        struct PendingRow: Sendable {
+            var id: Int64
+            var trackRef: String
+            var kind: String
+            var createdAt: Double
+            var positionSec: Double?
+            var durationSec: Double?
+        }
+
+        let rows: [PendingRow] = try await database.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, track_ref, kind, created_at, position_sec, duration_sec
                 FROM play_event
@@ -43,22 +58,29 @@ public struct HistorySyncStore: Sendable {
                 ORDER BY id
                 LIMIT ?
                 """, arguments: [limit])
-                .map { ($0["id"], $0["track_ref"], $0["kind"], $0["created_at"],
-                        $0["position_sec"], $0["duration_sec"]) }
+                .map { row in
+                    PendingRow(
+                        id: row["id"],
+                        trackRef: row["track_ref"],
+                        kind: row["kind"],
+                        createdAt: row["created_at"],
+                        positionSec: row["position_sec"],
+                        durationSec: row["duration_sec"]
+                    )
+                }
         }
         guard !rows.isEmpty else { return 0 }
 
-        let assignments: [(Int64, String)] = rows.map { row in
-            let (id, ref, kind, createdAt, position, duration) = row
+        let assignments: [(id: Int64, uid: String)] = rows.map { row in
             let uid = HistoryEvent.makeUID(
                 deviceID: localDeviceID,
-                trackRef: ref,
-                kind: kind,
-                createdAtMS: Self.milliseconds(createdAt),
-                positionMS: position.map(Self.milliseconds),
-                durationMS: duration.map(Self.milliseconds)
+                trackRef: row.trackRef,
+                kind: row.kind,
+                createdAtMS: Self.milliseconds(row.createdAt),
+                positionMS: row.positionSec.map(Self.milliseconds),
+                durationMS: row.durationSec.map(Self.milliseconds)
             )
-            return (id, uid)
+            return (row.id, uid)
         }
 
         return try await database.write { db in
