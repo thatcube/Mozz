@@ -157,7 +157,11 @@ struct MainTabsView: View {
     }
 
     /// Breathing room between the dock and the banner above it.
-    private static let continueBannerGap: CGFloat = 12
+    ///
+    /// Deliberately the dock's own internal spacing rather than a number picked
+    /// by eye, so the banner joins the same rhythm as the island sitting above
+    /// the tab bar instead of hovering at some unrelated distance.
+    private static var continueBannerGap: CGFloat { BottomBar.islandGap }
     /// Coordinate space the dock and the banner are both measured in.
     static let dockSpace = "mozz.dock"
 
