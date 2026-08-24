@@ -72,6 +72,28 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      # GRDB's `GRDBSQLite` is a systemLibrary target: it expects the OS to
+      # ship SQLite. macOS does, Linux has apt — Windows has neither, so we
+      # supply it.
+      #
+      # That turns out to be an advantage rather than a chore. Building SQLite
+      # ourselves means FTS5 is an explicit compile flag instead of a property
+      # we hope the platform happens to have, which is the single biggest risk
+      # the plan identified for search.
+      - name: Provide SQLite with FTS5
+        shell: pwsh
+        run: |
+          vcpkg install "sqlite3[core,fts5]:x64-windows"
+          $root = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+          if (-not (Test-Path "$root\include\sqlite3.h")) {
+            Write-Error "sqlite3.h missing after vcpkg install"; exit 1
+          }
+          # Swift on Windows honours the MSVC INCLUDE/LIB conventions.
+          "INCLUDE=$root\include;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LIB=$root\lib;$env:LIB"             | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SQLITE_BIN=$root\bin"               | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "sqlite3.h + sqlite3.lib provided from $root"
+
       # Stage 1 — does the platform-free core compile off-Apple at all?
       # Building the library targets alone isolates a core portability failure
       # from an FFI-facade failure.
@@ -107,6 +129,11 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item "$env:MOZZ_FFI_DLL_DIR\*.dll" harness-out -Force
+          # sqlite3.dll has to sit beside the harness too, or MozzFFI.dll
+          # fails to load with a bare "module not found".
+          if (Test-Path "$env:SQLITE_BIN") {
+            Copy-Item "$env:SQLITE_BIN\*.dll" harness-out -Force -ErrorAction SilentlyContinue
+          }
           $tracks = "${{ github.event.inputs.trackCount }}"
           if ([string]::IsNullOrWhiteSpace($tracks)) { $tracks = "100000" }
           Write-Host "running harness with $tracks tracks"
