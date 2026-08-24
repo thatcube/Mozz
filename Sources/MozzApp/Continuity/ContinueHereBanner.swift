@@ -30,10 +30,24 @@ struct ContinueHereBanner: View {
     @ViewBuilder
     private func card(for offer: ContinuityOffer) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
-                .font(.title3)
-                .foregroundStyle(.tint)
+            // Show the cover when the stored queue told us what's playing; fall
+            // back to the handoff glyph for a track-only offer, where an empty
+            // artwork frame would just read as a broken image.
+            if offer.title.isEmpty {
+                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, height: 38)
+                    .accessibilityHidden(true)
+            } else {
+                ArtworkView(
+                    artwork: offer.artwork,
+                    seed: offer.snapshot.cursor.current.remoteID,
+                    size: 38,
+                    cornerRadius: 6
+                )
                 .accessibilityHidden(true)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(headline(for: offer))

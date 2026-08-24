@@ -9,6 +9,10 @@ public struct ContinuityOffer: Sendable, Identifiable {
     public var snapshot: ContinuitySnapshot
     public var title: String
     public var artist: String
+    /// Cover art for the track being offered, resolved against the active
+    /// backend on this device — the stored queue carries only a reference, so
+    /// the URL is minted locally and stays valid across token rotation.
+    public var artwork: ArtworkRef?
     /// Device label, or nil where the backend cannot attribute a checkpoint —
     /// Subsonic's only signal is the client *product* name, which is identical
     /// for every Mozz install.
@@ -96,6 +100,7 @@ public final class ContinuityCoordinator: ObservableObject {
             snapshot: snapshot,
             title: item?.title ?? "",
             artist: item?.artist ?? "",
+            artwork: item?.artwork,
             deviceName: store.features.deviceAttribution && !cursor.deviceName.isEmpty
                 ? cursor.deviceName
                 : nil,
