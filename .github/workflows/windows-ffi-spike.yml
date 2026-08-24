@@ -58,9 +58,9 @@ jobs:
       - name: Install Swift
         uses: compnerd/gha-setup-swift@main
         with:
-          # swift-version replaced `branch`, swift-build replaced `tag`; the
-          # action requires both when pulling from swift.org.
-          swift-version: 6.3.3
+          # swift-version is the release *branch* (patch releases live on the
+          # minor branch); swift-build is the specific build on it.
+          swift-version: swift-6.3-release
           swift-build: 6.3.3-RELEASE
 
       - name: Swift version
