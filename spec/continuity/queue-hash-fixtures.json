@@ -1,0 +1,151 @@
+{
+  "cases" : [
+    {
+      "canonicalByteCount" : 139,
+      "canonicalBytesHex" : "763102616c62756d02616c622d3737027265762d33026f6666023002330230026a656c6c7966696e01376633643162326101757365722d34320174726b2d3030310130026a656c6c7966696e01376633643162326101757365722d34320174726b2d3030320131026a656c6c7966696e01376633643162326101757365722d34320174726b2d3030330132",
+      "input" : {
+        "descriptor" : {
+          "kind" : "album",
+          "sourceID" : "alb-77",
+          "sourceRevision" : "rev-3"
+        },
+        "isShuffled" : false,
+        "items" : [
+          {
+            "accountID" : "user-42",
+            "artist" : "Lena Vance",
+            "backend" : "jellyfin",
+            "baseOrdinal" : 0,
+            "durationMS" : 214000,
+            "remoteID" : "trk-001",
+            "serverID" : "7f3d1b2a",
+            "title" : "Opening"
+          },
+          {
+            "accountID" : "user-42",
+            "artist" : "Lena Vance",
+            "backend" : "jellyfin",
+            "baseOrdinal" : 1,
+            "durationMS" : 187500,
+            "remoteID" : "trk-002",
+            "serverID" : "7f3d1b2a",
+            "title" : "Golden Machine"
+          },
+          {
+            "accountID" : "user-42",
+            "artist" : "Lena Vance",
+            "backend" : "jellyfin",
+            "baseOrdinal" : 2,
+            "durationMS" : 245250,
+            "remoteID" : "trk-003",
+            "serverID" : "7f3d1b2a",
+            "title" : "Ocean Signal"
+          }
+        ],
+        "repeatMode" : "off",
+        "totalCount" : 3,
+        "windowStartAbsoluteIndex" : 0
+      },
+      "name" : "album-three-tracks",
+      "queueHash" : "018644cc1ba784e3ed4265cee00f8027323cd77e6efa6d04706b2450c7a4b034"
+    },
+    {
+      "canonicalByteCount" : 102,
+      "canonicalBytesHex" : "763102706c61796c69737402706c2d390202616c6c023102323430023936026a656c6c7966696e01376633643162326101757365722d34320174726b2d3331310137026a656c6c7966696e01376633643162326101757365722d34320174726b2d3130340132",
+      "input" : {
+        "descriptor" : {
+          "kind" : "playlist",
+          "sourceID" : "pl-9",
+          "sourceRevision" : null
+        },
+        "isShuffled" : true,
+        "items" : [
+          {
+            "accountID" : "user-42",
+            "artist" : "Ashford",
+            "backend" : "jellyfin",
+            "baseOrdinal" : 7,
+            "durationMS" : 301000,
+            "remoteID" : "trk-311",
+            "serverID" : "7f3d1b2a",
+            "title" : "Silent Horizon"
+          },
+          {
+            "accountID" : "user-42",
+            "artist" : "Cathedral",
+            "backend" : "jellyfin",
+            "baseOrdinal" : 2,
+            "durationMS" : 198000,
+            "remoteID" : "trk-104",
+            "serverID" : "7f3d1b2a",
+            "title" : "Neon Tide"
+          }
+        ],
+        "repeatMode" : "all",
+        "totalCount" : 240,
+        "windowStartAbsoluteIndex" : 96
+      },
+      "name" : "shuffled-playlist-window",
+      "queueHash" : "d29b8f91e18e85ebf2dd87560d317867fb8cb7ba825449a1070e6dff4feef0f2"
+    },
+    {
+      "canonicalByteCount" : 46,
+      "canonicalBytesHex" : "7631026164486f630202026f6e6502300231023002737562736f6e696301016272616e646f6e0138323933310130",
+      "input" : {
+        "descriptor" : {
+          "kind" : "adHoc",
+          "sourceID" : null,
+          "sourceRevision" : null
+        },
+        "isShuffled" : false,
+        "items" : [
+          {
+            "accountID" : "brandon",
+            "artist" : "Unknown",
+            "backend" : "subsonic",
+            "baseOrdinal" : 0,
+            "durationMS" : 123456,
+            "remoteID" : "82931",
+            "serverID" : "",
+            "title" : "Burning Lunar"
+          }
+        ],
+        "repeatMode" : "one",
+        "totalCount" : 1,
+        "windowStartAbsoluteIndex" : 0
+      },
+      "name" : "subsonic-adhoc-no-server-id",
+      "queueHash" : "798dbd030e945e49912f04977af20d88600a6a813e740f24c8f71329b99dc7f3"
+    },
+    {
+      "canonicalByteCount" : 53,
+      "canonicalBytesHex" : "763102617274697374026172742de2889102026f666602300231023002706c6578016d6163682dcea9010169642de288862d310130",
+      "input" : {
+        "descriptor" : {
+          "kind" : "artist",
+          "sourceID" : "art-∑",
+          "sourceRevision" : ""
+        },
+        "isShuffled" : false,
+        "items" : [
+          {
+            "accountID" : "",
+            "artist" : "Ünïcøde",
+            "backend" : "plex",
+            "baseOrdinal" : 0,
+            "durationMS" : 60000,
+            "remoteID" : "id-∆-1",
+            "serverID" : "mach-Ω",
+            "title" : "曲 · Ⅰ"
+          }
+        ],
+        "repeatMode" : "off",
+        "totalCount" : 1,
+        "windowStartAbsoluteIndex" : 0
+      },
+      "name" : "unicode-and-empty-fields",
+      "queueHash" : "0975fd890858729993f8ee3d15ef7e0aece9bce3ff07dfeabced261697c41120"
+    }
+  ],
+  "version" : 1
+}

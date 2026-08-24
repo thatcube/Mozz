@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import MozzContinuity
 import MozzCore
 import MozzDatabase
 
@@ -354,7 +355,138 @@ public func mozz_ffi_search(
     }
 }
 
-// MARK: - 4. Lifetime
+// MARK: - 4. Continuity hash conformance
+
+private struct HashCase: Encodable {
+    var name: String
+    var expectedHash: String
+    var actualHash: String
+    var expectedBytesHex: String
+    var actualBytesHex: String
+    var matches: Bool
+}
+
+/// Recompute the `spec/continuity` fixtures on *this* platform.
+///
+/// This is the point of the whole exercise. ADR-0010 requires a non-Apple peer
+/// to derive byte-identical queue hashes, otherwise a device reads a queue,
+/// disagrees with its own cursor, and continuity fails silently. Running the
+/// shared fixtures here proves the property on the platform that actually has to
+/// hold it — rather than on a Mac, where it was never in doubt.
+///
+/// Takes the fixture JSON as a string so the host owns file IO and this stays a
+/// pure function of its input.
+@_cdecl("mozz_ffi_verify_continuity_hashes")
+public func mozz_ffi_verify_continuity_hashes(
+    _ fixturesJSON: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>? {
+    guard let json = swiftString(fixturesJSON), !json.isEmpty else {
+        return failure(MozzFFIError.missingArgument("fixturesJSON").localizedDescription)
+    }
+
+    struct Spec: Decodable {
+        var version: Int
+        var cases: [Fixture]
+    }
+    struct Fixture: Decodable {
+        var name: String
+        var queueHash: String
+        var canonicalBytesHex: String
+        var input: Input
+    }
+    struct Input: Decodable {
+        var descriptor: Descriptor
+        var items: [Item]
+        var repeatMode: String
+        var isShuffled: Bool
+        var totalCount: Int
+        var windowStartAbsoluteIndex: Int
+    }
+    struct Descriptor: Decodable {
+        var kind: String
+        var sourceID: String?
+        var sourceRevision: String?
+    }
+    struct Item: Decodable {
+        var backend: String
+        var serverID: String
+        var accountID: String
+        var remoteID: String
+        var baseOrdinal: Int
+        var title: String
+        var artist: String
+        var durationMS: Int64
+    }
+
+    do {
+        let spec = try JSONDecoder().decode(Spec.self, from: Data(json.utf8))
+        var results: [HashCase] = []
+
+        for fixture in spec.cases {
+            guard let kind = QueueDescriptor.Kind(rawValue: fixture.input.descriptor.kind),
+                  let mode = ContinuityRepeatMode(rawValue: fixture.input.repeatMode) else {
+                return failure("unknown descriptor kind or repeat mode in '\(fixture.name)'")
+            }
+            let descriptor = QueueDescriptor(
+                kind: kind,
+                sourceID: fixture.input.descriptor.sourceID,
+                sourceRevision: fixture.input.descriptor.sourceRevision
+            )
+            var items: [ContinuityItem] = []
+            for raw in fixture.input.items {
+                guard let backend = BackendKind(rawValue: raw.backend) else {
+                    return failure("unknown backend '\(raw.backend)' in '\(fixture.name)'")
+                }
+                items.append(ContinuityItem(
+                    locator: TrackLocator(
+                        server: ServerAccountFingerprint(
+                            backend: backend,
+                            serverID: raw.serverID,
+                            accountID: raw.accountID
+                        ),
+                        remoteID: raw.remoteID
+                    ),
+                    baseOrdinal: raw.baseOrdinal,
+                    title: raw.title,
+                    artist: raw.artist,
+                    durationMS: raw.durationMS
+                ))
+            }
+
+            let bytes = ContinuityQueueBuilder.canonicalBytes(
+                items: items,
+                descriptor: descriptor,
+                repeatMode: mode,
+                isShuffled: fixture.input.isShuffled,
+                totalCount: fixture.input.totalCount,
+                startAbsoluteIndex: fixture.input.windowStartAbsoluteIndex
+            )
+            let hash = ContinuityQueueBuilder.hash(
+                items: items,
+                descriptor: descriptor,
+                repeatMode: mode,
+                isShuffled: fixture.input.isShuffled,
+                totalCount: fixture.input.totalCount,
+                startAbsoluteIndex: fixture.input.windowStartAbsoluteIndex
+            )
+            let hex = bytes.map { String(format: "%02x", $0) }.joined()
+
+            results.append(HashCase(
+                name: fixture.name,
+                expectedHash: fixture.queueHash,
+                actualHash: hash,
+                expectedBytesHex: fixture.canonicalBytesHex,
+                actualBytesHex: hex,
+                matches: hash == fixture.queueHash && hex == fixture.canonicalBytesHex
+            ))
+        }
+        return success(results)
+    } catch {
+        return failure(String(describing: error))
+    }
+}
+
+// MARK: - 5. Lifetime
 
 /// Release a string returned by any function above. Every returned pointer must
 /// be passed here exactly once.

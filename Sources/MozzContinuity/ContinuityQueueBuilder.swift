@@ -1,4 +1,8 @@
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 /// Builds the stored queue: content hashing, and the byte-budget window that
@@ -24,7 +28,13 @@ public enum ContinuityQueueBuilder {
     ///   base ordinals, the descriptor, and the shuffle/repeat modes. Display
     ///   metadata (title, artist, artwork) is excluded, so re-fetching richer
     ///   metadata does not invalidate an otherwise identical queue.
-    static func canonicalBytes(
+    ///
+    /// Public so a reimplementation on another platform can compare its
+    /// *intermediate* encoding, not just the final digest. When two platforms
+    /// disagree on a hash, the bytes are where the difference actually is, and
+    /// having them makes that a five-minute diff instead of a guessing game.
+    /// See `spec/continuity/` for the golden fixtures both sides must satisfy.
+    public static func canonicalBytes(
         items: [ContinuityItem],
         descriptor: QueueDescriptor,
         repeatMode: ContinuityRepeatMode,

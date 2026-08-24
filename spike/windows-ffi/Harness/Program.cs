@@ -30,6 +30,10 @@ internal static class Native
         int limit);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr mozz_ffi_verify_continuity_hashes(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string fixturesJson);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void mozz_ffi_free_string(IntPtr pointer);
 
     /// Marshal a returned C string and hand the buffer straight back to Swift.
@@ -72,6 +76,9 @@ internal static class Native
 
     public static JsonElement Search(string dbPath, string query, int limit) =>
         Unwrap(Consume(mozz_ffi_search(dbPath, query, limit)), "search");
+
+    public static JsonElement VerifyContinuityHashes(string fixturesJson) =>
+        Unwrap(Consume(mozz_ffi_verify_continuity_hashes(fixturesJson)), "verifyContinuityHashes");
 }
 
 internal static class Program
@@ -179,6 +186,49 @@ internal static class Program
                 : "  => encode cost is significant; consider a binary boundary format.");
 
             try { File.Delete(dbPath); } catch { /* best effort */ }
+
+            Console.WriteLine();
+            Console.WriteLine("=== 4. Continuity hashes: does this platform agree with spec/continuity? ===");
+            var fixturesPath = FindSpecFixtures();
+            if (fixturesPath is null)
+            {
+                // Not a pass: the check the whole cross-platform design depends on
+                // silently not running is worse than it failing loudly.
+                failures.Add("could not locate spec/continuity/queue-hash-fixtures.json");
+            }
+            else
+            {
+                var cases = Native.VerifyContinuityHashes(File.ReadAllText(fixturesPath));
+                var mismatches = 0;
+
+                foreach (var c in cases.EnumerateArray())
+                {
+                    var name = c.GetProperty("name").GetString();
+                    var matches = c.GetProperty("matches").GetBoolean();
+                    Console.WriteLine($"  {(matches ? "OK  " : "FAIL")}  {name}");
+
+                    if (!matches)
+                    {
+                        mismatches++;
+                        Console.WriteLine($"          expected hash : {c.GetProperty("expectedHash").GetString()}");
+                        Console.WriteLine($"          actual hash   : {c.GetProperty("actualHash").GetString()}");
+                        // The bytes are where the real difference lives; a hash
+                        // mismatch alone tells you nothing about the cause.
+                        Console.WriteLine($"          expected bytes: {c.GetProperty("expectedBytesHex").GetString()}");
+                        Console.WriteLine($"          actual bytes  : {c.GetProperty("actualBytesHex").GetString()}");
+                    }
+                }
+
+                if (mismatches > 0)
+                {
+                    failures.Add($"{mismatches} continuity hash fixture(s) do not match — " +
+                                 "cross-device resume would fail silently between this platform and iOS");
+                }
+                else
+                {
+                    Console.WriteLine("  => byte-identical with the Swift/iOS implementation.");
+                }
+            }
         }
         catch (DllNotFoundException error)
         {
@@ -191,6 +241,27 @@ internal static class Program
 
         Report(failures);
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    /// Walk up from the working directory to find the shared spec fixtures.
+    /// They are read from `spec/` rather than copied next to the binary so both
+    /// implementations verify against the same file and it cannot drift.
+    private static string? FindSpecFixtures()
+    {
+        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        for (var depth = 0; depth < 8 && directory is not null; depth++)
+        {
+            var candidate = Path.Combine(
+                directory.FullName, "spec", "continuity", "queue-hash-fixtures.json");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
     }
 
     private static void Report(List<string> failures)

@@ -53,6 +53,17 @@ let package = Package(
         // FTS5 full-text search. The recommended choice for hitting the 100k-track
         // performance bar (DB-level pagination, indexed sorts, off-main writes).
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.0"),
+
+        // swift-crypto — Apple's own cross-platform implementation of the
+        // CryptoKit API. Needed because two pieces of *portable* logic hash:
+        // the continuity queue hash (which ADR-0010 requires a non-Apple peer to
+        // recompute identically) and Subsonic's MD5 token auth. `CryptoKit`
+        // itself is Apple-only, so those layers could not build off-Apple.
+        //
+        // On Apple platforms `import Crypto` re-exports CryptoKit, so the shipping
+        // iOS app keeps using the system implementation; the guarded imports below
+        // make that explicit rather than implicit.
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.8.0"),
     ],
     targets: [
         // MARK: Domain core (pure Swift, no third-party deps)
@@ -82,8 +93,15 @@ let package = Package(
         .target(name: "MozzPlex", dependencies: ["MozzCore", "MozzNetworking"]),
         .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
         // Generic Subsonic / OpenSubsonic backend (Navidrome-QA'd, others
-        // best-effort). CryptoKit (system framework) is used for MD5 token auth.
-        .target(name: "MozzSubsonic", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
+        // best-effort). Uses MD5 for classic token auth, via swift-crypto so the
+        // backend builds off-Apple too.
+        .target(
+            name: "MozzSubsonic",
+            dependencies: [
+                "MozzCore", "MozzNetworking", "MozzContinuity",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
 
         // MARK: Cross-device continuity (ADR-0010)
         //
@@ -92,7 +110,14 @@ let package = Package(
         // implement the store, and MozzApp maps engine types across, so
         // MozzPlayback never has to import this (which is why the queue carries
         // its own `ContinuityRepeatMode`).
-        .target(name: "MozzContinuity", dependencies: ["MozzCore"]),
+        //
+        // swift-crypto supplies SHA-256 for the queue hash. That hash is the one
+        // value ADR-0010 requires a *non-Apple* peer to recompute byte-identically,
+        // so it cannot depend on an Apple-only framework.
+        .target(
+            name: "MozzContinuity",
+            dependencies: ["MozzCore", .product(name: "Crypto", package: "swift-crypto")]
+        ),
 
         // MARK: Catalog sync engine (backend -> DB, off-main)
         .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
@@ -152,7 +177,7 @@ let package = Package(
         // Exists to answer, on real target hardware: does the core build
         // off-Apple, does the linked SQLite have FTS5, does the C ABI hold, and
         // what does marshalling cost? See spike/windows-ffi/README.md.
-        .target(name: "MozzFFI", dependencies: ["MozzCore", "MozzDatabase"]),
+        .target(name: "MozzFFI", dependencies: ["MozzCore", "MozzDatabase", "MozzContinuity"]),
 
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),
