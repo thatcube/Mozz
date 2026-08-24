@@ -165,6 +165,33 @@ public sealed partial class ConnectViewModel : ViewModelBase
         await SyncAsync(prepared);
     }
 
+    /// <summary>
+    /// Hand the core the credentials for every saved account, at launch.
+    ///
+    /// The library is on disk, so a relaunch shows it without touching the
+    /// network — but playing any of it needs a stream URL, and the core resolves
+    /// one only against an ATTACHED backend. Without this the app came back up
+    /// looking fine and then refused to play anything ("No audio source for this
+    /// track yet") until the user happened to visit Servers and press Sync.
+    /// </summary>
+    public async Task AttachSavedAccountsAsync()
+    {
+        foreach (var account in _server.SavedAccounts())
+        {
+            try
+            {
+                await _server.AttachAsync(account);
+            }
+            catch (Exception ex)
+            {
+                // A server that has been signed out of, or whose credential no
+                // longer decrypts, must not stop the others being attached — and
+                // must not stop the app from opening.
+                Message = Explain(ex);
+            }
+        }
+    }
+
     // MARK: Sync
 
     [RelayCommand]
