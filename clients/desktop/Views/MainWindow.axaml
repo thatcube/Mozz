@@ -124,6 +124,7 @@
                              x:Name="TracksList"
                              ItemsSource="{Binding Tracks}"
                              DoubleTapped="OnTrackActivated"
+                             ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent"
                              BorderThickness="0"
                              Padding="0,0,8,0">
@@ -159,7 +160,7 @@
                     </ListBox>
 
                     <!-- Albums -->
-                    <ScrollViewer IsVisible="{Binding ShowAlbums}">
+                    <ScrollViewer IsVisible="{Binding ShowAlbums}" ScrollChanged="OnListScrolled">
                         <ItemsControl ItemsSource="{Binding Albums}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -188,7 +189,7 @@
                     </ScrollViewer>
 
                     <!-- Artists -->
-                    <ScrollViewer IsVisible="{Binding ShowArtists}">
+                    <ScrollViewer IsVisible="{Binding ShowArtists}" ScrollChanged="OnListScrolled">
                         <ItemsControl ItemsSource="{Binding Artists}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>

@@ -132,6 +132,42 @@ public sealed partial class MozzCore : IDisposable
     public Task<T?> CallAsync<T>(object request, CancellationToken token = default)
         => Task.Run(() => Call<T>(request), token);
 
+    /// <summary>
+    /// A listing plus where to resume it. The cursor rides the envelope rather
+    /// than the payload, so <see cref="Call{T}"/> stays usable for everything
+    /// that does not page.
+    /// </summary>
+    public Page<T> CallPage<T>(object request)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_handle <= 0) throw new InvalidOperationException("No library is open");
+
+        var json = JsonSerializer.Serialize(request, JsonOptions);
+        var utf8 = Marshal.StringToCoTaskMemUTF8(json);
+        nint responsePtr = 0;
+        try
+        {
+            responsePtr = mozz_session_call(_handle, utf8);
+            if (responsePtr == 0) throw new InvalidOperationException("The core returned nothing");
+
+            var text = Marshal.PtrToStringUTF8(responsePtr)
+                       ?? throw new InvalidOperationException("Unreadable response");
+            var envelope = JsonSerializer.Deserialize<Envelope<T>>(text, JsonOptions)
+                           ?? throw new InvalidOperationException("Unreadable response envelope");
+            if (!envelope.Ok) throw new MozzCoreException(envelope.Error ?? "unknown error");
+
+            return new Page<T>(envelope.Payload, envelope.NextCursor);
+        }
+        finally
+        {
+            if (responsePtr != 0) mozz_ffi_free_string(responsePtr);
+            Marshal.FreeCoTaskMem(utf8);
+        }
+    }
+
+    public Task<Page<T>> CallPageAsync<T>(object request, CancellationToken token = default)
+        => Task.Run(() => CallPage<T>(request), token);
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -145,7 +181,8 @@ public sealed partial class MozzCore : IDisposable
         [property: JsonPropertyName("cmd")] string? Cmd,
         [property: JsonPropertyName("payload")] T? Payload,
         [property: JsonPropertyName("error")] string? Error,
-        [property: JsonPropertyName("id")] int? Id);
+        [property: JsonPropertyName("id")] int? Id,
+        [property: JsonPropertyName("nextCursor")] string? NextCursor);
 }
 
 /// <summary>An error reported by the Swift core rather than by interop.</summary>

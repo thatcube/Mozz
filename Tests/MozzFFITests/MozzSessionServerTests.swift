@@ -386,6 +386,76 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertEqual(identity("Brandon"), identity("brandon"))
     }
 
+    // MARK: Paging across the boundary
+
+    /// A client walks a listing by echoing `nextCursor` back. This asserts the
+    /// whole loop through the C ABI: every row exactly once, and a terminating
+    /// end signal rather than a page that repeats forever.
+    func testCursorPagingWalksTheWholeListingThroughTheABI() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 20, albums: 40, tracks: 500))
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        var ids: [Int] = []
+        var cursor: String?
+        var pages = 0
+        repeat {
+            var request: [String: Any] = ["cmd": "tracks", "serverId": serverId, "limit": 50]
+            if let cursor { request["cursor"] = cursor }
+            let response = try call(handle, request)
+            XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
+            let rows = try XCTUnwrap(response["payload"] as? [[String: Any]])
+            ids.append(contentsOf: rows.compactMap { $0["id"] as? Int })
+            cursor = response["nextCursor"] as? String
+            pages += 1
+            XCTAssertLessThan(pages, 50, "paging did not terminate")
+        } while cursor != nil
+
+        XCTAssertEqual(ids.count, 500)
+        XCTAssertEqual(Set(ids).count, 500, "a track came back on two pages")
+    }
+
+    /// A mangled cursor restarts the listing rather than failing. It can only
+    /// come from a client that damaged a token we issued, and showing the first
+    /// page beats showing an error.
+    func testAGarbageCursorRestartsRatherThanFailing() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 2, albums: 4, tracks: 30))
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, [
+            "cmd": "tracks", "serverId": serverId, "limit": 10, "cursor": "not-a-real-cursor",
+        ])
+        XCTAssertEqual(response["ok"] as? Bool, true)
+        XCTAssertEqual((response["payload"] as? [[String: Any]])?.count, 10)
+    }
+
+    /// The last page must omit the cursor, or a client loops forever.
+    func testTheFinalPageReportsNoCursor() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 2, albums: 4, tracks: 30))
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "tracks", "serverId": serverId, "limit": 100])
+        XCTAssertEqual((response["payload"] as? [[String: Any]])?.count, 30)
+        XCTAssertNil(response["nextCursor"], "a short page must not offer a cursor")
+    }
+
     // MARK: Envelope
     func testUnknownCommandStillReportsUnknownAfterTheServerTable() throws {
         let path = try makeLibrary()

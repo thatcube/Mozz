@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 
@@ -22,5 +23,25 @@ public partial class MainWindow : Window
         {
             vm.PlayTrackCommand.Execute(track);
         }
+    }
+
+    /// <summary>
+    /// Append the next page as the reader nears the end of a list.
+    ///
+    /// Wired to every scrolling pane's <c>ScrollChanged</c>. The threshold is a
+    /// viewport rather than a fixed number of pixels: on a tall window a page
+    /// has to arrive earlier to stay ahead of the scroll, and on a short one an
+    /// absolute margin would fetch far too eagerly.
+    ///
+    /// Safe to fire often — <see cref="MainViewModel.LoadMoreAsync"/> ignores a
+    /// call while one is in flight or once the end has been reached.
+    /// </summary>
+    private void OnListScrolled(object? sender, ScrollChangedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        if (sender is not ScrollViewer viewer) return;
+
+        var remaining = viewer.Extent.Height - viewer.Offset.Y - viewer.Viewport.Height;
+        if (remaining <= viewer.Viewport.Height) _ = vm.LoadMoreAsync();
     }
 }

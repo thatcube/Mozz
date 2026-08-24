@@ -92,4 +92,14 @@ public sealed record CoreRequest(
     [JsonPropertyName("remoteId")] public string? RemoteId { get; init; }
     [JsonPropertyName("groupKey")] public string? GroupKey { get; init; }
     [JsonPropertyName("genre")] public string? Genre { get; init; }
+    /// <summary>Opaque resume position from a previous page's <c>nextCursor</c>.</summary>
+    [JsonPropertyName("cursor")] public string? Cursor { get; init; }
 }
+
+/// <summary>
+/// One page of a listing and where to resume it. <c>NextCursor</c> is null on
+/// the last page, which is the only end signal — the core does not report a
+/// total for these listings, and counting rows would be wrong the moment a
+/// background sync added one.
+/// </summary>
+public sealed record Page<T>(T? Rows, string? NextCursor);

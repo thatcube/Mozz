@@ -126,14 +126,20 @@ final class MozzSessionTests: XCTestCase {
         XCTAssertEqual(payload["albums"] as? Int, 20)
     }
 
+    /// Paging is by cursor now, not offset — see the note above the keyset
+    /// methods in LibraryRepository for why. `offset` is still accepted on the
+    /// request envelope so an older client's message decodes, but it no longer
+    /// moves the window, and this asserts the cursor is what does.
     func testPagingWalksTheLibrary() async throws {
         let path = try makeLibrary()
         try await seed(path, tracks: 200)
         let handle = try open(path)
         defer { _ = mozz_session_close(handle) }
 
-        let first = try call(handle, ["cmd": "tracks", "offset": 0, "limit": 50])
-        let second = try call(handle, ["cmd": "tracks", "offset": 50, "limit": 50])
+        let first = try call(handle, ["cmd": "tracks", "limit": 50])
+        let cursor = try XCTUnwrap(first["nextCursor"] as? String,
+                                   "a full page must offer somewhere to resume")
+        let second = try call(handle, ["cmd": "tracks", "limit": 50, "cursor": cursor])
 
         let a = try XCTUnwrap(first["payload"] as? [[String: Any]])
         let b = try XCTUnwrap(second["payload"] as? [[String: Any]])

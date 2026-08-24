@@ -213,6 +213,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadSectionAsync(LibrarySection section)
     {
         Section = section;
+        _pagingGeneration++;
+        _nextCursor = null;
         PageTitle = section switch
         {
             LibrarySection.Home => "Home",
@@ -264,27 +266,109 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // MARK: Paging
+    //
+    // A real self-hosted library is not a few hundred rows. Mozz's own benchmark
+    // library is 100,000 tracks, 12,500 albums and 4,000 artists, and until this
+    // existed the app loaded exactly the first 500 of each and offered no way to
+    // reach anything after that — 99.5% of the library was simply unreachable,
+    // silently, with no scrollbar hint that anything was missing.
+    //
+    // Pages are appended as the list nears its end. The page is smaller than the
+    // old fixed cap on purpose: the first screenful should arrive quickly, and
+    // after that the reader is always further from the end than one page.
+
+    private const int PageSize = 200;
+
+    /// Where to resume the current section's listing. Null means the end has
+    /// been reached — the core does not report a total, and counting rows would
+    /// be wrong the moment a background sync added one.
+    private string? _nextCursor;
+    private bool _isLoadingMore;
+    /// Bumped on every section change so a page still in flight from the
+    /// previous section cannot append its rows to the new one.
+    private int _pagingGeneration;
+
     private async Task LoadTracksAsync()
     {
-        // One page for now. Windowed paging as the list scrolls is next, and the
-        // core already takes offset/limit for it.
-        var rows = await _core.CallAsync<List<Track>>(
-            new CoreRequest("tracks") { Offset = 0, Limit = 500 });
-        Replace(Tracks, rows);
+        var page = await _core.CallPageAsync<List<Track>>(
+            new CoreRequest("tracks") { Limit = PageSize });
+        Replace(Tracks, page.Rows);
+        _nextCursor = page.NextCursor;
     }
 
     private async Task LoadAlbumsAsync()
     {
-        var rows = await _core.CallAsync<List<Album>>(
-            new CoreRequest("albums") { Offset = 0, Limit = 500 });
-        Replace(Albums, rows);
+        var page = await _core.CallPageAsync<List<Album>>(
+            new CoreRequest("albums") { Limit = PageSize });
+        Replace(Albums, page.Rows);
+        _nextCursor = page.NextCursor;
     }
 
     private async Task LoadArtistsAsync()
     {
-        var rows = await _core.CallAsync<List<Artist>>(
-            new CoreRequest("artists") { Offset = 0, Limit = 500 });
-        Replace(Artists, rows);
+        var page = await _core.CallPageAsync<List<Artist>>(
+            new CoreRequest("artists") { Limit = PageSize });
+        Replace(Artists, page.Rows);
+        _nextCursor = page.NextCursor;
+    }
+
+    /// <summary>
+    /// Append the next page. Called by the view when the scroll position nears
+    /// the end of the list; safe to call spuriously.
+    /// </summary>
+    public async Task LoadMoreAsync()
+    {
+        // Search results are a single ranked set, not a pageable listing —
+        // scrolling one must not start appending the whole library to it.
+        if (_nextCursor is null || _isLoadingMore || !_core.IsOpen) return;
+        if (Section is LibrarySection.Search or LibrarySection.Playlists or LibrarySection.Connect) return;
+
+        _isLoadingMore = true;
+        try
+        {
+            switch (Section)
+            {
+                case LibrarySection.Songs:
+                    await AppendAsync(Tracks, "tracks");
+                    break;
+                case LibrarySection.Home:
+                case LibrarySection.Albums:
+                    await AppendAsync(Albums, "albums");
+                    break;
+                case LibrarySection.Artists:
+                    await AppendAsync(Artists, "artists");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // A failed page must not poison the list that is already showing.
+            StatusMessage = ex.Message;
+            _nextCursor = null;
+        }
+        finally
+        {
+            _isLoadingMore = false;
+        }
+    }
+
+    private async Task AppendAsync<T>(ObservableCollection<T> target, string cmd)
+    {
+        var generation = _pagingGeneration;
+        var page = await _core.CallPageAsync<List<T>>(
+            new CoreRequest(cmd) { Limit = PageSize, Cursor = _nextCursor });
+
+        // A section switch while this was in flight would otherwise append one
+        // section's rows to another's collection.
+        if (generation != _pagingGeneration) return;
+
+        if (page.Rows is { Count: > 0 })
+        {
+            foreach (var row in page.Rows) target.Add(row);
+        }
+        _nextCursor = page.NextCursor;
+        RaiseDerived();
     }
 
     partial void OnSearchTextChanged(string value) => _ = RunSearchAsync(value);

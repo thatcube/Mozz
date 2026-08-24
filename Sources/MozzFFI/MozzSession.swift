@@ -41,6 +41,8 @@ struct SessionRequest: Decodable {
     var remoteId: String?
     var groupKey: String?
     var genre: String?
+    /// Opaque resume position for a paged listing; see LibraryRepository.PageCursor.
+    var cursor: String?
 
     // Server connection / sync / streaming. See `MozzSessionServer.swift`.
     var kind: String?
@@ -71,6 +73,10 @@ private struct SessionResponse<Payload: Encodable>: Encodable {
     var cmd: String
     var payload: Payload?
     var error: String?
+    /// Where to resume a paged listing, or absent on the last page. Sits on the
+    /// envelope rather than inside the payload so the payload stays a plain
+    /// array — a client that ignores paging is unaffected.
+    var nextCursor: String?
 }
 
 // MARK: - Wire models
@@ -287,6 +293,13 @@ public func mozz_session_call(
     }
 }
 
+/// A malformed cursor is treated as "from the start" rather than an error: it
+/// can only come from a client that mangled a token we gave it, and restarting
+/// the listing is a better answer than refusing to show anything.
+private func pageCursor(_ request: SessionRequest) -> LibraryRepository.PageCursor? {
+    request.cursor.flatMap(LibraryRepository.PageCursor.init(token:))
+}
+
 // MARK: - Dispatch
 
 private func dispatch(
@@ -295,7 +308,8 @@ private func dispatch(
 ) async throws -> String {
     let repo = session.repository
     let serverId = request.serverId
-    let offset = max(0, request.offset ?? 0)
+    // `offset` is gone from the big listings — they page by cursor now. It stays
+    // on the request envelope only so an older client's message still decodes.
     // Capped so a malformed request cannot ask for the whole library in one
     // allocation; a UI pages, and 1,000 rows is already far more than a screen.
     let limit = min(max(1, request.limit ?? 100), 1_000)
@@ -319,17 +333,21 @@ private func dispatch(
         )
         return sessionSuccess(request, counts)
 
+    // The three big listings page by cursor, not offset. OFFSET is O(offset) and
+    // is wrong whenever the table changes mid-walk, which is exactly what a
+    // background sync does — see the note above the keyset methods in
+    // LibraryRepository. An absent cursor means "from the start".
     case "artists":
-        let rows = try await repo.artistsPage(serverId: serverId, offset: offset, limit: limit)
-        return sessionSuccess(request, rows.map(wire))
+        let page = try await repo.artistsPage(serverId: serverId, after: pageCursor(request), limit: limit)
+        return sessionSuccess(request, page.rows.map(wire), nextCursor: page.next?.token)
 
     case "albums":
-        let rows = try await repo.albumsPage(serverId: serverId, offset: offset, limit: limit)
-        return sessionSuccess(request, rows.map(wire))
+        let page = try await repo.albumsPage(serverId: serverId, after: pageCursor(request), limit: limit)
+        return sessionSuccess(request, page.rows.map(wire), nextCursor: page.next?.token)
 
     case "tracks":
-        let rows = try await repo.tracksPage(serverId: serverId, offset: offset, limit: limit)
-        return sessionSuccess(request, rows.map(wire))
+        let page = try await repo.tracksPage(serverId: serverId, after: pageCursor(request), limit: limit)
+        return sessionSuccess(request, page.rows.map(wire), nextCursor: page.next?.token)
 
     case "artistAlbums":
         guard let remoteId = request.remoteId, let serverId else {
@@ -455,10 +473,11 @@ func unknownCommandMessage(_ cmd: String) -> String {
 
 func sessionSuccess<P: Encodable>(
     _ request: SessionRequest,
-    _ payload: P
+    _ payload: P,
+    nextCursor: String? = nil
 ) -> String {
     encodeSession(SessionResponse(id: request.id, ok: true, cmd: request.cmd,
-                                  payload: payload, error: nil))
+                                  payload: payload, error: nil, nextCursor: nextCursor))
 }
 
 func sessionFailure(
@@ -467,7 +486,7 @@ func sessionFailure(
     _ message: String
 ) -> String {
     encodeSession(SessionResponse<String>(id: id, ok: false, cmd: cmd,
-                                          payload: nil, error: message))
+                                          payload: nil, error: message, nextCursor: nil))
 }
 
 private func encodeSession<P: Encodable>(_ response: SessionResponse<P>) -> String {
