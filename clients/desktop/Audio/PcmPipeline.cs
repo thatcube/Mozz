@@ -253,6 +253,42 @@ internal sealed class PcmPipeline : IDisposable
         }
     }
 
+    /// <summary>
+    /// Take up a preload that arrived after the current track's decoder had
+    /// already run dry, provided the listener has not yet reached the end.
+    ///
+    /// The pump reads ahead by the ring's depth (two seconds), so a decoder
+    /// finishes a couple of seconds before the audio is heard. A caller that
+    /// preloads the moment a track starts — which is what the view model does —
+    /// is never in this position. But resolving the next track's URL is a
+    /// network round trip, and on a slow server, or for a very short track, it
+    /// can land in that window. Without this the preload is silently discarded:
+    /// playback stops, the "ended" notification advances the queue, and the
+    /// listener hears a gap between two tracks that were supposed to be
+    /// continuous. It is not a stall, but on a gapless album it is the one
+    /// artefact this whole design exists to prevent.
+    ///
+    /// Safe because nothing has been consumed past the boundary yet: the frame
+    /// where the next track begins is exactly where the previous one stopped
+    /// producing, and clearing the end marker un-arms an "ended" that has not
+    /// fired.
+    /// </summary>
+    private void AdoptPreloadIfTheCurrentTrackAlreadyDrained()
+    {
+        if (_current is not null || _next is null) return;
+
+        long end = Interlocked.Read(ref _endFrame);
+        if (end < 0) return;
+
+        long consumed = _ring.TotalRead / Channels;
+        if (consumed >= end) return;   // already heard the end; too late to stitch
+
+        _boundaries.Enqueue(new Boundary(end, _next.Token, _next.DurationTicks));
+        _current = _next;
+        _next = null;
+        Interlocked.Exchange(ref _endFrame, -1);
+    }
+
     private void ApplyReplayGain(Span<float> span, Segment segment)
     {
         double gain = ReplayGain.LinearFor(
@@ -278,6 +314,7 @@ internal sealed class PcmPipeline : IDisposable
                 case PipelineCommandKind.PreloadNext:
                     _next?.Decoder.Dispose();
                     _next = cmd.Segment;
+                    AdoptPreloadIfTheCurrentTrackAlreadyDrained();
                     break;
                 case PipelineCommandKind.Seek:
                     DoSeek(TimeSpan.FromTicks(cmd.SeekTicks));
