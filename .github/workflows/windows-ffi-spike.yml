@@ -58,9 +58,11 @@ jobs:
       - name: Install Swift
         uses: compnerd/gha-setup-swift@main
         with:
-          # swift-version is the release *branch* (patch releases live on the
-          # minor branch); swift-build is the specific build on it.
-          swift-version: swift-6.3-release
+          # The download path is
+          #   /{swift-version}/windows10/swift-{swift-build}/...
+          # so the branch carries the PATCH version too — swift-6.3-release
+          # paired with 6.3.3-RELEASE builds a URL that 404s.
+          swift-version: swift-6.3.3-release
           swift-build: 6.3.3-RELEASE
 
       - name: Swift version
