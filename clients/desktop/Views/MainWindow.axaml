@@ -47,7 +47,7 @@
 
                     <TextBox Grid.Row="1"
                              Text="{Binding SearchText}"
-                             Watermark="Search your library"
+                             PlaceholderText="Search your library"
                              Margin="0,0,0,18"
                              CornerRadius="8"
                              FontSize="13"
@@ -111,7 +111,9 @@
                          ListBox rather than ItemsControl: it virtualizes, which is
                          what keeps a hundred thousand rows scrolling smoothly. -->
                     <ListBox IsVisible="{Binding ShowTracks}"
+                             x:Name="TracksList"
                              ItemsSource="{Binding Tracks}"
+                             DoubleTapped="OnTrackActivated"
                              Background="Transparent"
                              BorderThickness="0"
                              Padding="0,0,8,0">
@@ -232,19 +234,22 @@
                 <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
                         <Button Classes="transport" Content="⤨" FontSize="15" />
-                        <Button Classes="transport" Content="⏮" FontSize="15" />
-                        <Button Classes="play" Content="⏵" FontSize="17"
+                        <Button Classes="transport" Content="⏮" FontSize="15"
+                                Command="{Binding PreviousCommand}" />
+                        <Button Classes="play" Content="{Binding PlayPauseGlyph}" FontSize="17"
                                 Command="{Binding TogglePlayPauseCommand}" />
-                        <Button Classes="transport" Content="⏭" FontSize="15" />
+                        <Button Classes="transport" Content="⏭" FontSize="15"
+                                Command="{Binding NextCommand}" />
                         <Button Classes="transport" Content="⟳" FontSize="15" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                        <TextBlock Text="0:00" Classes="secondary" FontSize="11"
+                        <TextBlock Text="{Binding PositionText, FallbackValue='0:00'}" Classes="secondary" FontSize="11"
                                    VerticalAlignment="Center" />
-                        <Border Width="420" Height="4" CornerRadius="2"
-                                Background="{DynamicResource SurfaceHover}"
+                        <Slider Classes="scrub" Width="420" Minimum="0"
+                                Maximum="{Binding DurationSeconds}"
+                                Value="{Binding PositionSeconds, Mode=TwoWay}"
                                 VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding NowPlaying.Duration, FallbackValue='0:00'}"
+                        <TextBlock Text="{Binding DurationText, FallbackValue='0:00'}"
                                    Classes="secondary" FontSize="11" VerticalAlignment="Center" />
                     </StackPanel>
                 </StackPanel>
@@ -253,8 +258,8 @@
                             HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Button Classes="transport" Content="☰" FontSize="14" />
                     <Button Classes="transport" Content="🔉" FontSize="13" />
-                    <Border Width="96" Height="4" CornerRadius="2"
-                            Background="{DynamicResource SurfaceHover}"
+                    <Slider Classes="scrub" Width="96" Minimum="0" Maximum="1"
+                            Value="{Binding Volume, Mode=TwoWay}"
                             VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>

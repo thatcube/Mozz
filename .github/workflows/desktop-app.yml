@@ -121,6 +121,11 @@ jobs:
       # beside it. Walking the actual import table beats a hardcoded list: the
       # set of Swift runtime DLLs changes between toolchain releases, and a
       # missing one produces a bare "DLL not found" at launch with no clue which.
+      #
+      # llvm-readobj rather than dumpbin: dumpbin only exists inside a Visual
+      # Studio developer shell, which this job is not running in. The LLVM tools
+      # ship with the Swift toolchain and are already on PATH — the SQLite step
+      # above uses clang-cl and llvm-lib from the same place.
       - name: Bundle the Swift runtime
         shell: pwsh
         run: |
@@ -135,9 +140,7 @@ jobs:
           # and the toolchain's own runtime directories.
           $searchDirs = @($ffi.DirectoryName)
           $swiftExe = (Get-Command swift -ErrorAction SilentlyContinue).Source
-          if ($swiftExe) {
-            $searchDirs += (Split-Path $swiftExe -Parent)
-          }
+          if ($swiftExe) { $searchDirs += (Split-Path $swiftExe -Parent) }
           foreach ($base in @("$env:LOCALAPPDATA\Programs\Swift", "C:\Program Files\Swift", "C:\Library")) {
             if (Test-Path $base) {
               $searchDirs += (Get-ChildItem -Path $base -Recurse -Directory -Filter bin -ErrorAction SilentlyContinue).FullName
@@ -148,11 +151,13 @@ jobs:
 
           # System DLLs are provided by Windows; copying them is both pointless
           # and, for the UCRT, actively wrong.
-          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool)'
+          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool|authz|netapi32|mpr)'
+
+          $missing = New-Object System.Collections.Generic.List[string]
 
           function Resolve-Imports([string]$path, [System.Collections.Generic.HashSet[string]]$seen) {
-            $deps = & dumpbin /nologo /dependents $path 2>$null |
-              Select-String -Pattern '^\s{4}(\S+\.dll)$' -AllMatches |
+            $deps = & llvm-readobj --coff-imports $path 2>$null |
+              Select-String -Pattern '^\s*Name:\s*(\S+\.dll)\s*$' |
               ForEach-Object { $_.Matches[0].Groups[1].Value }
             foreach ($dep in $deps) {
               if ($dep -match $systemish) { continue }
@@ -167,14 +172,27 @@ jobs:
                 Write-Host "  + $dep"
                 Resolve-Imports $found $seen
               } else {
-                Write-Host "  ? $dep (not found in search paths)"
+                Write-Host "  ? $dep (NOT FOUND)"
+                $missing.Add($dep)
               }
             }
           }
 
           $seen = [System.Collections.Generic.HashSet[string]]::new()
           Resolve-Imports (Join-Path $out "MozzFFI.dll") $seen
-          Write-Host "bundled $($seen.Count) dependency DLLs"
+          Write-Host "bundled $($seen.Count - $missing.Count) of $($seen.Count) dependency DLLs"
+
+          if ($seen.Count -eq 0) {
+            # An import walk that finds nothing means the parse failed, not that
+            # the DLL is dependency-free. Failing here beats shipping a bundle
+            # whose emptiness is discovered by a user.
+            Write-Error "no imports were resolved - llvm-readobj output did not parse"
+            exit 1
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "could not locate: $($missing -join ', ')"
+            exit 1
+          }
 
       # The real test: does it load on a machine that is NOT the build machine?
       # We approximate one by scrubbing every Swift directory out of PATH, so

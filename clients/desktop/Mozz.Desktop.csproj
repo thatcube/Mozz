@@ -8,11 +8,19 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon></ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The test project and scratch spikes live under this folder but are their
+         own compilations; keep the app's default globs from swallowing them. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;.scratch\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <Folder Include="Models\" />
     <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The audio pipeline's internals (ring buffer, decoders, DSP) are tested directly. -->
+    <InternalsVisibleTo Include="Mozz.Desktop.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,5 +33,10 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- miniaudio (MIT / public-domain) as the cross-platform output device.
+         Ships prebuilt natives for win-x64/arm64/x86, osx-x64/arm64 and
+         linux-x64/arm64, so the audio device works on every target with no
+         extra toolchain. Decode and HTTP go through the system FFmpeg binary. -->
+    <PackageReference Include="Hexa.NET.MiniAudio" Version="1.0.1" />
   </ItemGroup>
 </Project>
