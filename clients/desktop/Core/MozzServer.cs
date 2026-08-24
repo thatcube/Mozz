@@ -109,6 +109,43 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets)
         }, token).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Attach an account and leave it ready to sync.
+    ///
+    /// Plex addresses its catalog by library section, and a newly signed-in
+    /// account has none — the PIN flow yields an account and a server, never a
+    /// section. Syncing in that state fails with "Plex music section not
+    /// resolved". So resolve it once, save it, and re-attach, because the core
+    /// builds its backend at attach time and the one built above still has no
+    /// section. Returns the account to sync with, which may differ from the one
+    /// passed in.
+    /// </summary>
+    public async Task<ServerAccount> AttachForSyncAsync(
+        ServerAccount account, CancellationToken token = default)
+    {
+        await AttachAsync(account, token).ConfigureAwait(false);
+
+        if (account.Kind != BackendKind.Plex || account.MusicSectionId is { Length: > 0 })
+        {
+            return account;
+        }
+
+        // Needs the attach above: `libraries` resolves against an attached
+        // backend. For Plex it is musicSections(), which reads library/sections
+        // directly and so does not itself need a section.
+        var libraries = await LibrariesAsync(account.ServerId, token).ConfigureAwait(false);
+        if (libraries is not { Count: > 0 })
+        {
+            throw new MozzCoreException(
+                $"{account.ServerName} has no music library for Mozz to sync.");
+        }
+
+        var resolved = account with { MusicSectionId = libraries[0].Id };
+        SaveAccount(resolved);
+        await AttachAsync(resolved, token).ConfigureAwait(false);
+        return resolved;
+    }
+
     public Task<IReadOnlyList<MusicLibrary>?> LibrariesAsync(
         string serverId, CancellationToken token = default)
         => core.CallAsync<IReadOnlyList<MusicLibrary>>(new { cmd = "libraries", serverId }, token);
@@ -228,10 +265,16 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets)
             secrets.Set($"plex.account.{account.ServerId}", accountToken);
         }
 
+        SaveAccount(account);
+        return account;
+    }
+
+    /// <summary>Insert or replace one account, leaving the others alone.</summary>
+    private void SaveAccount(ServerAccount account)
+    {
         var accounts = SavedAccounts().Where(a => a.ServerId != account.ServerId).ToList();
         accounts.Add(account);
         WriteAccounts(accounts);
-        return account;
     }
 
     private static void WriteAccounts(IReadOnlyList<ServerAccount> accounts)

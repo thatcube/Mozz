@@ -152,13 +152,17 @@ public sealed partial class ConnectViewModel : ViewModelBase
 
     private async Task AfterSignInAsync(ServerAccount account)
     {
+        Message = $"Connected to {account.ServerName}.";
+
+        // Resolves and saves the Plex music section, so read the accounts back
+        // only after it has run — otherwise the list shows the unresolved one.
+        var prepared = await _server.AttachForSyncAsync(account);
+
         Accounts.Clear();
         foreach (var saved in _server.SavedAccounts()) Accounts.Add(saved);
         OnPropertyChanged(nameof(HasAccounts));
 
-        await _server.AttachAsync(account);
-        Message = $"Connected to {account.ServerName}.";
-        await SyncAsync(account);
+        await SyncAsync(prepared);
     }
 
     // MARK: Sync
@@ -168,8 +172,8 @@ public sealed partial class ConnectViewModel : ViewModelBase
     {
         try
         {
-            await _server.AttachAsync(account);
-            await SyncAsync(account);
+            var prepared = await _server.AttachForSyncAsync(account);
+            await SyncAsync(prepared);
         }
         catch (Exception ex)
         {
