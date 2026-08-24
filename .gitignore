@@ -51,3 +51,7 @@ build/
 obj/
 bin/
 harness-out/
+
+# .NET desktop client build output
+clients/desktop/bin/
+clients/desktop/obj/
