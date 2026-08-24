@@ -184,6 +184,14 @@ jobs:
           Resolve-Imports (Join-Path $out "MozzFFI.dll") $seen
           Write-Host "bundled $($seen.Count - $missing.Count) of $($seen.Count) dependency DLLs"
 
+          # Record exactly which files are Swift's. The verify step needs to copy
+          # these and ONLY these next to the harness: the publish directory also
+          # holds a complete .NET runtime, and dropping that on top of a
+          # differently-versioned self-contained app breaks it in a way that
+          # looks like a Swift problem but is not.
+          $manifest = @("MozzFFI.dll") + ($seen | Where-Object { $missing -notcontains $_ })
+          $manifest | Set-Content -Path "$env:RUNNER_TEMP\swift-runtime-dlls.txt"
+
           if ($seen.Count -eq 0) {
             # An import walk that finds nothing means the parse failed, not that
             # the DLL is dependency-free. Failing here beats shipping a bundle
@@ -262,7 +270,12 @@ jobs:
           dotnet publish spike/windows-ffi/Harness/Harness.csproj -c Release `
             -r win-x64 --self-contained true -o harness-out
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          Copy-Item "publish\win-x64\*.dll" harness-out -Force
+          # Only the Swift DLLs — see the manifest note in the bundling step.
+          Get-Content "$env:RUNNER_TEMP\swift-runtime-dlls.txt" | ForEach-Object {
+            $dll = Join-Path "publish\win-x64" $_
+            if (Test-Path $dll) { Copy-Item $dll harness-out -Force }
+            else { Write-Error "manifest lists $_ but it is not in the bundle"; exit 1 }
+          }
 
           $env:PATH = ($env:PATH -split ';' | Where-Object {
             $_ -and ($_ -notmatch '(?i)swift') -and ($_ -notmatch '(?i)\\Library\\')
