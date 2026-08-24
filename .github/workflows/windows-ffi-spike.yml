@@ -49,11 +49,16 @@ jobs:
 
       # The Swift toolchain for Windows. If this step is what breaks, the
       # problem is toolchain distribution rather than anything about Mozz.
+      #
+      # Keep this reasonably current. The runner's Visual Studio ships a very
+      # new MSVC STL, whose headers hard-fail on older Clang ("STL1000:
+      # Unexpected compiler version, expected Clang 20 or newer") — so a Swift
+      # release that trails the runner's VS by too much cannot compile anything
+      # at all, C++ interop included.
       - name: Install Swift
         uses: compnerd/gha-setup-swift@main
         with:
-          branch: swift-6.1.2-release
-          tag: 6.1.2-RELEASE
+          swift-version: 6.3.3
 
       - name: Swift version
         run: swift --version
