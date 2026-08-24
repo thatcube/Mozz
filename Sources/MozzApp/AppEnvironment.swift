@@ -1431,7 +1431,34 @@ public final class AppEnvironment: ObservableObject {
     public func setSelectedMusicLibraries(_ ids: [String]) {
         guard var stored = SessionPersistence.load(credentials) else { return }
         stored.selectedMusicSectionIDs = ids.isEmpty ? nil : ids
+        // Plex spans several sections and reads the list directly. The other two
+        // scope through a single id held on the connection — Jellyfin as
+        // `ParentId`, Subsonic as `musicFolderId` — so keep that in step, and
+        // drop the cached auto-resolved Jellyfin library or the old choice would
+        // win for the rest of the session.
+        if active?.connection.kind != .plex {
+            stored.musicSectionID = ids.first ?? stored.musicSectionID
+            cachedMusicLibraryId = nil
+        }
         SessionPersistence.save(stored, to: credentials)
+        // Subsonic reads `musicFolderId` when the backend is built, so it needs a
+        // rebuild to pick up the change. Jellyfin doesn't: its scope is resolved
+        // per sync via `resolvedMusicLibraryId()`, which now reads the stored
+        // choice, and browsing/streaming are unscoped anyway.
+        if active?.connection.kind == .subsonic {
+            Task { @MainActor in
+                if let rebuilt = try? await self.buildBackend(from: stored) {
+                    self.finishActivation(
+                        connection: rebuilt.0,
+                        backend: rebuilt.1,
+                        capabilities: self.active?.capabilities
+                            ?? ServerCapabilities(backend: .subsonic)
+                    )
+                }
+                self.startSync()
+            }
+            return
+        }
         startSync()
     }
 
@@ -1446,8 +1473,17 @@ public final class AppEnvironment: ObservableObject {
     /// Resolve (and cache) the music library id used to scope Jellyfin catalog
     /// queries via ParentId. Returns nil for Plex (uses section ids instead) and
     /// on any resolution failure — the sync then falls back to unscoped queries.
+    ///
+    /// The user's explicit choice wins over auto-resolution. Without that,
+    /// `resolveMusicLibraryId()` silently picks whichever music library the
+    /// server happens to list first, which is invisible and unfixable on a
+    /// server with more than one.
     private func resolvedMusicLibraryId() async -> String? {
         guard let active, active.connection.kind == .jellyfin else { return nil }
+        if let chosen = SessionPersistence.load(credentials)?.selectedMusicSectionIDs?.first,
+           !chosen.isEmpty {
+            return chosen
+        }
         if let cached = cachedMusicLibraryId, cached.serverId == active.connection.id {
             return cached.id
         }

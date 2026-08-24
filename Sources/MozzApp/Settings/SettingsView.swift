@@ -18,6 +18,9 @@ struct SettingsView: View {
     /// a `.task` on a view whose only content is conditional never fires until the
     /// content exists, a chicken-and-egg that leaves it permanently hidden).
     @State private var recCoverage: (total: Int, matched: Int, genreTagged: Int)?
+    /// Whether the active server exposes more than one music library, so the
+    /// picker is worth offering. Probed once when the screen appears.
+    @State private var hasSeveralLibraries = false
 
     var body: some View {
         NavigationStack {
@@ -39,6 +42,15 @@ struct SettingsView: View {
                                 PlexLibraryPickerView()
                             } label: {
                                 Label("Server & Libraries", mozz: "square.stack.3d.up")
+                            }
+                        } else if hasSeveralLibraries {
+                            // Jellyfin and Subsonic can both expose more than one
+                            // music library. Only offered when there is an actual
+                            // choice — otherwise it's a menu with one item.
+                            NavigationLink {
+                                MusicLibraryPickerView()
+                            } label: {
+                                Label("Music Library", mozz: "square.stack.3d.up")
                             }
                         }
                         if let text = env.syncStatusText {
@@ -163,6 +175,14 @@ struct SettingsView: View {
             .onAppear { env.playback.normalizationEnabled = normalizationEnabled }
             .onChange(of: normalizationEnabled) { _, enabled in
                 env.playback.normalizationEnabled = enabled
+            }
+            .task {
+                // Only Jellyfin/Subsonic need probing — Plex has its own row and
+                // its own picker. `musicLibraries()` already returns empty for a
+                // single-library server, so this is exactly "is there a choice".
+                if env.active?.connection.kind != .plex {
+                    hasSeveralLibraries = await !env.musicLibraries().isEmpty
+                }
             }
             .task {
                 // Poll the cheap coverage count while Settings is open so the status
