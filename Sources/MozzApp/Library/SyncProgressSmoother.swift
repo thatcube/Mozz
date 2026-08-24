@@ -1,113 +1,158 @@
 import Foundation
 import MozzSync
 
+/// The pacing maths behind the sync counters, kept free of timers and actors so
+/// it can be stepped deterministically in tests.
+///
+/// One of these per phase. It answers a single question: given where the counter
+/// is now, where the server says it should be, and how long this phase usually
+/// takes to deliver a page, how far should the counter move this tick?
+struct SyncCounterPacer {
+    /// Where the displayed counter currently sits. Fractional, so a slow phase
+    /// (a few items spread over half a minute) still advances instead of
+    /// rounding to nothing every tick.
+    private(set) var position: Double = 0
+    /// The last count the sync actually reported. The counter never passes this.
+    private(set) var target: Double = 0
+
+    /// Rolling estimate of the seconds between this phase's page arrivals.
+    private(set) var pageInterval: Double
+    private var lastArrival: Date?
+    private var seeded = false
+
+    /// Aim to take a little longer than the measured gap, so the counter is
+    /// usually still climbing when the next page lands rather than parked.
+    static let stretch = 1.25
+    /// Guard rails, so one freak interval can't freeze the counter or send it
+    /// sprinting.
+    static let minimumSpread = 4.0
+    static let maximumSpread = 60.0
+    /// Floor in items/second, so the tail of a step never decays to a standstill.
+    static let minimumRate = 0.8
+
+    init(defaultInterval: Double = 15) {
+        pageInterval = defaultInterval
+    }
+
+    /// How long a whole step should be spread over.
+    var spread: Double {
+        min(max(pageInterval * Self.stretch, Self.minimumSpread), Self.maximumSpread)
+    }
+
+    /// Record a freshly reported count.
+    ///
+    /// Crucially this is **per phase**. The sync runs its phases concurrently,
+    /// so a shared "did anything move" signal fires far more often than any one
+    /// phase delivers a page — which made every counter race through its step in
+    /// a fraction of the real interval and then sit still.
+    mutating func report(_ count: Int, at now: Date = Date()) {
+        let value = Double(count)
+
+        // First sight: adopt the value outright rather than counting up to it
+        // from zero, which would misrepresent a sync already in progress.
+        guard seeded else {
+            position = value
+            target = value
+            lastArrival = now
+            seeded = true
+            return
+        }
+
+        guard value != target else { return }
+
+        if value > target, let last = lastArrival {
+            let elapsed = now.timeIntervalSince(last)
+            // Ignore absurd gaps — a backgrounded app, a stalled server — so
+            // they can't poison the estimate.
+            if elapsed > 0.25, elapsed < 300 {
+                pageInterval = pageInterval * 0.6 + elapsed * 0.4
+            }
+        }
+        if value > target { lastArrival = now }
+
+        target = value
+        // A restart (or a re-scoped library) moves the target backwards; drop to
+        // it rather than crawling down.
+        if position > target { position = target }
+    }
+
+    /// Mark the phase finished: the counter should read exactly, not approach.
+    mutating func settle(at count: Int) {
+        position = Double(count)
+        target = Double(count)
+        seeded = true
+    }
+
+    /// Advance the counter by `elapsed` seconds. Returns whether there is still
+    /// ground to cover.
+    @discardableResult
+    mutating func advance(by elapsed: Double) -> Bool {
+        guard position < target else {
+            position = min(position, target)
+            return false
+        }
+        // Recomputed from the *current* remaining gap every tick rather than
+        // fixed when the page arrived: a stored rate goes stale the moment
+        // anything unexpected happens, and a stale rate of zero is exactly the
+        // frozen counter this exists to prevent.
+        let gap = target - position
+        let rate = max(gap / spread, Self.minimumRate)
+        position = min(position + rate * elapsed, target)
+        return position < target
+    }
+
+    /// The value to show.
+    var displayed: Int { Int(position.rounded(.down)) }
+}
+
 /// Eases the sync counters toward their real values so the card always looks
 /// alive.
 ///
-/// The sync writes in pages (500 items at a time), so the true counts arrive in
-/// big steps with long gaps between them — which reads as "frozen" even though
-/// the sync is fine.
+/// The sync writes in pages (500 items at a time) and a big library on a slow
+/// server can take twenty-odd seconds per page, so the raw counts sit still and
+/// then leap — which reads as frozen even though nothing is wrong.
 ///
-/// The pacing is the whole trick. A fixed easing rate is barely better than the
-/// raw numbers on a slow server: it sprints through the 500 in about a second
-/// and then sits still for the twenty-odd seconds until the next page lands. So
-/// this **measures how long pages actually take on this server** and spreads
-/// each step over roughly that long, which keeps the number climbing
-/// continuously whatever pace the server sets.
-///
-/// It stays strictly **un-optimistic**: the displayed value only ever chases a
-/// number the sync has already reported, and is clamped to it, so it can never
-/// run ahead of reality. If a page lands early the remaining gap grows and the
-/// rate is recomputed upward, so it catches up rather than falling behind.
+/// Each phase is paced independently by a ``SyncCounterPacer``, using how long
+/// *that* phase actually takes to deliver a page. It stays strictly
+/// un-optimistic: the displayed value only ever chases a number the sync has
+/// already reported, and is clamped to it, so it can never run ahead of reality.
 @MainActor
 final class SyncProgressSmoother: ObservableObject {
     @Published private(set) var counts: [SyncProgress.Phase: Int] = [:]
     @Published private(set) var fraction: Double = 0
 
-    /// Sub-integer positions, so a slow phase (a handful of items spread over
-    /// half a minute) still advances instead of rounding to nothing each tick.
-    private var positions: [SyncProgress.Phase: Double] = [:]
-    private var rates: [SyncProgress.Phase: Double] = [:]
-    private var targetCounts: [SyncProgress.Phase: Int] = [:]
+    private var pacers: [SyncProgress.Phase: SyncCounterPacer] = [:]
+    private var fractionPacer = SyncCounterPacer()
+    /// The fraction is paced in per-mille, so the integer-flavoured pacer has
+    /// enough resolution to move smoothly across a progress bar.
+    private static let fractionScale = 1000.0
 
-    private var fractionPosition: Double = 0
-    private var fractionRate: Double = 0
-    private var targetFraction: Double = 0
-
-    /// Rolling estimate of the seconds between page arrivals on this server.
-    /// The first real interval corrects the seed.
-    private var pageInterval: Double = 6
-    private var lastArrival: Date?
     private var timer: Timer?
-
     private let tick = 1.0 / 30.0
-    /// Aim to take slightly *longer* than the measured gap between pages, so the
-    /// counter is usually still climbing when the next one lands rather than
-    /// parked and waiting for it.
-    private let stretch = 1.2
-    /// Guard rails, so one freak interval can't freeze the counter for a minute
-    /// or send it sprinting.
-    private let minimumSpread = 1.5
-    private let maximumSpread = 45.0
 
     deinit { timer?.invalidate() }
 
     /// Point the smoother at the latest real progress.
     func update(from progress: SyncProgress?) {
         guard let progress else { return }
-
-        // Only a real page arrival should feed the interval estimate — the card
-        // re-renders for plenty of other reasons.
-        let advanced = progress.details.contains { detail in
-            detail.synced > (targetCounts[detail.phase] ?? 0)
-        }
-        if advanced {
-            let now = Date()
-            if let last = lastArrival {
-                let elapsed = now.timeIntervalSince(last)
-                // Ignore absurd gaps (backgrounded app, first paint) so they
-                // can't poison the average.
-                if elapsed > 0.25, elapsed < 120 {
-                    pageInterval = pageInterval * 0.6 + elapsed * 0.4
-                }
-            }
-            lastArrival = now
-        }
-
-        let spread = min(max(pageInterval * stretch, minimumSpread), maximumSpread)
+        let now = Date()
 
         for detail in progress.details {
-            let previousTarget = targetCounts[detail.phase]
-            targetCounts[detail.phase] = detail.synced
-
-            // Seed on first sight so a phase doesn't count up from zero when the
-            // app is reopened mid-sync.
-            if positions[detail.phase] == nil {
-                positions[detail.phase] = Double(detail.synced)
-                counts[detail.phase] = detail.synced
-            }
-            // A finished phase reads exactly rather than approaching forever.
+            var pacer = pacers[detail.phase] ?? SyncCounterPacer()
             if detail.state == .done {
-                positions[detail.phase] = Double(detail.synced)
-                counts[detail.phase] = detail.synced
-                rates[detail.phase] = 0
-                continue
+                pacer.settle(at: detail.synced)
+            } else {
+                pacer.report(detail.synced, at: now)
             }
-            // Re-pace whenever the target moves: spread the *current* remaining
-            // gap over roughly one page interval.
-            if previousTarget != detail.synced {
-                let gap = Double(detail.synced) - (positions[detail.phase] ?? 0)
-                rates[detail.phase] = gap > 0 ? gap / spread : 0
+            pacers[detail.phase] = pacer
+            if counts[detail.phase] != pacer.displayed {
+                counts[detail.phase] = pacer.displayed
             }
         }
 
         if let total = progress.totalCount, total > 0 {
-            let newTarget = min(Double(progress.itemsSynced) / Double(total), 1)
-            if newTarget != targetFraction {
-                targetFraction = newTarget
-                let gap = targetFraction - fractionPosition
-                fractionRate = gap > 0 ? gap / spread : 0
-            }
+            let permille = Int((Double(progress.itemsSynced) / Double(total) * Self.fractionScale).rounded())
+            fractionPacer.report(min(permille, Int(Self.fractionScale)), at: now)
         }
         start()
     }
@@ -116,15 +161,9 @@ final class SyncProgressSmoother: ObservableObject {
     /// numbers.
     func reset() {
         counts = [:]
-        positions = [:]
-        rates = [:]
-        targetCounts = [:]
+        pacers = [:]
+        fractionPacer = SyncCounterPacer()
         fraction = 0
-        fractionPosition = 0
-        fractionRate = 0
-        targetFraction = 0
-        lastArrival = nil
-        pageInterval = 6
         stop()
     }
 
@@ -145,32 +184,15 @@ final class SyncProgressSmoother: ObservableObject {
     private func step() {
         var moving = false
 
-        for (phase, target) in targetCounts {
-            let goal = Double(target)
-            var position = positions[phase] ?? goal
-
-            if position > goal {
-                position = goal                  // a restart; don't crawl downward
-            } else if position < goal {
-                position = min(position + (rates[phase] ?? 0) * tick, goal)
-                // Still short of the target means there is more to show, even if
-                // this tick's movement rounded to the same integer.
-                moving = moving || position < goal
-            }
-            positions[phase] = position
-
-            let shown = Int(position.rounded(.down))
-            if counts[phase] != shown { counts[phase] = shown }
+        for (phase, var pacer) in pacers {
+            moving = pacer.advance(by: tick) || moving
+            pacers[phase] = pacer
+            if counts[phase] != pacer.displayed { counts[phase] = pacer.displayed }
         }
 
-        if fractionPosition < targetFraction {
-            fractionPosition = min(fractionPosition + fractionRate * tick, targetFraction)
-            fraction = fractionPosition
-            moving = moving || fractionPosition < targetFraction
-        } else if fractionPosition > targetFraction {
-            fractionPosition = targetFraction
-            fraction = fractionPosition
-        }
+        moving = fractionPacer.advance(by: tick) || moving
+        let value = fractionPacer.position / Self.fractionScale
+        if abs(fraction - value) > 0.0001 { fraction = value }
 
         // Caught up — stop burning a timer until the next page lands.
         if !moving { stop() }

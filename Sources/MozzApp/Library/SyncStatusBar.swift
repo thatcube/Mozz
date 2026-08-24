@@ -207,7 +207,10 @@ struct SyncStatusBar: View {
 
     @ViewBuilder
     private func phaseCount(_ detail: SyncProgress.PhaseDetail) -> some View {
-        if detail.state != .pending {
+        // A phase the sync hasn't reached reports 0 of 0. Rendering that as
+        // "0/0" reads as an error — as though it ran and found nothing — so an
+        // empty phase shows no count at all until there is something to say.
+        if detail.state != .pending, !(detail.synced == 0 && (detail.total ?? 0) == 0) {
             Text(count(detail))
                 .foregroundStyle(detail.state == .done ? .secondary : .primary)
                 .monospacedDigit()
@@ -264,13 +267,15 @@ struct SyncStatusBar: View {
         // seconds at a time — the very thing the smoothing exists to fix.
         // Finished and queued rows stay compact, where width matters more.
         let synced = smoother.counts[d.phase] ?? d.synced
+        // A zero total means "not known yet", not "there are none".
+        let total = (d.total ?? 0) > 0 ? d.total : nil
         if d.state == .syncing {
-            if let total = d.total {
+            if let total {
                 return "\(Self.exact(synced))/\(Self.exact(total))"
             }
             return Self.exact(synced)
         }
-        if let total = d.total {
+        if let total {
             return "\(Self.compact(synced))/\(Self.compact(total))"
         }
         return Self.compact(synced)
