@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import CryptoKit
+import MozzContinuity
 import MozzCore
 import MozzDatabase
 import MozzDownloads
@@ -13,6 +15,9 @@ import MozzJellyfin
 import MozzSubsonic
 #if canImport(WidgetKit)
 import WidgetKit
+#endif
+#if canImport(UIKit)
+import UIKit
 #endif
 #if os(iOS)
 import Intents
@@ -80,6 +85,8 @@ public final class AppEnvironment: ObservableObject {
     public let fileStore: DownloadFileStore
     public let downloads: DownloadManager
     public let playback: PlaybackEngine
+    /// Cross-device playback continuity (ADR-0010).
+    public let continuity = ContinuityCoordinator()
     public let playEvents: PlayEventStore
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
@@ -136,6 +143,12 @@ public final class AppEnvironment: ObservableObject {
     /// can't cancel it; `RootView` shows a setup screen while this is true and
     /// `active` isn't ready yet.
     @Published public private(set) var isSettingUp = false
+    /// Non-empty while sign-in is waiting for the user to choose a music
+    /// library. Only ever populated when the server reports more than one.
+    @Published public private(set) var libraryChoice: [MusicLibraryOption] = []
+    /// The activation generation parked on that choice, so a superseded sign-in
+    /// can't resume the wrong setup.
+    private var pendingSetupGeneration: Int?
     /// True once the first sync has produced something playable, so the setup
     /// screen can offer a "Browse now" button while the rest syncs in background.
     @Published public private(set) var canEnterEarly = false
@@ -316,6 +329,45 @@ public final class AppEnvironment: ObservableObject {
     /// Retry the last failed setup, or a fresh one.
     public func retryActivation(session: AuthenticatedSession) { activate(session: session) }
 
+    /// Record the library chosen during sign-in and let setup finish.
+    ///
+    /// Deliberately does not go through `setSelectedMusicLibraries`, which kicks
+    /// its own sync — here the first sync is still to come and is gated so the
+    /// user isn't dropped onto an empty Home.
+    public func applyOnboardingLibraryChoice(_ ids: [String]) {
+        let generation = pendingSetupGeneration ?? activationGeneration
+        pendingSetupGeneration = nil
+        libraryChoice = []
+
+        if !ids.isEmpty, var stored = SessionPersistence.load(credentials) {
+            stored.selectedMusicSectionIDs = ids
+            if active?.connection.kind != .plex {
+                stored.musicSectionID = ids.first
+                cachedMusicLibraryId = nil
+            }
+            SessionPersistence.save(stored, to: credentials)
+        }
+
+        activationTask = Task { @MainActor in
+            // Subsonic reads `musicFolderId` when the backend is constructed, so
+            // it needs rebuilding before the first sync runs. Jellyfin resolves
+            // its scope per sync and Plex reads the list directly.
+            if self.active?.connection.kind == .subsonic,
+               let stored = SessionPersistence.load(self.credentials),
+               let rebuilt = try? await self.buildBackend(from: stored) {
+                self.finishActivation(
+                    connection: rebuilt.0,
+                    backend: rebuilt.1,
+                    capabilities: self.active?.capabilities ?? ServerCapabilities(backend: .subsonic)
+                )
+            }
+            await self.gateInitialSync()
+            guard generation == self.activationGeneration else { return }
+            self.setupError = nil
+            self.isSettingUp = false
+        }
+    }
+
     private func performActivation(_ session: AuthenticatedSession, generation: Int) async {
         canEnterEarly = false
         let stored = StoredSession(
@@ -330,6 +382,17 @@ public final class AppEnvironment: ObservableObject {
         SessionPersistence.save(stored, to: credentials)
         do {
             try await activate(stored)
+            // Before the first sync, let the user say which library to pull — but
+            // only when the server has more than one. Syncing first and asking
+            // after would mean indexing the wrong library and then throwing it
+            // away. Setup pauses here; the chooser resumes it.
+            let options = await musicLibraries()
+            if !options.isEmpty {
+                guard generation == activationGeneration else { return }
+                pendingSetupGeneration = generation
+                libraryChoice = options
+                return                          // `isSettingUp` stays true
+            }
             // First real sign-in → run the initial sync and stay on the setup
             // screen until there's enough to browse (or the user taps "Browse
             // now"), so we don't drop them onto an empty Home.
@@ -341,6 +404,8 @@ public final class AppEnvironment: ObservableObject {
             // Don't clobber a newer activation's freshly-saved session/state.
             guard generation == activationGeneration else { return }
             SessionPersistence.clear(credentials)
+            libraryChoice = []
+            pendingSetupGeneration = nil
             isSettingUp = false                 // cancelled → leave setup
         } catch {
             guard generation == activationGeneration else { return }
@@ -452,6 +517,9 @@ public final class AppEnvironment: ObservableObject {
             invalidateRadio()
         }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
+        // Point cross-device continuity (ADR-0010) at the new server and read
+        // back whatever another device left behind.
+        activateContinuity(backend: backend, capabilities: capabilities)
         // Fill in any track format the light sync skipped (covers relaunch/restore
         // where no fresh sync runs). Cheap no-op once everything's backfilled.
         startMediaBackfillIfNeeded()
@@ -573,6 +641,9 @@ public final class AppEnvironment: ObservableObject {
 
     public func signOut() {
         activationTask?.cancel()
+        // A parked library choice belongs to the account being left.
+        libraryChoice = []
+        pendingSetupGeneration = nil
         cancelSync()                 // stop any in-flight catalog sync for the old account
         mediaBackfillTask?.cancel()  // and the background format backfill
         isSettingUp = false
@@ -1421,7 +1492,34 @@ public final class AppEnvironment: ObservableObject {
     public func setSelectedMusicLibraries(_ ids: [String]) {
         guard var stored = SessionPersistence.load(credentials) else { return }
         stored.selectedMusicSectionIDs = ids.isEmpty ? nil : ids
+        // Plex spans several sections and reads the list directly. The other two
+        // scope through a single id held on the connection — Jellyfin as
+        // `ParentId`, Subsonic as `musicFolderId` — so keep that in step, and
+        // drop the cached auto-resolved Jellyfin library or the old choice would
+        // win for the rest of the session.
+        if active?.connection.kind != .plex {
+            stored.musicSectionID = ids.first ?? stored.musicSectionID
+            cachedMusicLibraryId = nil
+        }
         SessionPersistence.save(stored, to: credentials)
+        // Subsonic reads `musicFolderId` when the backend is built, so it needs a
+        // rebuild to pick up the change. Jellyfin doesn't: its scope is resolved
+        // per sync via `resolvedMusicLibraryId()`, which now reads the stored
+        // choice, and browsing/streaming are unscoped anyway.
+        if active?.connection.kind == .subsonic {
+            Task { @MainActor in
+                if let rebuilt = try? await self.buildBackend(from: stored) {
+                    self.finishActivation(
+                        connection: rebuilt.0,
+                        backend: rebuilt.1,
+                        capabilities: self.active?.capabilities
+                            ?? ServerCapabilities(backend: .subsonic)
+                    )
+                }
+                self.startSync()
+            }
+            return
+        }
         startSync()
     }
 
@@ -1436,8 +1534,17 @@ public final class AppEnvironment: ObservableObject {
     /// Resolve (and cache) the music library id used to scope Jellyfin catalog
     /// queries via ParentId. Returns nil for Plex (uses section ids instead) and
     /// on any resolution failure — the sync then falls back to unscoped queries.
+    ///
+    /// The user's explicit choice wins over auto-resolution. Without that,
+    /// `resolveMusicLibraryId()` silently picks whichever music library the
+    /// server happens to list first, which is invisible and unfixable on a
+    /// server with more than one.
     private func resolvedMusicLibraryId() async -> String? {
         guard let active, active.connection.kind == .jellyfin else { return nil }
+        if let chosen = SessionPersistence.load(credentials)?.selectedMusicSectionIDs?.first,
+           !chosen.isEmpty {
+            return chosen
+        }
         if let cached = cachedMusicLibraryId, cached.serverId == active.connection.id {
             return cached.id
         }
@@ -1549,6 +1656,120 @@ public final class AppEnvironment: ObservableObject {
                 try? await backend.reportPlayback(report)
             }
         }
+        // Cross-device continuity (ADR-0010). Separate from the scrobble hook
+        // above, which only fires on transport transitions and so would leave a
+        // long track's stored position sitting where the track started.
+        playback.onCheckpoint = { [weak self] checkpoint in
+            guard let self else { return }
+            Task { @MainActor in
+                guard let fingerprint = self.continuityFingerprint else { return }
+                self.continuity.record(checkpoint, fingerprint: fingerprint)
+            }
+        }
+    }
+
+    /// The identity a checkpoint written right now would carry, or nil when no
+    /// server is active.
+    var continuityFingerprint: ServerAccountFingerprint? {
+        guard let active else { return nil }
+        switch active.connection.kind {
+        case .jellyfin:
+            return ServerAccountFingerprint(
+                backend: .jellyfin,
+                serverID: active.capabilities.serverIdentity ?? "",
+                accountID: active.connection.userID ?? ""
+            )
+        case .subsonic:
+            // No protocol-level server UUID exists, so this makes no cross-URL
+            // correlation claim — see `ServerAccountFingerprint.isComparableAcross`.
+            return ServerAccountFingerprint(
+                backend: .subsonic,
+                serverID: "",
+                accountID: active.connection.userID ?? ""
+            )
+        case .plex:
+            return nil          // no durable store yet (ADR-0010 phase 3)
+        }
+    }
+
+    /// Build the continuity store for a freshly activated server and reconcile.
+    private func activateContinuity(backend: any MusicBackend, capabilities: ServerCapabilities) {
+        var store: (any ContinuityStore)?
+        switch backend {
+        case let subsonic as SubsonicBackend:
+            store = subsonic.makeContinuityStore(
+                supportsIndexBasedQueue: capabilities.supportsIndexBasedQueue ?? false
+            )
+        case let jellyfin as JellyfinBackend:
+            store = jellyfin.makeContinuityStore(serverIdentity: capabilities.serverIdentity)
+        default:
+            store = nil
+        }
+        continuity.activate(
+            store: store,
+            deviceID: Self.continuityDeviceID(from: clientIdentifier),
+            deviceName: Self.localDeviceName,
+            deviceKind: Self.localDeviceKind
+        )
+        Task { @MainActor in
+            await self.continuity.reconcile(
+                isPlayingLocally: self.playback.snapshot.status == .playing
+            )
+        }
+    }
+
+    /// Re-read the remote checkpoint when the app comes back to the foreground.
+    ///
+    /// An idle device must refresh: a phone that was paused in a pocket while
+    /// another device took over otherwise resurfaces showing stale state and
+    /// overwrites the newer session on its next write.
+    public func reconcileContinuity() {
+        Task { @MainActor in
+            await self.continuity.reconcile(
+                isPlayingLocally: self.playback.snapshot.status == .playing
+            )
+        }
+    }
+
+    /// Flush any pending checkpoint — the app may not run again.
+    public func flushContinuity() {
+        Task { @MainActor in await self.continuity.flushNow() }
+    }
+
+    /// A stable per-install id that never leaks the identifier presented to the
+    /// server. Domain-separated so the two cannot be correlated by a third party.
+    static func continuityDeviceID(from clientIdentifier: String) -> String {
+        let salted = "mozz.continuity.device\u{1}" + clientIdentifier
+        return SHA256.hash(data: Data(salted.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+            .prefix(32)
+            .description
+    }
+
+    static var localDeviceName: String {
+        #if canImport(UIKit)
+        return UIDevice.current.name
+        #else
+        return ProcessInfo.processInfo.hostName
+        #endif
+    }
+
+    /// Reported explicitly so the receiving device can show the right glyph.
+    /// Note an iPad app running on Apple Silicon reports `.mac`, which is
+    /// exactly what we want to display.
+    static var localDeviceKind: ContinuityDeviceKind {
+        #if canImport(UIKit)
+        switch UIDevice.current.userInterfaceIdiom {
+        case .phone: return .phone
+        case .pad: return .tablet
+        case .mac: return .desktop
+        case .tv: return .tv
+        default: return .unknown
+        }
+        #else
+        return .desktop
+        #endif
     }
 
     /// Feed the lock screen / Control Center album art. The engine fires

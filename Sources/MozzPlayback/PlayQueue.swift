@@ -175,6 +175,49 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         refreshWrapCache()
     }
 
+    /// Replace the queue with an **explicit, already-realized playback order**.
+    ///
+    /// Exists for cross-device continuity (ADR-0010). Every other loading path
+    /// derives `order` itself, which is right when this device is choosing the
+    /// order — but a queue arriving from another device must be reproduced
+    /// *exactly*, and it cannot be re-derived here: Mozz's shuffle is a balanced
+    /// spread biased by device-local recency/taste scores, so re-running it
+    /// would produce a different sequence. Passing `order` through verbatim is
+    /// the only way the receiving device plays the same thing in the same order.
+    ///
+    /// Keeping the base `tracks` alongside the realized `order` is what lets the
+    /// user turn shuffle *off* after a handoff and get the album back.
+    ///
+    /// - Parameters:
+    ///   - newTracks: the base (pre-shuffle) track order.
+    ///   - order: a permutation of `newTracks.indices` giving playback order.
+    ///     Invalid or incomplete permutations fall back to the identity, so a
+    ///     malformed record degrades to "plays in base order" instead of
+    ///     crashing or silently dropping tracks.
+    ///   - position: index into `order` of the current track.
+    public mutating func setItems(
+        _ newTracks: [Track],
+        realizedOrder order: [Int],
+        position: Int,
+        repeatMode: RepeatMode,
+        isShuffled: Bool
+    ) {
+        tracks = newTracks
+        nextLoopOrder = nil
+        self.repeatMode = repeatMode
+        self.isShuffled = isShuffled
+        guard !newTracks.isEmpty else {
+            self.order = []
+            self.position = -1
+            return
+        }
+        let isValidPermutation = order.count == newTracks.count
+            && Set(order) == Set(newTracks.indices)
+        self.order = isValidPermutation ? order : Array(newTracks.indices)
+        self.position = min(max(position, 0), self.order.count - 1)
+        refreshWrapCache()
+    }
+
     /// Replace the queue with `newTracks` and start playing a freshly balanced
     /// shuffle (no pinned start, so the first track feels random). Forces shuffle
     /// on — the single entry point every "Shuffle" button in the app uses.

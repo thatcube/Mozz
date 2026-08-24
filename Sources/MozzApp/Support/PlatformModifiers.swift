@@ -310,6 +310,23 @@ extension Color {
     /// such as the star rating fill.
     static var mozzBrand: Color { Color(red: 245.0 / 255.0, green: 0.0, blue: 49.0 / 255.0) }
 
+    /// The surface for a notification-style banner — the plain window
+    /// background.
+    ///
+    /// Rendered under a deliberately flipped `colorScheme` (see
+    /// `ContinueHereBanner`) this becomes the *inverted* surface: near-white in
+    /// dark mode, near-black in light mode. That is what separates a transient
+    /// notice from the chrome it floats above.
+    static var mozzBannerSurface: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(white: 1)
+        #endif
+    }
+
     /// The inverse of `Color.primary` — the label/spinner color that sits on a
     /// solid `Color.primary` pill (see `MozzProminentButtonStyle`), so text always
     /// contrasts the fill in both color schemes.
@@ -452,14 +469,18 @@ extension View {
 /// (white text on a near-white pill).
 struct MozzProminentButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    /// Sized to sit inline beside text (a banner action, a row accessory)
+    /// rather than filling the width as a primary CTA. Same scheme-proof color
+    /// pairing either way — that is the whole point of sharing the style.
+    var isCompact: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline)
+            .font(isCompact ? .subheadline.weight(.semibold) : .headline)
             .foregroundStyle(Color.mozzProminentLabel)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .padding(.horizontal, 20)
+            .frame(maxWidth: isCompact ? nil : .infinity)
+            .padding(.vertical, isCompact ? 7 : 14)
+            .padding(.horizontal, isCompact ? 14 : 20)
             .background(Capsule().fill(Color.mozzProminentFill))
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
             .contentShape(Capsule())
@@ -470,4 +491,9 @@ extension ButtonStyle where Self == MozzProminentButtonStyle {
     /// A legible, scheme-proof solid pill for primary CTAs. Use instead of
     /// `.borderedProminent`, which assumes a colored fill with a white label.
     static var mozzProminent: MozzProminentButtonStyle { MozzProminentButtonStyle() }
+
+    /// The same pill, sized to sit inline next to text.
+    static var mozzProminentCompact: MozzProminentButtonStyle {
+        MozzProminentButtonStyle(isCompact: true)
+    }
 }

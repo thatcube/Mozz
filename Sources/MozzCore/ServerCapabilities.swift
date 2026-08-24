@@ -33,9 +33,27 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
     /// Server accepts playback progress / scrobble reports.
     public var supportsProgressReporting: Bool
 
+    /// The server's own stable identity, where the protocol exposes one
+    /// (Jellyfin `System/Info/Public.Id`, Plex `machineIdentifier`).
+    ///
+    /// Distinct from the local server row id, which is derived from the base URL
+    /// and therefore differs between a LAN address and a public hostname for the
+    /// *same* machine. Cross-device continuity (ADR-0010) needs an identity that
+    /// survives that. `nil` for protocols with no server UUID (generic Subsonic).
+    public var serverIdentity: String?
+
     /// Plex-only: whether the account has an active Plex Pass. `nil` means not
     /// yet determined or not applicable.
     public var hasPlexPass: Bool?
+
+    /// Subsonic-only: whether the server advertises OpenSubsonic's
+    /// `indexBasedQueue` extension, so `savePlayQueue`/`getPlayQueue` identify
+    /// the current item by **index** rather than by track id.
+    ///
+    /// It matters for cross-device continuity (ADR-0010): a classic id-based
+    /// queue cannot say which occurrence is playing when the same track appears
+    /// twice. `nil` means not determined or not applicable.
+    public var supportsIndexBasedQueue: Bool?
 
     /// The detected server *product* name, when a backend reports one. Subsonic
     /// servers advertise their implementation in the OpenSubsonic `type` field
@@ -64,6 +82,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         supportsNormalizationGain: Bool = false,
         supportsProgressReporting: Bool = true,
         hasPlexPass: Bool? = nil,
+        serverIdentity: String? = nil,
+        supportsIndexBasedQueue: Bool? = nil,
         serverProduct: String? = nil,
         isOpenSubsonic: Bool = false,
         detectedAt: Date = Date()
@@ -79,6 +99,8 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.supportsNormalizationGain = supportsNormalizationGain
         self.supportsProgressReporting = supportsProgressReporting
         self.hasPlexPass = hasPlexPass
+        self.serverIdentity = serverIdentity
+        self.supportsIndexBasedQueue = supportsIndexBasedQueue
         self.serverProduct = serverProduct
         self.isOpenSubsonic = isOpenSubsonic
         self.detectedAt = detectedAt

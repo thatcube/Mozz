@@ -37,6 +37,7 @@ let package = Package(
         .library(name: "MozzSubsonic", targets: ["MozzSubsonic"]),
         .library(name: "MozzSync", targets: ["MozzSync"]),
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
+        .library(name: "MozzContinuity", targets: ["MozzContinuity"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
         .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
         .library(name: "MozzEnrichment", targets: ["MozzEnrichment"]),
@@ -74,10 +75,19 @@ let package = Package(
 
         // MARK: Backends (one `MusicBackend` conformer each)
         .target(name: "MozzPlex", dependencies: ["MozzCore", "MozzNetworking"]),
-        .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking"]),
+        .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
         // Generic Subsonic / OpenSubsonic backend (Navidrome-QA'd, others
         // best-effort). CryptoKit (system framework) is used for MD5 token auth.
-        .target(name: "MozzSubsonic", dependencies: ["MozzCore", "MozzNetworking"]),
+        .target(name: "MozzSubsonic", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
+
+        // MARK: Cross-device continuity (ADR-0010)
+        //
+        // Portable wire types + the `ContinuityStore` protocol for resuming
+        // playback on another device. Depends on MozzCore ONLY: the backends
+        // implement the store, and MozzApp maps engine types across, so
+        // MozzPlayback never has to import this (which is why the queue carries
+        // its own `ContinuityRepeatMode`).
+        .target(name: "MozzContinuity", dependencies: ["MozzCore"]),
 
         // MARK: Catalog sync engine (backend -> DB, off-main)
         .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
@@ -151,6 +161,7 @@ let package = Package(
         ),
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
+        .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),

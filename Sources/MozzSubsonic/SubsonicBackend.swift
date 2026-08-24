@@ -1,4 +1,5 @@
 import Foundation
+import MozzContinuity
 import MozzCore
 import MozzNetworking
 
@@ -88,8 +89,28 @@ public struct SubsonicBackend: MusicBackend {
             supportsSyncedLyrics: extensions.contains("songLyrics"),
             supportsNormalizationGain: openSubsonic, // replayGain is OpenSubsonic
             supportsProgressReporting: true,  // scrobble
+            supportsIndexBasedQueue: extensions.contains("indexBasedQueue"),
             serverProduct: product,
             isOpenSubsonic: openSubsonic
+        )
+    }
+
+    /// A cross-device continuity store backed by `savePlayQueue`/`getPlayQueue`
+    /// (ADR-0010).
+    ///
+    /// `accountID` folds the username into the fingerprint because generic
+    /// Subsonic exposes no server UUID — two accounts on one server must not
+    /// share a checkpoint identity. No cross-URL correlation is claimed; see
+    /// `ServerAccountFingerprint.isComparableAcross`.
+    public func makeContinuityStore(supportsIndexBasedQueue: Bool) -> any ContinuityStore {
+        SubsonicContinuityStore(
+            client: client,
+            fingerprint: ServerAccountFingerprint(
+                backend: .subsonic,
+                serverID: "",
+                accountID: connection.userID ?? ""
+            ),
+            supportsIndexBasedQueue: supportsIndexBasedQueue
         )
     }
 
@@ -341,6 +362,26 @@ public struct SubsonicBackend: MusicBackend {
             URLQueryItem(name: "id", value: itemID),
             URLQueryItem(name: "rating", value: "\(clamped)"),
         ], as: SubsonicEmpty.self)
+    }
+
+    /// The account's music folders (`getMusicFolders`).
+    ///
+    /// Subsonic has had this since v1.0.0 and it is genuinely honoured by the
+    /// current servers — Navidrome ≥ 0.58, gonic and LMS all filter results by
+    /// `musicFolderId` rather than accepting and ignoring it. Best-effort: a
+    /// server that doesn't implement the endpoint answers with an error
+    /// envelope, which becomes "nothing to choose".
+    public func fetchLibraries() async throws -> [MusicLibrary] {
+        guard let body = try? await client.send(
+            "getMusicFolders", as: SubsonicMusicFoldersPayload.self
+        ) else { return [] }
+        return (body.payload.musicFolders?.musicFolder ?? []).compactMap { folder in
+            guard let id = folder.id else { return nil }
+            // `id` is an integer in the spec, and on gonic it is an array index
+            // rather than a stable key — so it is carried as its string form and
+            // never interpreted.
+            return MusicLibrary(id: id.value, name: folder.name ?? "Music")
+        }
     }
 
     public func reportPlayback(_ report: PlaybackReport) async throws {

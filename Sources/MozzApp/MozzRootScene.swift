@@ -30,7 +30,18 @@ public struct MozzRootScene: Scene {
                     // Returning to the foreground resumes the enrichment crawl so an
                     // already-synced library keeps filling in without a manual sync.
                     // No-op when disabled or already running.
-                    if phase == .active { env.resumeEnrichmentIfNeeded() }
+                    if phase == .active {
+                        env.resumeEnrichmentIfNeeded()
+                        // An idle device has to re-read the shared checkpoint:
+                        // another device may have taken over while this one was
+                        // asleep, and stale state here would be published over
+                        // the newer session on the next write (ADR-0010).
+                        env.reconcileContinuity()
+                    }
+                    if phase == .background {
+                        // Last chance to run — get any pending checkpoint out.
+                        env.flushContinuity()
+                    }
                 }
         }
     }
@@ -44,6 +55,10 @@ struct RootView: View {
         Group {
             if env.isRestoring {
                 SplashView()
+            } else if !env.libraryChoice.isEmpty {
+                // Sign-in is parked waiting for a library choice; this takes
+                // precedence over the setup screen it interrupts.
+                OnboardingLibraryChoiceView()
             } else if env.isSettingUp {
                 SetupView()
             } else if env.active == nil {
