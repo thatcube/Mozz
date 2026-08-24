@@ -1,218 +1,309 @@
 # ADR-0010 — Cross-device playback continuity (session handoff)
 
-Status: **Proposed**.
+Status: **Proposed** (revised after source-level verification of all three backends).
 
 ## Context
 
-The request, in the words of a r/selfhosted commenter describing what self-hosted
-music is missing versus Spotify:
+The ask, from a r/selfhosted thread on what self-hosted music is missing versus
+Spotify:
 
 > if you're playing a track on one device and open Spotify on a second device, it
 > will usually ask if you want to listen on the new device. If you say yes, it
 > seamlessly ends the playback on the first device and starts it on the second
-> one. If you continue on the original device, you see the track progress in
-> real-time on device two. You can switch the playback to any device you have
-> connected to your account […] Basically, you can only have a single playback
-> session going on in Spotify, and you can very easily move that session between
-> devices.
+> one. […] You can switch the playback to any device you have connected to your
+> account […] Basically, you can only have a single playback session going on in
+> Spotify, and you can very easily move that session between devices.
 
-Decomposed, that is four separate capabilities with very different requirements:
+Four capabilities, with very different requirements:
 
-| # | Capability | Needs | Tolerates latency? |
+| # | Capability | Needs | Latency tolerance |
 | --- | --- | --- | --- |
-| C1 | "Continue here" — open on device B, resume where device A was | durable state | yes (seconds) |
-| C2 | Live progress mirroring — B watches A's position tick | live channel | no |
-| C3 | Device picker — push playback to another device | live channel + target awake | no |
-| C4 | Single-session semantics — A stops when B takes over | conflict resolution | yes |
+| C1 | "Continue here" — open on device B, resume where A was | durable state | seconds |
+| C2 | Live progress mirroring | live channel | none |
+| C3 | Device picker — push playback to another device | live channel + target awake | none |
+| C4 | Single-session — A stops when B takes over | atomic ownership | seconds |
 
-The target scenario Brandon named is explicitly **off-network**: listening on
-cellular away from home, then coming home and booting a PC, which should know
-what was playing. That single sentence rules out several otherwise-attractive
-designs, because the state must be readable by a machine that is **not** an Apple
-device and was **not** on the LAN when the listening happened.
+The maintainer's target scenario is explicitly **off-network**: listening on
+cellular away from home, then coming home and booting a **PC**, which should know
+what was playing. Pure-offline listening is out of scope until reconnect.
+
+That scenario rules out iCloud (CloudKit / KV store / synced Keychain) for the
+durable layer: it is Apple-device-only, so a PC can never read it, and the
+entitlement cannot be provisioned headlessly — which would break the per-branch
+headless deploy flow, exactly as App Groups did (see `AGENTS.local.md`). The
+durable state must live on the user's own server.
 
 ### What Mozz already has
 
 - `PlaybackEngine.persistentState` → `PlaybackPersistentState { queue: PlayQueue,
-  elapsed: TimeInterval }`, `Codable`, with a matching `restore(_:)`. This is
-  already the exact handoff payload.
-- Playback is already reported to every backend: Jellyfin
-  `Sessions/Playing[/Progress|/Stopped]`, Plex `/:/timeline`, Subsonic
-  `scrobble`. **Every supported server therefore already knows what Mozz played
-  and when.**
-- `ServerCapabilities` + `CapabilityResolver` — the established pattern for
-  gating features on per-server probing rather than branching on `BackendKind`.
-- `NSLocalNetworkUsageDescription` and `NSBonjourServices` are already declared in
-  `project.yml`; `LocalNetworkPermission` already handles the iOS local-network
-  permission race.
+  elapsed }`, `Codable`, with `restore(_:)`.
+- Playback already reported to every backend: Jellyfin `Sessions/Playing[/Progress
+  |/Stopped]`, Plex `/:/timeline`, Subsonic `scrobble`.
+- `ServerCapabilities` / `CapabilityResolver` — the established per-server gating
+  pattern.
+- `NSLocalNetworkUsageDescription` + `NSBonjourServices` already in `project.yml`;
+  `LocalNetworkPermission` already handles the iOS permission race.
+- `clientIdentifier` — already a stable, per-install, **device-local** id that each
+  server uses to tell devices apart (`AppEnvironment.buildBackend` deliberately
+  presents *this* device's, never the iCloud-synced session's).
 
-### The constraint that shapes everything: no single API covers all servers
+## The decisive finding
 
-| Backend | Purpose-built queue API? | Finding |
+An earlier draft of this ADR proposed a "universal floor": recover *what was
+playing and where* from the play history every backend already records, needing no
+client-writable storage. **Source-level verification killed it. No supported
+server persists a resume position for music.**
+
+| Server | Evidence | Position stored? |
 | --- | --- | --- |
-| **Subsonic / Navidrome** | **Yes** — `savePlayQueue` / `getPlayQueue` | Server-persisted queue + `current` + `position`, and `getPlayQueue` returns `changed` / `changedBy` (the device that last wrote). Effectively this exact feature, standardised since Subsonic 1.12.0. Navidrome implements it; ids are **strings**, not the spec's ints. |
-| **Jellyfin** | **No** | `NowPlayingQueue` lives on the *session* and is **not** persisted once the client disconnects. Per-item position **is** persisted (`UserData.PlaybackPositionTicks`). A queue must therefore be stored by the client, in the per-user client-writable KV store `DisplayPreferences.CustomPrefs`. |
-| **Plex** | **Partial** | `/playQueues` creates a genuinely server-side queue object with a `playQueueID` that another device can `GET`; `viewOffset` rides `/:/timeline`. But nothing tells device B *which* `playQueueID` was device A's — there is no per-client KV store to leave the pointer in. |
+| **Jellyfin** | `Audio` does not override `SupportsPositionTicksResume`, so it inherits `BaseItem`'s `=> false`. `UserDataManager.UpdatePlayState` then runs `if (!item.SupportsPositionTicksResume) { positionTicks = 0; }` before writing. (`MediaBrowser.Controller/Entities/Audio/Audio.cs`, `Emby.Server.Implementations/Library/UserDataManager.cs`) | **No — always written as 0** |
+| **Plex** | `viewOffset` is absent from `Track` records returned by `/status/sessions/history/all`; it appears only in *live* `/status/sessions`. "Store Track Progress" is widely reported broken for audio (`plexinc/plex-media-player#738`). | **No** |
+| **Subsonic** | `scrobble` has no position parameter in the protocol. Mozz correspondingly sends only `submission=false` at position 0 and `submission=true` on stop (`SubsonicBackend.swift:346`). | **No** |
 
-So the naive designs both fail:
+Two further defects sink the idea even for identifying the *track*:
 
-- **"Use the server's session API"** — only Jellyfin has a real one, and its queue
-  does not survive disconnection.
-- **"Use iCloud (CloudKit / KV store / synced Keychain)"** — fails the stated PC
-  scenario outright (Apple devices only), adds a third-party dependency to a
-  self-hosted app, and CloudKit/KVS need an entitlement that cannot be provisioned
-  headlessly (see `AGENTS.local.md`: the App Groups precedent), which would break
-  the per-branch headless deploy flow.
+- "Most recently played" identifies a **completed/scrobbled** track, which is not
+  necessarily the track that was playing when playback stopped.
+- The same server account is shared with every other client the user runs, so the
+  most recent activity may not be Mozz's at all.
+
+**Conclusion: Mozz must write its own checkpoint.** Play history is at best a
+low-confidence hint, never a correctness primitive.
+
+Related, equally decisive negative findings:
+
+- **Jellyfin `NowPlayingQueue` is in-memory only** (a `ConcurrentDictionary` in
+  `SessionManager`), lost on disconnect or server restart.
+- **Plex play queues are ephemeral and client-scoped.** They are session-linked
+  with no persistence guarantee, and `GET /playQueues/{id}` from a different
+  `X-Plex-Client-Identifier` is not reliably a passive read (`own=1` *transfers
+  ownership*). An earlier draft claimed Plex could offer full-queue durability via
+  `/playQueues`; **that claim is withdrawn.**
+- **A suspended iOS app cannot be a cast target.** iOS tears down the `NWListener`
+  and its Bonjour advertisement at suspension, and there is no socket-wake for
+  third-party apps. Spotify's own iOS app does not appear in Connect lists when
+  closed. Waking a cold device would require APNs — which needs a provider server
+  the user would have to run and pay for, violating the zero-cost constraint.
 
 ## Decision
 
-Split the feature along the durability/liveness seam, because that is where the
-per-server differences actually fall. Two small protocols in `MozzCore`, each with
-pluggable adapters, and a **fidelity ladder** so every server gets the best
-behaviour its API can support and no server gets nothing.
+Write our own checkpoint, keep it small, and be honest about what each server can
+hold. Three narrow protocols rather than one document that every adapter pretends
+to round-trip.
 
 ```mermaid
 graph TD
-    ENG["PlaybackEngine<br/>persistentState / restore"]
-    ENG --> DOC["PlaybackSessionDocument<br/>(one portable value type)"]
-    DOC --> STORE["PlaybackSessionStore<br/>durable · 'where was I?'"]
-    DOC --> BUS["PlaybackSessionBus<br/>live · 'who's playing now?'"]
-    STORE --> S1["Subsonic · savePlayQueue/getPlayQueue"]
-    STORE --> S2["Jellyfin · DisplayPreferences.CustomPrefs"]
-    STORE --> S3["Plex · /playQueues + viewOffset"]
-    STORE --> S4["Any server · recently-played + saved position"]
-    BUS --> B1["LAN peers · _mozz._tcp — all backends"]
-    BUS --> B2["Jellyfin · /Sessions + WebSocket"]
+    ENG["PlaybackEngine (local queue stays authoritative)"]
+    ENG --> CP["PlaybackCheckpoint (small, bounded)<br/>+ QueueManifest (written only on queue change)"]
+    CP --> CS["ContinuityStore — durable, authoritative"]
+    CP --> OBS["PlaybackObservation — read-only, low-confidence hints"]
+    CP --> RC["RemoteControl — live, best-effort"]
+    CS --> A1["Subsonic · savePlayQueue/getPlayQueue"]
+    CS --> A2["Jellyfin · DisplayPreferences.CustomPrefs"]
+    CS --> A3["Plex · dedicated playlist + cursor in summary"]
+    RC --> R1["Nearby devices · authenticated LAN peers"]
+    RC --> R2["Jellyfin · /Sessions + WebSocket"]
 ```
 
-### 1. One portable document
+### 1. Data model
+
+Split by write frequency, because the queue is large and static while the cursor
+is small and constantly moving:
 
 ```swift
-public struct PlaybackSessionDocument: Codable, Sendable, Hashable {
-    public var generation: Int          // monotonic; the conflict resolver
-    public var deviceID: String         // stable per install (NOT the shared clientIdentifier)
-    public var deviceName: String       // "Brandon's iPhone"
-    public var deviceKind: DeviceKind   // phone / tablet / desktop / web / speaker
-    public var updatedAt: Date
-    public var isPlaying: Bool
-    public var trackIDs: [String]       // provider remote ids, queue order
-    public var currentIndex: Int
+/// Small, written often.
+public struct PlaybackCheckpoint: Codable, Sendable {
+    public var serverFingerprint: String   // canonical, NOT derived from baseURL
+    public var deviceID: String            // domain-separated hash of clientIdentifier
+    public var deviceName: String
+    public var capturedAt: Date
+    public var state: PlaybackState        // playing / paused / stopped
+    public var current: TrackLocator
     public var positionSeconds: TimeInterval
-    public var source: QueueSource?     // album/playlist/station id — lets a peer re-derive a queue it can't read verbatim
-    public var isShuffled: Bool
-    public var repeatMode: RepeatMode
+    public var manifestRevision: Int        // ties cursor to a QueueManifest
+    public var indexInManifest: Int
+}
+
+/// Large, written only when the queue itself changes.
+public struct QueueManifest: Codable, Sendable {
+    public var revision: Int
+    public var descriptor: QueueDescriptor  // source kind + id + shuffle seed/version
+    public var window: [TrackLocator]       // bounded: current + ~20 back, ~100 ahead
+    public var isWindowed: Bool             // true when the real queue was larger
 }
 ```
 
-`source` matters: when a store can only carry a track and a position (the bottom
-rung), the receiving device can still rebuild a *sensible* queue from its own
-local catalog rather than playing an orphaned single track.
+`TrackLocator` is **server-qualified** (`serverFingerprint` + `remoteID`). A bare
+`Track.id` is only meaningful within one server, and the database already keys on
+`(serverId, remoteId)` for exactly this reason.
 
-### 2. Durable state — `PlaybackSessionStore`
+**Canonical server fingerprint.** Today `AppEnvironment.serverId` is
+`"\(kind)-\(baseURL)"`. That silently breaks cross-device correlation: the *same*
+server reached at `http://192.168.1.5:8096` on the LAN and
+`https://music.example.com` remotely produces two different ids. The fingerprint
+must come from the server's own identity — Plex `machineIdentifier`, Jellyfin
+server `Id`, Subsonic `username@normalized-host` — not from the URL used to reach
+it.
 
-```swift
-public protocol PlaybackSessionStore: Sendable {
-    var fidelity: SessionFidelity { get }        // .fullQueue | .trackAndPosition | .none
-    func save(_ doc: PlaybackSessionDocument) async throws
-    func load() async throws -> PlaybackSessionDocument?
-}
-```
+**Bounded window.** A 5,000-track shuffled queue is ~200 KB of ids and, on
+Subsonic, is sent as repeated `id=` query parameters — which will exceed common
+proxy/server URL limits long before the storage does. Store a window plus the
+descriptor and re-derive the rest locally; declare oversized ad-hoc queues
+explicitly windowed rather than claiming full fidelity.
 
-Adapters, best-first:
+**Shuffle.** `PlayQueue` keeps both the base `tracks` and the `order` permutation;
+a flat id list plus an `isShuffled` flag cannot preserve both, so turning shuffle
+off on the receiving device could not restore album order. The manifest therefore
+carries the realized order plus a shuffle seed/version in the descriptor.
 
-| Adapter | Mechanism | Fidelity | Other clients benefit? |
+**Station queues cannot transfer.** `continueAsStation` holds a runtime closure
+(`onQueueNearEnd`), which is not serializable. A station transfers as its
+descriptor and resumes generation locally, or transfers as a plain queue.
+
+### 2. Protocols
+
+Deliberately **not** one protocol with capability flags — the adapters genuinely
+differ in what they can hold, and a single `save(document)` would be a lie on
+Subsonic (which stores only ids, current and position — no shuffle, repeat,
+ownership or device).
+
+| Protocol | Purpose | Availability |
+| --- | --- | --- |
+| `ContinuityStore` | Read/write Mozz's authoritative checkpoint | Per-backend; the only source of truth for C1 |
+| `PlaybackObservation` | Read-only, low-confidence "what did this account play recently / what is live right now" | Everywhere, but never authoritative |
+| `RemoteControl` | Live commands to another device | Nearby LAN peers; Jellyfin sessions |
+
+Rich fields that a native store cannot hold are carried only where a free-form
+store exists; elsewhere they degrade explicitly rather than silently.
+
+### 3. Store adapters (evidence-based)
+
+| Backend | Mechanism | Verified | Fidelity |
 | --- | --- | --- | --- |
-| Subsonic | `savePlayQueue` / `getPlayQueue` | full queue | **Yes** — any Subsonic client (Feishin, Supersonic, symfonium) picks up Mozz's queue for free, on any OS |
-| Jellyfin | queue JSON in `DisplayPreferences.CustomPrefs`; position also lands natively in `UserData` | full queue | position yes, queue Mozz-only |
-| Plex | `/playQueues` object + `viewOffset`; `playQueueID` carried in the document | full queue | partial |
-| **Universal floor** | "most recently played track + its saved position", derived from play history every backend already records (`lastViewedAt` desc / `DatePlayed` desc / now-playing) | track + position | inherent |
+| **Subsonic** | `savePlayQueue` / `getPlayQueue` | Per-user, atomic replace, **no expiry, no size cap** (one row, ids as a comma-separated blob). `position` is **milliseconds**; `current` is a **track-id string**, not an index. Implemented by Navidrome, gonic and LMS. | ids + current + position |
+| **Jellyfin** | JSON blob in `DisplayPreferences` `CustomPrefs` | `CustomItemDisplayPreferences.Value` has **no `MaxLength`** — unlimited TEXT. A non-GUID `displayPreferencesId` is deterministically MD5-hashed, so a stable string key works. `Client` is capped at 32 chars. | full checkpoint + manifest |
+| **Plex** | **Open decision** — see below | No client-writable KV store exists; play queues are ephemeral | see below |
 
-The universal floor is the load-bearing piece of this ADR. It needs **no
-client-writable storage on the server at all** — only the play reports Mozz
-*already* sends. It therefore works on a server we have never heard of, and it
-alone satisfies the stated scenario ("it should know what song I was listening
-to"). Everything above it is an upgrade in fidelity, not a precondition.
+**Subsonic caveats, all verified:** `changedBy` is the `c=` query parameter — i.e.
+the *client product name*, not a device, so two Mozz installs are
+indistinguishable unless `c` is varied per device (Mozz currently sends a constant
+`clientInfo.product`). LMS hardcodes `changedBy` to `""`. gonic returns error 10
+for an empty-`id` save, so "clear the queue" must not be expressed that way.
+Navidrome ≥ 0.57.0 prefers the `indexBasedQueue` extension
+(`savePlayQueueByIndex`), which handles duplicate tracks correctly and shares the
+same underlying row.
 
-### 3. Live state — `PlaybackSessionBus`
+**The Subsonic payoff is real, not theoretical:** Feishin — the most popular
+desktop Subsonic client — actively implements these endpoints behind its
+`SERVER_PLAY_QUEUE` feature flag. A queue saved by Mozz on the phone is genuinely
+loadable by Feishin on a PC. That *is* the maintainer's scenario, satisfied with
+no Mozz-specific software on the PC at all.
 
-```swift
-public protocol PlaybackSessionBus: Sendable {
-    func advertise(_ doc: PlaybackSessionDocument) async
-    func peers() -> AsyncStream<[RemoteDevice]>
-    func send(_ command: RemoteCommand, to peer: RemoteDevice) async throws
-}
-```
+### 4. Ownership: best-effort, explicitly not a guarantee
 
-| Transport | Reach | Backends | Delivers |
-| --- | --- | --- | --- |
-| **LAN peers** — `_mozz._tcp` Bonjour advertise/browse + `NWConnection` | same network | **all** | C2 + C3 with no server support whatsoever; covers "moving around the house", the scenario the Reddit comment calls out as *"really nice"* |
-| **Jellyfin** `/Sessions` + WebSocket (`POST /Sessions/{id}/Playing/{command}`) | anywhere the server is reachable | Jellyfin | C2 + C3 off-LAN, and interop with the Jellyfin web player / Findroid |
-| **Plex Companion** | anywhere | Plex | deferred — GDM/plex.tv `provides=player` registration is disproportionately fiddly |
+None of these substrates offers compare-and-swap, ETags or any fencing primitive,
+so a monotonic `generation` counter **cannot** enforce single-session ownership:
+two devices can read generation 5, both write 6, and a later periodic save from
+the loser silently reinstates it. An offline device flushing a stale checkpoint
+can physically destroy a newer one.
 
-Putting the *universal* real-time layer on the LAN rather than on the server is
-deliberate: it is the only real-time transport that works identically for Plex,
-Jellyfin, Subsonic and any future backend, and it needs no entitlement.
+Therefore **C4 is downgraded to best-effort**, and the honest rules are:
 
-### 4. Single-session semantics (C4)
+- The old player is stopped only through a live, authenticated connection.
+- Offline writes are an outbox **compacted to latest-value-only**, never an event
+  backlog, and are discarded if a newer remote checkpoint is observed on reconnect.
+- Never blind-flush: read before write, and drop our write if the remote checkpoint
+  is newer than our capture time.
+- `state` is paired with `capturedAt` and honoured only inside a short lease
+  (~60 s). A crashed device otherwise leaves `playing` set forever. Position is
+  extrapolated only within the lease, and the receiving device never autoplays.
 
-`generation` is monotonic; ties break on `(updatedAt, deviceID)`. Taking over =
-load, `generation += 1`, set `deviceID` to self, save. If a live bus can reach the
-previous owner it is also sent an explicit `.stop`; if it cannot, the old owner
-notices it has been superseded on its next periodic save/load and stops itself.
+This is not a weakening of the product promise so much as an admission of what the
+platform already forced: a suspended iOS device cannot be stopped remotely at all.
 
-This is what makes takeover **universal**: correctness comes from the durable
-document, and the live channel is only a latency optimisation. A device that is
-asleep, off-LAN, or on a server with no session API still yields the session
-correctly — it just yields it a little later.
+### 5. Live layer: "nearby devices", authenticated
 
-### 5. Offline listening
+Scoped honestly to **devices currently running Mozz**:
 
-Writes go through an outbox and flush on reconnect, so a purely-offline listening
-session still lands on the server once there is a network. Until then, other
-devices legitimately do not know about it — the one case Brandon explicitly
-excluded.
+- iOS advertises only while it is alive — i.e. while playing audio (background
+  `audio` mode keeps `NWListener` up indefinitely) or foregrounded. On suspension
+  the advertisement disappears and cannot be woken.
+- macOS does not suspend, so a Mac running Mozz *is* a reliable always-on peer.
+- `_mozz._tcp` must be added to `NSBonjourServices` for **advertising** as well as
+  browsing; omitting it fails specifically on TestFlight/App Store builds.
+
+**Security is mandatory, and was missing from the first draft.** Remotely
+executable play/stop commands over the LAN require: minimal anonymous presence
+until authenticated, one-time pairing with a code/QR-derived key, encrypted and
+nonce-protected commands to prevent replay, and metadata revealed only after
+pairing. Peers fetch the checkpoint on demand rather than broadcasting it.
+
+The wire protocol must be **platform-neutral** (framed messages over TCP + mDNS),
+because `NWConnection` is Apple-only and a future PC peer has to speak it.
+
+### 6. Write cadence
+
+Cursor: immediately on track change, seek, pause, stop and backgrounding; every
+15–30 s while playing; coalesced and backed off on failure. Manifest: only on
+actual queue mutation. Without periodic writes a crash mid-track resumes at the
+track's start.
+
+### 7. Module placement
+
+`RepeatMode` lives in `MozzPlayback`, which already imports `MozzCore` — so
+putting a model that references it *in* `MozzCore` would create a cycle. Portable
+wire types go in a new **`MozzContinuity`** module depending only on `MozzCore`,
+mapped to playback types at the boundary.
+
+`deviceID` is a **domain-separated hash of the existing `clientIdentifier`** — not
+a new identifier. It is already stable per install and device-local, and reusing it
+lets a checkpoint correlate with server-side session data.
+
+## Open decision — Plex durable storage
+
+Plex has no client-writable key-value store and no durable queue. Two options:
+
+1. **Dedicated playlist** (`Mozz — Continue Listening`) holding the queue, with the
+   cursor JSON in the playlist's editable `summary`. Durable, account-scoped,
+   cross-device. Costs: one visible playlist in the user's library, and playlist
+   **writes** must be added — `MusicBackend` currently exposes only
+   `fetchPlaylists` / `fetchPlaylistItems`, no create/update.
+2. **Accept degraded Plex** — track-only, no position and no queue, recovered from
+   `/status/sessions/history/all?sort=viewedAt:desc` as a low-confidence hint.
+
+Option 1 is the only way Plex reaches parity. Option 2 ships sooner and touches
+nothing. This needs a product call.
+
+## Rejected alternatives
+
+| Rejected | Why |
+| --- | --- |
+| CloudKit / iCloud KV / synced Keychain | Apple-only, so a PC can never read it — fails the target scenario; entitlement breaks headless deploy |
+| Plex `/playQueues` as durable store | Verified ephemeral and client-scoped |
+| Server play-history as a correctness primitive | No server stores a music position; "recently played" ≠ "was playing" |
+| APNs push to wake a cold device | Requires a provider server the user must run and pay for |
+| A user-hosted coordinator service with CAS/leases | The only way to get *strict* C4, but it is one more thing to self-host; the promise is reduced instead |
+| Event log / CRDT | No substrate here offers atomic append or merge; a CRDT in a last-writer-wins slot still loses updates |
 
 ## Consequences
 
-**Good**
+**Good.** Works on every backend; works off-LAN; readable by a non-Apple PC (and on
+Subsonic, by existing PC clients with no extra software); no new entitlement, so
+headless per-branch deploy keeps working; costs the user nothing; nothing leaves
+their infrastructure.
 
-- Works on **every** backend, including ones with no session API, via the floor.
-- Works **off-LAN** and is readable by a **non-Apple PC**, because the state lives
-  on the user's own server — the stated scenario.
-- **No new entitlement**, so the headless per-branch deploy keeps working.
-- Nothing leaves the user's infrastructure; no Apple or third-party dependency.
-- On Subsonic it is bidirectionally interoperable with *other* clients for free.
-- Each layer is independently useful and independently shippable.
-
-**Costs**
-
-- Four store adapters instead of one; per-backend fidelity differences must be
-  surfaced honestly in the UI ("queue" vs "just the track").
-- A LAN peer channel is new surface area (Bonjour + `NWConnection` + a small
-  framed protocol) and needs `_mozz._tcp` added to `NSBonjourServices`.
-- `deviceID` must be a **new per-install identifier**, deliberately *not* the
-  existing `clientIdentifier` — that one is device-local precisely because two
-  devices sharing it register as one device on the server
-  (`RoutingCredentialStore`), which is the same reason it cannot identify a peer.
-
-## Open questions (verify against live servers before implementing)
-
-1. `DisplayPreferences.CustomPrefs` value size limit on Jellyfin — caps how long a
-   stored queue can be; a cap plus `source` re-derivation is the fallback.
-2. Whether Jellyfin persists `PlaybackPositionTicks` for **audio** items at all
-   resume thresholds, or only past a minimum duration.
-3. Plex: confirm a non-owner token can `GET /playQueues/{id}` created by the same
-   account on another device.
-4. Subsonic: confirm `changed`/`changedBy` are populated by Navidrome, and confirm
-   the string-id handling noted above.
-5. Whether any server rate-limits the save cadence; pick a debounce (target: on
-   track change, pause, seek, and background — not every progress tick).
+**Costs.** Three store adapters with genuinely different fidelity, which the UI must
+communicate honestly. A bounded window means very large ad-hoc queues do not
+transfer verbatim. Single-session is best-effort, not guaranteed. The LAN layer
+needs a pairing/crypto design and a portable wire protocol. Plex needs a product
+decision. Playlist writes may need adding to the backend protocol.
 
 ## Phasing
 
 | Phase | Delivers | Capabilities |
 | --- | --- | --- |
-| 1 | `PlaybackSessionDocument` + `PlaybackSessionStore` + universal floor adapter + "Continue here" banner | C1, C4 |
-| 2 | Native store adapters (Subsonic → Jellyfin → Plex) | C1 at full fidelity |
-| 3 | LAN peer bus: live progress + device picker | C2, C3 |
-| 4 | Jellyfin `/Sessions` + WebSocket for off-LAN live control | C2, C3 off-LAN |
+| 1 | `MozzContinuity` models + `ContinuityStore` + Subsonic adapter + "Continue here" | C1 on Subsonic |
+| 2 | Jellyfin `CustomPrefs` adapter | C1 on Jellyfin |
+| 3 | Plex (per the open decision) | C1 on Plex |
+| 4 | Authenticated nearby-device layer: live mirroring + picker | C2, C3, best-effort C4 |
+| 5 | Jellyfin `/Sessions` + WebSocket for off-LAN live control | C2, C3 off-LAN |
