@@ -310,6 +310,23 @@ extension Color {
     /// such as the star rating fill.
     static var mozzBrand: Color { Color(red: 245.0 / 255.0, green: 0.0, blue: 49.0 / 255.0) }
 
+    /// The surface for a notification-style banner — the plain window
+    /// background.
+    ///
+    /// Rendered under a deliberately flipped `colorScheme` (see
+    /// `ContinueHereBanner`) this becomes the *inverted* surface: near-white in
+    /// dark mode, near-black in light mode. That is what separates a transient
+    /// notice from the chrome it floats above.
+    static var mozzBannerSurface: Color {
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+        #elseif canImport(AppKit)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(white: 1)
+        #endif
+    }
+
     /// The inverse of `Color.primary` — the label/spinner color that sits on a
     /// solid `Color.primary` pill (see `MozzProminentButtonStyle`), so text always
     /// contrasts the fill in both color schemes.

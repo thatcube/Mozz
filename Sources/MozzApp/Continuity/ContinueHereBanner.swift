@@ -20,9 +20,23 @@ struct ContinueHereBanner: View {
     /// reappears when the player is dismissed.
     var isPlayerPresented: Bool
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The banner reads as a *notification*, so it runs at inverted contrast —
+    /// light on a dark UI, dark on a light one — which also stops it blending
+    /// into the tab bar sitting directly beneath it.
+    ///
+    /// Done by flipping `colorScheme` for the whole subtree rather than
+    /// hand-picking inverted colors, so every semantic color moves together. The
+    /// "Listen here" pill matters most here: it fills with `Color.primary`, so
+    /// under a naive inversion it would land light-on-light again — flipping the
+    /// scheme keeps it automatically opposite to whatever the banner became.
+    private var flipped: ColorScheme { colorScheme == .dark ? .light : .dark }
+
     var body: some View {
         if let offer = continuity.offer, !isPlayerPresented {
             card(for: offer)
+                .environment(\.colorScheme, flipped)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
@@ -81,11 +95,12 @@ struct ContinueHereBanner: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        // Capsule + the tab bar's own side inset, so the banner reads as part of
-        // the same floating dock stack rather than a differently-shaped card
-        // sitting slightly proud of it.
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.5)))
+        // A solid fill, not material: the point is a definite inverted surface,
+        // and a blur would sample the background and wash the inversion out.
+        // Under the flipped scheme this resolves light in dark mode and dark in
+        // light mode.
+        .background(Capsule().fill(Color.mozzBannerSurface))
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 12, y: 4)
         .padding(.horizontal, BottomBar.hMargin)
         .accessibilityElement(children: .contain)
     }
