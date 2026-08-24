@@ -109,6 +109,54 @@ Windowing keeps batches bounded: 180 days by default (the taste profile's 30-day
 half-life makes anything older worth ~1.6%), further trimmed to the backend's
 byte budget. When size binds, the **newest** events are kept.
 
+## Two artifacts, because a year in review asks a different question
+
+The raw event window above is tuned for **taste**: recent, precise, and trimmed
+oldest-first when space runs out. That is exactly wrong for a **year in review**,
+which needs the whole year and cares most about the months the window would drop
+first.
+
+So history publishes a second artifact per device — a compact `HistoryRollup`
+(`Sources/MozzHistory/HistoryRollup.swift`):
+
+| | Raw events | Rollup |
+|---|---|---|
+| Span | 180 days | a full calendar year |
+| Detail | every event | monthly totals + top artists/albums/tracks |
+| Size (heavy listener) | megabytes | a few KB |
+| Merge | G-Set union by uid | per-device totals, summed across devices |
+| Purpose | taste profile | year in review |
+
+Three things make the split necessary rather than merely tidy:
+
+1. **A year of raw events is megabytes per device**, in a record every device
+   re-uploads on every write. A year of totals is kilobytes.
+2. **Trimming oldest-first destroys January**, which a December review needs
+   most.
+3. **Names disappear.** Play events are keyed on `trackRef` and deliberately
+   outlive the catalog, so when a server drops an album the events remain but
+   nothing can name them. Rollups capture names **at play time**, so a review
+   still reads correctly years later.
+
+Note the local/sync asymmetry that makes this work: the local `play_event` table
+is *never* pruned, so a device can always rebuild its own full year even though
+it only *syncs* 180 days of raw events. The rollup is what carries the rest
+across devices.
+
+### Why the rollup merge is still coordination-free
+
+Counts cannot be a G-Set — adding two devices' totals twice would double them.
+But the same per-device-slot arrangement solves it: each device publishes *its
+own complete totals*, and merging **replaces** that device's contribution before
+summing across devices. That is a state-based CRDT, so it stays idempotent,
+commutative and associative, and still needs no compare-and-swap.
+
+**One honest limitation.** Each device publishes only its top 200 entries, so an
+artist ranked just below the cutoff on *every* device is missing from the merge
+even if their combined total would place them well inside it. This is inherent to
+merging truncated top-K lists; the only complete fix is shipping every key, which
+is the cost the rollup exists to avoid.
+
 ## Verifying an implementation
 
 Swift conformance runs in the normal suite

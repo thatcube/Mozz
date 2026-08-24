@@ -92,7 +92,7 @@ let package = Package(
 
         // MARK: Backends (one `MusicBackend` conformer each)
         .target(name: "MozzPlex", dependencies: ["MozzCore", "MozzNetworking"]),
-        .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
+        .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity", "MozzHistory"]),
         // Generic Subsonic / OpenSubsonic backend (Navidrome-QA'd, others
         // best-effort). Uses MD5 for classic token auth, via swift-crypto so the
         // backend builds off-Apple too.
@@ -205,7 +205,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MozzJellyfinTests",
-            dependencies: ["MozzJellyfin", "MozzNetworking"],
+            dependencies: ["MozzJellyfin", "MozzNetworking", "MozzHistory"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(
