@@ -73,29 +73,49 @@ jobs:
           dotnet-version: "8.0.x"
 
       # GRDB's `GRDBSQLite` is a systemLibrary target: it expects the OS to
-      # ship SQLite. macOS does, Linux has apt — Windows has neither, so we
-      # supply it.
+      # ship SQLite. macOS does, Linux has apt — Windows has neither.
       #
-      # That turns out to be an advantage rather than a chore. Building SQLite
-      # ourselves means FTS5 is an explicit compile flag instead of a property
-      # we hope the platform happens to have, which is the single biggest risk
-      # the plan identified for search.
-      - name: Provide SQLite with FTS5
+      # Building the amalgamation ourselves rather than taking a packaged one
+      # is the better answer regardless: GRDB needs optional features compiled
+      # in (FTS5 for search, snapshot for its pool), and a distro build that
+      # omits them fails at link time with undefined symbols. Here the feature
+      # set is an explicit list, which is a stronger position than we have on
+      # Apple, where we inherit whatever the OS shipped.
+      - name: Build SQLite with the features GRDB needs
         shell: pwsh
         run: |
-          vcpkg install "sqlite3[core,fts5]:x64-windows"
-          $root = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
-          if (-not (Test-Path "$root\include\sqlite3.h")) {
-            Write-Error "sqlite3.h missing after vcpkg install"; exit 1
-          }
-          # Deliberately NOT exporting INCLUDE/LIB. Those are populated by the
-          # Visual Studio environment, which is not visible in this step — so
-          # writing them here replaces rather than extends, msvcrt.lib and
-          # friends disappear, and even Package.swift stops linking. The paths
-          # go to each build individually via -Xcc / -Xlinker instead.
-          "SQLITE_ROOT=$root"      | Out-File -FilePath $env:GITHUB_ENV -Append
-          "SQLITE_BIN=$root\bin"   | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "sqlite3 provided from $root"
+          $ErrorActionPreference = "Stop"
+          $url = "https://sqlite.org/2025/sqlite-amalgamation-3510000.zip"
+          $root = "$env:RUNNER_TEMP\sqlite"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "$root\amalgamation.zip"
+          Expand-Archive "$root\amalgamation.zip" -DestinationPath $root -Force
+          $src = (Get-ChildItem -Path $root -Directory -Filter "sqlite-amalgamation-*")[0].FullName
+
+          New-Item -ItemType Directory -Force -Path "$root\include","$root\lib" | Out-Null
+          Copy-Item "$src\sqlite3.h","$src\sqlite3ext.h" "$root\include" -Force
+
+          # A STATIC library on purpose: the header then declares plain symbols
+          # rather than __declspec(dllimport), and there is no DLL to ship
+          # beside the app.
+          Push-Location $src
+          clang-cl /c /O2 /MD `
+            /DSQLITE_ENABLE_FTS5 `
+            /DSQLITE_ENABLE_SNAPSHOT `
+            /DSQLITE_ENABLE_PREUPDATE_HOOK `
+            /DSQLITE_ENABLE_COLUMN_METADATA `
+            /DSQLITE_ENABLE_RTREE `
+            /DSQLITE_ENABLE_JSON1 `
+            /DSQLITE_THREADSAFE=1 `
+            /DSQLITE_DQS=0 `
+            sqlite3.c /Fo:sqlite3.obj
+          if ($LASTEXITCODE -ne 0) { Write-Error "sqlite3.c failed to compile"; exit 1 }
+          llvm-lib /OUT:"$root\lib\sqlite3.lib" sqlite3.obj
+          if ($LASTEXITCODE -ne 0) { Write-Error "failed to archive sqlite3.lib"; exit 1 }
+          Pop-Location
+
+          "SQLITE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "built sqlite3.lib with FTS5 + snapshot at $root\lib"
 
       # Stage 1 — does the platform-free core compile off-Apple at all?
       # Building the library targets alone isolates a core portability failure
@@ -140,11 +160,6 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item "$env:MOZZ_FFI_DLL_DIR\*.dll" harness-out -Force
-          # sqlite3.dll has to sit beside the harness too, or MozzFFI.dll
-          # fails to load with a bare "module not found".
-          if (Test-Path "$env:SQLITE_BIN") {
-            Copy-Item "$env:SQLITE_BIN\*.dll" harness-out -Force -ErrorAction SilentlyContinue
-          }
           $tracks = "${{ github.event.inputs.trackCount }}"
           if ([string]::IsNullOrWhiteSpace($tracks)) { $tracks = "100000" }
           Write-Host "running harness with $tracks tracks"
