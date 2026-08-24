@@ -244,6 +244,17 @@ public protocol HistoryStore: Sendable {
     /// another device's slot.
     func save(_ batch: HistoryBatch) async throws
 
+    /// Every device's rollup for one calendar year.
+    func loadRollups(year: Int) async throws -> [HistoryRollup]
+
+    /// Write *this device's* rollup for its year.
+    ///
+    /// Kept apart from the event batch because the two have opposite lifetimes:
+    /// a batch is a rolling window rewritten on every sync, while a year's
+    /// rollup stops changing the moment that year ends. Bundling them would
+    /// rewrite a finished year forever.
+    func save(_ rollup: HistoryRollup) async throws
+
     /// Roughly how many bytes a batch may occupy, so the caller can size its
     /// window before serializing. Backends differ enormously here.
     var maximumBatchBytes: Int { get }

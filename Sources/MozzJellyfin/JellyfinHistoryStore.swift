@@ -127,6 +127,62 @@ public struct JellyfinHistoryStore: HistoryStore {
         ))
     }
 
+    // MARK: Rollups
+
+    /// Rollups live in a **separate preferences record per year**.
+    ///
+    /// A finished year never changes again, so keeping it out of the record that
+    /// holds the constantly-rewritten event batches means it is fetched and
+    /// re-uploaded only while it is still the current year.
+    static func rollupPreferencesID(year: Int) -> String { "mozz-rollup-\(year)" }
+    static let rollupKeyPrefix = "mozz.rollup."
+
+    public func loadRollups(year: Int) async throws -> [HistoryRollup] {
+        let id = Self.rollupPreferencesID(year: year)
+        let dto: JFDisplayPreferencesDto
+        do {
+            dto = try await client.send(
+                Endpoint(path: "DisplayPreferences/\(id)", query: query),
+                as: JFDisplayPreferencesDto.self
+            )
+        } catch MozzError.notFound {
+            return []
+        }
+        guard let prefs = dto.CustomPrefs else { return [] }
+
+        return prefs
+            .filter { $0.key.hasPrefix(Self.rollupKeyPrefix) }
+            .compactMap { _, json -> HistoryRollup? in
+                guard let data = json.data(using: .utf8) else { return nil }
+                return try? JSONDecoder().decode(HistoryRollup.self, from: data)
+            }
+            .filter { $0.year == year }
+    }
+
+    public func save(_ rollup: HistoryRollup) async throws {
+        let id = Self.rollupPreferencesID(year: rollup.year)
+        var dto = (try? await client.send(
+            Endpoint(path: "DisplayPreferences/\(id)", query: query),
+            as: JFDisplayPreferencesDto.self
+        )) ?? JFDisplayPreferencesDto()
+
+        var prefs = dto.CustomPrefs ?? [:]
+        guard let data = try? HistoryMerge.makeEncoder().encode(rollup),
+              let json = String(data: data, encoding: .utf8) else {
+            throw MozzError.invalidResponse
+        }
+        prefs["\(Self.rollupKeyPrefix)\(rollup.deviceID)"] = json
+
+        dto.CustomPrefs = prefs
+        dto.Id = dto.Id ?? id
+        dto.Client = dto.Client ?? Self.clientKey
+        _ = try await client.send(try Endpoint.jsonPost(
+            "DisplayPreferences/\(id)",
+            body: dto,
+            query: query
+        ))
+    }
+
     // MARK: Helpers
 
     static func key(for deviceID: String) -> String { "\(keyPrefix)\(deviceID)" }

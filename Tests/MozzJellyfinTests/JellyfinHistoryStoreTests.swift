@@ -11,13 +11,22 @@ import MozzNetworking
 /// record that changes between the read and the write.
 private final class RecordingTransport: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
-    private var _record: JFDisplayPreferencesDto?
+    /// Keyed by preferences id, because the store deliberately uses more than
+    /// one record — a shared slot here would let a bug that writes to the wrong
+    /// record pass unnoticed.
+    private var _records: [String: JFDisplayPreferencesDto]
     private var _posted: [JFDisplayPreferencesDto] = []
-    private var _notFound: Bool
 
-    init(record: JFDisplayPreferencesDto? = nil, notFound: Bool = false) {
-        self._record = record
-        self._notFound = notFound
+    init(records: [String: JFDisplayPreferencesDto] = [:]) {
+        self._records = records
+    }
+
+    convenience init(record: JFDisplayPreferencesDto) {
+        self.init(records: [JellyfinHistoryStore.preferencesID: record])
+    }
+
+    convenience init(notFound: Bool) {
+        self.init(records: [:])
     }
 
     var postedRecords: [JFDisplayPreferencesDto] {
@@ -25,8 +34,14 @@ private final class RecordingTransport: HTTPTransport, @unchecked Sendable {
         return _posted
     }
 
+    /// `.../DisplayPreferences/{id}?query`
+    private func preferencesID(from request: URLRequest) -> String {
+        request.url?.path.components(separatedBy: "/").last ?? ""
+    }
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = request.url ?? URL(string: "https://example.com")!
+        let id = preferencesID(from: request)
 
         if request.httpMethod == "POST" {
             let decoded = try JSONDecoder().decode(
@@ -34,23 +49,20 @@ private final class RecordingTransport: HTTPTransport, @unchecked Sendable {
             )
             lock.lock()
             _posted.append(decoded)
-            // Persist, so a later read observes the write.
-            _record = decoded
-            _notFound = false
+            _records[id] = decoded   // persist, so a later read observes the write
             lock.unlock()
             return (Data("{}".utf8), HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil)!)
         }
 
         lock.lock()
-        let record = _record
-        let missing = _notFound
+        let record = _records[id]
         lock.unlock()
 
-        if missing || record == nil {
+        guard let record else {
             return (Data(), HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!)
         }
-        let data = try JSONEncoder().encode(record)
-        return (data, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        return (try JSONEncoder().encode(record),
+                HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
 
@@ -246,6 +258,59 @@ final class JellyfinHistoryStoreTests: XCTestCase {
         var prefs = ["someOtherApp.setting": "keep-me"]
         JellyfinHistoryStore.dropStaleSlots(from: &prefs, now: 1_800_000_000_000, keeping: "dev-a")
         XCTAssertEqual(prefs["someOtherApp.setting"], "keep-me")
+    }
+
+    // MARK: Rollups
+
+    func testRollupsLiveInTheirOwnPerYearRecord() async throws {
+        // A finished year never changes again, so it must not sit in the record
+        // that gets rewritten on every sync.
+        let transport = RecordingTransport(notFound: true)
+        let store = JellyfinHistoryStore(client: makeClient(transport), userID: "u1")
+
+        try await store.save(HistoryRollup(deviceID: "dev-a", year: 2026, updatedAtMS: 1))
+        try await store.save(makeBatch(device: "dev-a"))
+
+        // Two different preferences records were written, not one.
+        let ids = Set(transport.postedRecords.compactMap(\.Id))
+        XCTAssertTrue(ids.contains(JellyfinHistoryStore.rollupPreferencesID(year: 2026)))
+        XCTAssertTrue(ids.contains(JellyfinHistoryStore.preferencesID))
+    }
+
+    func testRollupRoundTrips() async throws {
+        let transport = RecordingTransport(notFound: true)
+        let store = JellyfinHistoryStore(client: makeClient(transport), userID: "u1")
+
+        var monthly = Array(repeating: Int64(0), count: 12)
+        monthly[2] = 90_000
+        try await store.save(HistoryRollup(
+            deviceID: "dev-a", year: 2026, monthlyMS: monthly,
+            topArtists: [RollupEntry(key: "art-1", name: "Lena Vance", plays: 3, totalMS: 90_000)],
+            updatedAtMS: 5
+        ))
+
+        let loaded = try await store.loadRollups(year: 2026)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.monthlyMS[2], 90_000)
+        XCTAssertEqual(loaded.first?.topArtists.first?.name, "Lena Vance")
+    }
+
+    func testLoadingRollupsForAYearNeverWrittenIsEmpty() async throws {
+        let store = JellyfinHistoryStore(client: makeClient(RecordingTransport(notFound: true)), userID: "u1")
+        let loaded = try await store.loadRollups(year: 2019)
+        XCTAssertTrue(loaded.isEmpty)
+    }
+
+    func testSavingARollupPreservesOtherDevices() async throws {
+        let transport = RecordingTransport(notFound: true)
+        let a = JellyfinHistoryStore(client: makeClient(transport), userID: "u1")
+        let b = JellyfinHistoryStore(client: makeClient(transport), userID: "u1")
+
+        try await a.save(HistoryRollup(deviceID: "dev-a", year: 2026, updatedAtMS: 1))
+        try await b.save(HistoryRollup(deviceID: "dev-b", year: 2026, updatedAtMS: 2))
+
+        let loaded = try await a.loadRollups(year: 2026)
+        XCTAssertEqual(Set(loaded.map(\.deviceID)), ["dev-a", "dev-b"])
     }
 
     // MARK: End to end

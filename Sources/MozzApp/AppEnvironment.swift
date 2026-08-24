@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CryptoKit
 import MozzContinuity
+import MozzHistory
 import MozzCore
 import MozzDatabase
 import MozzDownloads
@@ -92,6 +93,9 @@ public final class AppEnvironment: ObservableObject {
     public let playback: PlaybackEngine
     /// Cross-device playback continuity (ADR-0010).
     public let continuity = ContinuityCoordinator()
+    /// Cross-device listening history — the log behind the taste profile, which
+    /// no backend records (skips and partial plays exist only locally).
+    public let history = HistoryCoordinator()
     public let playEvents: PlayEventStore
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
@@ -1745,6 +1749,20 @@ public final class AppEnvironment: ObservableObject {
             deviceName: Self.localDeviceName,
             deviceKind: Self.localDeviceKind
         )
+        // History rides the same activation and the same device id: a phone is
+        // one device in both systems, and the id already avoids leaking the
+        // identifier presented to the server.
+        var historyStore: (any HistoryStore)?
+        if let jellyfin = backend as? JellyfinBackend {
+            historyStore = jellyfin.makeHistoryStore()
+        }
+        history.activate(
+            store: historyStore,
+            database: database,
+            deviceID: Self.continuityDeviceID(from: clientIdentifier),
+            deviceName: Self.localDeviceName
+        )
+        Task { @MainActor in await self.history.syncIfDue() }
         Task { @MainActor in
             await self.continuity.reconcile(
                 isPlayingLocally: self.playback.snapshot.status == .playing
@@ -1763,6 +1781,14 @@ public final class AppEnvironment: ObservableObject {
                 isPlayingLocally: self.playback.snapshot.status == .playing
             )
         }
+    }
+
+    /// Sync listening history if it is due.
+    ///
+    /// Called on the same foreground hook as continuity, but rate-limited inside
+    /// the coordinator: a resume point goes stale in seconds, a play does not.
+    public func syncHistoryIfDue() {
+        Task { @MainActor in await self.history.syncIfDue() }
     }
 
     /// Flush any pending checkpoint — the app may not run again.
