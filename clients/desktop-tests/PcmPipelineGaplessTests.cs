@@ -1,5 +1,6 @@
 using Mozz.Desktop.Audio;
 using Mozz.Desktop.Audio.Decoding;
+using Xunit;
 
 namespace Mozz.Desktop.Tests;
 

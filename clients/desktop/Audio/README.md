@@ -72,10 +72,13 @@ sample count crosses the recorded boundary — i.e. when the listener actually
 hears the new track, not when it was decoded — which is what drives the view
 model to advance the queue and preload the following track.
 
-This is verified without hardware by `Tests/PcmPipelineGaplessTests.cs`: one
-continuous sine wave is split into two halves, played as two sources, and the
+This is verified without hardware by `clients/desktop-tests/PcmPipelineGaplessTests.cs`:
+one continuous sine wave is split into two halves, played as two sources, and the
 render output is asserted to be sample-contiguous across the boundary (no
 discontinuity, no repeated or dropped frame) with `TrackChanged` firing once.
+Those tests are pure-managed and BCL-only, so the same project's
+`dotnet test` runs them on the **Windows CI leg** as well as macOS — which is
+where the pipeline's Windows correctness is checked before a user does.
 
 ## What each file is
 
@@ -126,7 +129,9 @@ Platform/INowPlayingIntegration.cs  OS "now playing" seam (SMTC / MPNowPlayingIn
 - **ReplayGain tag *reading*.** The engine *applies* gain supplied on
   `AudioSource`; parsing the gain tags out of files/stream metadata is the
   caller's job and is not yet populated by the library sync.
-- **Verified on macOS only.** The WASAPI output path and SMTC could not be
-  exercised on this Mac. They are argued from miniaudio's cross-platform backend
-  (WASAPI is its default Windows device) and are the main thing a Windows machine
-  should confirm.
+- **The WASAPI *output* path and SMTC are unverified on Windows.** The gapless
+  pipeline, DSP, ring buffer and decoders are pure-managed and run green on the
+  Windows CI leg, but *audible* output through miniaudio's WASAPI device and the
+  SMTC media-key surface could not be exercised from this Mac. They are argued
+  from miniaudio's cross-platform backend (WASAPI is its default Windows device)
+  and are the main thing a physical Windows machine should confirm.

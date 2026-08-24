@@ -8,19 +8,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon></ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- The test project and scratch spikes live under this folder but are their
-         own compilations; keep the app's default globs from swallowing them. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**;.scratch\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <Folder Include="Models\" />
     <AvaloniaResource Include="Assets\**" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- The audio pipeline's internals (ring buffer, decoders, DSP) are tested directly. -->
-    <InternalsVisibleTo Include="Mozz.Desktop.Tests" />
   </ItemGroup>
 
   <ItemGroup>

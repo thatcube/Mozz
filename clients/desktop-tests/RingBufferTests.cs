@@ -1,4 +1,5 @@
 using Mozz.Desktop.Audio.Dsp;
+using Xunit;
 
 namespace Mozz.Desktop.Tests;
 

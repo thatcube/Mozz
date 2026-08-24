@@ -25,6 +25,21 @@
     <Compile Include="..\desktop\Core\SecretStore.cs" />
   </ItemGroup>
 
+  <!--
+    The audio engine's pure-managed core is compiled in directly too, for the
+    same reason: it lets the DSP, ring buffer, WAV decoder and gapless pipeline
+    be tested headlessly, and because these files are platform-neutral BCL-only
+    code the tests then run unchanged on the Windows CI leg — which is the only
+    place the sample pipeline gets exercised off macOS before a user does.
+
+    MiniAudioEngine.cs is excluded on purpose: it is the one file that binds the
+    native Hexa.NET.MiniAudio device, and nothing under test needs a sound card.
+    Excluding it keeps the native package out of the headless run entirely.
+  -->
+  <ItemGroup>
+    <Compile Include="..\desktop\Audio\**\*.cs" Exclude="..\desktop\Audio\MiniAudioEngine.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />

@@ -65,11 +65,13 @@ jobs:
             8.0.x
             10.0.x
 
-      # Before the long Swift build: these test the platform-native credential
-      # store against the real OS facility, and need nothing else. DPAPI cannot
-      # be exercised on a developer's Mac at all, so this job is the only place
-      # the Windows credential path is ever run before a user signs in.
-      - name: Test the credential store
+      # Before the long Swift build: this project tests the platform-native
+      # credential store against the real OS facility, and the audio engine's
+      # pure-managed core (ring buffer, WAV decoder, EQ, and the gapless PCM
+      # pipeline). DPAPI cannot be exercised on a developer's Mac at all, so this
+      # job is the only place the Windows credential path — and the sample
+      # pipeline — are ever run on Windows before a user signs in.
+      - name: Test the credential store and audio pipeline
         run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
 
       # Same amalgamation build as the spike, and for the same reason: GRDB's
@@ -250,7 +252,7 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Test the credential store
+      - name: Test the credential store and audio pipeline
         run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
 
       - name: Build MozzFFI.dylib
