@@ -60,6 +60,10 @@ public struct PlexBackend: MusicBackend {
     }
 
     /// The music (`artist`-type) library sections on this server.
+    public func fetchLibraries() async throws -> [MusicLibrary] {
+        try await musicSections().map { MusicLibrary(id: $0.id, name: $0.title) }
+    }
+
     public func musicSections() async throws -> [MusicSection] {
         let response = try await client.send(Endpoint(path: "library/sections"), as: PlexContainerResponse.self)
         return (response.MediaContainer.Directory ?? [])

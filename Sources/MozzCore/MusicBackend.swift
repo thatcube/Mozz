@@ -81,6 +81,24 @@ public struct PlaybackReport: Sendable, Hashable {
     }
 }
 
+/// A selectable top-level music library on a server.
+///
+/// Every backend has this concept under a different name — Plex calls them
+/// library *sections*, Jellyfin *views* / media folders, Subsonic *music
+/// folders* — so the picker works against this one shape rather than three.
+///
+/// `id` is whatever the server uses to scope a query: a Plex section key, a
+/// Jellyfin `ParentId`, a Subsonic `musicFolderId`. It is opaque to the UI.
+public struct MusicLibrary: Sendable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 /// The fresh, music-centric backend abstraction that both Plex and Jellyfin
 /// implement.
 ///
@@ -110,6 +128,12 @@ public protocol MusicBackend: Sendable {
 
     /// Probe the server for version and optional-feature support.
     func detectCapabilities() async throws -> ServerCapabilities
+
+    /// The top-level music libraries this account can see, for the library
+    /// picker. Empty when the server exposes no such concept, when only one
+    /// exists and it needs no choosing, or when the lookup failed — callers
+    /// treat empty as "nothing to choose" and sync everything.
+    func fetchLibraries() async throws -> [MusicLibrary]
 
     // MARK: Catalog enumeration (drives sync into the local database)
 
@@ -232,6 +256,9 @@ public extension MusicBackend {
 
     /// Default: progress reporting is optional and silently ignored.
     func reportPlayback(_ report: PlaybackReport) async throws {}
+
+    /// Backends with no library concept opt out by default.
+    func fetchLibraries() async throws -> [MusicLibrary] { [] }
 
     /// Default: no backfill needed (the bulk sync already carries full details).
     func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }

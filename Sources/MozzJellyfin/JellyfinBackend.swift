@@ -19,13 +19,25 @@ public struct JellyfinBackend: MusicBackend {
     /// completeness — but pointless for the bounded quick start, which sets this
     /// false so its single page returns fast.
     private let includeTotalCount: Bool
-    /// The music library's item id, used as `ParentId` to scope catalog queries.
-    /// Without it, `Recursive=true&IncludeItemTypes=Audio` makes the server scan
+    /// The music library item ids used as `ParentId` to scope catalog queries.
+    ///
+    /// Without one, `Recursive=true&IncludeItemTypes=Audio` makes the server scan
     /// EVERY item across ALL libraries (movies, TV, …) to filter audio — on a
     /// large multi-library server that's a full-table scan per page (measured
     /// ~30s/page). With it, the server applies a cheap indexed `TopParentId`
-    /// filter. Resolved once per sync via `resolveMusicLibraryId()`.
-    private let musicLibraryId: String?
+    /// filter. Resolved via `fetchLibraries()` + the user's selection.
+    ///
+    /// Currently only the **first** id is applied (see `scopedLibraryId`).
+    /// Spanning several libraries means concatenating each one's pages into a
+    /// single offset stream, and the sync's prune guard trusts the reported
+    /// grand total — get the boundary or the total wrong and a partial
+    /// enumeration authorizes deleting the rest of the catalog. That is worth
+    /// doing deliberately rather than as a side effect of adding a picker, so
+    /// the list is carried here and the selection is single-choice for now.
+    private let musicLibraryIds: [String]
+
+    /// The library actually applied as `ParentId`.
+    private var scopedLibraryId: String? { musicLibraryIds.first }
 
     /// Audio containers we advertise as directly playable, so `universal` serves
     /// the original file when the codec is AVFoundation-friendly.
@@ -38,13 +50,16 @@ public struct JellyfinBackend: MusicBackend {
         transport: any HTTPTransport = URLSessionTransport(),
         includeTotalCount: Bool = true,
         musicLibraryId: String? = nil,
+        musicLibraryIds: [String]? = nil,
         logger: any NetworkLogger = NoopNetworkLogger()
     ) {
         self.connection = connection
         self.token = token
         self.clientInfo = clientInfo
         self.includeTotalCount = includeTotalCount
-        self.musicLibraryId = musicLibraryId
+        // `musicLibraryId` is the single-library form kept for existing callers;
+        // `musicLibraryIds` supersedes it when the user has picked several.
+        self.musicLibraryIds = musicLibraryIds ?? musicLibraryId.map { [$0] } ?? []
         let auth = JellyfinAuth.authorizationHeader(
             clientInfo: clientInfo,
             deviceID: connection.clientIdentifier,
@@ -141,8 +156,8 @@ public struct JellyfinBackend: MusicBackend {
             } else {
                 items.append(URLQueryItem(name: "EnableImages", value: "false"))
             }
-            if parent, let musicLibraryId {
-                items.append(URLQueryItem(name: "ParentId", value: musicLibraryId))
+            if parent, let scopedLibraryId {
+                items.append(URLQueryItem(name: "ParentId", value: scopedLibraryId))
             }
             return items
         }
@@ -233,7 +248,7 @@ public struct JellyfinBackend: MusicBackend {
                 URLQueryItem(name: "EnableImageTypes", value: "Primary"),
                 URLQueryItem(name: "ImageTypeLimit", value: "1"),
             ]
-            if let musicLibraryId { latestQuery.append(URLQueryItem(name: "ParentId", value: musicLibraryId)) }
+            if let scopedLibraryId { latestQuery.append(URLQueryItem(name: "ParentId", value: scopedLibraryId)) }
             let latestStart = Date()
             // Latest returns a bare [BaseItemDto] array, not the {Items:[]} wrapper.
             let raw = try await client.send(Endpoint(path: "Users/\(userID)/Items/Latest", query: latestQuery))
@@ -297,6 +312,34 @@ public struct JellyfinBackend: MusicBackend {
     /// Cheap (one small request, a handful of folders) and best-effort: on any
     /// failure or a server with no tagged music library we return nil and the
     /// caller falls back to unscoped (whole-server) queries.
+    /// Every music library this user can see, for the picker.
+    ///
+    /// `resolveMusicLibraryId()` deliberately returns only the first; this
+    /// returns them all so the user can choose which one Mozz syncs. Same
+    /// two-step lookup, because some servers don't tag `CollectionType` on
+    /// `Views` and only report it reliably on `Library/MediaFolders`.
+    public func fetchLibraries() async throws -> [MusicLibrary] {
+        func music(_ response: JFItemsResponse) -> [MusicLibrary] {
+            (response.Items ?? [])
+                .filter { $0.CollectionType?.lowercased() == "music" }
+                .compactMap { item -> MusicLibrary? in
+                    let id = item.Id
+                    guard !id.isEmpty else { return nil }
+                    return MusicLibrary(id: id, name: item.Name ?? "Music")
+                }
+        }
+        if let views = try? await client.send(
+            Endpoint(path: "Users/\(userID)/Views"), as: JFItemsResponse.self
+        ) {
+            let libraries = music(views)
+            if !libraries.isEmpty { return libraries }
+        }
+        guard let media = try? await client.send(
+            Endpoint(path: "Library/MediaFolders"), as: JFItemsResponse.self
+        ) else { return [] }
+        return music(media)
+    }
+
     public func resolveMusicLibraryId() async -> String? {
         do {
             let response = try await client.send(
@@ -612,8 +655,8 @@ public struct JellyfinBackend: MusicBackend {
         // the requested type — a full-table scan per page on a large multi-library
         // box (measured ~30s/page). ParentId turns it into an indexed TopParentId
         // filter over just the music items.
-        if let musicLibraryId {
-            query.append(URLQueryItem(name: "ParentId", value: musicLibraryId))
+        if let scopedLibraryId {
+            query.append(URLQueryItem(name: "ParentId", value: scopedLibraryId))
         }
         return query
     }
