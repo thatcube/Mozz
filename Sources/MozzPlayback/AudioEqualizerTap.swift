@@ -239,16 +239,43 @@ private func makeEqualizerTap(context: EqualizerTapContext) -> MTAudioProcessing
         unprepare: tapUnprepare,
         process: tapProcess)
 
-    var tap: MTAudioProcessingTap?
     // PreEffects: the tap sees audio before the mix's volume ramp, so EQ shapes
     // the full-scale signal and ReplayGain attenuates the equalized result.
+    //
+    // The out-parameter's type changed when this API was audited for Swift: it
+    // used to be `UnsafeMutablePointer<Unmanaged<MTAudioProcessingTap>?>` and is
+    // now `UnsafeMutablePointer<MTAudioProcessingTap?>`. Writing only the new
+    // form makes the whole package — not just this module — impossible to build
+    // on any toolchain older than the one on this desk, which took CI with it.
+    // The old spelling is unavailable on the new SDK and vice versa, so this is
+    // a compile-time branch rather than a runtime one.
+    //
+    // The 6.2 boundary is empirical, not documented: Swift 6.1.2 (the CI image)
+    // is known to need the Unmanaged form and 6.4 (this desk) the audited one.
+    // Anything in between is untested — but both arms are a hard compile error
+    // when wrong, never a silent miscompile, so a bad guess announces itself.
+    let created: MTAudioProcessingTap?
+    #if compiler(>=6.2)
+    var tap: MTAudioProcessingTap?
     let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
                                             kMTAudioProcessingTapCreationFlag_PreEffects, &tap)
-    guard status == noErr, let tap else {
+    created = tap
+    #else
+    var unmanagedTap: Unmanaged<MTAudioProcessingTap>?
+    let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
+                                            kMTAudioProcessingTapCreationFlag_PreEffects,
+                                            &unmanagedTap)
+    // `Create` returns +1; takeRetainedValue consumes it, matching the newer
+    // signature's already-managed return so the caller's ownership is identical
+    // either way.
+    created = unmanagedTap?.takeRetainedValue()
+    #endif
+
+    guard status == noErr, let created else {
         Unmanaged<EqualizerTapContext>.fromOpaque(rawContext).release()
         return nil
     }
-    return tap
+    return created
 }
 
 private let tapInit: MTAudioProcessingTapInitCallback = { _, clientInfo, tapStorageOut in

@@ -1,6 +1,13 @@
 import Foundation
 import MozzCore
 import MozzNetworking
+#if canImport(FoundationNetworking)
+// Off Apple, URLSession and its configuration live in a separate module. Without
+// this import `URLSessionConfiguration` resolves to a bare `AnyObject` and every
+// member access fails with a message that names neither the module nor the
+// platform.
+import FoundationNetworking
+#endif
 
 /// Keyless public fallback for song lyrics, backed by lrclib.net.
 ///
