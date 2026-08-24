@@ -209,7 +209,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          dotnet build spike/windows-ffi/Harness/Harness.csproj -c Release -o harness-out
+          # Self-contained: scrubbing PATH to prove the SWIFT runtime is bundled
+          # must not also break .NET's own runtime resolution, or the step fails
+          # for a reason that has nothing to do with what it is testing.
+          dotnet publish spike/windows-ffi/Harness/Harness.csproj -c Release `
+            -r win-x64 --self-contained true -o harness-out
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Copy-Item "publish\win-x64\*.dll" harness-out -Force
 
