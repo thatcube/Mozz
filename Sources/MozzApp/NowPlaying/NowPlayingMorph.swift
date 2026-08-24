@@ -260,6 +260,15 @@ struct NowPlayingMorphContainer: View {
                             .frame(width: m.islandTapW, height: m.islandTapH)
                             .contentShape(Rectangle())
                             .onTapGesture { ui.isFullPresented = true }
+                            // Expose the target itself as a control. Without this the
+                            // island is only a title, an artist and two transport
+                            // buttons, so "open the full player" is reachable by touch
+                            // but not by VoiceOver — or by a UI test.
+                            .accessibilityElement()
+                            .accessibilityIdentifier("mini-player")
+                            .accessibilityLabel("Now Playing")
+                            .accessibilityHint("Opens the full player")
+                            .accessibilityAddTraits(.isButton)
                             .position(x: m.surfaceCenterX, y: m.islandTapCenterY)
                     }
                     // Finger-following specular glow: a soft highlight on the glass

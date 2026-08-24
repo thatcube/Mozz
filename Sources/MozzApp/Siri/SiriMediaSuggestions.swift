@@ -108,6 +108,15 @@ enum SiriMediaSuggestions {
     /// Siri is most likely to mangle.
     static func registerVocabulary(playlists: [String], artists: [String]) {
         guard isAvailable else { return }
+        // `INVocabulary.shared()` raises — and so aborts the app — on the
+        // simulator, which has no Siri vocabulary service behind it. `isAvailable`
+        // doesn't cover this: a simulator build carries no embedded provisioning
+        // profile, so the entitlement check falls through to `true`. Teaching Siri
+        // names there is meaningless anyway, and crashing on every simulator
+        // launch with a populated library is not a fair trade.
+        #if targetEnvironment(simulator)
+        return
+        #else
         let playlists = Self.distinct(playlists, limit: 100)
         let artists = Self.distinct(artists, limit: 200)
         // Off the main thread: this hands potentially hundreds of strings to
@@ -122,6 +131,7 @@ enum SiriMediaSuggestions {
                                                            of: .mediaMusicArtistName)
             }
         }
+        #endif
     }
 
     private static func distinct(_ values: [String], limit: Int) -> [String] {

@@ -14,17 +14,23 @@ public struct DemoBackend: MusicBackend {
     /// (see ``DemoAudioProvider``); a fixed-URL initializer stays available for
     /// the performance harness, which never plays audio.
     private let clipProvider: @Sendable (Track) -> URL
+    /// Set only when shooting App Store screenshots, where the catalog is a
+    /// curated fixture on disk with real cover art and real audio. Everywhere
+    /// else this is nil and the backend behaves exactly as before.
+    private let screenshots: ScreenshotLibrary?
 
-    public init(serverId: ServerID, clipProvider: @escaping @Sendable (Track) -> URL) {
+    public init(serverId: ServerID, clipProvider: @escaping @Sendable (Track) -> URL,
+                screenshots: ScreenshotLibrary? = nil) {
         self.connection = ServerConnection(
             id: serverId,
             kind: .jellyfin,
-            name: "Demo Library",
+            name: screenshots == nil ? "Demo Library" : "My Music",
             baseURL: URL(string: "https://synthetic.local")!,
             userID: "demo",
             clientIdentifier: "demo-client"
         )
         self.clipProvider = clipProvider
+        self.screenshots = screenshots
     }
 
     /// Convenience: serve one fixed clip for every track (used where playback
@@ -50,14 +56,32 @@ public struct DemoBackend: MusicBackend {
     public func fetchPlaylistItems(playlistID: String, offset: Int, limit: Int) async throws -> CatalogPage<Track> { CatalogPage(items: []) }
 
     public func streamSource(for track: Track, options: StreamOptions) async throws -> StreamSource {
-        StreamSource(url: clipProvider(track), isTranscoded: false)
+        StreamSource(url: audioURL(for: track), isTranscoded: false)
     }
 
-    public func originalFileURL(for track: Track) throws -> URL { clipProvider(track) }
+    public func originalFileURL(for track: Track) throws -> URL { audioURL(for: track) }
 
-    public func artworkURL(for artwork: ArtworkRef, size: Int) -> URL? { nil }
+    /// Screenshot fixtures ship real audio per track; the ordinary demo falls
+    /// back to a generated tone.
+    private func audioURL(for track: Track) -> URL {
+        screenshots?.audioURL(forTrackID: track.id) ?? clipProvider(track)
+    }
+
+    /// The ordinary demo has no artwork at all, which is exactly why it can't be
+    /// used for screenshots: with nothing to sample, the Now Playing backdrop
+    /// falls back to a hashed seed colour instead of the album's own palette.
+    public func artworkURL(for artwork: ArtworkRef, size: Int) -> URL? {
+        screenshots?.coverURL(forArtworkKey: artwork.key)
+    }
 
     public func setFavorite(_ isFavorite: Bool, itemID: String, type: CatalogItemType) async throws {}
+
+    /// Serve the fixture's own `.lrc` sidecars. Without this the screenshot run
+    /// would fall through to the online provider, which has never heard of these
+    /// tracks — so the lyrics pane would shoot empty.
+    public func fetchLyrics(for track: Track) async throws -> Lyrics? {
+        screenshots?.lyrics(forTrackID: track.id)
+    }
 
     public func setRating(_ stars: Double?, itemID: String, type: CatalogItemType) async throws {}
 }

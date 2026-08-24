@@ -13,6 +13,7 @@ import MozzSync
 import MozzPlex
 import MozzJellyfin
 import MozzSubsonic
+import os
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -22,6 +23,10 @@ import UIKit
 #if os(iOS)
 import Intents
 #endif
+
+/// Failures while activating the screenshot fixture. Its own category so a
+/// headless capture run can be diagnosed from the simulator log.
+private let screenshotLog = Logger(subsystem: "com.thatcube.Mozz", category: "screenshots")
 
 /// A resolver whose delegate can be swapped at runtime. The ``PlaybackEngine``
 /// is created once at launch, but the active server (and therefore the offline/
@@ -303,6 +308,19 @@ public final class AppEnvironment: ObservableObject {
 
     public func restoreSession() async {
         defer { isRestoring = false; didAttemptPlaybackRestore = true }
+        // Shooting screenshots: skip onboarding and any saved session so a run
+        // always starts from the same curated fixture.
+        if ScreenshotLibrary.fromEnvironment() != nil {
+            do {
+                try await activateDemo()
+            } catch {
+                // Swallowing this silently drops the app back to onboarding with
+                // no clue why, which is a miserable thing to debug in a headless
+                // capture run.
+                screenshotLog.error("screenshot fixture failed to activate: \(error)")
+            }
+            return
+        }
         guard let saved = SessionPersistence.load(credentials) else { return }
         do {
             try await activate(saved)
@@ -458,9 +476,25 @@ public final class AppEnvironment: ObservableObject {
     /// multi-minute audio with no server.
     public func activateDemo(size: SyntheticCatalog.Size = .init(artists: 200, albums: 2_000, tracks: 20_000)) async throws {
         let serverId = "demo"
-        let backend = DemoBackend(serverId: serverId, clipProvider: Self.makeDemoClipProvider())
+        // A screenshot fixture replaces the synthetic catalog entirely: real
+        // names, real cover art and real audio, so every shot comes from the
+        // shipping UI with the correct artwork-derived backdrop.
+        let screenshots = ScreenshotLibrary.fromEnvironment()
+        let backend = DemoBackend(serverId: serverId,
+                                  clipProvider: Self.makeDemoClipProvider(),
+                                  screenshots: screenshots)
         let existing = try await repository.trackCount(serverId: serverId)
-        if existing == 0 {
+        if let screenshots {
+            let writer = CatalogWriter(database)
+            // The catalog's foreign keys point at a server row, so it has to
+            // exist before any artist is inserted (the synthetic generator does
+            // the same thing for the same reason).
+            try await writer.saveServer(backend.connection)
+            let catalog = screenshots.catalog()
+            try await writer.upsertArtists(catalog.artists, serverId: serverId)
+            try await writer.upsertAlbums(catalog.albums, serverId: serverId)
+            try await writer.upsertTracks(catalog.tracks, serverId: serverId)
+        } else if existing == 0 {
             try await SyntheticCatalog(database).generate(serverId: serverId, size: size)
         }
         let capabilities = try await backend.detectCapabilities()
@@ -469,7 +503,7 @@ public final class AppEnvironment: ObservableObject {
 
         let stored = StoredSession(
             kind: .jellyfin, baseURL: backend.connection.baseURL, token: "demo",
-            userID: "demo", serverName: "Demo Library",
+            userID: "demo", serverName: screenshots == nil ? "Demo Library" : "My Music",
             clientIdentifier: "demo-client", musicSectionID: nil, isDemo: true
         )
         SessionPersistence.save(stored, to: credentials)
