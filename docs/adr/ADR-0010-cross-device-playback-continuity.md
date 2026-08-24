@@ -137,26 +137,62 @@ hints) and `RemoteControl` (live commands) stay separate protocols — combining
 durable, observational and control concerns behind capability flags is what made
 the previous draft dishonest.
 
-### 2. Ownership, where it can be expressed at all
+### 2. Sessions identify, they do not arbitrate
 
 Timestamps conflate *freshness* with *authority*: a routine progress heartbeat is
 not a takeover, yet a later `capturedAt` would let an old device silently reclaim
-the session. Where the store is rich enough, ownership uses an epoch:
+the session. The fix is **not** an incrementing epoch — a counter is still a claim
+to authority, two devices can mint the same next value, and "newer" is undefined
+without CAS or trustworthy clocks.
+
+So a session is an **opaque UUID that identifies a run of playback, and confers
+nothing**:
 
 | Field | Meaning |
 | --- | --- |
-| `sessionEpoch` | Incremented **only** on an explicit new playback or takeover |
-| `ownerDeviceID` | Who owns that epoch |
-| `cursorSequence` | Monotonic **within** an epoch; ordinary progress updates |
+| `sessionID` | Opaque UUID, minted on an explicit new playback or takeover. Not ordered, not comparable |
+| `deviceID` | Which device produced this checkpoint |
+| `cursorSequence` | Monotonic **within one `sessionID`**; orders that session's own updates and nothing else |
 | `capturedAt` | Freshness / position extrapolation only — never authority |
 
-A device observing a foreign epoch stops publishing its own. Outbox entries from a
-superseded epoch are discarded regardless of timestamp. Subsonic cannot carry any
-of this, so **Subsonic has no durable ownership semantics** — resume only.
+Rules that follow, and that must not be violated:
+
+- **An active publisher is never suppressed** by anything read from a durable
+  store. A device that is playing keeps publishing, full stop.
+- Rich stores keep **per-device checkpoints** rather than one contested slot, so
+  device B arriving can be offered *competing resume candidates* ("iPhone, 2 min
+  ago · Mac, yesterday") instead of a single winner chosen by clock skew.
+- An outbox entry is discarded only when superseded by a **local** session
+  transition or an **authenticated live handoff** — never by a remote timestamp.
+- Subsonic has a single per-user queue and therefore is inherently
+  **last-writer-wins**, with no durable ownership semantics at all. Accepted, not
+  papered over.
 
 `PresenceLease` (~60 s) gates "is something playing right now": without it a crashed
 device leaves `playing` set forever. Position is extrapolated only inside the lease
 and capped by track duration; the receiving device never autoplays.
+
+`RichCheckpoint`, stored only where a free-form store exists, must bind the cursor
+to a *queue occurrence* — `ResumePoint.current` alone cannot distinguish two plays
+of the same track in one queue:
+
+```swift
+public struct RichCheckpoint: Codable, Sendable {
+    public var sessionID: UUID
+    public var deviceID: String
+    public var cursorSequence: UInt64
+    public var capturedAt: Date
+    public var state: PlaybackState
+    public var manifestID: String
+    public var currentAbsoluteIndex: Int      // resolves duplicate occurrences
+    public var positionMilliseconds: Int64    // integer: floats are not canonical
+}
+```
+
+Classic Subsonic identifies `current` by **track id**, so a queue containing the
+same track twice cannot resolve which occurrence is playing; only the index-based
+extension can. Where duplicates exist on a classic server, queue-occurrence
+fidelity is explicitly downgraded — track and position stay exact.
 
 ### 3. Manifests are immutable and content-addressed
 
@@ -166,8 +202,21 @@ write manifest 8 over the sole slot, and a peer reading checkpoint 7 finds manif
 different "8".
 
 So: `manifestID = SHA256(canonicalManifestBytes)`. Write and verify the manifest
-first, then the checkpoint that references it; retain superseded manifests for a
-grace period before collection. Backend notes:
+first, then the checkpoint that references it.
+
+**Canonical encoding must be specified or this is not portable.** `JSONEncoder`
+output is not canonical across platforms, and a PC peer has to compute the same
+hash. Therefore: **RFC 8785 canonical JSON** (or canonical CBOR), all times and
+positions as **integer milliseconds** — never floating point — and `manifestID`
+itself excluded from the bytes it hashes.
+
+**Retention must be explicit**, because versioned Jellyfin preference ids
+accumulate and the API offers no convenient enumeration of abandoned ones. Each
+checkpoint carries a bounded list of retained manifest ids forming a predecessor
+chain; anything off the chain is collectable. Crash-orphaned manifests are accepted
+as a known cost and swept periodically.
+
+Backend notes:
 
 - **Jellyfin** — separate/versioned display-preference ids, not two keys mutated
   through one whole-record POST.
@@ -193,7 +242,7 @@ public struct QueueManifest: Codable, Sendable {
     public var totalCount: Int
     public var hasMoreBefore: Bool
     public var hasMoreAfter: Bool
-    public var repeatMode: RepeatMode
+    public var repeatMode: ContinuityRepeatMode   // local enum, NOT MozzPlayback's
     public var isShuffled: Bool
 }
 
@@ -288,9 +337,16 @@ macOS does not suspend, so a Mac is a reliable always-on peer. `_mozz._tcp` must
 in `NSBonjourServices` for **advertising** as well as browsing — omitting it fails
 specifically on TestFlight/App Store builds.
 
-Security is mandatory: minimal anonymous presence until authenticated, one-time
-pairing with a code/QR-derived key, encrypted commands with nonce/replay protection,
-metadata revealed only after pairing, checkpoints fetched on demand rather than
+Security is mandatory, and "a code/QR-derived key" is a requirement, not a design —
+a short code plus an ordinary KDF is offline-brute-forceable. The LAN phase is
+therefore **gated on a separate security ADR** specifying one of:
+
+- a **high-entropy secret transported by QR**, or
+- a reviewed **PAKE (e.g. SPAKE2)** if a short human-typed code is wanted,
+
+followed in either case by authenticated key confirmation, **AEAD-protected
+messages with replay counters**, minimal anonymous presence until paired, metadata
+revealed only after pairing, and checkpoints fetched on demand rather than
 broadcast. The wire protocol is **platform-neutral** (framed messages over TCP +
 mDNS), since `NWConnection` is Apple-only and a future PC peer must speak it.
 
@@ -298,12 +354,15 @@ mDNS), since `NWConnection` is Apple-only and a future PC peer must speak it.
 
 Cursor: on track change, seek, pause, stop and backgrounding; every 15–30 s while
 playing; coalesced, with backoff. Manifest: only on queue mutation or window roll.
-Offline writes are an outbox **compacted to latest-value-only**, discarded if a
-newer remote epoch is observed. Never blind-flush: read before write.
+Offline writes are an outbox **compacted to latest-value-only**, discarded only on a
+**local** session transition or an **authenticated live handoff** — never because a
+remote checkpoint looks newer.
 
 `RepeatMode` lives in `MozzPlayback`, which imports `MozzCore`, so a model
 referencing it cannot live in `MozzCore`. Wire types go in a new **`MozzContinuity`**
-module depending only on `MozzCore`, mapped at the boundary.
+module depending only on `MozzCore`, and the manifest carries its **own**
+`ContinuityRepeatMode` mapped at the boundary — reusing `MozzPlayback.RepeatMode`
+would recreate the very cycle this avoids.
 
 ## What is actually promised
 
@@ -328,6 +387,7 @@ Stated per tier, because a single "works everywhere" claim would be false:
 | User-hosted coordinator with CAS/leases | The only route to strict C4, but it is one more thing to self-host; the promise is reduced instead |
 | Event log / CRDT | No substrate offers atomic append or merge; a CRDT in a last-writer-wins slot still loses updates |
 | Seed-based shuffle reconstruction | Balanced shuffle depends on device-local recency/taste scores |
+| Incrementing epoch counter for ownership | Still a claim to authority; two devices mint the same next value, and "newer" is undefined without CAS or trustworthy clocks |
 | Generic playlist writes in `MusicBackend` | Only Plex needs them, and only opt-in; keep the blast radius in its adapter |
 
 ## Consequences
@@ -349,7 +409,12 @@ unless the user opts in.
 | Phase | Delivers | Capabilities |
 | --- | --- | --- |
 | 1 | `MozzContinuity` models + `ContinuityStore` + Subsonic adapter + "Continue here" | Exact C1 on Subsonic |
-| 2 | Jellyfin `CustomPrefs` adapter (rich checkpoint + manifest) | Exact C1 on Jellyfin |
-| 3 | Authenticated nearby-device layer: live mirroring, picker, best-effort transfer | C2, C3, best-effort C4 |
-| 4 | Plex live observation + history hint | Exact-while-live, hint otherwise |
-| 5 | Jellyfin `/Sessions` + WebSocket off-LAN live control; optional Plex playlist adapter | C2/C3 off-LAN; opt-in durable Plex |
+| 2 | Jellyfin `CustomPrefs` adapter (rich checkpoint + manifest) — ideally the same release as phase 1 | Exact C1 on Jellyfin |
+| 3 | Plex live observation (`/status/sessions`, capability-probed) + history hint | Exact-while-live, hint otherwise |
+| 4 | Authenticated nearby-device layer — **gated on the security ADR** | C2, C3, best-effort C4 |
+| 5 | Jellyfin `/Sessions` + WebSocket off-LAN control; optional Plex playlist adapter | C2/C3 off-LAN; opt-in durable Plex |
+
+Plex observation is deliberately ahead of the LAN layer: it is far smaller and
+lower-risk than designing a secure peer protocol, so Plex users get *something*
+sooner. `/status/sessions` must be capability-probed — shared/home-user tokens may
+have restricted session visibility.
