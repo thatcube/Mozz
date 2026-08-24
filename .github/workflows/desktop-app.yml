@@ -196,6 +196,53 @@ jobs:
             exit 1
           }
 
+      # FFmpeg does the decoding (see clients/desktop/Audio/README.md). macOS and
+      # Linux users have a package manager and generally already have it; Windows
+      # has neither, and the entire pitch of this build is "download it and your
+      # music works". A missing-prerequisite dialog would break that on the one
+      # platform the project exists for, so the Windows zip carries its own.
+      #
+      # The "essentials" build: it carries every decoder Mozz needs (FLAC, ALAC,
+      # AAC, Vorbis, Opus, MP3, WAV are all native FFmpeg decoders) without the
+      # full build's extra encoders, which we never invoke — 106 MB against 240.
+      #
+      # These are GPL-licensed builds, which is fine and in fact the simplest
+      # case: Mozz is GPL-3.0 itself, and FFmpeg is invoked as a separate
+      # executable rather than linked, the loosest coupling available. The
+      # licence text ships beside the binary.
+      - name: Bundle FFmpeg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-essentials_build.zip"
+          $tmp = "$env:RUNNER_TEMP\ffmpeg"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "$tmp\ffmpeg.zip"
+          Expand-Archive "$tmp\ffmpeg.zip" -DestinationPath $tmp -Force
+
+          $exe = Get-ChildItem -Path $tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { Write-Error "ffmpeg.exe not found in the downloaded archive"; exit 1 }
+          Copy-Item $exe.FullName "publish\win-x64\ffmpeg.exe" -Force
+
+          # Ship the licence text with the binary, as the LGPL requires.
+          $license = Get-ChildItem -Path $tmp -Recurse -Include "LICENSE*","COPYING*" |
+                     Select-Object -First 1
+          if ($license) { Copy-Item $license.FullName "publish\win-x64\FFMPEG-LICENSE.txt" -Force }
+
+          # It has to actually run: a build for the wrong architecture, or one
+          # missing a DLL, fails here rather than the first time someone presses
+          # play. Decoding a generated tone end to end also proves the codecs are
+          # present, which `-version` alone would not.
+          $ffmpeg = (Resolve-Path "publish\win-x64\ffmpeg.exe").Path
+          & $ffmpeg -hide_banner -loglevel error `
+            -f lavfi -i "sine=frequency=440:duration=1" `
+            -f flac "$tmp\probe.flac"
+          if ($LASTEXITCODE -ne 0) { Write-Error "bundled ffmpeg could not encode"; exit 1 }
+          & $ffmpeg -hide_banner -loglevel error -i "$tmp\probe.flac" -f f32le -ac 2 -ar 48000 NUL
+          if ($LASTEXITCODE -ne 0) { Write-Error "bundled ffmpeg could not decode FLAC to f32le"; exit 1 }
+          $size = [math]::Round((Get-Item $ffmpeg).Length / 1MB, 1)
+          Write-Host "bundled ffmpeg.exe ($size MB); FLAC -> f32le round trip ok"
+
       # The real test: does it load on a machine that is NOT the build machine?
       # We approximate one by scrubbing every Swift directory out of PATH, so
       # the loader can only find what we copied. A missing runtime DLL then

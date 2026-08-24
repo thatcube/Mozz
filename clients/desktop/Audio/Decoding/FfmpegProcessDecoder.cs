@@ -46,11 +46,50 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
         Duration = source.KnownDuration;
         _frameBytes = targetChannels * sizeof(float);
         _residual = new byte[_frameBytes];
-        _ffmpegPath = ffmpegPath
-            ?? Environment.GetEnvironmentVariable("MOZZ_FFMPEG")
-            ?? "ffmpeg";
+        _ffmpegPath = ffmpegPath ?? ResolveFfmpeg();
 
         Start(TimeSpan.Zero);
+    }
+
+    private static string? _resolved;
+
+    /// <summary>
+    /// Where to find ffmpeg, in priority order: an explicit <c>MOZZ_FFMPEG</c>
+    /// override, a copy shipped beside the app, then <c>PATH</c>.
+    ///
+    /// The bundled copy is checked before PATH, not after, because it is the one
+    /// we tested against. A user with a decade-old ffmpeg on PATH — or one built
+    /// without the decoders we need — should get the working one.
+    ///
+    /// This matters most on Windows, which has no package manager the way macOS
+    /// and Linux do: a gaming PC will not have ffmpeg, and "download the zip and
+    /// your music works" cannot survive a missing-prerequisite dialog. The
+    /// Windows release bundles it; on macOS and Linux, PATH is the normal answer.
+    /// </summary>
+    private static string ResolveFfmpeg()
+    {
+        if (_resolved is not null) return _resolved;
+
+        if (Environment.GetEnvironmentVariable("MOZZ_FFMPEG") is { Length: > 0 } configured)
+        {
+            return _resolved = configured;
+        }
+
+        var exe = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        var appDir = AppContext.BaseDirectory;
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(appDir, exe),
+                     Path.Combine(appDir, "ffmpeg", exe),
+                     Path.Combine(appDir, "runtimes", "ffmpeg", exe),
+                 })
+        {
+            if (File.Exists(candidate)) return _resolved = candidate;
+        }
+
+        // Let the OS resolve it. If it isn't there either, Process.Start throws
+        // and the catch below turns it into a message naming MOZZ_FFMPEG.
+        return _resolved = exe;
     }
 
     /// <summary>The last few stderr lines, for surfacing a decode failure to the user.</summary>
