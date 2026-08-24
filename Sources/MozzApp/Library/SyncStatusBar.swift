@@ -207,7 +207,17 @@ struct SyncStatusBar: View {
 
     @ViewBuilder
     private func phaseCount(_ detail: SyncProgress.PhaseDetail) -> some View {
-        if detail.state != .pending {
+        // A phase the sync hasn't reached reports 0 of 0. Rendering that as
+        // "0/0" reads as an error — as though it ran and found nothing — so a
+        // phase with nothing to say shows no count at all.
+        //
+        // A *finished* empty phase is the opposite problem: a bare green check
+        // with no number looks like it was skipped or wrongly marked done. It
+        // did run, there was simply nothing there, so it says "None".
+        if detail.state == .done, detail.synced == 0 {
+            Text("None")
+                .foregroundStyle(.secondary)
+        } else if detail.state != .pending, !(detail.synced == 0 && (detail.total ?? 0) == 0) {
             Text(count(detail))
                 .foregroundStyle(detail.state == .done ? .secondary : .primary)
                 .monospacedDigit()
@@ -238,6 +248,8 @@ struct SyncStatusBar: View {
     /// Spoken as a state rather than a bare number, so the checklist reads as one.
     private func accessibilityLabel(_ detail: SyncProgress.PhaseDetail) -> Text {
         switch detail.state {
+        case .done where detail.synced == 0:
+            return Text("\(detail.phase.label), none")
         case .done: return Text("\(detail.phase.label), done")
         // The *real* count, not the eased one: the smoothing exists to make the
         // screen feel alive, and reading a deliberately-lagging number aloud
@@ -264,13 +276,15 @@ struct SyncStatusBar: View {
         // seconds at a time — the very thing the smoothing exists to fix.
         // Finished and queued rows stay compact, where width matters more.
         let synced = smoother.counts[d.phase] ?? d.synced
+        // A zero total means "not known yet", not "there are none".
+        let total = (d.total ?? 0) > 0 ? d.total : nil
         if d.state == .syncing {
-            if let total = d.total {
+            if let total {
                 return "\(Self.exact(synced))/\(Self.exact(total))"
             }
             return Self.exact(synced)
         }
-        if let total = d.total {
+        if let total {
             return "\(Self.compact(synced))/\(Self.compact(total))"
         }
         return Self.compact(synced)

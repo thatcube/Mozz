@@ -161,6 +161,32 @@ final class JellyfinCatalogTests: XCTestCase {
         XCTAssertTrue(header?.contains("Token=\"jf-token\"") == true)
         XCTAssertTrue(header?.contains("DeviceId=\"client-uuid\"") == true)
     }
+
+    /// A page total Mozz never asked for must not be reported as a catalog total.
+    ///
+    /// Jellyfin populates `TotalRecordCount` even when `EnableTotalRecordCount`
+    /// is false — with the size of the page it just returned. The backend only
+    /// asks for a real count on the first page, because that COUNT(*) is
+    /// expensive on a large library. Passing the echo through made a *resumed*
+    /// sync (which always starts at a non-zero offset) see the catalog shrink
+    /// from 6480 to 0, decide the library had changed underneath it, discard the
+    /// checkpoint and re-walk every page — so resuming a long sync never
+    /// resumed. Regression test for that.
+    func testTotalIsOnlyReportedWhenItWasActuallyRequested() async throws {
+        let backend = makeBackend()
+
+        let first = try await backend.fetchAlbums(offset: 0, limit: 100)
+        XCTAssertEqual(first.totalCount, 1, "the first page asks for the count, so it must report it")
+
+        let resumed = try await backend.fetchAlbums(offset: 500, limit: 100)
+        XCTAssertNil(resumed.totalCount, "a page that never asked for a count must not invent one")
+
+        let resumedTracks = try await backend.fetchTracks(offset: 500, limit: 100)
+        XCTAssertNil(resumedTracks.totalCount)
+        let resumedArtists = try await backend.fetchArtists(offset: 500, limit: 100)
+        XCTAssertNil(resumedArtists.totalCount)
+    }
+
 }
 
 final class JellyfinURLTests: XCTestCase {

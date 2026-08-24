@@ -238,6 +238,11 @@ public struct LibrarySyncEngine: Sendable {
                 resumeIfPossible: startMode == .resumeIfPossible,
                 maximumAge: Self.maximumCheckpointAge
             )
+            // When this is false every checkpoint was just dropped, so the whole
+            // library is about to be re-walked. That is the difference between a
+            // sync that picks up where it left off and one that starts over, so
+            // it is worth being able to see which happened.
+            diag?("RUN resumable=\(resumedRun) requested=\(startMode == .resumeIfPossible)")
         } else {
             resumedRun = false
         }
@@ -266,22 +271,37 @@ public struct LibrarySyncEngine: Sendable {
         // (serverUnreachable) and aborted the whole sync. One heavy stream at a
         // time keeps every request served promptly and well within the timeout.
         // A bounded plan (quick start) may skip artists/playlists entirely.
-        async let artistsTask = syncPages(
-            phase: .artists, maxPages: plan.maxArtistPages,
-            fetch: { try await backend.fetchArtists(offset: $0, limit: $1) },
-            write: { try await writer.upsertArtists($0, serverId: serverId, syncCheckpoint: $1) },
-            id: \.id,
-            resumeFromCheckpoint: resumedRun,
-            persistCheckpoint: isResumableMirror,
-            report: report
-        )
-        async let playlistsTask = plan.includePlaylists
-            ? syncPlaylists(
+        async let artistsTask: PagedEnumeration = {
+            let enumeration = try await self.syncPages(
+                phase: .artists, maxPages: plan.maxArtistPages,
+                fetch: { try await backend.fetchArtists(offset: $0, limit: $1) },
+                write: { try await writer.upsertArtists($0, serverId: serverId, syncCheckpoint: $1) },
+                id: \.id,
                 resumeFromCheckpoint: resumedRun,
                 persistCheckpoint: isResumableMirror,
                 report: report
             )
-            : PagedEnumeration(seen: [], reportedTotal: nil, phase: .playlists, elapsed: 0)
+            // Mark done the moment THIS phase finishes rather than where the
+            // ordered awaits below reach it. Artists runs concurrently and
+            // finishes early, but it used to be marked complete only after the
+            // heavy albums *and* tracks phases — so it sat at its full count
+            // ("3,770/3,770") with a spinner for the entire rest of the sync,
+            // which reads as stuck.
+            await complete(enumeration)
+            return enumeration
+        }()
+        async let playlistsTask: PagedEnumeration = {
+            guard plan.includePlaylists else {
+                return PagedEnumeration(seen: [], reportedTotal: nil, phase: .playlists, elapsed: 0)
+            }
+            let enumeration = try await self.syncPlaylists(
+                resumeFromCheckpoint: resumedRun,
+                persistCheckpoint: isResumableMirror,
+                report: report
+            )
+            await complete(enumeration)
+            return enumeration
+        }()
 
         let artistIDs: PagedEnumeration
         let albumIDs: PagedEnumeration
@@ -319,9 +339,7 @@ public struct LibrarySyncEngine: Sendable {
             }
             await complete(trackIDs)
             artistIDs = try await artistsTask
-            await complete(artistIDs)
             playlistIDs = try await playlistsTask
-            await complete(playlistIDs)
         } catch {
             diag?("SYNC ERROR: \(error)")
             throw error
@@ -463,9 +481,13 @@ public struct LibrarySyncEngine: Sendable {
         var checkpoint: CatalogSyncCheckpoint?
         if resumeFromCheckpoint {
             checkpoint = try await syncStore.checkpoint(serverId: serverId, phase: phase.rawValue)
+            if checkpoint == nil {
+                diag?("\(phase.rawValue): no checkpoint stored — walking from 0")
+            }
             if let saved = checkpoint,
                Date().timeIntervalSince(saved.updatedAt) > Self.maximumCheckpointAge {
                 try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                diag?("\(phase.rawValue): checkpoint too old — walking from 0")
                 checkpoint = nil
             }
             // A checkpoint with no reported total is unresumable, because there is
@@ -482,8 +504,14 @@ public struct LibrarySyncEngine: Sendable {
             // rule the prune guard applies below.
             if let saved = checkpoint, saved.reportedTotal == nil {
                 try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                diag?("\(phase.rawValue): checkpoint has no total — walking from 0")
                 checkpoint = nil
             }
+            if let saved = checkpoint {
+                diag?("\(phase.rawValue): resuming at \(saved.committedOffset)/\(saved.reportedTotal.map(String.init) ?? "?")\(saved.completed ? " (completed)" : "")")
+            }
+        } else {
+            diag?("\(phase.rawValue): run not resumable — walking from 0")
         }
         var offset = checkpoint?.committedOffset ?? 0
         var seen: [String] = []
@@ -666,9 +694,13 @@ public struct LibrarySyncEngine: Sendable {
         var checkpoint: CatalogSyncCheckpoint?
         if resumeFromCheckpoint {
             checkpoint = try await syncStore.checkpoint(serverId: serverId, phase: phase.rawValue)
+            if checkpoint == nil {
+                diag?("\(phase.rawValue): no checkpoint stored — walking from 0")
+            }
             if let saved = checkpoint,
                Date().timeIntervalSince(saved.updatedAt) > Self.maximumCheckpointAge {
                 try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                diag?("\(phase.rawValue): checkpoint too old — walking from 0")
                 checkpoint = nil
             }
             // A checkpoint with no reported total is unresumable, because there is
@@ -685,8 +717,14 @@ public struct LibrarySyncEngine: Sendable {
             // rule the prune guard applies below.
             if let saved = checkpoint, saved.reportedTotal == nil {
                 try await syncStore.clearCheckpoint(serverId: serverId, phase: phase.rawValue)
+                diag?("\(phase.rawValue): checkpoint has no total — walking from 0")
                 checkpoint = nil
             }
+            if let saved = checkpoint {
+                diag?("\(phase.rawValue): resuming at \(saved.committedOffset)/\(saved.reportedTotal.map(String.init) ?? "?")\(saved.completed ? " (completed)" : "")")
+            }
+        } else {
+            diag?("\(phase.rawValue): run not resumable — walking from 0")
         }
         var offset = checkpoint?.committedOffset ?? 0
         var playlistsSeen: [Playlist] = []
