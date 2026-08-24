@@ -1,13 +1,6 @@
 import Foundation
 import MozzCore
 import MozzDatabase
-#if canImport(FoundationNetworking)
-// Off Apple, URLSession and its configuration live in a separate module. Without
-// this import `URLSessionConfiguration` resolves to a bare `AnyObject` and every
-// member access fails with a message that names neither the module nor the
-// platform.
-import FoundationNetworking
-#endif
 
 /// Orchestrates offline downloads of original audio files using a **background**
 /// `URLSession`, so transfers continue when the app is suspended and can finish

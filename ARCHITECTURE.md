@@ -32,14 +32,15 @@ That is not an aspiration. Measured, by `wc -l` on `Sources/`:
 
 | | Lines | Runs on |
 |---|---:|---|
-| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment`, `MozzDownloads` | **18,282** | every platform |
+| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment` | **17,826** | every platform |
 | `MozzFFI` — the C ABI facade over it | 1,663 | every non-Apple platform |
 | `MozzPlayback` — AVFoundation engine | 2,688 | Apple only, **correctly** |
+| `MozzDownloads` — background `URLSession` | 463 | Apple only, **correctly** |
 | `MozzApp` — SwiftUI | 21,836 | Apple only, **correctly** |
 | `clients/desktop` — C# / Avalonia UI + audio | 4,858 | Windows, macOS, Linux |
 
 So the database, all three server clients, sync, search, listening history, cross-device
-continuity, recommendations, artwork enrichment and offline downloads are written once.
+continuity, recommendations and artwork enrichment are written once.
 A new platform is a UI shell and an audio backend — not a port.
 
 ### Why the line is drawn there
@@ -49,6 +50,15 @@ interactions, and the frameworks that do each of them well are not the same fram
 SwiftUI layer is the largest single body of code here and none of it travels; that is the
 correct outcome, not a failure to abstract. Attempting a portable UI would produce something
 that is nobody's idea of a good app on any of the five platforms.
+
+**Offline downloads turned out not to be shared either**, which was a surprise. The module
+looks portable — it imports nothing Apple-only — but it is built on a *background*
+`URLSession` (`background(withIdentifier:)`, `sessionSendsLaunchEvents`), which exists so
+transfers survive the app being suspended. That is an iOS lifecycle concern with no
+counterpart on a desktop, where a process simply keeps running. A desktop client wants a
+plain download queue, not a port of this one. Linking it into the shared graph compiled
+fine on Apple and failed on Windows and Linux immediately, which is the argument for
+having the portability CI rather than reasoning about it.
 
 **Audio output should not be shared either.** Apple has AVFoundation and gets gapless,
 route changes, interruptions and the now-playing centre for free. Everywhere else that is
@@ -122,8 +132,9 @@ platform framework.
    APPLE PLATFORM LAYER              │        OTHER PLATFORM LAYER
                                      │
    ┌──────────────┐ ┌──────────────┐ │   ┌────────────────────────────┐
-   │   MozzApp    │ │ MozzPlayback │ │   │  clients/desktop  (C#)     │
-   │   SwiftUI    │ │ AVFoundation │ │   │  Avalonia UI + miniaudio   │
+   │  MozzApp     │ │ MozzPlayback │ │   │  clients/desktop  (C#)     │
+   │  SwiftUI     │ │ AVFoundation │ │   │  Avalonia UI + miniaudio   │
+   │              │ │MozzDownloads │ │   │                            │
    └──────┬───────┘ └──────┬───────┘ │   └─────────────┬──────────────┘
           │                │         │                 │ JSON over C ABI
           │                │         │   ┌─────────────▼──────────────┐
@@ -135,7 +146,7 @@ platform framework.
    ────────────────┼─────────────────┴─────────────────┼────────────────
                    ▼      SHARED CORE — every platform ▼
    ┌───────────────────────────────────────────────────────────────────┐
-   │  MozzSync   MozzRecommend   MozzEnrichment   MozzDownloads        │
+   │  MozzSync   MozzRecommend   MozzEnrichment                        │
    │  MozzHistory   MozzContinuity                                     │
    │  MozzPlex    MozzJellyfin    MozzSubsonic   (MusicBackend impls)  │
    │  ┌─────────────────────┐  ┌──────────────┐                        │
@@ -160,7 +171,7 @@ platform framework.
 | **MozzContinuity** | Cross-device playback handoff; the queue hash two devices compare (ADR-0010). | MozzCore, Crypto | shared | ~555 |
 | **MozzRecommend** | Taste profile, genre TF-IDF similarity, radio, Mozz Weekly. | MozzCore, MozzDatabase | shared | ~1,071 |
 | **MozzEnrichment** | Artwork and metadata enrichment from external sources. | MozzCore, MozzNetworking, MozzDatabase | shared | ~1,855 |
-| **MozzDownloads** | Background downloads, disk store, offline URL resolution. | MozzCore, MozzNetworking, MozzDatabase | shared | ~463 |
+| **MozzDownloads** | Background `URLSession` downloads, disk store, offline URL resolution. | MozzCore, MozzNetworking, MozzDatabase | **Apple only** | ~463 |
 | **MozzFFI** | The C ABI facade: `mozz_session_open/call/close`, one JSON command dispatcher. What every non-Apple client drives. | all shared modules | non-Apple | ~1,663 |
 | **MozzPlayback** | `AVQueuePlayer` gapless engine, `PlayQueue`, now-playing + remote commands, audio session. | MozzCore | **Apple only** | ~2,688 |
 | **MozzApp** | SwiftUI features + `AppEnvironment` composition root. | all above | **Apple only** | ~21,836 |
@@ -473,7 +484,8 @@ offline downloads, stubbed queue, single-item player = no gapless, no music scro
 
 This keeps the design clean and *not* Plozz-coupled, which is exactly what makes it a good
 candidate to back-port *into* Plozz later (the brief's tvOS reuse goal): `MozzCore`,
-`MozzDatabase`, `MozzSync`, `MozzPlayback` and `MozzDownloads` are UI-free and platform-portable.
+`MozzDatabase` and `MozzSync` are UI-free and platform-portable; `MozzPlayback` and
+`MozzDownloads` are UI-free but Apple-bound (AVFoundation and background `URLSession`).
 
 ---
 
