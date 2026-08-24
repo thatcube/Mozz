@@ -105,7 +105,28 @@ jobs:
       - name: Install the Swift Android SDK
         run: |
           set -euxo pipefail
-          swift sdk install "$ANDROID_SDK_URL" --checksum "$ANDROID_SDK_CHECKSUM"
+          # `swift sdk install` (the swift-package binary) has intermittently
+          # SIGSEGV'd mid-install on the x86_64 leg while the identical call
+          # succeeds on aarch64 — a flaky crash in the installer itself, not in
+          # anything Mozz controls. Retry it, treat an already-registered bundle
+          # as success, and scrub any half-written bundle a crashed attempt left
+          # behind so the next attempt starts clean.
+          installed=0
+          for attempt in 1 2 3; do
+            if swift sdk install "$ANDROID_SDK_URL" --checksum "$ANDROID_SDK_CHECKSUM"; then
+              installed=1; break
+            fi
+            echo "swift sdk install attempt ${attempt} failed; checking whether it registered anyway"
+            if [ "$(swift sdk list 2>/dev/null | grep -ci android || true)" -gt 0 ]; then
+              echo "an Android SDK is already registered — proceeding"
+              installed=1; break
+            fi
+            rm -rf "$HOME/.swiftpm/swift-sdks/${ANDROID_SDK_NAME}.artifactbundle" \
+                   "/root/.swiftpm/swift-sdks/${ANDROID_SDK_NAME}.artifactbundle" \
+                   "/github/home/.swiftpm/swift-sdks/${ANDROID_SDK_NAME}.artifactbundle" 2>/dev/null || true
+            sleep 5
+          done
+          test "$installed" -eq 1
           swift sdk list
           # `swift sdk install` writes under the toolchain's *real* home, which in
           # this container is root's (/root), not the step's $HOME (/github/home).
