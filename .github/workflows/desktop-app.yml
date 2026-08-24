@@ -33,6 +33,7 @@ on:
   push:
     paths:
       - "clients/desktop/**"
+      - "clients/desktop-tests/**"
       - "Sources/**"
       - "Package.swift"
       - ".github/workflows/desktop-app.yml"
@@ -69,7 +70,7 @@ jobs:
       # be exercised on a developer's Mac at all, so this job is the only place
       # the Windows credential path is ever run before a user signs in.
       - name: Test the credential store
-        run: dotnet test clients/desktop/Mozz.Desktop.Tests/Mozz.Desktop.Tests.csproj -c Release
+        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
 
       # Same amalgamation build as the spike, and for the same reason: GRDB's
       # GRDBSQLite is a systemLibrary target and Windows ships no SQLite. Static,
@@ -232,7 +233,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Test the credential store
-        run: dotnet test clients/desktop/Mozz.Desktop.Tests/Mozz.Desktop.Tests.csproj -c Release
+        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
 
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI

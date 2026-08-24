@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Source files are included directly rather than through a ProjectReference.
+
+    The app is a WinExe with a full Avalonia dependency tree; the thing worth
+    testing here is the platform-native credential store, which needs no UI
+    framework. Pulling Avalonia into a headless test run buys nothing and makes
+    the run fragile on a CI machine with no display.
+
+    This project also deliberately sits BESIDE clients/desktop rather than
+    inside it. The .NET SDK globs every .cs file under a project directory, so a
+    nested test project makes the app try to compile the tests — and the test
+    project's generated obj/ assembly attributes along with them, which fails
+    with a duplicate-attribute error that names neither cause.
+  -->
+  <ItemGroup>
+    <Compile Include="..\desktop\Core\SecretStore.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+</Project>
