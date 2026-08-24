@@ -179,6 +179,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
             _core.Open(dbPath);
 
+            // Before anything can be played: the tracks come from the local
+            // database, but their stream URLs come from an attached backend.
+            await Connect.AttachSavedAccountsAsync();
+
             await RefreshCountsAsync();
             await LoadSectionAsync(LibrarySection.Home);
 
