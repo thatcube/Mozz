@@ -223,6 +223,7 @@ let package = Package(
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
         .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
+        .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
