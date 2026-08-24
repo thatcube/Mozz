@@ -130,6 +130,7 @@ final class AsyncRateLimiterTests: XCTestCase {
         let interval: TimeInterval = 0.1
         let limiter = AsyncRateLimiter(minInterval: interval)
         let recorder = GrantRecorder()
+        let start = Date()
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<4 {
                 group.addTask {
@@ -145,10 +146,28 @@ final class AsyncRateLimiterTests: XCTestCase {
         }
         let times = await recorder.sorted()
         XCTAssertEqual(times.count, 4)
-        for i in 1..<times.count {
-            let gap = times[i].timeIntervalSince(times[i - 1])
-            // Generous tolerance (half the interval) vs. the ~0 gaps a herd produces.
-            XCTAssertGreaterThanOrEqual(gap, interval * 0.5, "grants \(i-1),\(i) only \(gap)s apart")
+
+        // Each grant is checked against the START, not against the grant before
+        // it. That distinction is the whole point.
+        //
+        // A timestamp is taken when the continuation gets CPU, which is not when
+        // the limiter granted — on a loaded shared runner a resumed task can sit
+        // for tens of milliseconds. Comparing neighbours therefore measures
+        // scheduler latency as much as the limiter: delay grant N's *observation*
+        // and its gap to N+1 collapses, which is exactly how this failed in CI at
+        // 0.027s when the limiter itself was behaving perfectly.
+        //
+        // Measured from the start the asymmetry works for us. Scheduling delay
+        // only ever pushes an observation LATER, so the k-th grant appearing no
+        // earlier than k intervals in is a bound that jitter cannot break — while
+        // a herd, which releases everything at once, still fails it immediately.
+        for (index, time) in times.enumerated() {
+            let elapsed = time.timeIntervalSince(start)
+            let earliest = Double(index) * interval
+            // A few ms of slack for timer granularity and Date() resolution.
+            XCTAssertGreaterThanOrEqual(
+                elapsed, earliest - 0.01,
+                "grant \(index) arrived \(elapsed)s in, before its \(earliest)s slot")
         }
     }
 }
