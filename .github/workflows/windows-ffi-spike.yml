@@ -88,21 +88,32 @@ jobs:
           if (-not (Test-Path "$root\include\sqlite3.h")) {
             Write-Error "sqlite3.h missing after vcpkg install"; exit 1
           }
-          # Swift on Windows honours the MSVC INCLUDE/LIB conventions.
-          "INCLUDE=$root\include;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "LIB=$root\lib;$env:LIB"             | Out-File -FilePath $env:GITHUB_ENV -Append
-          "SQLITE_BIN=$root\bin"               | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "sqlite3.h + sqlite3.lib provided from $root"
+          # Deliberately NOT exporting INCLUDE/LIB. Those are populated by the
+          # Visual Studio environment, which is not visible in this step — so
+          # writing them here replaces rather than extends, msvcrt.lib and
+          # friends disappear, and even Package.swift stops linking. The paths
+          # go to each build individually via -Xcc / -Xlinker instead.
+          "SQLITE_ROOT=$root"      | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SQLITE_BIN=$root\bin"   | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "sqlite3 provided from $root"
 
       # Stage 1 — does the platform-free core compile off-Apple at all?
       # Building the library targets alone isolates a core portability failure
       # from an FFI-facade failure.
       - name: Stage 1 — build the core
-        run: swift build -c release --target MozzCore --target MozzDatabase
+        shell: pwsh
+        run: |
+          swift build -c release --target MozzCore --target MozzDatabase `
+            -Xcc -I"$env:SQLITE_ROOT\include" `
+            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib"
 
       # Stage 2 — does @_cdecl give us a real, linkable DLL?
       - name: Stage 2 — build the FFI shared library
-        run: swift build -c release --product MozzFFI
+        shell: pwsh
+        run: |
+          swift build -c release --product MozzFFI `
+            -Xcc -I"$env:SQLITE_ROOT\include" `
+            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib"
 
       - name: Locate MozzFFI.dll
         shell: pwsh
