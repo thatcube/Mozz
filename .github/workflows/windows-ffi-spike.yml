@@ -1,0 +1,133 @@
+name: Windows FFI spike
+
+# Proves (or disproves) that Mozz's platform-free Swift core builds as a C-ABI
+# shared library on Windows x64 and can be driven from a .NET host.
+#
+# Runs on demand, and only when the spike itself changes — this is an
+# investigation, not a gate on normal iOS work.
+#
+# The steps are deliberately staged so a failure identifies its own layer:
+#   1. core compiles             -> is the Swift code portable at all?
+#   2. FFI product links         -> does @_cdecl produce a usable DLL?
+#   3. harness loads + probes    -> does the C ABI hold, and is FTS5 present?
+#   4. benchmark                 -> are the numbers within budget?
+
+on:
+  workflow_dispatch:
+    inputs:
+      trackCount:
+        description: "Synthetic catalog size (tracks)"
+        required: false
+        default: "100000"
+  push:
+    paths:
+      - "Sources/MozzFFI/**"
+      - "spike/windows-ffi/**"
+      - ".github/workflows/windows-ffi-spike.yml"
+
+concurrency:
+  group: windows-ffi-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Swift toolchain for Windows. If this step is what breaks, the
+      # problem is toolchain distribution rather than anything about Mozz.
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.1.2-release
+          tag: 6.1.2-RELEASE
+
+      - name: Swift version
+        run: swift --version
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Stage 1 — does the platform-free core compile off-Apple at all?
+      # Building the library targets alone isolates a core portability failure
+      # from an FFI-facade failure.
+      - name: Stage 1 — build the core
+        run: swift build -c release --target MozzCore --target MozzDatabase
+
+      # Stage 2 — does @_cdecl give us a real, linkable DLL?
+      - name: Stage 2 — build the FFI shared library
+        run: swift build -c release --product MozzFFI
+
+      - name: Locate MozzFFI.dll
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Recurse -Filter MozzFFI.dll .build |
+                 Select-Object -First 1
+          if (-not $dll) {
+            Write-Error "MozzFFI.dll was not produced by the build"
+            exit 1
+          }
+          Write-Host "found: $($dll.FullName) ($([math]::Round($dll.Length/1MB,1)) MB)"
+          "MOZZ_FFI_DLL_DIR=$($dll.DirectoryName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build the C# harness
+        run: dotnet build spike/windows-ffi/Harness/Harness.csproj -c Release -o harness-out
+
+      # The Swift runtime DLLs sit alongside the toolchain, and Swift is not
+      # ABI-stable on Windows, so a shipping app has to redistribute them like
+      # the MSVC runtime. Here we simply put MozzFFI.dll next to the harness and
+      # let the toolchain's runtime resolve from PATH — packaging them properly
+      # is its own (known) piece of work, called out in the plan's risk table.
+      - name: Stage 3+4 — run the harness
+        shell: pwsh
+        run: |
+          Copy-Item "$env:MOZZ_FFI_DLL_DIR\*.dll" harness-out -Force
+          $tracks = "${{ github.event.inputs.trackCount }}"
+          if ([string]::IsNullOrWhiteSpace($tracks)) { $tracks = "100000" }
+          Write-Host "running harness with $tracks tracks"
+          & .\harness-out\MozzSpikeHarness.exe $tracks
+          exit $LASTEXITCODE
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-spike-logs
+          path: |
+            .build/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The same spike on macOS. Not the point of the exercise, but it is a free
+  # control: if Windows fails and macOS passes, the fault is platform-specific
+  # rather than a bug in the facade itself.
+  macos-control:
+    name: macOS control
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build the FFI shared library
+        run: swift build -c release --product MozzFFI
+
+      - name: Build the C# harness
+        run: dotnet build spike/windows-ffi/Harness/Harness.csproj -c Release -o harness-out
+
+      - name: Run the harness
+        run: |
+          cp .build/release/libMozzFFI.dylib harness-out/
+          # A smaller catalog: this job exists to validate the facade, not to
+          # produce headline numbers.
+          ./harness-out/MozzSpikeHarness 20000

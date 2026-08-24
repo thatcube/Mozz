@@ -42,6 +42,11 @@ let package = Package(
         .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
         .library(name: "MozzEnrichment", targets: ["MozzEnrichment"]),
         .library(name: "MozzApp", targets: ["MozzApp"]),
+
+        // Cross-platform FFI spike (see spike/windows-ffi/README.md). A DYNAMIC
+        // library so non-Apple hosts get a real .dll/.so to load. Additive: the
+        // iOS app links MozzApp/MozzCore and is unaffected by this product.
+        .library(name: "MozzFFI", type: .dynamic, targets: ["MozzFFI"]),
     ],
     dependencies: [
         // GRDB.swift — the SQLite toolkit backing our source-of-truth store and
@@ -139,6 +144,15 @@ let package = Package(
             ],
             resources: [.process("Resources")]
         ),
+
+        // MARK: - Cross-platform FFI spike
+        //
+        // A thin `@_cdecl` C-ABI facade over the platform-free core, so a
+        // non-Swift host (C#/.NET on Windows, Kotlin on Android) can drive it.
+        // Exists to answer, on real target hardware: does the core build
+        // off-Apple, does the linked SQLite have FTS5, does the C ABI hold, and
+        // what does marshalling cost? See spike/windows-ffi/README.md.
+        .target(name: "MozzFFI", dependencies: ["MozzCore", "MozzDatabase"]),
 
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),

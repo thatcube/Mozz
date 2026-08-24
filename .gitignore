@@ -46,3 +46,8 @@ CLAUDE.local.md
 # Screenshot fixture: large binary covers + audio, generated locally.
 ScreenshotAssets/
 build/
+
+# .NET build output (spike harness)
+obj/
+bin/
+harness-out/
