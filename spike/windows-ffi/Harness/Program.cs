@@ -165,6 +165,7 @@ internal static class Program
             Console.WriteLine("     reopens the DB per call, so it must not inflate the query baseline)");
             string[] terms = ["Machine", "Golden", "Ocean", "Silent", "Horizon"];
             double totalQuery = 0, totalEncode = 0;
+            var firstPlan = true;
 
             foreach (var term in terms)
             {
@@ -177,6 +178,17 @@ internal static class Program
 
                 totalQuery += queryMs;
                 totalEncode += encodeMs;
+
+                if (firstPlan && search.TryGetProperty("queryPlan", out var plan))
+                {
+                    firstPlan = false;
+                    Console.WriteLine("  query plan for this platform:");
+                    foreach (var line in plan.EnumerateArray())
+                    {
+                        Console.WriteLine($"      {line.GetString()}");
+                    }
+                    Console.WriteLine();
+                }
                 Console.WriteLine(
                     $"  {term,-10} {tracks,4} tracks   open {openMs,6:F2} ms   query {queryMs,7:F2} ms   " +
                     $"encode {encodeMs,6:F2} ms   {bytes,6} bytes");

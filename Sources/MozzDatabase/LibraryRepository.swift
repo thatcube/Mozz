@@ -466,26 +466,63 @@ public struct LibraryRepository: Sendable {
         return try await database.read { db in
             let serverFilter = serverId != nil
             func order(_ table: String) -> String { ranked ? "ORDER BY bm25(\(table))" : "" }
+            // CROSS JOIN, with the FTS table first, is a deliberate optimizer
+            // instruction rather than a stylistic choice: SQLite documents that
+            // CROSS JOIN suppresses table reordering, which pins the FTS table
+            // as the outer loop.
+            //
+            // Written the natural way round, the planner is free to drive from
+            // the base table instead — scanning all 100k tracks and probing the
+            // index once per row. Apple's SQLite has STAT4 statistics and picks
+            // correctly; a stock build has no statistics for a virtual table and
+            // picked the catastrophic plan, turning a 16 ms search into 54
+            // seconds on Windows. Pinning the order makes the query fast on any
+            // SQLite, which is worth more than relying on a good planner.
             let artists = try ArtistRecord.fetchAll(db, sql: """
-                SELECT artist.* FROM artist
-                JOIN artist_fts ON artist_fts.rowid = artist.id
+                SELECT artist.* FROM artist_fts
+                CROSS JOIN artist ON artist.id = artist_fts.rowid
                 WHERE artist_fts MATCH ?\(serverFilter ? " AND artist.serverId = ?" : "")
                 \(order("artist_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             let albums = try AlbumRecord.fetchAll(db, sql: """
-                SELECT album.* FROM album
-                JOIN album_fts ON album_fts.rowid = album.id
+                SELECT album.* FROM album_fts
+                CROSS JOIN album ON album.id = album_fts.rowid
                 WHERE album_fts MATCH ?\(serverFilter ? " AND album.serverId = ?" : "")
                 \(order("album_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType * 5))
                 .dedupedByAlbumGroup(limit: limitPerType)
             let tracks = try TrackRecord.fetchAll(db, sql: """
-                SELECT track.* FROM track
-                JOIN track_fts ON track_fts.rowid = track.id
+                SELECT track.* FROM track_fts
+                CROSS JOIN track ON track.id = track_fts.rowid
                 WHERE track_fts MATCH ?\(serverFilter ? " AND track.serverId = ?" : "")
                 \(order("track_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             return SearchResults(artists: artists, albums: albums, tracks: tracks)
+        }
+    }
+
+    /// The query plan SQLite chooses for the track search, as text.
+    ///
+    /// Exposed for the cross-platform spike: a search that is fast on one
+    /// platform and pathological on another is almost always a different join
+    /// order, and the plan says so immediately where a stopwatch only says
+    /// "slow". A healthy plan scans `track_fts` and looks `track` up by rowid;
+    /// an unhealthy one scans `track`.
+    public func searchQueryPlan(_ query: String, serverId: ServerID? = nil) async throws -> [String] {
+        guard let pattern = FTSQuery.pattern(for: query) else { return [] }
+        let serverFilter = serverId != nil
+        return try await database.read { db in
+            // EXPLAIN QUERY PLAN returns (id, parent, notused, detail); the
+            // human-readable part is `detail`, and fetching the first column
+            // silently yields row ids instead.
+            try Row.fetchAll(db, sql: """
+                EXPLAIN QUERY PLAN
+                SELECT track.* FROM track_fts
+                CROSS JOIN track ON track.id = track_fts.rowid
+                WHERE track_fts MATCH ?\(serverFilter ? " AND track.serverId = ?" : "")
+                ORDER BY bm25(track_fts) LIMIT ?
+                """, arguments: Self.matchArgs(pattern, serverId, 20))
+                .map { row in (row["detail"] as String?) ?? "" }
         }
     }
 

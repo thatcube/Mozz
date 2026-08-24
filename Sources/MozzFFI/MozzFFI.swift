@@ -285,6 +285,7 @@ public func mozz_ffi_benchmark(
 // MARK: - 3. Marshalling cost
 
 private struct SearchResult: Encodable {
+    var queryPlan: [String]
     var query: String
     var artists: Int
     var albums: Int
@@ -342,7 +343,15 @@ public func mozz_ffi_search(
             let payload = (try? encoder.encode(titles)) ?? Data()
             let encodeMs = Date().timeIntervalSince(encodeStart) * 1000
 
+            // The plan is the diagnostic that matters when a search is fast on
+            // one platform and pathological on another: a stopwatch says "slow",
+            // the plan says *why*.
+            let plan = (try? await repository.searchQueryPlan(
+                term, serverId: SyntheticCatalog.defaultServerID
+            )) ?? []
+
             return SearchResult(
+                queryPlan: plan,
                 query: term,
                 artists: results.artists.count,
                 albums: results.albums.count,
