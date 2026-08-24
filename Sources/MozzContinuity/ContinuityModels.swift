@@ -80,6 +80,21 @@ public enum ContinuityPlaybackState: String, Codable, Sendable, Hashable {
 /// `MozzPlayback`.
 public typealias ContinuityRepeatMode = RepeatMode
 
+/// What kind of device wrote a checkpoint, so the UI can show the right glyph.
+///
+/// Sent explicitly rather than guessed from the device *name*: names are
+/// user-chosen free text ("Brandon's Studio", "kitchen") and sniffing them for
+/// "iPhone" would be wrong as often as it was right.
+public enum ContinuityDeviceKind: String, Codable, Sendable, Hashable {
+    case phone
+    case tablet
+    case desktop
+    case tv
+    case speaker
+    case web
+    case unknown
+}
+
 /// Where a queue came from, so a device that cannot read the queue verbatim can
 /// still rebuild something sensible — and so a truncated queue can be extended
 /// past its stored end instead of simply stopping.
@@ -134,6 +149,9 @@ public struct ContinuityCursor: Codable, Sendable, Hashable {
     /// Human label for the UI ("Brandon's iPhone"). Empty where the backend
     /// cannot carry it.
     public var deviceName: String
+    /// What sort of device wrote this. Optional so checkpoints written before
+    /// this field existed still decode.
+    public var deviceKind: ContinuityDeviceKind?
     /// Monotonic **within one `playbackRunID`** and meaningless across runs. It
     /// orders one device's own updates; it is not a claim to authority.
     public var cursorSequence: UInt64
@@ -154,6 +172,7 @@ public struct ContinuityCursor: Codable, Sendable, Hashable {
         playbackRunID: UUID,
         deviceID: String,
         deviceName: String = "",
+        deviceKind: ContinuityDeviceKind? = nil,
         cursorSequence: UInt64,
         capturedAtMS: Int64,
         state: ContinuityPlaybackState,
@@ -165,6 +184,7 @@ public struct ContinuityCursor: Codable, Sendable, Hashable {
         self.playbackRunID = playbackRunID
         self.deviceID = deviceID
         self.deviceName = deviceName
+        self.deviceKind = deviceKind
         self.cursorSequence = cursorSequence
         self.capturedAtMS = capturedAtMS
         self.state = state

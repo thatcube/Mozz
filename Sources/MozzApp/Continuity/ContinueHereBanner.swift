@@ -64,8 +64,7 @@ struct ContinueHereBanner: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(headline(for: offer))
-                    .font(.subheadline.weight(.semibold))
+                headline(for: offer)
                 if !offer.title.isEmpty {
                     Text(subtitle(for: offer))
                         .font(.caption)
@@ -105,15 +104,43 @@ struct ContinueHereBanner: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Names the other device when the backend can attribute a checkpoint.
-    /// Subsonic cannot — its only signal is the client *product* name, which is
-    /// identical for every Mozz install — so the copy stays honest and just says
-    /// where you left off.
-    private func headline(for offer: ContinuityOffer) -> String {
+    /// Names the source device in the brand color, with a glyph for what it is,
+    /// so the eye lands on *where the music is* rather than on the boilerplate.
+    ///
+    /// Subsonic cannot attribute a checkpoint to a device — its only signal is
+    /// the client *product* name, identical for every Mozz install — so the copy
+    /// stays honest there and just says where you left off.
+    @ViewBuilder
+    private func headline(for offer: ContinuityOffer) -> some View {
         if let device = offer.deviceName {
-            return "Playing on \(device)"
+            HStack(spacing: 5) {
+                Text("Playing on")
+                HStack(spacing: 3) {
+                    Image(systemName: icon(for: offer.deviceKind))
+                        .imageScale(.small)
+                    Text(device)
+                        .lineLimit(1)
+                }
+                // Fixed brand red, legible on either inverted surface.
+                .foregroundStyle(Color.mozzBrand)
+            }
+            .font(.subheadline.weight(.semibold))
+        } else {
+            Text("Pick up where you left off")
+                .font(.subheadline.weight(.semibold))
         }
-        return "Pick up where you left off"
+    }
+
+    private func icon(for kind: ContinuityDeviceKind?) -> String {
+        switch kind {
+        case .phone: return "iphone"
+        case .tablet: return "ipad"
+        case .desktop: return "desktopcomputer"
+        case .tv: return "appletv"
+        case .speaker: return "hifispeaker"
+        case .web: return "globe"
+        case .unknown, .none: return "waveform"
+        }
     }
 
     private func subtitle(for offer: ContinuityOffer) -> String {

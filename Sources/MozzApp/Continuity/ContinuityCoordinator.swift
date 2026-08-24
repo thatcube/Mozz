@@ -17,6 +17,9 @@ public struct ContinuityOffer: Sendable, Identifiable {
     /// Subsonic's only signal is the client *product* name, which is identical
     /// for every Mozz install.
     public var deviceName: String?
+    /// What sort of device the checkpoint came from, for the glyph beside the
+    /// name. Nil alongside a nil `deviceName`.
+    public var deviceKind: ContinuityDeviceKind?
     /// True when only the track and position survived: the queue could not be
     /// paired with the cursor, or the backend cannot store one.
     public var isTrackOnly: Bool
@@ -39,6 +42,7 @@ public final class ContinuityCoordinator: ObservableObject {
     private var store: (any ContinuityStore)?
     private var deviceID: String = ""
     private var deviceName: String = ""
+    private var deviceKind: ContinuityDeviceKind = .unknown
 
     /// Writes are suppressed until the first reconcile completes.
     ///
@@ -60,10 +64,16 @@ public final class ContinuityCoordinator: ObservableObject {
     // MARK: Lifecycle
 
     /// Point the coordinator at a signed-in server, or clear it on sign-out.
-    public func activate(store: (any ContinuityStore)?, deviceID: String, deviceName: String) {
+    public func activate(
+        store: (any ContinuityStore)?,
+        deviceID: String,
+        deviceName: String,
+        deviceKind: ContinuityDeviceKind
+    ) {
         self.store = store
         self.deviceID = deviceID
         self.deviceName = deviceName
+        self.deviceKind = deviceKind
         hasReconciled = false
         offer = nil
         lastWrittenQueueHash = nil
@@ -96,14 +106,14 @@ public final class ContinuityCoordinator: ObservableObject {
         let item = snapshot.queue?.items.first {
             $0.locator.remoteID == cursor.current.remoteID
         }
+        let attributed = store.features.deviceAttribution && !cursor.deviceName.isEmpty
         offer = ContinuityOffer(
             snapshot: snapshot,
             title: item?.title ?? "",
             artist: item?.artist ?? "",
             artwork: item?.artwork,
-            deviceName: store.features.deviceAttribution && !cursor.deviceName.isEmpty
-                ? cursor.deviceName
-                : nil,
+            deviceName: attributed ? cursor.deviceName : nil,
+            deviceKind: attributed ? (cursor.deviceKind ?? .unknown) : nil,
             isTrackOnly: snapshot.queue == nil
         )
     }
@@ -131,6 +141,7 @@ public final class ContinuityCoordinator: ObservableObject {
             playbackRunID: checkpoint.runID,
             deviceID: deviceID,
             deviceName: deviceName,
+            deviceKind: deviceKind,
             cursorSequence: checkpoint.sequence,
             capturedAtMS: Int64(Date().timeIntervalSince1970 * 1000),
             state: ContinuityMapper.state(checkpoint.status),

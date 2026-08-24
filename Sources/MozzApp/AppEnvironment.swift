@@ -1611,7 +1611,8 @@ public final class AppEnvironment: ObservableObject {
         continuity.activate(
             store: store,
             deviceID: Self.continuityDeviceID(from: clientIdentifier),
-            deviceName: Self.localDeviceName
+            deviceName: Self.localDeviceName,
+            deviceKind: Self.localDeviceKind
         )
         Task { @MainActor in
             await self.continuity.reconcile(
@@ -1654,6 +1655,23 @@ public final class AppEnvironment: ObservableObject {
         return UIDevice.current.name
         #else
         return ProcessInfo.processInfo.hostName
+        #endif
+    }
+
+    /// Reported explicitly so the receiving device can show the right glyph.
+    /// Note an iPad app running on Apple Silicon reports `.mac`, which is
+    /// exactly what we want to display.
+    static var localDeviceKind: ContinuityDeviceKind {
+        #if canImport(UIKit)
+        switch UIDevice.current.userInterfaceIdiom {
+        case .phone: return .phone
+        case .pad: return .tablet
+        case .mac: return .desktop
+        case .tv: return .tv
+        default: return .unknown
+        }
+        #else
+        return .desktop
         #endif
     }
 
