@@ -355,23 +355,10 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
           disable-animations: true
-          script: |
-            # This runs under the emulator-runner's shell, which is dash — no
-            # `pipefail` (dash rejects it outright). The one pipe below doesn't
-            # need it: adb never forwards the remote exit code, so success is
-            # judged solely by the __RC__=0 sentinel grep, not the pipe status.
-            set -eu
-            DEV=/data/local/tmp/mozz
-            adb wait-for-device
-            adb shell "rm -rf $DEV && mkdir -p $DEV"
-            adb push payload/. "$DEV/"
-            adb push spec/continuity/queue-hash-fixtures.json "$DEV/queue-hash-fixtures.json"
-            adb shell "chmod 755 $DEV/harness"
-            echo "running harness with ${TRACK_COUNT} tracks"
-            # adb shell does not forward the remote exit status, so smuggle it out
-            # in a sentinel and fail the step unless the harness returned 0.
-            adb shell "cd $DEV && LD_LIBRARY_PATH=$DEV ./harness ./libMozzFFI.so ${TRACK_COUNT} $DEV/mozz-spike.sqlite $DEV/queue-hash-fixtures.json; echo __RC__=\$?" | tee emu-out.txt
-            grep -q "__RC__=0" emu-out.txt
+          # A single line on purpose: the action runs each line of `script` in its
+          # own `sh -c`, so anything multi-line loses its variables and `set` flags
+          # between lines. Hand the whole job to one bash process via a file.
+          script: bash "$GITHUB_WORKSPACE/spike/android-ffi/run-emulator.sh"
 
   # ---------------------------------------------------------------------------
   # A free control: the identical harness against a native macOS build. If the
