@@ -103,7 +103,14 @@ public struct Logger: Sendable {
     public func fault(_ message: LogMessage) { emit("FAULT", message) }
 
     private func emit(_ level: String, _ message: LogMessage) {
-        FileHandle.standardError.write(Data("\(prefix) \(level): \(message.text)\n".utf8))
+        // `write(contentsOf:)` throws; the older `write(_:)` TRAPS on a failed
+        // write, and "nothing" is a real destination here. A GUI process started
+        // from Explorer has no stderr at all, so on Windows every one of these
+        // lines aborted the app with an illegal instruction (0xC000001D) the
+        // moment a sync logged its first phase. Logging must never be able to
+        // kill the process it is reporting on.
+        try? FileHandle.standardError.write(
+            contentsOf: Data("\(prefix) \(level): \(message.text)\n".utf8))
     }
 }
 #endif
