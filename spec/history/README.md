@@ -114,10 +114,15 @@ asymmetry: a resume point is worthless if it arrives late, while **a play
 recorded a day late lands in exactly the same taste profile and the same month of
 the same year.** History is latency-tolerant; continuity is not.
 
-Where a server *does* offer a genuine KV store, it may additionally act as a
-store-and-forward relay so peers need not be awake at the same moment. That is an
-availability optimization layered on a feature that already works everywhere —
-not a capability some users get and others do not.
+Requiring two devices to be awake together is fine in principle and fails for the
+most common listening pattern of all — in the car, on cellular, where the phone
+does all the listening and the desktop none. So a **zero-knowledge relay**
+(ADR-0012) lets a phone leave an encrypted batch for a PC that was never awake at
+the same moment. It carries these same payloads unchanged; it stores ciphertext
+under a random id and can read none of it.
+
+Where a server *does* offer a genuine KV store — Jellyfin's `CustomPrefs` — it may
+also act as a relay, which is why `JellyfinHistoryStore` still exists.
 
 ## Batches
 

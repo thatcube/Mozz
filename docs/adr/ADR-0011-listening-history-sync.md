@@ -110,7 +110,13 @@ and does not use per-server storage as its mechanism.**
    than a reason to invent another.
 3. **The wire format stays platform-neutral**, per the same section: a Windows or
    Android peer must speak it, so it is specified in `spec/`, not in Swift.
-4. **`JellyfinHistoryStore` is demoted, not deleted.** It stops being *the*
+4. **A relay closes the co-presence gap (ADR-0012).** Requiring two devices to
+   be awake together is acceptable in principle but fails for the single most
+   common listening pattern — in the car, on cellular, where the phone does all
+   the listening and the desktop none. ADR-0012 adds a zero-knowledge relay so a
+   phone can leave an encrypted batch for a PC that was never awake at the same
+   time. It carries the payloads defined here unchanged.
+5. **`JellyfinHistoryStore` is demoted, not deleted.** It stops being *the*
    mechanism and becomes an optional **store-and-forward relay**: where a server
    genuinely offers a KV store, a device may leave a batch there so peers can
    collect it without both being awake at once. This is an availability
@@ -178,3 +184,7 @@ Changed: `JellyfinHistoryStore` is reframed as an optional relay, and
 channel exists.
 
 Blocked on: the pairing/security ADR (ADR-0010 §8).
+
+Amended by: ADR-0012, which adds the store-and-forward relay that makes this
+work for car and cellular listening without requiring two devices to be awake at
+the same time.
