@@ -70,6 +70,11 @@ jobs:
     runs-on: ubuntu-latest
     container: swift:6.3.3-noble
     timeout-minutes: 60
+    # The swift image's default shell is dash; force bash so `set -o pipefail`
+    # and the bashisms in the steps below behave.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
