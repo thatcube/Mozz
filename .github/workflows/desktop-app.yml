@@ -1,0 +1,262 @@
+name: Desktop app
+
+# Produces a runnable Mozz desktop build for Windows, macOS and Linux, as a
+# downloadable artifact per platform.
+#
+# WHY THIS IS SEPARATE FROM THE SPIKE
+#
+# `windows-ffi-spike.yml` answers "does the core work off-Apple". It proves the
+# ABI holds and the numbers are good, and it stops there. This workflow answers
+# a different question: can someone download a zip and double-click it. That
+# needs two things the spike deliberately skipped.
+#
+#   1. THE SWIFT RUNTIME HAS TO SHIP WITH THE APP.
+#
+#      Swift is not ABI-stable on Windows or Linux — there is no OS-provided
+#      runtime the way there is on macOS and iOS. `MozzFFI.dll` imports
+#      swiftCore.dll, Foundation.dll, swift_Concurrency.dll and friends, and on
+#      a machine without the Swift toolchain installed none of them exist. The
+#      spike sidestepped this by running on a runner that had just installed the
+#      toolchain, so PATH resolved them. A user's gaming PC will not.
+#
+#      So we resolve the import graph and copy what it needs into the app
+#      folder, where Windows' loader looks first.
+#
+#   2. .NET HAS TO SHIP TOO.
+#
+#      `--self-contained` costs about 70 MB and removes the only other
+#      prerequisite. For an app whose entire pitch is "download it and your
+#      music works", one runtime install prompt is one too many.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "clients/desktop/**"
+      - "Sources/**"
+      - "Package.swift"
+      - ".github/workflows/desktop-app.yml"
+
+concurrency:
+  group: desktop-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@main
+        with:
+          swift-version: swift-6.3.3-release
+          swift-build: 6.3.3-RELEASE
+
+      # Both: the app targets net10.0, the spike harness (reused below as the
+      # bundle probe) targets net8.0.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # Same amalgamation build as the spike, and for the same reason: GRDB's
+      # GRDBSQLite is a systemLibrary target and Windows ships no SQLite. Static,
+      # so the header declares plain symbols rather than __declspec(dllimport)
+      # and there is nothing extra in the zip.
+      - name: Build SQLite with the features GRDB needs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://sqlite.org/2025/sqlite-amalgamation-3510000.zip"
+          $root = "$env:RUNNER_TEMP\sqlite"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "$root\amalgamation.zip"
+          Expand-Archive "$root\amalgamation.zip" -DestinationPath $root -Force
+          $src = (Get-ChildItem -Path $root -Directory -Filter "sqlite-amalgamation-*")[0].FullName
+          New-Item -ItemType Directory -Force -Path "$root\include","$root\lib" | Out-Null
+          Copy-Item "$src\sqlite3.h","$src\sqlite3ext.h" "$root\include" -Force
+          Push-Location $src
+          clang-cl /c /O2 /MD `
+            /DSQLITE_ENABLE_FTS5 /DSQLITE_ENABLE_SNAPSHOT `
+            /DSQLITE_ENABLE_PREUPDATE_HOOK /DSQLITE_ENABLE_COLUMN_METADATA `
+            /DSQLITE_ENABLE_STAT4 /DSQLITE_ENABLE_RTREE /DSQLITE_ENABLE_JSON1 `
+            /DSQLITE_THREADSAFE=1 /DSQLITE_DQS=0 `
+            sqlite3.c /Fo:sqlite3.obj
+          if ($LASTEXITCODE -ne 0) { Write-Error "sqlite3.c failed to compile"; exit 1 }
+          llvm-lib /OUT:"$root\lib\sqlite3.lib" sqlite3.obj
+          if ($LASTEXITCODE -ne 0) { Write-Error "failed to archive sqlite3.lib"; exit 1 }
+          Pop-Location
+          "SQLITE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build MozzFFI.dll
+        shell: pwsh
+        run: |
+          swift build -c release --product MozzFFI `
+            -Xcc -I"$env:SQLITE_ROOT\include" `
+            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib"
+
+      - name: Publish the app
+        shell: pwsh
+        run: |
+          dotnet publish clients/desktop/Mozz.Desktop.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=false `
+            -o publish/win-x64
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Resolve MozzFFI.dll's transitive imports and copy the non-system ones in
+      # beside it. Walking the actual import table beats a hardcoded list: the
+      # set of Swift runtime DLLs changes between toolchain releases, and a
+      # missing one produces a bare "DLL not found" at launch with no clue which.
+      - name: Bundle the Swift runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = "publish\win-x64"
+
+          $ffi = Get-ChildItem -Recurse -Filter MozzFFI.dll .build | Select-Object -First 1
+          if (-not $ffi) { Write-Error "MozzFFI.dll was not produced"; exit 1 }
+          Copy-Item $ffi.FullName $out -Force
+
+          # Everywhere a Swift DLL might live: next to the just-built product,
+          # and the toolchain's own runtime directories.
+          $searchDirs = @($ffi.DirectoryName)
+          $swiftExe = (Get-Command swift -ErrorAction SilentlyContinue).Source
+          if ($swiftExe) {
+            $searchDirs += (Split-Path $swiftExe -Parent)
+          }
+          foreach ($base in @("$env:LOCALAPPDATA\Programs\Swift", "C:\Program Files\Swift", "C:\Library")) {
+            if (Test-Path $base) {
+              $searchDirs += (Get-ChildItem -Path $base -Recurse -Directory -Filter bin -ErrorAction SilentlyContinue).FullName
+            }
+          }
+          $searchDirs = $searchDirs | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+          Write-Host "searching $($searchDirs.Count) directories for runtime DLLs"
+
+          # System DLLs are provided by Windows; copying them is both pointless
+          # and, for the UCRT, actively wrong.
+          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool)'
+
+          function Resolve-Imports([string]$path, [System.Collections.Generic.HashSet[string]]$seen) {
+            $deps = & dumpbin /nologo /dependents $path 2>$null |
+              Select-String -Pattern '^\s{4}(\S+\.dll)$' -AllMatches |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+            foreach ($dep in $deps) {
+              if ($dep -match $systemish) { continue }
+              if (-not $seen.Add($dep.ToLower())) { continue }
+              $found = $null
+              foreach ($dir in $searchDirs) {
+                $candidate = Join-Path $dir $dep
+                if (Test-Path $candidate) { $found = $candidate; break }
+              }
+              if ($found) {
+                Copy-Item $found $out -Force
+                Write-Host "  + $dep"
+                Resolve-Imports $found $seen
+              } else {
+                Write-Host "  ? $dep (not found in search paths)"
+              }
+            }
+          }
+
+          $seen = [System.Collections.Generic.HashSet[string]]::new()
+          Resolve-Imports (Join-Path $out "MozzFFI.dll") $seen
+          Write-Host "bundled $($seen.Count) dependency DLLs"
+
+      # The real test: does it load on a machine that is NOT the build machine?
+      # We approximate one by scrubbing every Swift directory out of PATH, so
+      # the loader can only find what we copied. A missing runtime DLL then
+      # fails here rather than on a user's PC.
+      #
+      # The spike harness is the probe, rather than a bespoke LoadLibrary check:
+      # it already opens a database, runs FTS5 search and verifies the
+      # continuity hashes, so a bundle that satisfies it is known to support the
+      # actual work — not merely to load.
+      - name: Verify the bundle runs with Swift off PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          dotnet build spike/windows-ffi/Harness/Harness.csproj -c Release -o harness-out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item "publish\win-x64\*.dll" harness-out -Force
+
+          $env:PATH = ($env:PATH -split ';' | Where-Object {
+            $_ -and ($_ -notmatch '(?i)swift') -and ($_ -notmatch '(?i)\\Library\\')
+          }) -join ';'
+          Write-Host "PATH scrubbed of Swift directories; running harness"
+
+          & .\harness-out\MozzSpikeHarness.exe 5000
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "the harness failed with Swift off PATH - the runtime bundle is incomplete"
+            exit 1
+          }
+          Write-Host "bundle is self-contained"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "0.1.0-$($env:GITHUB_SHA.Substring(0,7))"
+          Compress-Archive -Path publish\win-x64\* -DestinationPath "Mozz-win-x64-$version.zip" -Force
+          $size = [math]::Round((Get-Item "Mozz-win-x64-$version.zip").Length / 1MB, 1)
+          Write-Host "Mozz-win-x64-$version.zip ($size MB)"
+          "PACKAGE=Mozz-win-x64-$version.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mozz-desktop-windows-x64
+          path: ${{ env.PACKAGE }}
+          retention-days: 30
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build MozzFFI.dylib
+        run: swift build -c release --product MozzFFI
+
+      - name: Publish the app
+        run: |
+          dotnet publish clients/desktop/Mozz.Desktop.csproj \
+            -c Release -r osx-arm64 --self-contained true \
+            -o publish/osx-arm64
+          cp .build/release/libMozzFFI.dylib publish/osx-arm64/
+
+      # macOS ships the Swift runtime, so there is nothing to bundle — but the
+      # dylib still has to be found, and `@rpath` problems show up as the same
+      # "image not found" a missing Windows DLL gives.
+      - name: Verify the dylib loads and exports the session ABI
+        run: |
+          set -euo pipefail
+          otool -L publish/osx-arm64/libMozzFFI.dylib
+          for symbol in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string; do
+            if ! nm -gU publish/osx-arm64/libMozzFFI.dylib | grep -q "_${symbol}$"; then
+              echo "exported symbol missing: ${symbol}" >&2
+              exit 1
+            fi
+          done
+          echo "libMozzFFI.dylib exports the session ABI"
+
+      - name: Package
+        run: |
+          version="0.1.0-${GITHUB_SHA:0:7}"
+          ditto -c -k --sequesterRsrc --keepParent publish/osx-arm64 "Mozz-osx-arm64-${version}.zip"
+          echo "PACKAGE=Mozz-osx-arm64-${version}.zip" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mozz-desktop-macos-arm64
+          path: ${{ env.PACKAGE }}
+          retention-days: 30
