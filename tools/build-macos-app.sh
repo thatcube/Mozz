@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+#
+# Build Mozz Desktop as a real macOS .app bundle.
+#
+# WHY THIS EXISTS
+#
+# `dotnet publish` produces a folder with a bare executable in it. On Windows and
+# Linux that is genuinely what you ship. On macOS it is not an app: double-clicking
+# it opens a Terminal window, it has no icon in the Dock, it cannot be dragged to
+# Applications, and Gatekeeper treats it as an unidentified binary rather than
+# something with a bundle identifier.
+#
+# So this assembles the bundle macOS expects, gives it the app icon as an .icns,
+# and ad-hoc signs it. Ad-hoc rather than Developer ID: this is for running the
+# thing locally and on the maintainer's own machines. Distributing it to other
+# people needs a real signature and notarisation, which is a separate job with
+# its own credentials — see fastlane for how the iOS side does it.
+#
+#   tools/build-macos-app.sh              → build/Mozz.app
+#   tools/build-macos-app.sh --run        → build it and launch it
+#   tools/build-macos-app.sh --library X  → launch against a specific library file
+#
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+RUN=0
+LIBRARY=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --run) RUN=1; shift ;;
+    --library) LIBRARY="$2"; RUN=1; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# SwiftPM refuses to resolve in this worktree without it; see AGENTS.local.md.
+export GIT_CONFIG_PARAMETERS="'safe.bareRepository=all'"
+export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+export PATH="$DOTNET_ROOT:$PATH"
+# ~/.nuget is root-owned on this machine.
+export NUGET_PACKAGES="${NUGET_PACKAGES:-$HOME/Development/.nuget-packages}"
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  arm64) RID="osx-arm64" ;;
+  x86_64) RID="osx-x64" ;;
+  *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+APP="build/Mozz.app"
+STAGE="build/publish-$RID"
+
+echo "▸ Building the Swift core…"
+swift build -c release --product MozzFFI
+
+echo "▸ Publishing the app ($RID, self-contained)…"
+rm -rf "$STAGE"
+dotnet publish clients/desktop/Mozz.Desktop.csproj \
+  -c Release -r "$RID" --self-contained true \
+  -p:UseAppHost=true \
+  -o "$STAGE" \
+  --nologo -v quiet
+cp .build/release/libMozzFFI.dylib "$STAGE/"
+
+echo "▸ Assembling ${APP}…"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# Everything published goes in MacOS/ so the executable finds its runtime and
+# libMozzFFI.dylib beside it, which is where dlopen looks first.
+cp -R "$STAGE/." "$APP/Contents/MacOS/"
+
+# The icon. iconutil wants a specific set of sizes and @2x names; anything
+# missing shows as a generic document in some contexts and not others.
+ICONSET="build/Mozz.iconset"
+SOURCE_ICON="App/Mozz/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+if [ -f "$SOURCE_ICON" ]; then
+  rm -rf "$ICONSET"; mkdir -p "$ICONSET"
+  for size in 16 32 128 256 512; do
+    sips -z $size $size "$SOURCE_ICON" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    sips -z $((size * 2)) $((size * 2)) "$SOURCE_ICON" \
+      --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Mozz.icns"
+  rm -rf "$ICONSET"
+else
+  echo "  (no source icon at $SOURCE_ICON — bundle will use the generic one)"
+fi
+
+# CalVer, matching the iOS app's scheme.
+VERSION="$(date +%Y.%-m.%-d)"
+BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Mozz</string>
+  <key>CFBundleDisplayName</key><string>Mozz</string>
+  <key>CFBundleIdentifier</key><string>com.thatcube.Mozz.desktop</string>
+  <key>CFBundleExecutable</key><string>Mozz.Desktop</string>
+  <key>CFBundleIconFile</key><string>Mozz</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <!-- Without this the process is a background agent: no Dock icon, no menu
+       bar, and the window cannot be brought to the front. -->
+  <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+  <key>NSHumanReadableCopyright</key><string>GPL-3.0. Free forever, open source.</string>
+</dict>
+</plist>
+PLIST
+
+# Ad-hoc signature. Unsigned bundles containing a self-contained .NET runtime are
+# refused outright on Apple silicon — every Mach-O needs at least an ad-hoc
+# signature, so this signs the nested binaries before the bundle itself.
+echo "▸ Signing (ad-hoc)…"
+find "$APP/Contents/MacOS" -type f \( -name "*.dylib" -o -name "*.so" \) \
+  -exec codesign --force --sign - --timestamp=none {} \; 2>/dev/null || true
+codesign --force --deep --sign - --timestamp=none "$APP" 2>/dev/null \
+  || echo "  (codesign reported an issue; the app may still run)"
+
+SIZE="$(du -sh "$APP" | cut -f1)"
+echo "✓ $APP ($SIZE) — version $VERSION build $BUILD"
+
+if [ "$RUN" = "1" ]; then
+  echo "▸ Launching…"
+  if [ -n "$LIBRARY" ]; then
+    MOZZ_LIBRARY="$LIBRARY" open -n "$APP"
+  else
+    open -n "$APP"
+  fi
+fi

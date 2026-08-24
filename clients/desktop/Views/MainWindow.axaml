@@ -10,7 +10,8 @@
         Width="1360" Height="880"
         MinWidth="940" MinHeight="620"
         Background="{DynamicResource AppBackground}"
-        Title="Mozz">
+        Title="Mozz"
+        Icon="avares://Mozz.Desktop/Assets/mozz.ico">
 
     <Design.DataContext>
         <vm:MainViewModel />
