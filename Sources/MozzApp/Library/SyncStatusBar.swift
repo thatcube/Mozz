@@ -18,6 +18,15 @@ struct SyncStatusBar: View {
     /// the label beside them instead of shrivelling as the text grows.
     @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 11
 
+    /// Walks the counters up to each new page instead of letting them jump, so a
+    /// slow sync still looks like it's moving. See `SyncProgressSmoother`.
+    @StateObject private var smoother = SyncProgressSmoother()
+    @State private var quipIndex = 0
+
+    /// Rotates the status line. Slow enough to read, quick enough that a long
+    /// sync never shows the same words for long.
+    private let quipTimer = Timer.publish(every: 7, on: .main, in: .common).autoconnect()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             header
@@ -26,7 +35,7 @@ struct SyncStatusBar: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.06)))
@@ -41,12 +50,24 @@ struct SyncStatusBar: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Library sync"))
         .accessibilityValue(Text(env.syncStatusText ?? "Syncing your library"))
+        .onAppear { smoother.update(from: env.syncProgress) }
+        .onChange(of: env.syncProgress) { _, progress in
+            smoother.update(from: progress)
+        }
+        .onChange(of: env.isSyncing) { _, syncing in
+            if !syncing { smoother.reset() }
+        }
+        .onReceive(quipTimer) { _ in
+            // The line is decoration, not information — announcing every rotation
+            // would interrupt VoiceOver mid-sentence for no gain.
+            withAnimation(.easeInOut(duration: 0.35)) { quipIndex += 1 }
+        }
     }
 
     // MARK: Header — title, %, progress bar
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             // Title and total sit side by side when they fit and stack when they
             // don't, rather than the total squeezing the title into an ellipsis.
             ViewThatFits(in: .horizontal) {
@@ -60,7 +81,8 @@ struct SyncStatusBar: View {
                     totalLabel
                 }
             }
-            if let fraction = env.syncFraction {
+            quipLine
+            if let fraction = displayFraction {
                 ProgressView(value: fraction)
                     .progressViewStyle(.linear)
                     .frame(height: 3)
@@ -71,11 +93,38 @@ struct SyncStatusBar: View {
         }
     }
 
+    /// The rotating "we know it's slow" line.
+    ///
+    /// Wraps rather than truncates at large Dynamic Type sizes — it's a full
+    /// sentence, so clipping it would leave a dangling half-thought. Hidden from
+    /// VoiceOver: the card already exposes the real status as its
+    /// `accessibilityValue`, and a line that changes every seven seconds would
+    /// interrupt whatever was being read.
+    private var quipLine: some View {
+        Text(SyncQuips.line(index: quipIndex, fraction: displayFraction))
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .transition(.opacity)
+            .id(quipIndex)
+            .accessibilityHidden(true)
+    }
+
+    /// The eased fraction, falling back to the raw one before the smoother has
+    /// anything (so the bar is never stuck at zero on first paint).
+    private var displayFraction: Double? {
+        guard let raw = env.syncFraction else { return nil }
+        return smoother.fraction > 0 ? smoother.fraction : raw
+    }
+
     private var titleLine: some View {
         HStack(spacing: 9) {
             ProgressView().controlSize(.small)
             Text("Syncing your library")
-                .font(.footnote.weight(.semibold))
+                // A notch larger than the rows beneath it: this is the card's
+                // headline and was reading as just another line of small text.
+                .font(.subheadline.weight(.semibold))
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -90,7 +139,7 @@ struct SyncStatusBar: View {
     /// "42%" once a total is known, else a live item count so the number always
     /// means something.
     private var overallText: String {
-        if let fraction = env.syncFraction {
+        if let fraction = displayFraction {
             return "\(Int((fraction * 100).rounded()))%"
         }
         if let n = env.syncProgress?.itemsSynced, n > 0 {
@@ -119,19 +168,20 @@ struct SyncStatusBar: View {
     }
 
     private func phaseRow(_ detail: SyncProgress.PhaseDetail) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-            statusGlyph(detail.state)
-                // Reserve one glyph's width for every row so the labels align in a
-                // column regardless of which state each row is in.
-                .frame(width: glyph, alignment: .center)
-            Text(detail.phase.label)
-                .foregroundStyle(detail.state == .pending ? .tertiary : .secondary)
-            Spacer(minLength: 6)
-            if detail.state != .pending {
-                Text(count(detail))
-                    .foregroundStyle(detail.state == .done ? .secondary : .primary)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+        // Label and count share a line when they fit and stack when they don't.
+        // This matters more now the active row shows exact digits — at the larger
+        // accessibility text sizes "Songs" and "5,143/9,512" cannot share a line,
+        // and stacking keeps both fully readable instead of truncating either.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                phaseGlyphAndLabel(detail)
+                Spacer(minLength: 6)
+                phaseCount(detail)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                phaseGlyphAndLabel(detail)
+                phaseCount(detail)
+                    .padding(.leading, glyph + 7)
             }
         }
         .font(.caption)
@@ -141,6 +191,28 @@ struct SyncStatusBar: View {
         .animation(.easeInOut(duration: 0.25), value: detail.state)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(detail))
+    }
+
+    private func phaseGlyphAndLabel(_ detail: SyncProgress.PhaseDetail) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            statusGlyph(detail.state)
+                // Reserve one glyph's width for every row so the labels align in a
+                // column regardless of which state each row is in.
+                .frame(width: glyph, alignment: .center)
+            Text(detail.phase.label)
+                .foregroundStyle(detail.state == .pending ? .tertiary : .secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func phaseCount(_ detail: SyncProgress.PhaseDetail) -> some View {
+        if detail.state != .pending {
+            Text(count(detail))
+                .foregroundStyle(detail.state == .done ? .secondary : .primary)
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        }
     }
 
     @ViewBuilder
@@ -167,7 +239,12 @@ struct SyncStatusBar: View {
     private func accessibilityLabel(_ detail: SyncProgress.PhaseDetail) -> Text {
         switch detail.state {
         case .done: return Text("\(detail.phase.label), done")
-        case .syncing: return Text("\(detail.phase.label), \(count(detail))")
+        // The *real* count, not the eased one: the smoothing exists to make the
+        // screen feel alive, and reading a deliberately-lagging number aloud
+        // would just be inaccurate.
+        case .syncing:
+            let total = detail.total.map { " of \(Self.exact($0))" } ?? ""
+            return Text("\(detail.phase.label), \(Self.exact(detail.synced))\(total)")
         case .pending: return Text("\(detail.phase.label), waiting")
         }
     }
@@ -181,10 +258,27 @@ struct SyncStatusBar: View {
     }
 
     private func count(_ d: SyncProgress.PhaseDetail) -> String {
-        if let total = d.total {
-            return "\(Self.compact(d.synced))/\(Self.compact(total))"
+        // The row being worked on shows exact digits, because that is where the
+        // eased counter lives and compact form would hide it: at 9.5k totals a
+        // "0.1k" step is 100 items, so the number would still sit still for
+        // seconds at a time — the very thing the smoothing exists to fix.
+        // Finished and queued rows stay compact, where width matters more.
+        let synced = smoother.counts[d.phase] ?? d.synced
+        if d.state == .syncing {
+            if let total = d.total {
+                return "\(Self.exact(synced))/\(Self.exact(total))"
+            }
+            return Self.exact(synced)
         }
-        return Self.compact(d.synced)
+        if let total = d.total {
+            return "\(Self.compact(synced))/\(Self.compact(total))"
+        }
+        return Self.compact(synced)
+    }
+
+    /// Grouped digits: 5143 → "5,143" (localized separator).
+    static func exact(_ n: Int) -> String {
+        n.formatted(.number.grouping(.automatic))
     }
 
     /// Compact number formatting: 3720 → "3.7k", 950 → "950".
