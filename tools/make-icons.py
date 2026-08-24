@@ -23,10 +23,13 @@ So the rules are enforced here rather than remembered:
     Lanczos otherwise, because a nearest-neighbour downscale of pixel art drops
     entire rows of pixels — including, at small sizes, parts of the face.
 
-  * The disc lands on exactly the pixels the previous icon's disc occupied, so
-    the background gradient underneath is reused rather than reconstructed. That
-    is why the source icons are read rather than regenerated: matching a subtle
-    radial gradient by eye is a fool's errand when the real thing is right there.
+  * The background is a NEUTRAL radial gradient, synthesized here. The previous
+    icons carried a colour cast — near the centre the light background measured
+    (240, 230, 234), a ten-point spread between channels, against a corner of
+    (236, 235, 238) — so what looked like a gradient was almost entirely a hue
+    shift from pink to blue, with the luminance nearly flat. Read against the
+    red disc it tinted the whole plate. The gradient here varies brightness
+    only, so the depth survives and the cast does not.
 
 USAGE
 
@@ -36,6 +39,7 @@ Writes the iOS light/dark app icons, the desktop window icon, and the .ico for
 Windows. Requires Pillow and Google Chrome (headless).
 """
 
+import math
 import os
 import shutil
 import subprocess
@@ -116,17 +120,36 @@ def downscale(image: Image.Image, size: int) -> Image.Image:
     return image.resize((size, size), Image.LANCZOS)
 
 
-def compose_on_existing(art: Image.Image, base_path: Path) -> Image.Image:
-    """Place the disc onto the previous icon's background.
+# Neutral plate colours: centre and corner, as greys. Brightness only — see the
+# note at the top of this file about the cast the previous icons carried.
+LIGHT_PLATE = (247, 234)   # centre, corner
+DARK_PLATE = (31, 24)
 
-    The disc occupies exactly the pixels the old one did, so the gradient behind
-    it survives untouched and the new icon sits on the same background as the
-    old — no attempt to re-derive a radial gradient by sampling.
+
+def plate(centre: int, corner: int) -> Image.Image:
+    """A neutral radial gradient, bright in the middle.
+
+    Interpolated on the distance from the centre normalised to the corner, so
+    the falloff reaches its end value exactly at the corners rather than partway
+    along the edges — which would leave the four corners flat and visibly
+    banded against the curve.
     """
-    base = Image.open(base_path).convert("RGBA")
-    if base.size != (CANVAS, CANVAS):
-        base = base.resize((CANVAS, CANVAS), Image.LANCZOS)
-    canvas = base.copy()
+    canvas = Image.new("RGBA", (CANVAS, CANVAS))
+    pixels = canvas.load()
+    centre_xy = (CANVAS - 1) / 2
+    furthest = math.hypot(centre_xy, centre_xy)
+    for y in range(CANVAS):
+        dy = y - centre_xy
+        for x in range(CANVAS):
+            t = math.hypot(x - centre_xy, dy) / furthest
+            value = round(centre + (corner - centre) * t)
+            pixels[x, y] = (value, value, value, 255)
+    return canvas
+
+
+def compose(art: Image.Image, background: Image.Image) -> Image.Image:
+    """Centre the disc on a background."""
+    canvas = background.copy()
     offset = (CANVAS - art.width) // 2
     canvas.alpha_composite(art, (offset, offset))
     return canvas
@@ -142,13 +165,14 @@ def main() -> None:
     art = render_svg(svg, RENDER)
     print(f"rendered {svg.name} at {RENDER}px ({RENDER // GRID}x the {GRID}px grid)")
 
-    # iOS: light and dark, disc over each existing background.
-    for name in ("icon-1024.png", "icon-1024-dark.png"):
+    # iOS: light and dark.
+    for name, (centre, corner) in (
+        ("icon-1024.png", LIGHT_PLATE),
+        ("icon-1024-dark.png", DARK_PLATE),
+    ):
         target = IOS_ICONSET / name
-        if not target.exists():
-            sys.exit(f"missing base icon {target} — the background comes from it")
-        compose_on_existing(art, target).convert("RGB").save(target)
-        print(f"  wrote {target.relative_to(REPO)}")
+        compose(art, plate(centre, corner)).convert("RGB").save(target)
+        print(f"  wrote {target.relative_to(REPO)}  (plate {centre}→{corner}, neutral)")
 
     # Desktop: the window/taskbar icon, transparent rather than on a plate,
     # because every desktop draws its own frame around it.
@@ -169,8 +193,11 @@ def main() -> None:
     # finding the original attachment again.
     stored = REPO / "tools/icons/mozz-logo.svg"
     stored.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(svg, stored)
-    print(f"  wrote {stored.relative_to(REPO)}")
+    # Re-running against the stored copy is the normal way to regenerate after a
+    # background tweak, so it must not be an error.
+    if stored.resolve() != svg.resolve():
+        shutil.copy(svg, stored)
+        print(f"  wrote {stored.relative_to(REPO)}")
 
 
 if __name__ == "__main__":
