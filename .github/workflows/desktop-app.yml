@@ -3,6 +3,10 @@ name: Desktop app
 # Produces a runnable Mozz desktop build for Windows, macOS and Linux, as a
 # downloadable artifact per platform.
 #
+# All three are real targets, not a Windows build with two afterthoughts. The
+# only thing that differs between them is what the operating system already
+# provides — see the per-job notes.
+#
 # WHY THIS IS SEPARATE FROM THE SPIKE
 #
 # `windows-ffi-spike.yml` answers "does the core work off-Apple". It proves the
@@ -353,5 +357,127 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mozz-desktop-macos-arm64
+          path: ${{ env.PACKAGE }}
+          retention-days: 30
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1.2"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Avalonia needs an X/GL stack present to link and to run headless checks;
+      # ALSA is what miniaudio opens on Linux.
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libx11-6 libice6 libsm6 libfontconfig1 \
+            libicu-dev ffmpeg
+
+      - name: Test the credential store and audio pipeline
+        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+
+      # Ubuntu does ship libsqlite3, unlike Windows — but shipping it is not the
+      # same as shipping it with FTS5, and Mozz's search is FTS5. Building the
+      # amalgamation makes the feature set an explicit list rather than a
+      # property of whichever distro the user happens to run, which matters more
+      # on Linux than anywhere else.
+      - name: Build SQLite with the features GRDB needs
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/sqlite"
+          mkdir -p "$root/include" "$root/lib"
+          curl -fsSL -o "$root/amalgamation.zip" https://sqlite.org/2025/sqlite-amalgamation-3510000.zip
+          unzip -q "$root/amalgamation.zip" -d "$root"
+          src=$(find "$root" -maxdepth 1 -type d -name 'sqlite-amalgamation-*' | head -1)
+          cp "$src/sqlite3.h" "$src/sqlite3ext.h" "$root/include/"
+          cc -c -O2 -fPIC \
+            -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_SNAPSHOT \
+            -DSQLITE_ENABLE_PREUPDATE_HOOK -DSQLITE_ENABLE_COLUMN_METADATA \
+            -DSQLITE_ENABLE_STAT4 -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_JSON1 \
+            -DSQLITE_THREADSAFE=1 -DSQLITE_DQS=0 \
+            "$src/sqlite3.c" -o "$root/sqlite3.o"
+          ar rcs "$root/lib/libsqlite3.a" "$root/sqlite3.o"
+          echo "SQLITE_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Build libMozzFFI.so
+        run: |
+          swift build -c release --product MozzFFI \
+            -Xcc -I"$SQLITE_ROOT/include" \
+            -Xlinker -L"$SQLITE_ROOT/lib"
+
+      - name: Publish the app
+        run: |
+          dotnet publish clients/desktop/Mozz.Desktop.csproj \
+            -c Release -r linux-x64 --self-contained true \
+            -o publish/linux-x64
+          cp .build/release/libMozzFFI.so publish/linux-x64/
+
+      # Swift is no more ABI-stable on Linux than on Windows, and a desktop user
+      # will not have a Swift toolchain. Same approach as the Windows job:
+      # resolve the real import graph rather than guessing at a list of names.
+      - name: Bundle the Swift runtime
+        run: |
+          set -euo pipefail
+          out=publish/linux-x64
+          missing=0
+          resolve() {
+            ldd "$1" 2>/dev/null | awk '/=>/ {print $1, $3}' | while read -r name path; do
+              case "$name" in
+                libswift*|libFoundation*|lib_Foundation*|libdispatch*|libBlocksRuntime*|lib_Concurrency*|lib_StringProcessing*|lib_RegexParser*)
+                  if [ -f "$path" ] && [ ! -f "$out/$name" ]; then
+                    cp "$path" "$out/"
+                    echo "  + $name"
+                    resolve "$path"
+                  fi
+                  ;;
+              esac
+            done
+          }
+          resolve "$out/libMozzFFI.so"
+          count=$(find "$out" -maxdepth 1 -name 'libswift*' -o -maxdepth 1 -name 'libFoundation*' | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "no Swift runtime libraries were bundled - ldd output did not parse" >&2
+            exit 1
+          fi
+          echo "bundled $count Swift runtime libraries"
+
+      # The same standalone check the Windows job runs: strip the toolchain out
+      # of the loader's view, then drive the C ABI for real. A bundle that is
+      # incomplete fails here rather than on someone's desktop.
+      - name: Verify the bundle runs without the toolchain
+        run: |
+          set -euo pipefail
+          dotnet publish spike/windows-ffi/Harness/Harness.csproj -c Release \
+            -r linux-x64 --self-contained true -o harness-out
+          cp publish/linux-x64/lib*.so harness-out/
+          # LD_LIBRARY_PATH is REPLACED with just the harness directory, not
+          # appended to: the toolchain install puts its own runtime on that
+          # variable, and leaving it there would let the harness succeed on
+          # libraries a user will not have. ($ORIGIN is not expanded in
+          # LD_LIBRARY_PATH — only in an RPATH — so the path is spelled out.)
+          LD_LIBRARY_PATH="$PWD/harness-out" ./harness-out/MozzSpikeHarness 5000
+
+      - name: Package
+        run: |
+          version="0.1.0-${GITHUB_SHA:0:7}"
+          tar -C publish/linux-x64 -czf "Mozz-linux-x64-${version}.tar.gz" .
+          echo "PACKAGE=Mozz-linux-x64-${version}.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mozz-desktop-linux-x64
           path: ${{ env.PACKAGE }}
           retention-days: 30
