@@ -20,8 +20,17 @@ on:
         required: false
         default: "100000"
   push:
+    # Every module the spike links, not just the facade. Watching only
+    # MozzFFI meant a release-mode break in MozzDatabase went unnoticed
+    # through four runs — the spike builds the core, so it has to watch it.
     paths:
       - "Sources/MozzFFI/**"
+      - "Sources/MozzCore/**"
+      - "Sources/MozzDatabase/**"
+      - "Sources/MozzContinuity/**"
+      - "Sources/MozzHistory/**"
+      - "Package.swift"
+      - "spec/**"
       - "spike/windows-ffi/**"
       - ".github/workflows/windows-ffi-spike.yml"
 
