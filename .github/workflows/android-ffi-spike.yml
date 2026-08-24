@@ -107,8 +107,21 @@ jobs:
           set -euxo pipefail
           swift sdk install "$ANDROID_SDK_URL" --checksum "$ANDROID_SDK_CHECKSUM"
           swift sdk list
-          BUNDLE="$(find "$HOME" -maxdepth 6 -type d -name "${ANDROID_SDK_NAME}.artifactbundle" 2>/dev/null | head -1)"
+          # `swift sdk install` writes under the toolchain's *real* home, which in
+          # this container is root's (/root), not the step's $HOME (/github/home).
+          # Resolve the bundle from the known swift-sdks locations, then fall back
+          # to a filesystem scan so a future layout change fails loudly, not silently.
+          BUNDLE=""
+          for d in "$HOME/.swiftpm/swift-sdks" /root/.swiftpm/swift-sdks /github/home/.swiftpm/swift-sdks; do
+            if [ -d "$d/${ANDROID_SDK_NAME}.artifactbundle" ]; then
+              BUNDLE="$d/${ANDROID_SDK_NAME}.artifactbundle"; break
+            fi
+          done
+          if [ -z "$BUNDLE" ]; then
+            BUNDLE="$(find / -path /proc -prune -o -path /sys -prune -o -type d -name "${ANDROID_SDK_NAME}.artifactbundle" -print 2>/dev/null | head -1)"
+          fi
           test -n "$BUNDLE"
+          echo "resolved SDK bundle: $BUNDLE"
           echo "SDK_BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
 
       # The SDK carries Swift's Android runtime but not an NDK; setup-android-sdk.sh
