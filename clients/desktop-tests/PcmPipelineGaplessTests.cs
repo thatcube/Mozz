@@ -197,3 +197,61 @@ public class PcmPipelineGaplessTests
         Assert.True(pipe.Position.TotalSeconds > 0.05, "position should have advanced during playback");
     }
 }
+
+/// <summary>
+/// ReplayGain end to end through the pipeline, not just the dB→linear maths.
+///
+/// The scalar was always correct; nothing ever handed it a gain. The server's
+/// figure travelled as far as the FFI boundary and stopped, so two albums
+/// mastered at different loudness played at different loudness — the most
+/// audible thing a music player can get wrong, and invisible in a unit test of
+/// the converter alone.
+/// </summary>
+public class ReplayGainPipelineTests
+{
+    private static float PeakOf(double? gainDb)
+    {
+        const int rate = 48000, ch = 2, frames = 9600;
+        var dec = new WavPcmDecoder(
+            new MemoryStream(WavTestSignal.SineFloat(rate, ch, 0, frames, 441.0)), rate, ch);
+
+        using var pipe = new PcmPipeline(rate, ch, ringSeconds: 2.0);
+        pipe.SetReplayGain(ReplayGainMode.Track, preampDb: 0.0);
+        using var ended = new ManualResetEventSlim(false);
+        pipe.PlaybackEnded += () => ended.Set();
+
+        pipe.LoadCurrent(dec, new AudioSource("mem://a", ReplayGainTrackDb: gainDb), "a");
+        Thread.Sleep(250);
+
+        var buf = new float[512 * ch];
+        float peak = 0;
+        int guard = 0;
+        while (!ended.IsSet && guard++ < 100_000)
+        {
+            pipe.Render(buf);
+            foreach (var s in buf) peak = Math.Max(peak, Math.Abs(s));
+        }
+        return peak;
+    }
+
+    [Fact]
+    public void ANegativeGainActuallyAttenuates()
+    {
+        var unity = PeakOf(null);
+        var attenuated = PeakOf(-6.0);
+
+        Assert.True(unity > 0.5f, $"reference signal should be near full scale, was {unity}");
+
+        // -6 dB is half amplitude. Generous tolerance: the signal is a sine
+        // sampled at 48k, so the captured peak need not land exactly on the
+        // crest, and the pipeline ramps volume at the start.
+        var ratio = attenuated / unity;
+        Assert.InRange(ratio, 0.42f, 0.58f);
+    }
+
+    [Fact]
+    public void NoGainMeansUnityNotSilence()
+    {
+        Assert.InRange(PeakOf(null) / PeakOf(0.0), 0.95f, 1.05f);
+    }
+}

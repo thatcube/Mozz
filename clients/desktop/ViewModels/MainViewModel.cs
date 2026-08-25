@@ -138,6 +138,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (Avalonia.Controls.Design.IsDesignMode) return;
 
         _engine = new MiniAudioEngine { Volume = Volume };
+        // Track gain rather than album: Mozz plays across a whole library far
+        // more than it plays an album end to end, and album mode deliberately
+        // preserves the loudness relationship *within* a record — which is the
+        // wrong choice when the next song is from somewhere else entirely.
+        //
+        // No pre-amp. ReplayGain figures are almost always negative (they
+        // attenuate to a reference level), so adding headroom back invites the
+        // clipping the standard exists to avoid.
+        _engine.SetReplayGain(ReplayGainMode.Track);
         _engine.TrackChanged += OnEngineTrackChanged;
         _engine.PlaybackEnded += OnEnginePlaybackEnded;
         _engine.Error += OnEngineError;
@@ -668,7 +677,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 var known = probed ?? (track.DurationSeconds > 0
                     ? TimeSpan.FromSeconds(track.DurationSeconds)
                     : (TimeSpan?)null);
-                return new AudioSource(Path.GetFullPath(file), KnownDuration: known);
+                return new AudioSource(Path.GetFullPath(file),
+                                       ReplayGainTrackDb: track.NormalizationGainDB,
+                                       KnownDuration: known);
             }
         }
 
@@ -684,6 +695,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 return new AudioSource(
                     stream.Url,
                     stream.Headers,
+                    // The server's own ReplayGain figure, so two albums mastered
+                    // at different loudness play at the same level. Jellyfin and
+                    // Subsonic both report it; Plex does not, and those tracks
+                    // simply play unattenuated.
+                    ReplayGainTrackDb: track.NormalizationGainDB,
                     KnownDuration: track.DurationSeconds > 0 ? TimeSpan.FromSeconds(track.DurationSeconds) : null);
             }
         }
