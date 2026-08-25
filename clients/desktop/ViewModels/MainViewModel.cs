@@ -141,6 +141,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Track> _homeRecentlyPlayed = [];
     private List<Album> _homeRecentlyAddedAlbums = [];
     private List<Playlist> _homePlaylists = [];
+    private string? _homeMessage;
     private HomeMixTile? _selectedMix;
     private AlbumReleaseKindLookup? _releaseKindLookup;
     private readonly SettingsCategorySelectionState _settingsCategorySelection = new();
@@ -161,6 +162,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                                 && HomeRows.Count > 0;
     public bool ShowHomeEmpty => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
                                  && !IsBusy
+                                 && HomeRows.Count == 0
                                  && TrackCount > 0
                                  && HomeComposition.IsEmpty(
                                      _homeMixTiles,
@@ -916,15 +918,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _homeRecentlyPlayed = [];
         _homeRecentlyAddedAlbums = [];
         _homePlaylists = [];
+        _homeMessage = null;
         HomeRows.Clear();
         RaiseDerived();
 
-        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        var attachedServerIds = Connect.Accounts
+            .Select(a => a.ServerId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var serverId = attachedServerIds.FirstOrDefault();
         var result = await HomeMixLoader.LoadAsync(
             ReadHomeMixesAsync,
             LoadLikedTracksAsync,
             GenerateHomeMixesAsync,
-            Connect.Accounts.Select(a => a.ServerId).ToList(),
+            attachedServerIds,
             () => StatusMessage = "Generating mixes for Home…");
 
         _homeMixTiles = HomeMixPresentation.BuildTiles(
@@ -932,22 +940,38 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             result.Mixes,
             serverId).ToList();
         HomeMixGrid.Reset(_homeMixTiles);
+        var messages = new List<string>();
+        if (!string.IsNullOrWhiteSpace(result.Message)) messages.Add(result.Message);
         if (!string.IsNullOrWhiteSpace(serverId))
         {
             var server = serverId!;
-            _homeRecentlyPlayed = (await _core.CallAsync<List<Track>>(
-                new CoreRequest("recentlyPlayedTracks") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
-                .ToList();
-            _homeRecentlyAddedAlbums = (await _core.CallAsync<List<Album>>(
-                new CoreRequest("recentlyAddedAlbums") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
-                .ToList();
-            _homePlaylists = (await _core.CallAsync<List<Playlist>>(
-                new CoreRequest("playlists") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
-                .Take(MediaDetailFormatting.ShelfPageSize)
-                .ToList();
+            _homeRecentlyPlayed = (await HomeShelfLoader.LoadAsync<Track>(
+                   "Recently Played",
+                   new CoreRequest("recentlyPlayedTracks") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize },
+                   async request => await _core.CallAsync<List<Track>>(request),
+                   messages))
+               .ToList();
+            _homeRecentlyAddedAlbums = (await HomeShelfLoader.LoadAsync<Album>(
+                   "Recently Added",
+                   new CoreRequest("recentlyAddedAlbums") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize },
+                   async request => await _core.CallAsync<List<Album>>(request),
+                   messages))
+               .ToList();
+            _homePlaylists = (await HomeShelfLoader.LoadAsync<Playlist>(
+                   "Your Playlists",
+                   new CoreRequest("playlists") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize },
+                   async request => await _core.CallAsync<List<Playlist>>(request),
+                   messages))
+               .Take(MediaDetailFormatting.ShelfPageSize)
+               .ToList();
         }
+        else
+        {
+            _homeMessage = HomeMixPresentation.NoAttachedHomeServerMessage;
+        }
+
         RebuildHomeRows();
-        StatusMessage = result.Message;
+        StatusMessage = messages.Count == 0 ? null : string.Join(" ", messages.Distinct(StringComparer.Ordinal));
         RaiseDerived();
     }
 
@@ -1643,7 +1667,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)),
             ColumnsFor(DesktopLayout.TrackCardPitch),
             ColumnsFor(DesktopLayout.AlbumTilePitch),
-            ColumnsFor(DesktopLayout.PlaylistTilePitch)));
+            ColumnsFor(DesktopLayout.PlaylistTilePitch),
+            _homeMessage));
     }
 
     private void AddAlbumShelf(List<DetailRow> rows, string title, IReadOnlyList<Album> albums)
