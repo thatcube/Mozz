@@ -91,13 +91,24 @@ struct WireSyncStatus: Encodable {
     var running: Bool
     var finished: Bool
     var phase: String?
+    var phaseLabel: String?
     var itemsSynced: Int
     var total: Int?
+    var details: [WireSyncPhaseDetail]
     var error: String?
     var artists: Int?
     var albums: Int?
     var tracks: Int?
     var playlists: Int?
+}
+
+struct WireSyncPhaseDetail: Encodable {
+    var phase: String
+    var label: String
+    var state: String
+    var synced: Int
+    var total: Int?
+    var isComplete: Bool
 }
 
 struct WireLibrary: Encodable {
@@ -114,9 +125,10 @@ final class SyncBox: @unchecked Sendable {
     private let lock = NSLock()
     private var running = false
     private var finished = false
-    private var phase: String?
+    private var phase: SyncProgress.Phase?
     private var itemsSynced = 0
     private var total: Int?
+    private var details: [SyncProgress.PhaseDetail] = []
     private var failure: String?
     private var counts: (artists: Int, albums: Int, tracks: Int, playlists: Int)?
 
@@ -130,16 +142,18 @@ final class SyncBox: @unchecked Sendable {
         phase = nil
         itemsSynced = 0
         total = nil
+        details = []
         failure = nil
         counts = nil
         return true
     }
 
-    func report(phase: String, itemsSynced: Int, total: Int?) {
+    func report(_ progress: SyncProgress) {
         lock.lock(); defer { lock.unlock() }
-        self.phase = phase
-        self.itemsSynced = itemsSynced
-        self.total = total
+        self.phase = progress.phase
+        self.itemsSynced = progress.itemsSynced
+        self.total = progress.totalCount
+        self.details = progress.details
     }
 
     func succeed(artists: Int, albums: Int, tracks: Int, playlists: Int) {
@@ -159,12 +173,30 @@ final class SyncBox: @unchecked Sendable {
     func status() -> WireSyncStatus {
         lock.lock(); defer { lock.unlock() }
         return WireSyncStatus(
-            running: running, finished: finished, phase: phase,
-            itemsSynced: itemsSynced, total: total, error: failure,
+            running: running, finished: finished, phase: phase?.rawValue,
+            phaseLabel: phase?.label, itemsSynced: itemsSynced, total: total,
+            details: details.map(wireSyncPhaseDetail), error: failure,
             artists: counts?.artists, albums: counts?.albums,
             tracks: counts?.tracks, playlists: counts?.playlists
         )
     }
+}
+
+private func wireSyncPhaseDetail(_ detail: SyncProgress.PhaseDetail) -> WireSyncPhaseDetail {
+    let state: String
+    switch detail.state {
+    case .pending: state = "pending"
+    case .syncing: state = "syncing"
+    case .done: state = "done"
+    }
+    return WireSyncPhaseDetail(
+        phase: detail.phase.rawValue,
+        label: detail.phase.label,
+        state: state,
+        synced: detail.synced,
+        total: detail.total,
+        isComplete: detail.isComplete
+    )
 }
 
 /// Backends and their sync boxes, keyed by server id.
@@ -499,11 +531,7 @@ private func startSync(_ request: ServerRequest, _ session: SessionContext) thro
         let engine = LibrarySyncEngine(backend: backend, database: database)
         do {
             let summary = try await engine.sync(plan: .full, startMode: .resumeIfPossible) { progress in
-                box.report(
-                    phase: progress.phase.rawValue,
-                    itemsSynced: progress.itemsSynced,
-                    total: progress.totalCount
-                )
+                box.report(progress)
             }
             box.succeed(
                 artists: summary.artists, albums: summary.albums,
