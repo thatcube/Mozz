@@ -19,6 +19,16 @@ struct ArtistDetailView: View {
     private var fullAlbums: [AlbumRecord] { albums.filter { !AlbumReleaseClassifier.isSingleOrEP(trackCount: $0.trackCount) } }
     private var singles: [AlbumRecord] { albums.filter { AlbumReleaseClassifier.isSingleOrEP(trackCount: $0.trackCount) } }
 
+    /// The artist's newest record. Ordered by `LatestRelease` in the shared core
+    /// rather than sorted here, so the phone and the desktop cannot name
+    /// different records as the same artist's latest.
+    private var latestRelease: AlbumRecord? {
+        let recency = albums.map {
+            ReleaseRecency(year: $0.year, addedAt: $0.addedAt, title: $0.title)
+        }
+        return LatestRelease.newestIndex(recency).map { albums[$0] }
+    }
+
     /// Artists frequently have no art of their own — fall back to a representative
     /// album cover so the hero still blooms with color.
     private var heroArtwork: ArtworkRef? {
@@ -39,6 +49,9 @@ struct ArtistDetailView: View {
             actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle, startRadio: startRadio) },
             content: {
                 VStack(alignment: .leading, spacing: 30) {
+                    if let latest = latestRelease {
+                        ArtistAlbumShelf(title: "Latest Release", albums: [latest])
+                    }
                     if !topSongs.isEmpty { topSongsSection }
                     if !fullAlbums.isEmpty { ArtistAlbumShelf(title: "Albums", albums: fullAlbums) }
                     if !singles.isEmpty { ArtistAlbumShelf(title: "Singles & EPs", albums: singles) }

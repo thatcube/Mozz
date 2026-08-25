@@ -932,6 +932,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             case LibraryPageKind.ArtistDetail when SelectedArtist is not null:
                 rows.Add(new ArtistHeroRow(SelectedArtist));
+                // Ordered by the same rule the phone uses, so the two apps can
+                // never name different records as this artist's latest.
+                if (MediaDetailFormatting.LatestRelease(
+                        _detailArtistAlbums.Concat(_detailArtistSingles)) is { } latest)
+                {
+                    AddAlbumShelf(rows, "Latest Release", new[] { latest });
+                }
                 AddTrackGrid(rows, "Top Songs", _detailArtistTopTracks, _detailArtistAlbums.Concat(_detailArtistSingles).ToList());
                 AddAlbumShelf(rows, "Albums", _detailArtistAlbums);
                 AddAlbumShelf(rows, "Singles & EPs", _detailArtistSingles);
