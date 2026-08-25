@@ -20,6 +20,7 @@
 
     <Window.Resources>
         <core:EnumMatchConverter x:Key="EnumMatch" />
+        <core:StringMatchConverter x:Key="StringMatch" />
     </Window.Resources>
 
     <!--
@@ -122,6 +123,16 @@
                                                      Brush="{Binding #LblServers.Foreground}"
                                                      VerticalAlignment="Center" />
                                 <TextBlock x:Name="LblServers" Text="Servers" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="nav" Classes.selected="{Binding IsSettingsSelected}"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Settings}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconSettings}"
+                                                     Brush="{Binding #LblSettings.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblSettings" Text="Settings" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -956,6 +967,240 @@
                             </DataTemplate>
                         </ListBox.DataTemplates>
                     </ListBox>
+
+                    <!-- Settings: desktop parity for the phone Settings stack. -->
+                    <ScrollViewer IsVisible="{Binding ShowSettings}">
+                     <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,8,28">
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="14">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconServer}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Server" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="{Binding ActiveAccount.ServerName, FallbackValue='No server signed in'}"
+                                      Classes="primary" FontSize="16" />
+                           <TextBlock Text="{Binding ActiveAccount.BaseUrl}" Classes="secondary"
+                                      IsVisible="{Binding HasActiveAccount}" />
+                           <TextBlock Text="{Binding LibrarySummary}" Classes="secondary" />
+                           <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasActiveAccount}">
+                             <Button Content="Sync Now" Classes="accent"
+                                     IsEnabled="{Binding !Connect.IsSyncing}"
+                                     Command="{Binding SyncNowCommand}" />
+                             <Button Content="Refresh Settings"
+                                     Command="{Binding RefreshSettingsPanelCommand}" />
+                           </StackPanel>
+                           <StackPanel Spacing="7" IsVisible="{Binding Connect.IsSyncing}">
+                             <ProgressBar Value="{Binding Connect.SyncProgress}" Maximum="1"
+                                          IsIndeterminate="{Binding !Connect.SyncProgress}"
+                                          Height="4" CornerRadius="2" />
+                             <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5" />
+                           </StackPanel>
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18"
+                               IsVisible="{Binding HasSettingsLibraries}">
+                         <StackPanel Spacing="12">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconStack}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Music Libraries" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="Pick the library this desktop syncs. Changing it re-attaches the server and syncs."
+                                      Classes="secondary" TextWrapping="Wrap" />
+                           <ItemsControl ItemsSource="{Binding SettingsLibraries}">
+                             <ItemsControl.ItemTemplate>
+                               <DataTemplate>
+                                 <Button Classes="tile" Margin="0,0,0,8"
+                                         Command="{Binding $parent[ScrollViewer].DataContext.SelectMusicLibraryCommand}"
+                                         CommandParameter="{Binding}">
+                                   <Border Background="{DynamicResource SurfaceHover}" CornerRadius="9" Padding="12">
+                                     <Grid ColumnDefinitions="*,Auto">
+                                       <StackPanel Grid.Column="0" Spacing="3">
+                                         <TextBlock Text="{Binding Name}" Classes="primary" />
+                                         <TextBlock Text="{Binding Status}" Classes="secondary" />
+                                       </StackPanel>
+                                       <controls:TablerIcon Grid.Column="1" Size="19" Data="{StaticResource IconCheck}"
+                                                            Brush="{DynamicResource Accent}"
+                                                            IsVisible="{Binding IsSelected}" />
+                                     </Grid>
+                                   </Border>
+                                 </Button>
+                               </DataTemplate>
+                             </ItemsControl.ItemTemplate>
+                           </ItemsControl>
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="14">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconVolume}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Playback" Classes="sectionTitle" />
+                           </StackPanel>
+                           <CheckBox Content="Volume Normalization"
+                                     IsChecked="{Binding NormalizationEnabled}" />
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="14">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconWaveform}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Equalizer" Classes="sectionTitle" />
+                           </StackPanel>
+                           <CheckBox Content="Equalizer" IsChecked="{Binding EqualizerEnabled}" />
+                           <ItemsControl ItemsSource="{Binding EqualizerPresetOptions}">
+                             <ItemsControl.ItemsPanel>
+                               <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                             </ItemsControl.ItemsPanel>
+                             <ItemsControl.ItemTemplate>
+                               <DataTemplate>
+                                 <Button Content="{Binding Label}" Margin="0,0,8,8"
+                                         Command="{Binding $parent[ScrollViewer].DataContext.ApplyEqualizerPresetCommand}"
+                                         CommandParameter="{Binding}" />
+                               </DataTemplate>
+                             </ItemsControl.ItemTemplate>
+                           </ItemsControl>
+                           <ItemsControl ItemsSource="{Binding EqualizerBands}">
+                             <ItemsControl.ItemTemplate>
+                               <DataTemplate>
+                                 <Grid ColumnDefinitions="52,*,62" Margin="0,0,0,8">
+                                   <TextBlock Grid.Column="0" Text="{Binding Label}" Classes="secondary"
+                                              VerticalAlignment="Center" />
+                                   <Slider Grid.Column="1" Minimum="-12" Maximum="12" TickFrequency="0.5"
+                                           Value="{Binding Gain}" />
+                                   <TextBlock Grid.Column="2" Text="{Binding GainText}" Classes="secondary"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                 </Grid>
+                               </DataTemplate>
+                             </ItemsControl.ItemTemplate>
+                           </ItemsControl>
+                           <Grid ColumnDefinitions="72,*,62">
+                             <TextBlock Grid.Column="0" Text="Preamp" Classes="secondary" VerticalAlignment="Center" />
+                             <Slider Grid.Column="1" Minimum="-12" Maximum="12" TickFrequency="0.5"
+                                     Value="{Binding EqualizerPreamp}" />
+                             <TextBlock Grid.Column="2" Text="{Binding EqualizerPreampText}" Classes="secondary"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center" />
+                           </Grid>
+                           <Button Content="Reset to Flat" HorizontalAlignment="Left"
+                                   Command="{Binding ResetEqualizerCommand}" />
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="12">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconQuote}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Lyrics" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="Desktop lyrics display and offline lyric capture need shared core/FFI support before they can be configured here."
+                                      Classes="secondary" TextWrapping="Wrap" />
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="14">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconSparkles}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Recommendations" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="MusicBrainz enrichment needs a desktop FFI command before this can become a real control."
+                                      Classes="secondary" TextWrapping="Wrap" />
+                           <TextBlock Text="Not Recommended" Classes="primary" FontWeight="SemiBold" />
+                           <TextBlock Text="Nothing hidden" Classes="secondary"
+                                      IsVisible="{Binding !HasSuppressions}" />
+                           <ItemsControl ItemsSource="{Binding SuppressedArtists}">
+                             <ItemsControl.ItemTemplate>
+                               <DataTemplate>
+                                 <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                                   <StackPanel Grid.Column="0">
+                                     <TextBlock Text="{Binding Title}" Classes="primary" />
+                                     <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
+                                   </StackPanel>
+                                   <Button Grid.Column="1" Content="Restore"
+                                           Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
+                                           CommandParameter="{Binding}" />
+                                 </Grid>
+                               </DataTemplate>
+                             </ItemsControl.ItemTemplate>
+                           </ItemsControl>
+                           <ItemsControl ItemsSource="{Binding SuppressedTracks}">
+                             <ItemsControl.ItemTemplate>
+                               <DataTemplate>
+                                 <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                                   <StackPanel Grid.Column="0">
+                                     <TextBlock Text="{Binding Title}" Classes="primary" />
+                                     <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
+                                   </StackPanel>
+                                   <Button Grid.Column="1" Content="Restore"
+                                           Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
+                                           CommandParameter="{Binding}" />
+                                 </Grid>
+                               </DataTemplate>
+                             </ItemsControl.ItemTemplate>
+                           </ItemsControl>
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="14">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconPalette}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Appearance" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="Theme" Classes="primary" />
+                           <StackPanel Orientation="Horizontal" Spacing="8">
+                             <RadioButton Content="System" GroupName="appearance"
+                                          IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=system}" />
+                             <RadioButton Content="Light" GroupName="appearance"
+                                          IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=light}" />
+                             <RadioButton Content="Dark" GroupName="appearance"
+                                          IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=dark}" />
+                           </StackPanel>
+                           <TextBlock Text="Dark Style" Classes="primary" />
+                           <StackPanel Orientation="Horizontal" Spacing="8">
+                             <RadioButton Content="Dim" GroupName="darkstyle"
+                                          IsChecked="{Binding DarkStyle, Converter={StaticResource StringMatch}, ConverterParameter=dim}" />
+                             <RadioButton Content="Black" GroupName="darkstyle"
+                                          IsChecked="{Binding DarkStyle, Converter={StaticResource StringMatch}, ConverterParameter=black}" />
+                           </StackPanel>
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="12">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconStethoscope}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="Diagnostics" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="{Binding SecretStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
+                           <TextBlock Text="{Binding SettingsStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
+                           <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" TextWrapping="Wrap" />
+                         </StackPanel>
+                       </Border>
+
+                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                         <StackPanel Spacing="12">
+                           <StackPanel Orientation="Horizontal" Spacing="10">
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconInfo}" Brush="{DynamicResource Accent}" />
+                             <TextBlock Text="About" Classes="sectionTitle" />
+                           </StackPanel>
+                           <TextBlock Text="One app for your music, wherever it lives. Free forever. Open source."
+                                      Classes="primary" TextWrapping="Wrap" />
+                           <TextBlock Text="GPL-3.0 · Source on GitHub: https://github.com/thatcube/Mozz"
+                                      Classes="secondary" TextWrapping="Wrap" />
+                         </StackPanel>
+                       </Border>
+
+                       <Button Content="Sign Out" HorizontalAlignment="Left"
+                               Foreground="{DynamicResource Accent}"
+                               IsVisible="{Binding HasActiveAccount}"
+                               Command="{Binding SignOutCommand}" />
+                       <TextBlock Text="{Binding SettingsMessage}" Classes="secondary" TextWrapping="Wrap"
+                                  IsVisible="{Binding SettingsMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                     </StackPanel>
+                    </ScrollViewer>
 
                     <!-- Servers: sign in, and mirror a catalog. -->
                     <ScrollViewer IsVisible="{Binding ShowConnect}">

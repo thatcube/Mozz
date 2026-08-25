@@ -16,9 +16,10 @@ namespace Mozz.Desktop.Core;
 /// of <c>Connect</c> and forgets it; this puts it in the platform's keystore and
 /// hands it back on the next launch through <c>Attach</c>.
 /// </summary>
-public sealed class MozzServer(MozzCore core, ISecretStore secrets)
+public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? accountsPath = null)
 {
     private const string AccountsKey = "accounts.json";
+    private readonly string _accountsPath = accountsPath ?? Path.Combine(AppPaths.SupportDirectory, AccountsKey);
 
     // MARK: Sign-in
 
@@ -150,6 +151,18 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets)
         string serverId, CancellationToken token = default)
         => core.CallAsync<IReadOnlyList<MusicLibrary>>(new { cmd = "libraries", serverId }, token);
 
+    public async Task<ServerAccount> SelectMusicLibraryAsync(
+        ServerAccount account,
+        string libraryId,
+        CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(libraryId)) return account;
+        var updated = account with { MusicSectionId = libraryId };
+        SaveAccount(updated);
+        await AttachAsync(updated, token).ConfigureAwait(false);
+        return updated;
+    }
+
     // MARK: Sync
 
     public Task<SyncStart?> StartSyncAsync(string serverId, CancellationToken token = default)
@@ -220,7 +233,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets)
     /// </summary>
     public IReadOnlyList<ServerAccount> SavedAccounts()
     {
-        var path = Path.Combine(AppPaths.SupportDirectory, AccountsKey);
+        var path = _accountsPath;
         if (!File.Exists(path)) return [];
         try
         {
@@ -239,6 +252,17 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets)
         var remaining = SavedAccounts().Where(a => a.ServerId != serverId).ToList();
         WriteAccounts(remaining);
         secrets.Set(SecretKey(serverId), null);
+        secrets.Set($"plex.account.{serverId}", null);
+    }
+
+    public void ForgetAllAccounts()
+    {
+        foreach (var account in SavedAccounts())
+        {
+            secrets.Set(SecretKey(account.ServerId), null);
+            secrets.Set($"plex.account.{account.ServerId}", null);
+        }
+        WriteAccounts([]);
     }
 
     private ServerAccount Persist(SessionPayload session, string? username, string identifier)
@@ -270,17 +294,24 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets)
     }
 
     /// <summary>Insert or replace one account, leaving the others alone.</summary>
-    private void SaveAccount(ServerAccount account)
+    internal void SaveAccount(ServerAccount account)
     {
         var accounts = SavedAccounts().Where(a => a.ServerId != account.ServerId).ToList();
         accounts.Add(account);
         WriteAccounts(accounts);
     }
 
-    private static void WriteAccounts(IReadOnlyList<ServerAccount> accounts)
+    internal void SaveAccount(ServerAccount account, string secret, string? accountToken = null)
     {
-        var path = Path.Combine(AppPaths.SupportDirectory, AccountsKey);
-        File.WriteAllText(path, JsonSerializer.Serialize(accounts,
+        secrets.Set(SecretKey(account.ServerId), secret);
+        if (accountToken is not null) secrets.Set($"plex.account.{account.ServerId}", accountToken);
+        SaveAccount(account);
+    }
+
+    private void WriteAccounts(IReadOnlyList<ServerAccount> accounts)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_accountsPath)!);
+        File.WriteAllText(_accountsPath, JsonSerializer.Serialize(accounts,
             new JsonSerializerOptions { WriteIndented = true }));
     }
 

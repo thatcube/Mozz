@@ -12,6 +12,7 @@ public enum LibrarySection
     Playlists,
     Search,
     Connect,
+    Settings,
 }
 
 public enum LibraryPageKind

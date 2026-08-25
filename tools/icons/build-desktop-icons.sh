@@ -51,6 +51,20 @@ playlist            Playlist
 server              Server
 search              Search
 heart-filled        Heart
+category            Settings
+refresh             Refresh
+waveform            Waveform
+quote               Quote
+sparkles            Sparkles
+stack-3             Stack
+palette             Palette
+stethoscope         Stethoscope
+check               Check
+circle-x            CircleX
+info-circle         Info
+code                Code
+star                Star
+x                   X
 "
 
 tmp="${OUT}.tmp"

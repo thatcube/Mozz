@@ -60,11 +60,12 @@ internal sealed class TenBandEqualizer(int sampleRate, int channels)
     private readonly int _sampleRate = sampleRate;
     private Biquad[][] _bands = [];
     private volatile bool _enabled;
+    private double _preamp = 1.0;
 
     public bool Enabled => _enabled;
 
     /// <summary>Rebuild the filter bank from new settings. Cheap enough to call whenever the user drags a slider.</summary>
-    public void Configure(IReadOnlyList<EqBand> bands, bool enabled)
+    public void Configure(IReadOnlyList<EqBand> bands, bool enabled, double preampDb = 0)
     {
         var next = new Biquad[bands.Count][];
         for (int b = 0; b < bands.Count; b++)
@@ -80,6 +81,7 @@ internal sealed class TenBandEqualizer(int sampleRate, int channels)
 
         _bands = next;
         _enabled = enabled && bands.Count > 0;
+        Volatile.Write(ref _preamp, Math.Pow(10.0, Math.Clamp(preampDb, -12.0, 12.0) / 20.0));
     }
 
     /// <summary>Clear every filter's state — used at a load or seek so nothing carries a click across the discontinuity.</summary>
@@ -106,7 +108,7 @@ internal sealed class TenBandEqualizer(int sampleRate, int channels)
                 float sample = interleaved[baseIdx + c];
                 for (int b = 0; b < bands.Length; b++)
                     sample = bands[b][c].Process(sample);
-                interleaved[baseIdx + c] = sample;
+                interleaved[baseIdx + c] = (float)(sample * Volatile.Read(ref _preamp));
             }
         }
     }

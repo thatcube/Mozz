@@ -100,7 +100,7 @@ internal sealed class PcmPipeline : IDisposable
         set => Volatile.Write(ref _volume, Math.Clamp(value, 0.0, 1.0));
     }
 
-    public void SetEqualizer(EqualizerSettings settings) => _eq.Configure(settings.Bands, settings.Enabled);
+    public void SetEqualizer(EqualizerSettings settings) => _eq.Configure(settings.Bands, settings.Enabled, settings.PreampDb);
 
     public void SetReplayGain(ReplayGainMode mode, double preampDb)
     {

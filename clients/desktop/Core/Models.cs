@@ -86,6 +86,11 @@ public sealed record LibraryCounts(
     int Albums,
     int Tracks);
 
+public sealed record SuppressedRef(
+    [property: JsonPropertyName("scope")] string Scope,
+    [property: JsonPropertyName("ref")] string Ref,
+    [property: JsonPropertyName("createdAt")] double CreatedAt);
+
 public sealed record SearchResults(
     IReadOnlyList<Artist> Artists,
     IReadOnlyList<Album> Albums,
