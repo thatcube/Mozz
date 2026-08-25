@@ -12,7 +12,10 @@
 
   <ItemGroup>
     <Folder Include="Models\" />
-    <AvaloniaResource Include="Assets\**" />
+    <!-- Icons.axaml is a XAML ResourceDictionary, not a raw asset: it is already
+         picked up as AvaloniaXaml (compiled + embedded), so keep it out of the
+         raw-resource glob to avoid including it twice. -->
+    <AvaloniaResource Include="Assets\**" Exclude="Assets\Icons.axaml" />
   </ItemGroup>
 
   <ItemGroup>

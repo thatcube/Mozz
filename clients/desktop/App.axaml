@@ -11,6 +11,13 @@
 
     <Application.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Tabler icon geometries, generated from tools/icons/tabler-svg/
+                     by tools/icons/build-desktop-icons.sh. Merging them here makes
+                     every Icon* key StaticResource-able app-wide. -->
+                <ResourceInclude Source="avares://Mozz.Desktop/Assets/Icons.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+
             <FontFamily x:Key="InterFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
 
             <!-- Mozz crimson, taken from the iOS app icon so the two read as
@@ -67,21 +74,46 @@
         <Style Selector="Button.transport">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="Padding" Value="0" />
+            <!-- Icons bind their Brush to this Foreground; secondary at rest keeps
+                 shuffle / repeat / queue / volume quiet so the transport reads as a
+                 hierarchy rather than a row of equally loud glyphs. -->
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="34" />
             <Setter Property="CornerRadius" Value="17" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+            <!-- The stray blue rounded-rect behind Next was Fluent's
+                 DefaultFocusAdorner: the AdornerLayer draws it around whatever last
+                 took focus, and clicking a button focuses it. Opt out the same way
+                 ComboBox/TextBox do, then supply a keyboard-only ring below so the
+                 control stays accessible without the pointer artefact. -->
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <!-- Previous / next lead the secondary controls: full-strength foreground. -->
+        <Style Selector="Button.transport.lead">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.transport:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
         <Style Selector="Button.transport:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Button.transport:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="Button.transport:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource TextTertiary}" />
+            <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
         <Style Selector="Button.play">
             <Setter Property="Background" Value="{DynamicResource Accent}" />
             <Setter Property="Foreground" Value="White" />
+            <Setter Property="Padding" Value="0" />
             <Setter Property="Width" Value="42" />
             <Setter Property="Height" Value="42" />
             <Setter Property="CornerRadius" Value="21" />
@@ -89,9 +121,18 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
         <Style Selector="Button.play:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <!-- Press deepens the crimson rather than flashing Fluent's grey pressed fill. -->
+        <Style Selector="Button.play:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
+        </Style>
+        <Style Selector="Button.play:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
         <Style Selector="TextBlock.pageTitle">
