@@ -1,0 +1,75 @@
+{
+  "cases" : [
+    {
+      "canonicalByteCount" : 71,
+      "canonicalBytesHex" : "6831016131623263336434016a656c6c7966696e2d376633643a74726b2d30303101636f6d706c6574656401313830303030303030303030300132313430303001323134303030",
+      "input" : {
+        "createdAtMS" : 1800000000000,
+        "deviceID" : "a1b2c3d4",
+        "durationMS" : 214000,
+        "kind" : "completed",
+        "positionMS" : 214000,
+        "trackRef" : "jellyfin-7f3d:trk-001"
+      },
+      "name" : "completed-play",
+      "uid" : "a1e3afba60a83a2e1a14bc86fc046297"
+    },
+    {
+      "canonicalByteCount" : 68,
+      "canonicalBytesHex" : "6831016131623263336434016a656c6c7966696e2d376633643a74726b2d30303201736b6970706564013138303030303030333030303001313235303001313837353030",
+      "input" : {
+        "createdAtMS" : 1800000030000,
+        "deviceID" : "a1b2c3d4",
+        "durationMS" : 187500,
+        "kind" : "skipped",
+        "positionMS" : 12500,
+        "trackRef" : "jellyfin-7f3d:trk-002"
+      },
+      "name" : "skip-partway",
+      "uid" : "85940b5ad4f639a075846bdb852e99f1"
+    },
+    {
+      "canonicalByteCount" : 49,
+      "canonicalBytesHex" : "683101653566366137623801737562736f6e69632d3a3832393331016c696b656401313830303030303130303030300101",
+      "input" : {
+        "createdAtMS" : 1800000100000,
+        "deviceID" : "e5f6a7b8",
+        "durationMS" : null,
+        "kind" : "liked",
+        "positionMS" : null,
+        "trackRef" : "subsonic-:82931"
+      },
+      "name" : "like-no-position",
+      "uid" : "452820fae94d7872c04929665b60f8a6"
+    },
+    {
+      "canonicalByteCount" : 49,
+      "canonicalBytesHex" : "683101613162326333643401706c65782d6d6163683a390173746172746564013138303030303032303030303001300130",
+      "input" : {
+        "createdAtMS" : 1800000200000,
+        "deviceID" : "a1b2c3d4",
+        "durationMS" : 0,
+        "kind" : "started",
+        "positionMS" : 0,
+        "trackRef" : "plex-mach:9"
+      },
+      "name" : "position-zero-is-not-absent",
+      "uid" : "d38157f6657fd80eec8d38cfb36e1433"
+    },
+    {
+      "canonicalByteCount" : 69,
+      "canonicalBytesHex" : "6831016131623263336434016a656c6c7966696e2dcea93ae69bb22de288862d3101636f6d706c657465640131383030303030333030303030013630303030013630303030",
+      "input" : {
+        "createdAtMS" : 1800000300000,
+        "deviceID" : "a1b2c3d4",
+        "durationMS" : 60000,
+        "kind" : "completed",
+        "positionMS" : 60000,
+        "trackRef" : "jellyfin-Ω:曲-∆-1"
+      },
+      "name" : "unicode-track-ref",
+      "uid" : "d754ef484c8eab33270a09cb618ba57e"
+    }
+  ],
+  "version" : 1
+}

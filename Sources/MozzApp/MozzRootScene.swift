@@ -37,6 +37,10 @@ public struct MozzRootScene: Scene {
                         // asleep, and stale state here would be published over
                         // the newer session on the next write (ADR-0010).
                         env.reconcileContinuity()
+                        // Listening history rides the same hook but is rate
+                        // limited inside the coordinator — a resume point goes
+                        // stale in seconds, a play does not.
+                        env.syncHistoryIfDue()
                     }
                     if phase == .background {
                         // Last chance to run — get any pending checkpoint out.

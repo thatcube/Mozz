@@ -1,5 +1,6 @@
 import Foundation
 import MozzContinuity
+import MozzHistory
 import MozzCore
 import MozzNetworking
 
@@ -109,6 +110,12 @@ public struct JellyfinBackend: MusicBackend {
                 accountID: userID
             )
         )
+    }
+
+    /// Cross-device listening history, on the same `DisplayPreferences`
+    /// substrate as continuity but in its own record — see `JellyfinHistoryStore`.
+    public func makeHistoryStore() -> any HistoryStore {
+        JellyfinHistoryStore(client: client, userID: userID)
     }
 
     // MARK: Diagnostics
