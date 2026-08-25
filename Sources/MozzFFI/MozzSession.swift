@@ -1,6 +1,7 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+import MozzRecommend
 
 // MARK: - The session facade
 //
@@ -39,10 +40,14 @@ struct SessionRequest: Decodable {
     var limit: Int?
     var query: String?
     var remoteId: String?
+    var artistRemoteId: String?
     var groupKey: String?
     var genre: String?
     /// Opaque resume position for a paged listing; see LibraryRepository.PageCursor.
     var cursor: String?
+    /// Spec-name alias for cursor-paged detail shelves.
+    var after: String?
+    var trackCount: Int?
 
     // Server connection / sync / streaming. See `MozzSessionServer.swift`.
     var kind: String?
@@ -61,6 +66,15 @@ struct SessionRequest: Decodable {
     var size: Int?
     var maxBitrateKbps: Int?
     var forceTranscode: Bool?
+
+    // Recommendations.
+    var setId: String?
+    var seed: UInt64?
+    var seedTitle: String?
+    var seedGenres: [String]?
+    var seedArtistIds: [String]?
+    var seedTrackRef: String?
+    var excluding: [String]?
 }
 
 /// The server commands take the same envelope; the alias only keeps the two
@@ -114,6 +128,86 @@ private struct WireAlbum: Encodable {
     var groupKey: String
 }
 
+private struct WireArtistHeader: Encodable {
+    var remoteId: String
+    var serverId: String
+    var name: String
+    var sortName: String?
+    var artworkKey: String?
+    var heroArtworkKey: String?
+    var albumCount: Int?
+    var genres: [String]
+    var isFavorite: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case remoteId, serverId, name, sortName, artworkKey, heroArtworkKey, albumCount, genres, isFavorite
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(remoteId, forKey: .remoteId)
+        try container.encode(serverId, forKey: .serverId)
+        try container.encode(name, forKey: .name)
+        try container.encode(sortName, forKey: .sortName)
+        try container.encode(artworkKey, forKey: .artworkKey)
+        try container.encode(heroArtworkKey, forKey: .heroArtworkKey)
+        try container.encode(albumCount, forKey: .albumCount)
+        try container.encode(genres, forKey: .genres)
+        try container.encode(isFavorite, forKey: .isFavorite)
+    }
+}
+
+private struct WireAlbumHeader: Encodable {
+    var remoteId: String
+    var serverId: String
+    var title: String
+    var sortTitle: String?
+    var artistName: String
+    var artistRemoteId: String?
+    var year: Int?
+    var artworkKey: String?
+    var trackCount: Int?
+    var genres: [String]
+    var isFavorite: Bool
+    var addedAt: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case remoteId, serverId, title, sortTitle, artistName, artistRemoteId, year, artworkKey
+        case trackCount, genres, isFavorite, addedAt
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(remoteId, forKey: .remoteId)
+        try container.encode(serverId, forKey: .serverId)
+        try container.encode(title, forKey: .title)
+        try container.encode(sortTitle, forKey: .sortTitle)
+        try container.encode(artistName, forKey: .artistName)
+        try container.encode(artistRemoteId, forKey: .artistRemoteId)
+        try container.encode(year, forKey: .year)
+        try container.encode(artworkKey, forKey: .artworkKey)
+        try container.encode(trackCount, forKey: .trackCount)
+        try container.encode(genres, forKey: .genres)
+        try container.encode(isFavorite, forKey: .isFavorite)
+        try container.encode(addedAt, forKey: .addedAt)
+    }
+}
+
+private struct WireAlbumPage: Encodable {
+    var items: [WireAlbumHeader]
+    var nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items, nextCursor
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
 private struct WireTrack: Encodable {
     var id: Int64
     var remoteId: String
@@ -154,6 +248,51 @@ private struct WireSearchResults: Encodable {
     var tracks: [WireTrack]
 }
 
+private struct WireHomeMix: Encodable {
+    var id: String
+    var title: String
+    var subtitle: String?
+    var kind: String
+    var artworkKey: String?
+    var generatedAt: Double
+}
+
+private struct WireRecommendationSet: Encodable {
+    var id: String
+    var title: String
+    var kind: String
+    var generatedAt: Double
+}
+
+private struct WireRecommendationItem: Encodable {
+    var setId: String
+    var trackRef: String
+    var rank: Int
+    var score: Double
+    var inLibrary: Bool
+    var reason: String?
+}
+
+private struct WireRadioBatch: Encodable {
+    var remoteIds: [String]
+    var tracks: [WireTrack]
+}
+
+private struct WireAlbumReleaseKind: Encodable {
+    var kind: String
+    var isSingleOrEP: Bool
+}
+
+private struct WireSuppression: Encodable {
+    var scope: String
+    var ref: String
+    var createdAt: Double
+}
+
+private struct WireAction: Encodable {
+    var ok: Bool
+}
+
 // MARK: - Mapping
 
 private func wire(_ r: ArtistRecord) -> WireArtist {
@@ -169,6 +308,25 @@ private func wire(_ r: AlbumRecord) -> WireAlbum {
         title: r.title, artistName: r.artistName, artistRemoteId: r.artistRemoteId,
         year: r.year, trackCount: r.trackCount, artworkKey: r.artworkKey,
         groupKey: r.albumGroupKey
+    )
+}
+
+private func wireHeader(_ r: ArtistRecord, heroArtworkKey: String? = nil) -> WireArtistHeader {
+    WireArtistHeader(
+        remoteId: r.remoteId, serverId: r.serverId, name: r.name,
+        sortName: r.sortName, artworkKey: r.artworkKey,
+        heroArtworkKey: heroArtworkKey ?? r.artworkKey,
+        albumCount: r.albumCount, genres: r.genres, isFavorite: r.isFavorite
+    )
+}
+
+private func wireHeader(_ r: AlbumRecord) -> WireAlbumHeader {
+    WireAlbumHeader(
+        remoteId: r.remoteId, serverId: r.serverId, title: r.title,
+        sortTitle: r.sortTitle, artistName: r.artistName,
+        artistRemoteId: r.artistRemoteId, year: r.year, artworkKey: r.artworkKey,
+        trackCount: r.trackCount, genres: r.genres, isFavorite: r.isFavorite,
+        addedAt: r.addedAt
     )
 }
 
@@ -190,12 +348,27 @@ private func wire(_ r: PlaylistRecord) -> WirePlaylist {
     )
 }
 
+private func wire(_ m: RecommendationService.HomeMix) -> WireHomeMix {
+    WireHomeMix(id: m.id, title: m.title, subtitle: m.subtitle, kind: m.kind,
+                artworkKey: m.artworkKey, generatedAt: m.generatedAt)
+}
+
+private func wire(_ r: RecommendationSetRecord) -> WireRecommendationSet {
+    WireRecommendationSet(id: r.id, title: r.title, kind: r.kind, generatedAt: r.generatedAt)
+}
+
+private func wire(_ r: RecommendationItemRecord) -> WireRecommendationItem {
+    WireRecommendationItem(setId: r.setId, trackRef: r.trackRef, rank: r.rank,
+                           score: r.score, inLibrary: r.inLibrary, reason: r.reason)
+}
+
 // MARK: - Session
 
 /// One open library, owning the database pool for its lifetime.
 final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
+    let recommendations: RecommendationService
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
@@ -203,6 +376,7 @@ final class MozzSession: @unchecked Sendable {
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
+        self.recommendations = RecommendationService(store: RecommendationStore(database))
     }
 }
 
@@ -211,6 +385,7 @@ final class MozzSession: @unchecked Sendable {
 protocol SessionContext: AnyObject {
     var database: MusicDatabase { get }
     var repository: LibraryRepository { get }
+    var recommendations: RecommendationService { get }
     var backends: BackendTable { get }
 }
 
@@ -303,7 +478,7 @@ public func mozz_session_call(
 /// can only come from a client that mangled a token we gave it, and restarting
 /// the listing is a better answer than refusing to show anything.
 private func pageCursor(_ request: SessionRequest) -> LibraryRepository.PageCursor? {
-    request.cursor.flatMap(LibraryRepository.PageCursor.init(token:))
+    (request.after ?? request.cursor).flatMap(LibraryRepository.PageCursor.init(token:))
 }
 
 // MARK: - Dispatch
@@ -355,12 +530,54 @@ private func dispatch(
         let page = try await repo.tracksPage(serverId: serverId, after: pageCursor(request), limit: limit)
         return sessionSuccess(request, page.rows.map(wire), nextCursor: page.next?.token)
 
+    case "artist":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "artist needs remoteId and serverId")
+        }
+        guard let artist = try await repo.artist(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "artist not found: \(remoteId)")
+        }
+        let albums = try await repo.albums(forArtistRemoteId: remoteId, serverId: serverId)
+        let heroArtworkKey = ArtistDetailPresentation.heroArtworkKey(artist: artist, albums: albums)
+        return sessionSuccess(request, wireHeader(artist, heroArtworkKey: heroArtworkKey))
+
+    case "album":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "album needs remoteId and serverId")
+        }
+        guard let album = try await repo.album(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "album not found: \(remoteId)")
+        }
+        return sessionSuccess(request, wireHeader(album))
+
     case "artistAlbums":
         guard let remoteId = request.remoteId, let serverId else {
             return sessionFailure(request.id, request.cmd, "artistAlbums needs remoteId and serverId")
         }
         let rows = try await repo.albums(forArtistRemoteId: remoteId, serverId: serverId)
         return sessionSuccess(request, rows.map(wire))
+
+    case "artistTopTracks":
+        guard let artistRemoteId = request.artistRemoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "artistTopTracks needs artistRemoteId and serverId")
+        }
+        let rows = try await repo.topTracks(forArtistRemoteId: artistRemoteId, serverId: serverId, limit: limit)
+        return sessionSuccess(request, rows.map(wire))
+
+    case "artistAppearsOn":
+        guard let artistRemoteId = request.artistRemoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "artistAppearsOn needs artistRemoteId and serverId")
+        }
+        let page = try await repo.appearsOnAlbums(
+            forArtistRemoteId: artistRemoteId,
+            serverId: serverId,
+            after: pageCursor(request),
+            limit: limit
+        )
+        return sessionSuccess(
+            request,
+            WireAlbumPage(items: page.rows.map(wireHeader), nextCursor: page.next?.token)
+        )
 
     case "albumTracks":
         guard let serverId else {
@@ -391,6 +608,13 @@ private func dispatch(
         }
         let rows = try await repo.tracks(forPlaylistRemoteId: remoteId, serverId: serverId)
         return sessionSuccess(request, rows.map(wire))
+
+    case "albumReleaseKind":
+        let kind = AlbumReleaseClassifier.kind(trackCount: request.trackCount)
+        return sessionSuccess(
+            request,
+            WireAlbumReleaseKind(kind: kind.rawValue, isSingleOrEP: kind.isSingleOrEP)
+        )
 
     case "recentlyAddedAlbums":
         guard let serverId else {
@@ -434,6 +658,103 @@ private func dispatch(
             tracks: results.tracks.map(wire)
         ))
 
+    case "homeMixes":
+        let mixes = try await session.recommendations.homeMixes().map(wire)
+        return sessionSuccess(request, mixes)
+
+    case "generateHomeMixes":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "generateHomeMixes needs serverId")
+        }
+        try await session.recommendations.generateHomeMixes(serverId: serverId, seed: request.seed)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "mix":
+        guard let setId = request.setId else {
+            return sessionFailure(request.id, request.cmd, "mix needs setId")
+        }
+        guard let set = try await session.recommendations.set(id: setId) else {
+            return sessionFailure(request.id, request.cmd, "mix not found: \(setId)")
+        }
+        return sessionSuccess(request, wire(set))
+
+    case "mixTracks":
+        guard let setId = request.setId else {
+            return sessionFailure(request.id, request.cmd, "mixTracks needs setId")
+        }
+        let rows = try await session.recommendations.tracks(forSetId: setId)
+        return sessionSuccess(request, rows.map(wire))
+
+    case "generateMozzWeekly":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "generateMozzWeekly needs serverId")
+        }
+        let set = try await session.recommendations.generateMozzWeekly(serverId: serverId, limit: limit, seed: request.seed)
+        return sessionSuccess(request, wire(set))
+
+    case "mozzWeeklyTracks":
+        let rows = try await session.recommendations.mozzWeeklyTracks()
+        return sessionSuccess(request, rows.map(wire))
+
+    case "mozzWeeklyItems":
+        let rows = try await session.recommendations.mozzWeeklyItems()
+        return sessionSuccess(request, rows.map(wire))
+
+    case "radioBatch":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "radioBatch needs serverId")
+        }
+        let seed = RadioSeed(title: request.seedTitle ?? "Radio",
+                             genres: request.seedGenres ?? [],
+                             artistIds: request.seedArtistIds ?? [],
+                             seedTrackRef: request.seedTrackRef)
+        let remoteIds = try await session.recommendations.radioBatch(
+            seed: seed, serverId: serverId, limit: limit, excluding: Set(request.excluding ?? []))
+        var tracks: [WireTrack] = []
+        tracks.reserveCapacity(remoteIds.count)
+        for remoteId in remoteIds {
+            if let track = try await repo.track(serverId: serverId, remoteId: remoteId) {
+                tracks.append(wire(track))
+            }
+        }
+        return sessionSuccess(request, WireRadioBatch(remoteIds: remoteIds, tracks: tracks))
+
+    case "suppressTrack":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "suppressTrack needs remoteId and serverId")
+        }
+        try await session.recommendations.suppressTrack(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "suppressArtist":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "suppressArtist needs remoteId and serverId")
+        }
+        try await session.recommendations.suppressArtist(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "unsuppressTrack":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "unsuppressTrack needs remoteId and serverId")
+        }
+        try await session.recommendations.unsuppressTrack(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "unsuppressArtist":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "unsuppressArtist needs remoteId and serverId")
+        }
+        try await session.recommendations.unsuppressArtist(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "suppressions":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "suppressions needs serverId")
+        }
+        let rows = try await session.recommendations.suppressions(serverId: serverId)
+            .map { WireSuppression(scope: $0.scope, ref: $0.ref, createdAt: $0.createdAt) }
+        return sessionSuccess(request, rows)
+
     default:
         // Not a catalog command — try the server/sync/streaming table before
         // declaring it unknown, so both halves share one envelope and one error.
@@ -449,9 +770,13 @@ private func dispatch(
 /// hand-maintained and make the failure it protects against loud.
 let mozzSessionCommands = [
     "ping", "servers", "counts", "artists", "albums", "tracks",
-    "artistAlbums", "albumTracks", "playlists", "playlistTracks",
+    "artist", "album", "artistAlbums", "artistTopTracks", "artistAppearsOn",
+    "albumTracks", "albumReleaseKind", "playlists", "playlistTracks",
     "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
-    "genres", "genreAlbums", "search",
+    "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
+    "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
+    "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
+    "unsuppressTrack", "unsuppressArtist", "suppressions",
     "connect", "plexPin", "plexPinCheck", "attach", "libraries",
     "sync", "syncStatus", "streamURL", "artworkURL",
 ].sorted()

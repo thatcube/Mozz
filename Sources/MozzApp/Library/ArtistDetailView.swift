@@ -12,18 +12,27 @@ struct ArtistDetailView: View {
 
     @State private var songs: [TrackRecord] = []
     @State private var albums: [AlbumRecord] = []
+    @State private var appearsOn: [AlbumRecord] = []
     @State private var loaded = false
 
     private var topSongs: [TrackRecord] { Array(songs.prefix(5)) }
-    private var fullAlbums: [AlbumRecord] { albums.filter { ($0.trackCount ?? 99) > 3 } }
-    private var singles: [AlbumRecord] { albums.filter { ($0.trackCount ?? 99) <= 3 } }
+    private var fullAlbums: [AlbumRecord] { albums.filter { !AlbumReleaseClassifier.isSingleOrEP(trackCount: $0.trackCount) } }
+    private var singles: [AlbumRecord] { albums.filter { AlbumReleaseClassifier.isSingleOrEP(trackCount: $0.trackCount) } }
+
+    /// The artist's newest record. Ordered by `LatestRelease` in the shared core
+    /// rather than sorted here, so the phone and the desktop cannot name
+    /// different records as the same artist's latest.
+    private var latestRelease: AlbumRecord? {
+        let recency = albums.map {
+            ReleaseRecency(year: $0.year, addedAt: $0.addedAt, title: $0.title)
+        }
+        return LatestRelease.newestIndex(recency).map { albums[$0] }
+    }
 
     /// Artists frequently have no art of their own — fall back to a representative
     /// album cover so the hero still blooms with color.
     private var heroArtwork: ArtworkRef? {
-        if let key = artist.artworkKey { return ArtworkRef(key: key) }
-        if let key = albums.first(where: { $0.artworkKey != nil })?.artworkKey { return ArtworkRef(key: key) }
-        return nil
+        ArtistDetailPresentation.heroArtworkKey(artist: artist, albums: albums).map(ArtworkRef.init(key:))
     }
 
     private var metaLine: String? {
@@ -40,10 +49,14 @@ struct ArtistDetailView: View {
             actions: { DetailPlayActions(play: { play(from: 0) }, shuffle: shuffle, startRadio: startRadio) },
             content: {
                 VStack(alignment: .leading, spacing: 30) {
+                    if let latest = latestRelease {
+                        ArtistAlbumShelf(title: "Latest Release", albums: [latest])
+                    }
                     if !topSongs.isEmpty { topSongsSection }
                     if !fullAlbums.isEmpty { ArtistAlbumShelf(title: "Albums", albums: fullAlbums) }
                     if !singles.isEmpty { ArtistAlbumShelf(title: "Singles & EPs", albums: singles) }
-                    if loaded && songs.isEmpty && albums.isEmpty {
+                    if !appearsOn.isEmpty { ArtistAlbumShelf(title: "Appears On", albums: appearsOn) }
+                    if loaded && songs.isEmpty && albums.isEmpty && appearsOn.isEmpty {
                         ContentUnavailableView { Label("Nothing Here Yet", mozz: "music.mic") }
                             .padding(.top, 40)
                     }
@@ -100,6 +113,12 @@ struct ArtistDetailView: View {
         guard let serverId = env.active?.connection.id else { loaded = true; return }
         albums = (try? await env.repository.albums(forArtistRemoteId: artist.remoteId, serverId: serverId)) ?? []
         songs = (try? await env.repository.topTracks(forArtistRemoteId: artist.remoteId, serverId: serverId, limit: 500)) ?? []
+        appearsOn = (try? await env.repository.appearsOnAlbums(
+            forArtistRemoteId: artist.remoteId,
+            serverId: serverId,
+            after: nil,
+            limit: 20
+        ).rows) ?? []
         loaded = true
     }
 }

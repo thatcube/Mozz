@@ -388,6 +388,43 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// Albums credited to another album-artist that nevertheless contain tracks
+    /// by this artist. Cursor-paged for the desktop/iOS "Appears On" shelf.
+    public func appearsOnAlbums(
+        forArtistRemoteId artistRemoteId: String,
+        serverId: ServerID,
+        after cursor: PageCursor?,
+        limit: Int
+    ) async throws -> Page<AlbumRecord> {
+        let seek = cursor.map { " AND \(Self.seekClause(["albumGroupKey"], $0))" } ?? ""
+        var mutableArgs: StatementArguments = [serverId, artistRemoteId, artistRemoteId]
+        if let cursor { mutableArgs += Self.seekArgs(cursor) }
+        mutableArgs += [limit]
+        let args = mutableArgs
+
+        let rows = try await database.read { db in
+            try AlbumRecord.fetchAll(db, sql: """
+                SELECT album.*, \(Self.albumRepresentative("album.")) FROM album
+                WHERE album.serverId = ?
+                  AND album.artistRemoteId IS NOT NULL
+                  AND album.artistRemoteId <> ?
+                  AND \(Self.albumHasTracks)
+                  AND EXISTS (
+                      SELECT 1 FROM track
+                      WHERE track.serverId = album.serverId
+                        AND track.albumRemoteId = album.remoteId
+                        AND track.artistRemoteId = ?
+                  )\(seek)
+                GROUP BY album.albumGroupKey
+                ORDER BY album.albumGroupKey, album.id
+                LIMIT ?
+                """, arguments: args)
+        }
+        return Page(rows: rows, next: rows.count < limit ? nil : rows.last.map {
+            PageCursor(keys: [$0.albumGroupKey], id: $0.id ?? 0)
+        })
+    }
+
     /// Tracks of an album in disc/track order.
     public func tracks(forAlbumRemoteId albumRemoteId: String, serverId: ServerID) async throws -> [TrackRecord] {
         try await database.read { db in
