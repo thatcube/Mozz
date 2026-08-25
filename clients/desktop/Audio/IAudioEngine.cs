@@ -48,8 +48,8 @@ public sealed record AudioSource(
 /// <param name="Q">Quality factor — higher is narrower.</param>
 public readonly record struct EqBand(double FrequencyHz, double GainDb, double Q = 1.0);
 
-/// <summary>The whole equaliser: on/off plus the bands to apply.</summary>
-public sealed record EqualizerSettings(bool Enabled, IReadOnlyList<EqBand> Bands)
+/// <summary>The whole equaliser: on/off plus the bands and preamp to apply.</summary>
+public sealed record EqualizerSettings(bool Enabled, IReadOnlyList<EqBand> Bands, double PreampDb = 0)
 {
     /// <summary>The ten ISO centre frequencies a graphic EQ conventionally uses.</summary>
     public static readonly double[] IsoCentres =
@@ -57,7 +57,7 @@ public sealed record EqualizerSettings(bool Enabled, IReadOnlyList<EqBand> Bands
 
     /// <summary>A flat ten-band EQ — every band at 0 dB — as a starting point.</summary>
     public static EqualizerSettings Flat()
-        => new(false, Array.ConvertAll(IsoCentres, f => new EqBand(f, 0.0)));
+        => new(false, Array.ConvertAll(IsoCentres, f => new EqBand(f, 0.0)), 0);
 }
 
 /// <summary>Raised when the current source changes as playback flows into a preloaded track.</summary>
@@ -95,7 +95,7 @@ public interface IAudioEngine : IDisposable
 
     /// <summary>Load <paramref name="source"/> and begin playing it immediately, replacing whatever was playing.</summary>
     /// <param name="token">An opaque caller tag echoed back by <see cref="TrackChanged"/>; the view model passes the track id.</param>
-    void Play(AudioSource source, object? token = null);
+    bool Play(AudioSource source, object? token = null);
 
     /// <summary>
     /// Open <paramref name="source"/> now so it is buffered and ready. When the

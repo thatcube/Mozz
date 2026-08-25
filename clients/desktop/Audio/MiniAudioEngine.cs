@@ -59,10 +59,11 @@ public sealed unsafe class MiniAudioEngine : IAudioEngine
         set => _pipeline.Volume = value;
     }
 
-    public void Play(AudioSource source, object? token = null)
+    public bool Play(AudioSource source, object? token = null)
     {
-        if (!TryCreateDecoder(source, out var decoder)) return;
+        if (!TryCreateDecoder(source, out var decoder)) return false;
         _pipeline.LoadCurrent(decoder, source, token);
+        return true;
     }
 
     public void PreloadNext(AudioSource source, object? token = null)
