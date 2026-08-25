@@ -1,0 +1,105 @@
+using System.Text.Json.Serialization;
+
+namespace Mozz.Desktop.Core;
+
+// The wire contract with the Swift core. Deliberately mirrors the Wire* types
+// in Sources/MozzFFI/MozzSession.swift — a change on either side must be made on
+// both, which is why the shapes are kept small and obvious.
+
+public sealed record Server(
+    string Id,
+    string Kind,
+    string Name,
+    string BaseUrl);
+
+public sealed record Artist(
+    long Id,
+    string RemoteId,
+    string ServerId,
+    string Name,
+    string? ArtworkKey);
+
+public sealed record Album(
+    long Id,
+    string RemoteId,
+    string ServerId,
+    string Title,
+    string ArtistName,
+    string? ArtistRemoteId,
+    int? Year,
+    int? TrackCount,
+    string? ArtworkKey,
+    string GroupKey);
+
+public sealed record Track(
+    long Id,
+    string RemoteId,
+    string ServerId,
+    string Title,
+    string ArtistName,
+    string? AlbumTitle,
+    string? AlbumRemoteId,
+    int? TrackNumber,
+    int? DiscNumber,
+    double DurationSeconds,
+    string? ArtworkKey,
+    bool IsFavorite)
+{
+    /// <summary>m:ss, the form every music player uses.</summary>
+    public string Duration
+    {
+        get
+        {
+            if (DurationSeconds <= 0 || double.IsNaN(DurationSeconds)) return "--:--";
+            var span = TimeSpan.FromSeconds(DurationSeconds);
+            return span.TotalHours >= 1
+                ? $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}"
+                : $"{span.Minutes}:{span.Seconds:00}";
+        }
+    }
+}
+
+public sealed record Playlist(
+    long Id,
+    string RemoteId,
+    string ServerId,
+    string Title,
+    int? TrackCount);
+
+public sealed record LibraryCounts(
+    int Artists,
+    int Albums,
+    int Tracks);
+
+public sealed record SearchResults(
+    IReadOnlyList<Artist> Artists,
+    IReadOnlyList<Album> Albums,
+    IReadOnlyList<Track> Tracks);
+
+// MARK: - Requests
+
+/// <summary>
+/// One command to the core. Only the fields a command needs are serialized;
+/// the rest are omitted rather than sent as null.
+/// </summary>
+public sealed record CoreRequest(
+    [property: JsonPropertyName("cmd")] string Cmd)
+{
+    [JsonPropertyName("serverId")] public string? ServerId { get; init; }
+    [JsonPropertyName("offset")] public int? Offset { get; init; }
+    [JsonPropertyName("limit")] public int? Limit { get; init; }
+    [JsonPropertyName("query")] public string? Query { get; init; }
+    [JsonPropertyName("remoteId")] public string? RemoteId { get; init; }
+    [JsonPropertyName("groupKey")] public string? GroupKey { get; init; }
+    [JsonPropertyName("genre")] public string? Genre { get; init; }
+    /// <summary>Opaque resume position from a previous page's <c>nextCursor</c>.</summary>
+    [JsonPropertyName("cursor")] public string? Cursor { get; init; }
+}
+
+/// <summary>
+/// One page of a listing and where to resume it. <c>NextCursor</c> is null on
+/// the last page, which is the only end signal — the core does not report a
+/// total for these listings, and counting rows would be wrong the moment a
+/// background sync added one.
+/// </summary>
+public sealed record Page<T>(T? Rows, string? NextCursor);

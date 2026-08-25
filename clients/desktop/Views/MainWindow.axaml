@@ -1,0 +1,450 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Mozz.Desktop.ViewModels"
+        xmlns:core="using:Mozz.Desktop.Core"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1360" d:DesignHeight="880"
+        x:Class="Mozz.Desktop.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="1360" Height="880"
+        MinWidth="940" MinHeight="620"
+        Background="{DynamicResource AppBackground}"
+        Title="Mozz"
+        Icon="avares://Mozz.Desktop/Assets/mozz.ico">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <Window.Resources>
+        <core:ArtworkPlaceholderConverter x:Key="Artwork" />
+        <core:InitialConverter x:Key="Initial" />
+        <core:EnumMatchConverter x:Key="EnumMatch" />
+    </Window.Resources>
+
+    <!--
+      Three bands, the arrangement every desktop player converges on because it
+      works: a sidebar that never moves, content that scrolls, and transport
+      pinned to the bottom so it stays reachable however deep you've browsed.
+    -->
+    <Grid RowDefinitions="*,Auto">
+
+        <Grid Grid.Row="0" ColumnDefinitions="248,*">
+
+            <!-- Sidebar -->
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14,18,14,14">
+
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="11" Margin="6,0,0,20">
+                        <Border Width="28" Height="28" CornerRadius="7"
+                                Background="{DynamicResource AccentDeep}">
+                            <TextBlock Text="M" FontSize="16" FontWeight="Bold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Mozz" FontSize="21" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextPrimary}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <TextBox Grid.Row="1"
+                             Text="{Binding SearchText}"
+                             PlaceholderText="Search your library"
+                             Margin="0,0,0,18"
+                             CornerRadius="8"
+                             FontSize="13"
+                             Background="{DynamicResource SurfaceRaised}"
+                             BorderThickness="0"
+                             Padding="11,9" />
+
+                    <StackPanel Grid.Row="2" Spacing="3">
+                        <Button Classes="nav" Classes.selected="{Binding IsHomeSelected}"
+                                Content="Home"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Home}" />
+                        <Button Classes="nav" Classes.selected="{Binding IsSongsSelected}"
+                                Content="Songs"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Songs}" />
+                        <Button Classes="nav" Classes.selected="{Binding IsAlbumsSelected}"
+                                Content="Albums"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Albums}" />
+                        <Button Classes="nav" Classes.selected="{Binding IsArtistsSelected}"
+                                Content="Artists"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Artists}" />
+                        <Button Classes="nav" Classes.selected="{Binding IsPlaylistsSelected}"
+                                Content="Playlists"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Playlists}" />
+                        <Button Classes="nav" Classes.selected="{Binding IsConnectSelected}"
+                                Content="Servers"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Connect}" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3"
+                               Text="{Binding LibrarySummary}"
+                               Classes="secondary"
+                               FontSize="11.5"
+                               TextWrapping="Wrap"
+                               Margin="6,12,6,4" />
+                </Grid>
+            </Border>
+
+            <!-- Content -->
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="32,26,24,0">
+
+                <StackPanel Grid.Row="0" Spacing="5" Margin="0,0,0,20">
+                    <TextBlock Text="{Binding PageTitle}" Classes="pageTitle" />
+                    <TextBlock Text="{Binding StatusMessage}" Classes="secondary"
+                               IsVisible="{Binding StatusMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+
+                <Panel Grid.Row="1" x:Name="ContentPane" SizeChanged="OnContentResized">
+
+                    <StackPanel IsVisible="{Binding IsLibraryEmpty}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Spacing="11" MaxWidth="430">
+                        <TextBlock Text="Nothing here yet" Classes="sectionTitle"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Classes="secondary" TextAlignment="Center" TextWrapping="Wrap"
+                                   Text="Connect a Plex, Jellyfin or Subsonic server and Mozz will sync your library." />
+                        <Button Content="Connect a server"
+                                HorizontalAlignment="Center"
+                                Classes="accent"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Connect}" />
+                    </StackPanel>
+
+                    <!-- Songs / search results.
+                         ListBox rather than ItemsControl: it virtualizes, which is
+                         what keeps a hundred thousand rows scrolling smoothly. -->
+                    <ListBox IsVisible="{Binding ShowTracks}"
+                             x:Name="TracksList"
+                             ItemsSource="{Binding Tracks}"
+                             DoubleTapped="OnTrackActivated"
+                             ScrollViewer.ScrollChanged="OnListScrolled"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Padding="0,0,8,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="44,*,200,64" Height="50">
+                                    <Border Grid.Column="0" Width="38" Height="38"
+                                            CornerRadius="6" ClipToBounds="True"
+                                            Background="{Binding AlbumTitle, Converter={StaticResource Artwork}}">
+                                        <TextBlock Text="{Binding AlbumTitle, Converter={StaticResource Initial}}"
+                                                   FontSize="15" FontWeight="SemiBold"
+                                                   Foreground="#88FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center"
+                                                Margin="13,0" Spacing="2">
+                                        <TextBlock Text="{Binding Title}" Classes="primary" />
+                                        <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding AlbumTitle}"
+                                               Classes="secondary" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Duration}"
+                                               Classes="secondary" VerticalAlignment="Center"
+                                               HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Albums -->
+                    <!-- Albums.
+                         A ListBox of ROWS, not a WrapPanel of tiles: Avalonia has
+                         only VirtualizingStackPanel, so chunking into rows is what
+                         buys virtualization. See ViewModels/GridRows.cs. -->
+                    <ListBox IsVisible="{Binding ShowAlbums}"
+                             ItemsSource="{Binding AlbumGrid.Rows}"
+                             ScrollViewer.ScrollChanged="OnListScrolled"
+                             Background="Transparent" BorderThickness="0"
+                             SelectionMode="Single" Padding="0,0,8,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.Styles>
+                            <!-- A row is a layout device, not something to select.
+                                 Without these the ListBox paints its selected and
+                                 hover chrome across a whole row of tiles, which
+                                 reads as a rendering fault. -->
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Focusable" Value="False" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <ItemsControl ItemsSource="{Binding}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Width="176" Margin="0,0,20,24" Spacing="9">
+                                                <Border Width="176" Height="176" CornerRadius="8"
+                                                        ClipToBounds="True"
+                                                        Background="{Binding Title, Converter={StaticResource Artwork}}">
+                                                    <TextBlock Text="{Binding Title, Converter={StaticResource Initial}}"
+                                                               FontSize="52" FontWeight="Bold"
+                                                               Foreground="#55FFFFFF"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding Title}" Classes="primary" />
+                                                    <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Artists -->
+                    <ListBox IsVisible="{Binding ShowArtists}"
+                             ItemsSource="{Binding ArtistGrid.Rows}"
+                             ScrollViewer.ScrollChanged="OnListScrolled"
+                             Background="Transparent" BorderThickness="0"
+                             SelectionMode="Single" Padding="0,0,8,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.Styles>
+                            <!-- A row is a layout device, not something to select.
+                                 Without these the ListBox paints its selected and
+                                 hover chrome across a whole row of tiles, which
+                                 reads as a rendering fault. -->
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Focusable" Value="False" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <ItemsControl ItemsSource="{Binding}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Width="158" Margin="0,0,20,24" Spacing="10">
+                                                <Border Width="138" Height="138" CornerRadius="69"
+                                                        ClipToBounds="True"
+                                                        HorizontalAlignment="Center"
+                                                        Background="{Binding Name, Converter={StaticResource Artwork}}">
+                                                    <TextBlock Text="{Binding Name, Converter={StaticResource Initial}}"
+                                                               FontSize="44" FontWeight="Bold"
+                                                               Foreground="#55FFFFFF"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                                <TextBlock Text="{Binding Name}" Classes="primary"
+                                                           TextAlignment="Center" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Servers: sign in, and mirror a catalog. -->
+                    <ScrollViewer IsVisible="{Binding ShowConnect}">
+                      <StackPanel Spacing="26" MaxWidth="560" HorizontalAlignment="Left">
+
+                        <!-- Already signed in -->
+                        <StackPanel Spacing="12" IsVisible="{Binding Connect.HasAccounts}">
+                          <TextBlock Text="Your servers" Classes="sectionTitle" />
+                          <ItemsControl ItemsSource="{Binding Connect.Accounts}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Border Background="{DynamicResource SurfaceRaised}"
+                                        CornerRadius="10" Padding="15,13" Margin="0,0,0,9">
+                                  <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                      <TextBlock Text="{Binding ServerName}" Classes="primary" />
+                                      <TextBlock Text="{Binding BaseUrl}" Classes="secondary" FontSize="11.5" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Sync" Margin="0,0,8,0"
+                                            Command="{Binding $parent[ScrollViewer].DataContext.Connect.SyncAccountCommand}"
+                                            CommandParameter="{Binding}" />
+                                    <Button Grid.Column="2" Content="Sign out"
+                                            Command="{Binding $parent[ScrollViewer].DataContext.Connect.ForgetAccountCommand}"
+                                            CommandParameter="{Binding}" />
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+
+                        <!-- Add one -->
+                        <StackPanel Spacing="13">
+                          <TextBlock Text="Add a server" Classes="sectionTitle" />
+
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <RadioButton Content="Jellyfin" GroupName="kind"
+                                         IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Jellyfin}" />
+                            <RadioButton Content="Plex" GroupName="kind"
+                                         IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Plex}" />
+                            <RadioButton Content="Subsonic" GroupName="kind"
+                                         IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Subsonic}" />
+                          </StackPanel>
+
+                          <StackPanel Spacing="9" IsVisible="{Binding Connect.NeedsCredentials}">
+                            <TextBox Text="{Binding Connect.ServerUrl}"
+                                     PlaceholderText="192.168.1.10:8096"
+                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                     Background="{DynamicResource SurfaceRaised}" />
+                            <TextBox Text="{Binding Connect.Username}"
+                                     PlaceholderText="Username"
+                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                     Background="{DynamicResource SurfaceRaised}" />
+                            <TextBox Text="{Binding Connect.Password}"
+                                     PasswordChar="•"
+                                     PlaceholderText="Password"
+                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                     Background="{DynamicResource SurfaceRaised}" />
+                          </StackPanel>
+
+                          <TextBlock Classes="secondary" TextWrapping="Wrap"
+                                     IsVisible="{Binding Connect.IsPlex}"
+                                     Text="Plex signs in through plex.tv rather than a password. Press Sign in and Mozz will give you a link to approve." />
+
+                          <!-- Plex link.
+                               The link, not the code: Mozz requests a "strong"
+                               PIN, which is a 25-character token that app.plex.tv
+                               requires and that nobody is meant to type. Showing
+                               it large invites exactly the wrong thing. -->
+                          <Border IsVisible="{Binding Connect.PlexLinkUrl, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                  Background="{DynamicResource SurfaceRaised}"
+                                  CornerRadius="10" Padding="15,14">
+                            <StackPanel Spacing="11">
+                              <TextBlock Text="Approve Mozz in your browser"
+                                         Classes="primary" FontWeight="SemiBold" />
+                              <TextBlock Classes="secondary" FontSize="11.5" TextWrapping="Wrap"
+                                         Text="This opens plex.tv. Sign in there and Mozz will connect by itself — nothing to type back here." />
+                              <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Open Plex" Classes="accent"
+                                        Command="{Binding Connect.OpenPlexLinkCommand}" />
+                                <Button Content="Copy link"
+                                        Command="{Binding Connect.CopyPlexLinkCommand}" />
+                                <Button Content="Cancel"
+                                        Command="{Binding Connect.CancelPlexCommand}" />
+                              </StackPanel>
+                            </StackPanel>
+                          </Border>
+
+                          <Button Content="Sign in" Classes="accent" HorizontalAlignment="Left"
+                                  IsEnabled="{Binding !Connect.IsBusy}"
+                                  Command="{Binding Connect.SignInCommand}" />
+
+                          <TextBlock Text="{Binding Connect.Message}" Classes="secondary" TextWrapping="Wrap"
+                                     IsVisible="{Binding Connect.Message, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                          <StackPanel Spacing="7" IsVisible="{Binding Connect.IsSyncing}">
+                            <ProgressBar Value="{Binding Connect.SyncProgress}" Maximum="1"
+                                         IsIndeterminate="{Binding !Connect.SyncProgress}"
+                                         Height="4" CornerRadius="2" />
+                            <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5" />
+                          </StackPanel>
+                          <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5"
+                                     IsVisible="{Binding !Connect.IsSyncing}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </ScrollViewer>
+                </Panel>
+            </Grid>
+        </Grid>
+
+        <!-- Now playing -->
+        <Border Grid.Row="1" Height="88"
+                Background="{DynamicResource BarBackground}"
+                BorderBrush="{DynamicResource Divider}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,Auto,*" Margin="22,0">
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="13"
+                            VerticalAlignment="Center">
+                    <Border Width="56" Height="56" CornerRadius="7" ClipToBounds="True"
+                            Background="{Binding NowPlaying.AlbumTitle, Converter={StaticResource Artwork}}">
+                        <TextBlock Text="{Binding NowPlaying.AlbumTitle, Converter={StaticResource Initial}}"
+                                   FontSize="20" FontWeight="SemiBold" Foreground="#66FFFFFF"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
+                        <TextBlock Classes="primary" FontWeight="Medium"
+                                   Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
+                        <TextBlock Classes="secondary"
+                                   Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
+                        <Button Classes="transport" Content="⤨" FontSize="15" />
+                        <Button Classes="transport" Content="⏮" FontSize="15"
+                                Command="{Binding PreviousCommand}" />
+                        <Button Classes="play" Content="{Binding PlayPauseGlyph}" FontSize="17"
+                                Command="{Binding TogglePlayPauseCommand}" />
+                        <Button Classes="transport" Content="⏭" FontSize="15"
+                                Command="{Binding NextCommand}" />
+                        <Button Classes="transport" Content="⟳" FontSize="15" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding PositionText, FallbackValue='0:00'}" Classes="secondary" FontSize="11"
+                                   VerticalAlignment="Center" />
+                        <Slider Classes="scrub" Width="420" Minimum="0"
+                                Maximum="{Binding DurationSeconds}"
+                                Value="{Binding PositionSeconds, Mode=TwoWay}"
+                                VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding DurationText, FallbackValue='0:00'}"
+                                   Classes="secondary" FontSize="11" VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Classes="transport" Content="☰" FontSize="14" />
+                    <Button Classes="transport" Content="🔉" FontSize="13" />
+                    <Slider Classes="scrub" Width="96" Minimum="0" Maximum="1"
+                            Value="{Binding Volume, Mode=TwoWay}"
+                            VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
