@@ -112,10 +112,13 @@ struct PlexResource: Decodable {
     let connections: [PlexConnectionDTO]?
 }
 
-/// The signed-in plex.tv account. Only the avatar is read; `thumb` is an
-/// absolute plex.tv URL (with a `?c=` cache-buster that changes when the user
-/// swaps their photo, so the URL is re-fetched rather than cached forever).
+/// The signed-in plex.tv account. `thumb` is an absolute plex.tv URL (with a
+/// `?c=` cache-buster that changes when the user swaps their photo, so the URL
+/// is re-fetched rather than cached forever).
 struct PlexAccountUser: Decodable {
+    let username: String?
+    let title: String?
+    let email: String?
     let thumb: String?
 }
 

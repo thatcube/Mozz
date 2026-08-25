@@ -99,6 +99,24 @@ public struct MusicLibrary: Sendable, Hashable, Identifiable {
     }
 }
 
+/// The identity of the signed-in account for a server.
+///
+/// `displayName` is what a UI should show first; `username` is the login/account
+/// handle when the backend exposes one. `avatarURL` is directly loadable by the
+/// same plain image fetcher/cache used for artwork, or `nil` when the backend has
+/// no real user photo.
+public struct SignedInAccount: Sendable, Hashable {
+    public var displayName: String?
+    public var username: String?
+    public var avatarURL: URL?
+
+    public init(displayName: String? = nil, username: String? = nil, avatarURL: URL? = nil) {
+        self.displayName = displayName
+        self.username = username
+        self.avatarURL = avatarURL
+    }
+}
+
 /// The fresh, music-centric backend abstraction that both Plex and Jellyfin
 /// implement.
 ///
@@ -211,6 +229,10 @@ public protocol MusicBackend: Sendable {
     /// is decoration and must never surface an error.
     func userAvatarURL(size: Int) async -> URL?
 
+    /// The signed-in account identity for this backend. Best-effort: callers
+    /// should treat missing fields as "the server does not expose that".
+    func signedInAccount(size: Int) async -> SignedInAccount
+
     // MARK: Writes (gated by capabilities)
 
     /// Set or clear a favorite. Throws ``MozzError/unsupported(_:)`` if the
@@ -271,7 +293,24 @@ public extension MusicBackend {
     /// (and for the offline demo backend).
     func userAvatarURL(size: Int) async -> URL? { nil }
 
+    /// Default: if a backend has no richer profile endpoint, expose the stable
+    /// account id/login it already carries and no avatar.
+    func signedInAccount(size: Int) async -> SignedInAccount {
+        let username = connection.userID?.nilIfEmpty
+        return SignedInAccount(
+            displayName: username,
+            username: username,
+            avatarURL: await userAvatarURL(size: size)
+        )
+    }
+
     /// Default: the backend has no lyrics concept. An authoritative "none" rather
     /// than a failure, so the resolver is free to fall back to LRCLIB.
     func fetchLyrics(for track: Track) async throws -> Lyrics? { nil }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
 }

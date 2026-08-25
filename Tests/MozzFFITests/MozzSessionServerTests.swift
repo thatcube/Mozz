@@ -215,6 +215,40 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertNotNil(named["t"])
     }
 
+    // MARK: Account
+
+    func testAccountReturnsSignedInIdentityAndExplicitNullAvatar() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+        let serverId = try attachSubsonic(handle)
+
+        let response = try call(handle, [
+            "cmd": "account", "serverId": serverId, "size": 120,
+        ])
+        XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
+        XCTAssertEqual(response["cmd"] as? String, "account")
+        let payload = try XCTUnwrap(response["payload"] as? [String: Any])
+        XCTAssertEqual(Set(payload.keys), ["avatarURL", "displayName", "username"])
+        XCTAssertEqual(payload["displayName"] as? String, "brandon")
+        XCTAssertEqual(payload["username"] as? String, "brandon")
+        XCTAssertTrue(payload["avatarURL"] is NSNull, "Subsonic has no real account photo")
+    }
+
+    func testAccountWithoutAttachIsAClearError() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "account", "serverId": "missing"])
+        XCTAssertEqual(response["ok"] as? Bool, false)
+        XCTAssertTrue(try XCTUnwrap(response["error"] as? String).contains("attached"))
+    }
+
+    func testAccountCommandIsAdvertised() {
+        XCTAssertTrue(mozzSessionCommands.contains("account"))
+    }
+
     // MARK: Sync lifecycle
 
     func testSyncWithoutAttachIsAClearError() throws {

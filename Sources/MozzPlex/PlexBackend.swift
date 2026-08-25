@@ -21,6 +21,7 @@ public struct PlexBackend: MusicBackend {
 
     public let connection: ServerConnection
     private let token: String
+    private let accountToken: String?
     private let clientInfo: ClientInfo
     private let client: HTTPClient
     /// The music library section ids to browse during sync. Plex is
@@ -35,10 +36,12 @@ public struct PlexBackend: MusicBackend {
         clientInfo: ClientInfo,
         transport: any HTTPTransport = URLSessionTransport(),
         logger: any NetworkLogger = NoopNetworkLogger(),
-        musicSectionIDs: [String]? = nil
+        musicSectionIDs: [String]? = nil,
+        accountToken: String? = nil
     ) {
         self.connection = connection
         self.token = token
+        self.accountToken = accountToken
         self.clientInfo = clientInfo
         self.musicSectionIDs = musicSectionIDs ?? connection.musicSectionID.map { [$0] } ?? []
         self.client = HTTPClient(
@@ -147,6 +150,16 @@ public struct PlexBackend: MusicBackend {
         )
         let items = (response.MediaContainer.Metadata ?? []).compactMap(PlexMapper.track)
         return CatalogPage(items: items, totalCount: response.MediaContainer.totalSize)
+    }
+
+    // MARK: Account
+
+    public func signedInAccount(size: Int) async -> SignedInAccount {
+        guard let accountToken, !accountToken.isEmpty else {
+            return SignedInAccount()
+        }
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: connection.clientIdentifier)
+        return (try? await auth.accountProfile(accountToken: accountToken)) ?? SignedInAccount()
     }
 
     // MARK: Playback & downloads

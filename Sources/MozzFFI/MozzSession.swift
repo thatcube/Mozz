@@ -57,6 +57,7 @@ struct SessionRequest: Decodable {
     var password: String?
     var apiKey: String?
     var token: String?
+    var accountToken: String?
     var userID: String?
     var serverName: String?
     var clientIdentifier: String?
@@ -125,6 +126,23 @@ private struct WireServer: Encodable {
     var kind: String
     var name: String
     var baseURL: String
+}
+
+struct WireAccount: Encodable {
+    var displayName: String?
+    var username: String?
+    var avatarURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case displayName, username, avatarURL
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(username, forKey: .username)
+        try container.encode(avatarURL, forKey: .avatarURL)
+    }
 }
 
 private struct WireArtist: Encodable {
@@ -883,7 +901,7 @@ let mozzSessionCommands = [
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
-    "connect", "plexPin", "plexPinCheck", "attach", "libraries",
+    "connect", "plexPin", "plexPinCheck", "attach", "libraries", "account",
     "sync", "syncStatus", "streamURL", "artworkURL",
 ].sorted()
 
