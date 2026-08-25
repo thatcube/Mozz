@@ -107,6 +107,24 @@ jobs:
           Pop-Location
           "SQLITE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # `swift build` is the whole cost of this job: about nine of its thirteen
+      # minutes, and it starts from nothing every time — including for a push
+      # that changed only C#, an icon or a shell script, which is most of them.
+      #
+      # An exact key hit means no Swift source moved, so the build below finds
+      # its product already there and returns almost at once. A prefix hit (the
+      # restore-keys line) is the interesting case: the compiler gets the last
+      # run's object files and rebuilds only what actually changed. The Swift
+      # version is in the key because a toolchain bump invalidates everything it
+      # previously emitted.
+      - name: Cache the Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftbuild-win-x64-6.3.3-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: |
+            swiftbuild-win-x64-6.3.3-
+
       - name: Build MozzFFI.dll
         shell: pwsh
         run: |
@@ -138,7 +156,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           $out = "publish\win-x64"
 
-          $ffi = Get-ChildItem -Recurse -Filter MozzFFI.dll .build | Select-Object -First 1
+          # Newest wins: .build is restored from a cache now, so it can hold an
+          # earlier run's copy as well as this one's.
+          $ffi = Get-ChildItem -Recurse -Filter MozzFFI.dll .build |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $ffi) { Write-Error "MozzFFI.dll was not produced"; exit 1 }
           Copy-Item $ffi.FullName $out -Force
 
@@ -323,6 +344,16 @@ jobs:
       - name: Test the credential store and audio pipeline
         run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
 
+      # Same reasoning as the Windows job, and worth having even though this one
+      # is already the fastest: the build is still the largest part of it.
+      - name: Cache the Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftbuild-macos-arm64-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: |
+            swiftbuild-macos-arm64-
+
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI
 
@@ -361,15 +392,41 @@ jobs:
           retention-days: 30
 
   linux:
-    name: Linux x64
-    runs-on: ubuntu-24.04
+    # Both architectures, because "Linux" on a developer's desk is increasingly
+    # arm64 — a VM on an Apple silicon Mac is arm64, and so is a Raspberry Pi or
+    # an Ampere box. Shipping only linux-x64 meant the maintainer could not run
+    # the Linux build on his own machine without emulating a whole x86 guest.
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rid: linux-x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            rid: linux-arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Swift
+      # Two actions for one toolchain: swift-actions/setup-swift does not
+      # publish an aarch64 Linux path, and SwiftyLab's does. The x64 job keeps
+      # the action that has been building it, rather than moving a working
+      # build onto an unproven one to save four lines of YAML.
+      - name: Install Swift (x64)
+        if: matrix.arch == 'x64'
         uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1.2"
+
+      - name: Install Swift (arm64)
+        if: matrix.arch == 'arm64'
+        uses: SwiftyLab/setup-swift@latest
         with:
           swift-version: "6.1.2"
 
@@ -412,6 +469,16 @@ jobs:
           ar rcs "$root/lib/libsqlite3.a" "$root/sqlite3.o"
           echo "SQLITE_ROOT=$root" >> "$GITHUB_ENV"
 
+      # Keyed per architecture: x64 and arm64 object files are not interchangeable,
+      # and the two runners install the toolchain through different actions.
+      - name: Cache the Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftbuild-linux-${{ matrix.arch }}-6.1.2-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: |
+            swiftbuild-linux-${{ matrix.arch }}-6.1.2-
+
       - name: Build libMozzFFI.so
         run: |
           swift build -c release --product MozzFFI \
@@ -421,9 +488,9 @@ jobs:
       - name: Publish the app
         run: |
           dotnet publish clients/desktop/Mozz.Desktop.csproj \
-            -c Release -r linux-x64 --self-contained true \
-            -o publish/linux-x64
-          cp .build/release/libMozzFFI.so publish/linux-x64/
+            -c Release -r ${{ matrix.rid }} --self-contained true \
+            -o publish/${{ matrix.rid }}
+          cp .build/release/libMozzFFI.so publish/${{ matrix.rid }}/
 
       # Swift is no more ABI-stable on Linux than on Windows, and a desktop user
       # will not have a Swift toolchain. Same approach as the Windows job:
@@ -431,7 +498,7 @@ jobs:
       - name: Bundle the Swift runtime
         run: |
           set -euo pipefail
-          out=publish/linux-x64
+          out=publish/${{ matrix.rid }}
           manifest="$RUNNER_TEMP/swift-runtime-libs.txt"
           : > "$manifest"
 
@@ -472,10 +539,10 @@ jobs:
         run: |
           set -euo pipefail
           dotnet publish spike/windows-ffi/Harness/Harness.csproj -c Release \
-            -r linux-x64 --self-contained true -o harness-out
+            -r ${{ matrix.rid }} --self-contained true -o harness-out
           # Only the Swift libraries — see the manifest note in the bundling step.
           while read -r lib; do
-            cp "publish/linux-x64/$lib" harness-out/
+            cp "publish/${{ matrix.rid }}/$lib" harness-out/
           done < "$RUNNER_TEMP/swift-runtime-libs.txt"
           # LD_LIBRARY_PATH is REPLACED with just the harness directory, not
           # appended to: the toolchain install puts its own runtime on that
@@ -487,11 +554,11 @@ jobs:
       - name: Package
         run: |
           version="0.1.0-${GITHUB_SHA:0:7}"
-          tar -C publish/linux-x64 -czf "Mozz-linux-x64-${version}.tar.gz" .
-          echo "PACKAGE=Mozz-linux-x64-${version}.tar.gz" >> "$GITHUB_ENV"
+          tar -C publish/${{ matrix.rid }} -czf "Mozz-${{ matrix.rid }}-${version}.tar.gz" .
+          echo "PACKAGE=Mozz-${{ matrix.rid }}-${version}.tar.gz" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mozz-desktop-linux-x64
+          name: mozz-desktop-${{ matrix.rid }}
           path: ${{ env.PACKAGE }}
           retention-days: 30
