@@ -1,8 +1,11 @@
 import Foundation
+import MozzContinuity
 import MozzCore
 import MozzDatabase
 import MozzEnrichment
+import MozzJellyfin
 import MozzRecommend
+import MozzSubsonic
 
 // MARK: - The session facade
 //
@@ -70,9 +73,11 @@ struct SessionRequest: Decodable {
     var size: Int?
     var maxBitrateKbps: Int?
     var forceTranscode: Bool?
+    var itemType: String?
 
     // Listening history.
     var eventKind: String?
+    var state: String?
     var positionSeconds: Double?
     var durationSeconds: Double?
     var positionMS: Int64?
@@ -94,6 +99,27 @@ struct SessionRequest: Decodable {
     var useLRCLIB: Bool?
     var userInitiated: Bool?
     var leadSeconds: Double?
+
+    // Favorites / ratings.
+    var liked: Bool?
+    var isFavorite: Bool?
+    var rating: Double?
+    var flush: Bool?
+
+    // Continuity.
+    var playbackRunID: String?
+    var cursorSequence: UInt64?
+    var capturedAtMS: Int64?
+    var currentRemoteID: String?
+    var currentAbsoluteIndex: Int?
+    var queue: WireContinuityQueueInput?
+    var descriptor: WireQueueDescriptor?
+    var items: [WireContinuityItemInput]?
+    var repeatMode: String?
+    var isShuffled: Bool?
+    var totalCount: Int?
+    var startAbsoluteIndex: Int?
+    var windowStartAbsoluteIndex: Int?
 
     // Recommendations.
     var setId: String?
@@ -266,11 +292,38 @@ private struct WireTrack: Encodable {
     var durationSeconds: Double
     var artworkKey: String?
     var isFavorite: Bool
+    var rating: Double?
+    var addedAt: Double?
     /// ReplayGain in dB, when the server supplied one. Carried across the
     /// boundary because without it a client has no way to level a library, and
     /// the loudness difference between two albums is the most audible thing a
     /// music player can get wrong.
     var normalizationGainDB: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, remoteId, serverId, title, artistName, albumTitle, albumRemoteId
+        case trackNumber, discNumber, durationSeconds, artworkKey, isFavorite
+        case rating, addedAt, normalizationGainDB
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(remoteId, forKey: .remoteId)
+        try container.encode(serverId, forKey: .serverId)
+        try container.encode(title, forKey: .title)
+        try container.encode(artistName, forKey: .artistName)
+        try container.encodeIfPresent(albumTitle, forKey: .albumTitle)
+        try container.encodeIfPresent(albumRemoteId, forKey: .albumRemoteId)
+        try container.encodeIfPresent(trackNumber, forKey: .trackNumber)
+        try container.encodeIfPresent(discNumber, forKey: .discNumber)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encodeIfPresent(artworkKey, forKey: .artworkKey)
+        try container.encode(isFavorite, forKey: .isFavorite)
+        try container.encodeIfPresent(rating, forKey: .rating)
+        try container.encodeIfPresent(addedAt, forKey: .addedAt)
+        try container.encodeIfPresent(normalizationGainDB, forKey: .normalizationGainDB)
+    }
 }
 
 private struct WirePlaylist: Encodable {
@@ -342,6 +395,37 @@ private struct WireHistoryImport: Encodable {
     var imported: Int
 }
 
+private struct WireFavoriteMutation: Encodable {
+    var serverId: String
+    var remoteId: String
+    var itemType: String
+    var kind: String
+    var value: Double?
+    var liked: Bool
+    var queued: Bool
+    var synced: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case serverId, remoteId, itemType, kind, value, liked, queued, synced
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(serverId, forKey: .serverId)
+        try container.encode(remoteId, forKey: .remoteId)
+        try container.encode(itemType, forKey: .itemType)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(value, forKey: .value)
+        try container.encode(liked, forKey: .liked)
+        try container.encode(queued, forKey: .queued)
+        try container.encode(synced, forKey: .synced)
+    }
+}
+
+private struct WirePlaybackReportResult: Encodable {
+    var reported: Bool
+}
+
 private struct WireLyricsLine: Encodable {
     var text: String
     var startSeconds: Double?
@@ -395,6 +479,144 @@ private struct WireLyricsResolution: Encodable {
     }
 }
 
+struct WireServerAccountFingerprint: Codable, Sendable, Hashable {
+    var backend: String
+    var serverID: String
+    var accountID: String
+}
+
+struct WireTrackLocator: Codable, Sendable, Hashable {
+    var server: WireServerAccountFingerprint
+    var remoteID: String
+}
+
+struct WireQueueDescriptor: Codable, Sendable, Hashable {
+    var kind: String
+    var sourceID: String?
+    var sourceRevision: String?
+}
+
+struct WireContinuityItemInput: Codable, Sendable, Hashable {
+    var remoteID: String
+    var backend: String?
+    var serverID: String?
+    var accountID: String?
+    var baseOrdinal: Int
+    var title: String
+    var artist: String
+    var durationMS: Int64
+    var artworkKey: String?
+}
+
+struct WireContinuityQueueInput: Codable, Sendable, Hashable {
+    var descriptor: WireQueueDescriptor
+    var items: [WireContinuityItemInput]
+    var repeatMode: String
+    var isShuffled: Bool
+    var totalCount: Int
+    var startAbsoluteIndex: Int?
+    var windowStartAbsoluteIndex: Int?
+    var isTruncated: Bool?
+}
+
+private struct WireContinuityItem: Encodable {
+    var locator: WireTrackLocator
+    var baseOrdinal: Int
+    var title: String
+    var artist: String
+    var durationMS: Int64
+    var artworkKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case locator, baseOrdinal, title, artist, durationMS, artworkKey
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(locator, forKey: .locator)
+        try container.encode(baseOrdinal, forKey: .baseOrdinal)
+        try container.encode(title, forKey: .title)
+        try container.encode(artist, forKey: .artist)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(artworkKey, forKey: .artworkKey)
+    }
+}
+
+private struct WireContinuityQueue: Encodable {
+    var queueHash: String
+    var descriptor: WireQueueDescriptor
+    var items: [WireContinuityItem]
+    var startAbsoluteIndex: Int
+    var totalCount: Int
+    var isTruncated: Bool
+    var repeatMode: String
+    var isShuffled: Bool
+}
+
+private struct WireContinuityCursor: Encodable {
+    var playbackRunID: String
+    var deviceID: String
+    var deviceName: String
+    var deviceKind: String?
+    var cursorSequence: UInt64
+    var capturedAtMS: Int64
+    var state: String
+    var current: WireTrackLocator
+    var currentAbsoluteIndex: Int
+    var positionMS: Int64
+    var queueHash: String?
+
+    enum CodingKeys: String, CodingKey {
+        case playbackRunID, deviceID, deviceName, deviceKind, cursorSequence, capturedAtMS
+        case state, current, currentAbsoluteIndex, positionMS, queueHash
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(playbackRunID, forKey: .playbackRunID)
+        try container.encode(deviceID, forKey: .deviceID)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(deviceKind, forKey: .deviceKind)
+        try container.encode(cursorSequence, forKey: .cursorSequence)
+        try container.encode(capturedAtMS, forKey: .capturedAtMS)
+        try container.encode(state, forKey: .state)
+        try container.encode(current, forKey: .current)
+        try container.encode(currentAbsoluteIndex, forKey: .currentAbsoluteIndex)
+        try container.encode(positionMS, forKey: .positionMS)
+        try container.encode(queueHash, forKey: .queueHash)
+    }
+}
+
+private struct WireContinuitySnapshot: Encodable {
+    var cursor: WireContinuityCursor
+    var queue: WireContinuityQueue?
+    var isQueueMissing: Bool
+    var hydratedTracks: [WireTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case cursor, queue, isQueueMissing, hydratedTracks
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cursor, forKey: .cursor)
+        try container.encode(queue, forKey: .queue)
+        try container.encode(isQueueMissing, forKey: .isQueueMissing)
+        try container.encode(hydratedTracks, forKey: .hydratedTracks)
+    }
+}
+
+private struct WireContinuityHash: Encodable {
+    var queueHash: String
+    var canonicalByteCount: Int
+    var canonicalBytesHex: String
+}
+
+private struct WireContinuitySave: Encodable {
+    var saved: Bool
+    var queueHash: String?
+}
+
 // MARK: - Mapping
 
 private func wire(_ r: ArtistRecord) -> WireArtist {
@@ -439,6 +661,8 @@ private func wire(_ r: TrackRecord) -> WireTrack {
         albumRemoteId: r.albumRemoteId, trackNumber: r.trackNumber,
         discNumber: r.discNumber, durationSeconds: r.duration,
         artworkKey: r.artworkKey, isFavorite: r.isFavorite,
+        rating: r.rating,
+        addedAt: r.addedAt,
         normalizationGainDB: r.normalizationGainDB
     )
 }
@@ -473,6 +697,75 @@ private func wire(_ lyrics: Lyrics) -> WireLyrics {
     )
 }
 
+private func wire(_ fingerprint: ServerAccountFingerprint) -> WireServerAccountFingerprint {
+    WireServerAccountFingerprint(
+        backend: fingerprint.backend.rawValue,
+        serverID: fingerprint.serverID,
+        accountID: fingerprint.accountID
+    )
+}
+
+private func wire(_ locator: TrackLocator) -> WireTrackLocator {
+    WireTrackLocator(server: wire(locator.server), remoteID: locator.remoteID)
+}
+
+private func wire(_ descriptor: QueueDescriptor) -> WireQueueDescriptor {
+    WireQueueDescriptor(
+        kind: descriptor.kind.rawValue,
+        sourceID: descriptor.sourceID,
+        sourceRevision: descriptor.sourceRevision
+    )
+}
+
+private func wire(_ item: ContinuityItem) -> WireContinuityItem {
+    WireContinuityItem(
+        locator: wire(item.locator),
+        baseOrdinal: item.baseOrdinal,
+        title: item.title,
+        artist: item.artist,
+        durationMS: item.durationMS,
+        artworkKey: item.artwork?.key
+    )
+}
+
+private func wire(_ queue: ContinuityQueue) -> WireContinuityQueue {
+    WireContinuityQueue(
+        queueHash: queue.queueHash,
+        descriptor: wire(queue.descriptor),
+        items: queue.items.map(wire),
+        startAbsoluteIndex: queue.startAbsoluteIndex,
+        totalCount: queue.totalCount,
+        isTruncated: queue.isTruncated,
+        repeatMode: queue.repeatMode.rawValue,
+        isShuffled: queue.isShuffled
+    )
+}
+
+private func wire(_ cursor: ContinuityCursor) -> WireContinuityCursor {
+    WireContinuityCursor(
+        playbackRunID: cursor.playbackRunID.uuidString,
+        deviceID: cursor.deviceID,
+        deviceName: cursor.deviceName,
+        deviceKind: cursor.deviceKind?.rawValue,
+        cursorSequence: cursor.cursorSequence,
+        capturedAtMS: cursor.capturedAtMS,
+        state: cursor.state.rawValue,
+        current: wire(cursor.current),
+        currentAbsoluteIndex: cursor.currentAbsoluteIndex,
+        positionMS: cursor.positionMS,
+        queueHash: cursor.queueHash
+    )
+}
+
+private func wire(_ snapshot: ContinuitySnapshot, hydrated: [TrackRecord]) -> WireContinuitySnapshot {
+    WireContinuitySnapshot(
+        cursor: wire(snapshot.cursor),
+        queue: snapshot.queue.map(wire),
+        isQueueMissing: snapshot.isQueueMissing,
+        hydratedTracks: hydrated.map(wire)
+    )
+}
+
 // MARK: - Session
 
 /// One open library, owning the database pool for its lifetime.
@@ -481,6 +774,7 @@ final class MozzSession: @unchecked Sendable {
     let repository: LibraryRepository
     let recommendations: RecommendationService
     let lyrics: LyricsService
+    let favorites: FavoritesStore
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
@@ -490,6 +784,7 @@ final class MozzSession: @unchecked Sendable {
         self.repository = LibraryRepository(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
         self.lyrics = LyricsService()
+        self.favorites = FavoritesStore(database)
     }
 }
 
@@ -500,6 +795,7 @@ protocol SessionContext: AnyObject {
     var repository: LibraryRepository { get }
     var recommendations: RecommendationService { get }
     var lyrics: LyricsService { get }
+    var favorites: FavoritesStore { get }
     var backends: BackendTable { get }
 }
 
@@ -593,6 +889,83 @@ public func mozz_session_call(
 /// the listing is a better answer than refusing to show anything.
 private func pageCursor(_ request: SessionRequest) -> LibraryRepository.PageCursor? {
     (request.after ?? request.cursor).flatMap(LibraryRepository.PageCursor.init(token:))
+}
+
+private func hex(_ data: Data) -> String {
+    data.map { String(format: "%02x", $0) }.joined()
+}
+
+private func queueDescriptor(_ wire: WireQueueDescriptor) throws -> QueueDescriptor {
+    guard let kind = QueueDescriptor.Kind(rawValue: wire.kind) else {
+        throw MozzError.unsupported("unknown continuity descriptor kind: \(wire.kind)")
+    }
+    return QueueDescriptor(kind: kind, sourceID: wire.sourceID, sourceRevision: wire.sourceRevision)
+}
+
+private func continuityFingerprint(
+    _ item: WireContinuityItemInput,
+    fallback: ServerAccountFingerprint?
+) throws -> ServerAccountFingerprint {
+    let backendRaw = item.backend ?? fallback?.backend.rawValue
+    guard let backendRaw, let backend = BackendKind(rawValue: backendRaw) else {
+        throw MozzError.unsupported("continuity item needs backend")
+    }
+    return ServerAccountFingerprint(
+        backend: backend,
+        serverID: item.serverID ?? fallback?.serverID ?? "",
+        accountID: item.accountID ?? fallback?.accountID ?? ""
+    )
+}
+
+private func continuityQueue(
+    _ input: WireContinuityQueueInput,
+    fallbackFingerprint: ServerAccountFingerprint? = nil
+) throws -> ContinuityQueue {
+    let descriptor = try queueDescriptor(input.descriptor)
+    let items = try input.items.map { item -> ContinuityItem in
+        let fingerprint = try continuityFingerprint(item, fallback: fallbackFingerprint)
+        return ContinuityItem(
+            locator: TrackLocator(server: fingerprint, remoteID: item.remoteID),
+            baseOrdinal: item.baseOrdinal,
+            title: item.title,
+            artist: item.artist,
+            durationMS: item.durationMS,
+            artwork: item.artworkKey.map(ArtworkRef.init(key:))
+        )
+    }
+    guard let repeatMode = RepeatMode(rawValue: input.repeatMode) else {
+        throw MozzError.unsupported("unknown continuity repeatMode: \(input.repeatMode)")
+    }
+    return ContinuityQueueBuilder.make(
+        items: items,
+        descriptor: descriptor,
+        repeatMode: repeatMode,
+        isShuffled: input.isShuffled,
+        totalCount: input.totalCount,
+        startAbsoluteIndex: input.startAbsoluteIndex ?? input.windowStartAbsoluteIndex ?? 0,
+        isTruncated: input.isTruncated ?? false
+    )
+}
+
+private func continuityQueueInput(_ request: SessionRequest) throws -> WireContinuityQueueInput {
+    if let queue = request.queue { return queue }
+    guard let descriptor = request.descriptor,
+          let items = request.items,
+          let repeatMode = request.repeatMode,
+          let isShuffled = request.isShuffled,
+          let totalCount = request.totalCount else {
+        throw MozzError.unsupported("continuity queue needs descriptor, items, repeatMode, isShuffled and totalCount")
+    }
+    return WireContinuityQueueInput(
+        descriptor: descriptor,
+        items: items,
+        repeatMode: repeatMode,
+        isShuffled: isShuffled,
+        totalCount: totalCount,
+        startAbsoluteIndex: request.startAbsoluteIndex,
+        windowStartAbsoluteIndex: request.windowStartAbsoluteIndex,
+        isTruncated: nil
+    )
 }
 
 // MARK: - Dispatch
@@ -737,6 +1110,13 @@ private func dispatch(
         let rows = try await repo.recentlyAddedAlbums(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
 
+    case "recentlyAddedTracks":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "recentlyAddedTracks needs serverId")
+        }
+        let rows = try await repo.recentlyAddedTracks(serverId: serverId, limit: limit)
+        return sessionSuccess(request, rows.map(wire))
+
     case "recentlyPlayedTracks":
         guard let serverId else {
             return sessionFailure(request.id, request.cmd, "recentlyPlayedTracks needs serverId")
@@ -827,6 +1207,46 @@ private func dispatch(
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
+
+    case "likedTracksCount":
+        let count = try await repo.likedTracksCount(serverId: serverId)
+        return sessionSuccess(request, ["count": count])
+
+    case "setFavorite":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "setFavorite needs serverId and remoteId")
+        }
+        guard let liked = request.liked ?? request.isFavorite else {
+            return sessionFailure(request.id, request.cmd, "setFavorite needs liked")
+        }
+        return try await applyFavoriteMutation(
+            request,
+            session: session,
+            serverId: serverId,
+            remoteId: remoteId,
+            value: .favorite(liked),
+            flush: request.flush ?? true
+        )
+
+    case "setRating":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "setRating needs serverId and remoteId")
+        }
+        return try await applyFavoriteMutation(
+            request,
+            session: session,
+            serverId: serverId,
+            remoteId: remoteId,
+            value: .rating(request.rating),
+            flush: request.flush ?? true
+        )
+
+    case "flushFavoriteOutbox":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "flushFavoriteOutbox needs serverId")
+        }
+        let flushed = try await flushFavoriteOutbox(session: session, serverId: serverId)
+        return sessionSuccess(request, ["flushed": flushed])
 
     case "genres":
         guard let serverId else {
@@ -945,6 +1365,105 @@ private func dispatch(
             lyrics: lyrics.map(wire)
         ))
 
+    case "reportPlayback":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback needs serverId and remoteId")
+        }
+        guard let stateRaw = request.state, let state = PlaybackState(rawValue: stateRaw) else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback needs state (playing|paused|stopped)")
+        }
+        guard let backend = session.backends.backend(serverId) else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback needs an attached serverId")
+        }
+        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback track not found: \(remoteId)")
+        }
+        try await backend.reportPlayback(PlaybackReport(
+            track: record.toDomain(),
+            state: state,
+            positionSeconds: request.positionSeconds ?? request.positionMS.map { Double($0) / 1000 } ?? 0,
+            sessionID: request.contextID ?? request.contextId
+        ))
+        return sessionSuccess(request, WirePlaybackReportResult(reported: true))
+
+    case "continuityQueueHash":
+        do {
+            let input = try continuityQueueInput(request)
+            let queue = try continuityQueue(input)
+            let bytes = ContinuityQueueBuilder.canonicalBytes(
+                items: queue.items,
+                descriptor: queue.descriptor,
+                repeatMode: queue.repeatMode,
+                isShuffled: queue.isShuffled,
+                totalCount: queue.totalCount,
+                startAbsoluteIndex: queue.startAbsoluteIndex
+            )
+            return sessionSuccess(request, WireContinuityHash(
+                queueHash: queue.queueHash,
+                canonicalByteCount: bytes.count,
+                canonicalBytesHex: hex(bytes)
+            ))
+        } catch {
+            return sessionFailure(request.id, request.cmd, String(describing: error))
+        }
+
+    case "continuityLoad":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "continuityLoad needs serverId")
+        }
+        guard let store = try await continuityStore(request, session: session, serverId: serverId) else {
+            return sessionFailure(request.id, request.cmd, "continuityLoad needs an attached Jellyfin or Subsonic serverId")
+        }
+        guard let snapshot = try await store.load() else {
+            return sessionSuccess(request, Optional<WireContinuitySnapshot>.none)
+        }
+        var hydrated: [TrackRecord] = []
+        for remoteID in snapshot.hydrated.keys.sorted() {
+            if let record = try await repo.track(serverId: serverId, remoteId: remoteID) {
+                hydrated.append(record)
+            }
+        }
+        return sessionSuccess(request, wire(snapshot, hydrated: hydrated))
+
+    case "continuitySave":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs serverId")
+        }
+        guard let store = try await continuityStore(request, session: session, serverId: serverId),
+              let fingerprint = try await continuityFingerprint(session: session, serverId: serverId) else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs an attached Jellyfin or Subsonic serverId")
+        }
+        guard let playbackRunID = request.playbackRunID.flatMap(UUID.init(uuidString:)) else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs playbackRunID")
+        }
+        guard let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs deviceID")
+        }
+        guard let stateRaw = request.state, let state = ContinuityPlaybackState(rawValue: stateRaw) else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs state (playing|paused|stopped)")
+        }
+        guard let currentRemoteID = request.currentRemoteID ?? request.remoteId,
+              let currentAbsoluteIndex = request.currentAbsoluteIndex,
+              let positionMS = request.positionMS else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs currentRemoteID, currentAbsoluteIndex and positionMS")
+        }
+        let queue = try request.queue.map { try continuityQueue($0, fallbackFingerprint: fingerprint) }
+        let cursor = ContinuityCursor(
+            playbackRunID: playbackRunID,
+            deviceID: deviceID,
+            deviceName: request.deviceName ?? "",
+            deviceKind: request.kind.flatMap(ContinuityDeviceKind.init(rawValue:)),
+            cursorSequence: request.cursorSequence ?? 0,
+            capturedAtMS: request.capturedAtMS ?? Int64(Date().timeIntervalSince1970 * 1000),
+            state: state,
+            current: TrackLocator(server: fingerprint, remoteID: currentRemoteID),
+            currentAbsoluteIndex: currentAbsoluteIndex,
+            positionMS: positionMS,
+            queueHash: (store.features.storesQueue ? queue?.queueHash : nil)
+        )
+        try await store.save(cursor, queue: queue)
+        return sessionSuccess(request, WireContinuitySave(saved: true, queueHash: queue?.queueHash))
+
     case "suppressTrack":
         guard let remoteId = request.remoteId, let serverId else {
             return sessionFailure(request.id, request.cmd, "suppressTrack needs remoteId and serverId")
@@ -989,6 +1508,127 @@ private func dispatch(
     }
 }
 
+private func applyFavoriteMutation(
+    _ request: SessionRequest,
+    session: MozzSession,
+    serverId: String,
+    remoteId: String,
+    value: FavoriteChange.Value,
+    flush: Bool
+) async throws -> String {
+    let itemType = request.itemType.flatMap(CatalogItemType.init(rawValue:)) ?? .track
+    guard itemType == .track else {
+        return sessionFailure(request.id, request.cmd, "only track favorites are supported over the ABI")
+    }
+    guard let track = try await session.repository.track(serverId: serverId, remoteId: remoteId) else {
+        return sessionFailure(request.id, request.cmd, "\(request.cmd) track not found: \(remoteId)")
+    }
+    let wasLiked = LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating)
+    let change = FavoriteChange(serverId: serverId, remoteId: remoteId, itemType: itemType, value: value)
+    let nowLiked = try await session.favorites.applyLocally(change)
+    if nowLiked != wasLiked {
+        try? await PlayEventStore(session.database).append(
+            PlayEvent(trackID: remoteId, kind: nowLiked ? .liked : .unliked),
+            serverId: serverId
+        )
+    }
+    if flush {
+        _ = try? await flushFavoriteOutbox(session: session, serverId: serverId)
+    }
+    let queued = try await session.favorites.pending(serverId: serverId).contains {
+        $0.remoteId == remoteId && $0.itemType == itemType.rawValue
+    }
+    let kind: String
+    let storedValue: Double?
+    switch value {
+    case .favorite(let favorite):
+        kind = "favorite"
+        storedValue = favorite ? 1 : 0
+    case .rating(let rating):
+        kind = "rating"
+        storedValue = rating
+    }
+    return sessionSuccess(request, WireFavoriteMutation(
+        serverId: serverId,
+        remoteId: remoteId,
+        itemType: itemType.rawValue,
+        kind: kind,
+        value: storedValue,
+        liked: nowLiked,
+        queued: queued,
+        synced: !queued
+    ))
+}
+
+private func flushFavoriteOutbox(session: MozzSession, serverId: String) async throws -> Int {
+    guard let backend = session.backends.backend(serverId) else { return 0 }
+    let pending = try await session.favorites.pending(serverId: serverId)
+    var flushed = 0
+    for op in pending {
+        let type = CatalogItemType(rawValue: op.itemType) ?? .track
+        do {
+            if op.kind == "favorite" {
+                try await backend.setFavorite((op.value ?? 0) >= 0.5, itemID: op.remoteId, type: type)
+            } else {
+                try await backend.setRating(op.value, itemID: op.remoteId, type: type)
+            }
+        } catch {
+            break
+        }
+        if let id = op.id,
+           try await session.favorites.removePending(id: id, ifUnchangedSince: op.createdAt) {
+            flushed += 1
+        }
+    }
+    return flushed
+}
+
+private func continuityFingerprint(
+    session: MozzSession,
+    serverId: String
+) async throws -> ServerAccountFingerprint? {
+    guard let backend = session.backends.backend(serverId) else { return nil }
+    switch backend.connection.kind {
+    case .jellyfin:
+        let cached = try await session.repository.capabilities(serverId: serverId)
+        let detected = try? await backend.detectCapabilities().serverIdentity
+        let serverIdentity = cached?.serverIdentity ?? detected ?? ""
+        return ServerAccountFingerprint(
+            backend: .jellyfin,
+            serverID: serverIdentity,
+            accountID: backend.connection.userID ?? ""
+        )
+    case .subsonic:
+        return ServerAccountFingerprint(
+            backend: .subsonic,
+            serverID: "",
+            accountID: backend.connection.userID ?? ""
+        )
+    case .plex:
+        return nil
+    }
+}
+
+private func continuityStore(
+    _ request: SessionRequest,
+    session: MozzSession,
+    serverId: String
+) async throws -> (any ContinuityStore)? {
+    guard let backend = session.backends.backend(serverId) else { return nil }
+    if let jellyfin = backend as? JellyfinBackend {
+        let cached = try await session.repository.capabilities(serverId: serverId)
+        let detected = try? await backend.detectCapabilities().serverIdentity
+        let serverIdentity = cached?.serverIdentity ?? detected
+        return jellyfin.makeContinuityStore(serverIdentity: serverIdentity)
+    }
+    if let subsonic = backend as? SubsonicBackend {
+        let cached = try await session.repository.capabilities(serverId: serverId)
+        let supportsIndex = cached?.supportsIndexBasedQueue ?? false
+        return subsonic.makeContinuityStore(supportsIndexBasedQueue: supportsIndex)
+    }
+    return nil
+}
+
 /// Every command the dispatcher accepts.
 ///
 /// Kept beside the error rather than derived from the switch, because Swift
@@ -998,12 +1638,16 @@ let mozzSessionCommands = [
     "ping", "servers", "counts", "artists", "albums", "tracks",
     "artist", "album", "artistAlbums", "artistTopTracks", "artistAppearsOn",
     "albumTracks", "albumReleaseKind", "playlists", "playlistTracks",
-    "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
+    "recentlyAddedAlbums", "recentlyAddedTracks", "recentlyPlayedTracks",
+    "likedTracks", "likedTracksCount",
+    "setFavorite", "setRating", "flushFavoriteOutbox",
     "recordPlayEvent", "playHistory", "historyExportBatch",
     "historyImportBatches", "historyYearRollup",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
-    "mozzWeeklyItems", "radioBatch", "lyrics", "suppressTrack", "suppressArtist",
+    "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",
+    "continuityQueueHash", "continuityLoad", "continuitySave",
+    "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
     "connect", "plexPin", "plexPinCheck", "attach", "libraries", "account",
     "sync", "syncStatus", "streamURL", "artworkURL",
