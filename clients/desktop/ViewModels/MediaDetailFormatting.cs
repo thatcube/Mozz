@@ -10,6 +10,8 @@ public sealed record AlbumTrackRow(
 
 public static class MediaDetailFormatting
 {
+    public const int ShelfPageSize = 20;
+
     public static IReadOnlyList<AlbumTrackRow> AlbumTrackRows(IEnumerable<Track> tracks)
     {
         var ordered = OrderAlbumTracks(tracks).ToList();
@@ -52,6 +54,8 @@ public static class MediaDetailFormatting
     public static string AlbumMeta(Album album, IReadOnlyCollection<Track> tracks)
     {
         var parts = new List<string>();
+        var genre = FirstGenre(album.Genres);
+        if (!string.IsNullOrEmpty(genre)) parts.Add(genre);
         if (album.Year is not null) parts.Add(album.Year.Value.ToString());
 
         var count = tracks.Count > 0 ? tracks.Count : album.TrackCount ?? 0;
@@ -63,11 +67,32 @@ public static class MediaDetailFormatting
         return string.Join(" · ", parts);
     }
 
+    public static string PlaylistMeta(Playlist playlist, IReadOnlyCollection<Track> tracks)
+    {
+        var count = tracks.Count > 0 ? tracks.Count : playlist.TrackCount ?? 0;
+        var parts = new List<string>();
+        if (count > 0) parts.Add(count == 1 ? "1 song" : $"{count} songs");
+        var duration = FormatLongDuration(tracks.Sum(t => t.DurationSeconds));
+        if (!string.IsNullOrEmpty(duration)) parts.Add(duration);
+        return string.Join(" · ", parts);
+    }
+
     public static string ArtistMeta(IReadOnlyCollection<Album> albums, IReadOnlyCollection<Track> tracks)
     {
         var parts = new List<string>();
         if (albums.Count > 0) parts.Add(albums.Count == 1 ? "1 album" : $"{albums.Count} albums");
         if (tracks.Count > 0) parts.Add(tracks.Count == 1 ? "1 song" : $"{tracks.Count} songs");
+        return string.Join(" · ", parts);
+    }
+
+    public static string ArtistMeta(Artist artist, IReadOnlyCollection<Album> albums, IReadOnlyCollection<Track> tracks)
+    {
+        var parts = new List<string>();
+        var genre = FirstGenre(artist.Genres);
+        if (!string.IsNullOrWhiteSpace(genre)) parts.Add(genre);
+        var albumCount = artist.AlbumCount ?? albums.Count;
+        if (albumCount > 0) parts.Add(albumCount == 1 ? "1 album" : $"{albumCount} albums");
+        if (tracks.Count > 0) parts.Add(tracks.Count == 1 ? "1 top song" : $"{tracks.Count} top songs");
         return string.Join(" · ", parts);
     }
 
@@ -81,4 +106,81 @@ public static class MediaDetailFormatting
         var minutes = roundedMinutes % 60;
         return minutes == 0 ? $"{hours} hr" : $"{hours} hr {minutes} min";
     }
+
+    public static string TrackAlbumYear(Track track, Album? album = null)
+    {
+        var albumTitle = track.AlbumTitle;
+        var year = album?.Year;
+        return (string.IsNullOrWhiteSpace(albumTitle), year) switch
+        {
+            (false, not null) => $"{albumTitle} · {year}",
+            (false, null) => albumTitle!,
+            (true, not null) => year.Value.ToString(),
+            _ => string.Empty,
+        };
+    }
+
+    public static Album? LatestRelease(IEnumerable<Album> albums) =>
+        albums.OrderByDescending(a => a.Year ?? int.MinValue)
+              .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
+              .FirstOrDefault();
+
+    public static IReadOnlyList<Album> MoreByArtist(IEnumerable<Album> albums, Album current) =>
+        albums.Where(a => !SameAlbum(a, current))
+              .OrderByDescending(a => a.Year ?? int.MinValue)
+              .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
+              .Take(ShelfPageSize)
+              .ToList();
+
+    public static IReadOnlyList<Album> StudioAlbums(IEnumerable<Album> albums) =>
+        albums.Where(a => !IsSingleOrEpFromCore(a))
+              .OrderByDescending(a => a.Year ?? int.MinValue)
+              .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
+              .Take(ShelfPageSize)
+              .ToList();
+
+    public static IReadOnlyList<Album> SinglesAndEps(IEnumerable<Album> albums) =>
+        albums.Where(IsSingleOrEpFromCore)
+              .OrderByDescending(a => a.Year ?? int.MinValue)
+              .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
+              .Take(ShelfPageSize)
+              .ToList();
+
+    public static bool IsSingleOrEpFromCore(Album album)
+    {
+        if (album.IsSingleOrEp is not null) return album.IsSingleOrEp.Value;
+        return album.ReleaseKind?.Equals("single", StringComparison.OrdinalIgnoreCase) == true
+               || album.ReleaseKind?.Equals("ep", StringComparison.OrdinalIgnoreCase) == true
+               || album.ReleaseKind?.Equals("singleEp", StringComparison.OrdinalIgnoreCase) == true
+               || album.ReleaseKind?.Equals("single_or_ep", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    public static IReadOnlyList<IReadOnlyList<T>> ChunkRows<T>(IReadOnlyList<T> items, int columns)
+    {
+        columns = Math.Max(1, columns);
+        var rows = new List<IReadOnlyList<T>>();
+        for (var i = 0; i < items.Count; i += columns)
+        {
+            rows.Add(items.Skip(i).Take(Math.Min(columns, items.Count - i)).ToList());
+        }
+        return rows;
+    }
+
+    private static bool SameAlbum(Album a, Album b)
+    {
+        if (!string.IsNullOrWhiteSpace(a.RemoteId) && !string.IsNullOrWhiteSpace(b.RemoteId))
+        {
+            return a.ServerId == b.ServerId && a.RemoteId == b.RemoteId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(a.GroupKey) && !string.IsNullOrWhiteSpace(b.GroupKey))
+        {
+            return a.GroupKey == b.GroupKey;
+        }
+
+        return a.Id != 0 && a.Id == b.Id;
+    }
+
+    private static string? FirstGenre(IReadOnlyList<string>? genres) =>
+        genres?.FirstOrDefault(g => !string.IsNullOrWhiteSpace(g));
 }

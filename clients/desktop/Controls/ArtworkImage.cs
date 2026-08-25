@@ -65,11 +65,14 @@ public sealed class ArtworkImage : Control
             nameof(FallbackForeground),
             new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)));
 
+    public static readonly StyledProperty<bool> ArtistHeroProperty =
+        AvaloniaProperty.Register<ArtworkImage, bool>(nameof(ArtistHero));
+
     static ArtworkImage()
     {
         AffectsRender<ArtworkImage>(
             FallbackTextProperty, FallbackFontSizeProperty, FallbackFontWeightProperty,
-            FallbackForegroundProperty, CornerRadiusProperty);
+            FallbackForegroundProperty, CornerRadiusProperty, ArtistHeroProperty);
         AffectsMeasure<ArtworkImage>(DisplaySizeProperty);
     }
 
@@ -86,6 +89,7 @@ public sealed class ArtworkImage : Control
     public double FallbackFontSize { get => GetValue(FallbackFontSizeProperty); set => SetValue(FallbackFontSizeProperty, value); }
     public FontWeight FallbackFontWeight { get => GetValue(FallbackFontWeightProperty); set => SetValue(FallbackFontWeightProperty, value); }
     public IBrush? FallbackForeground { get => GetValue(FallbackForegroundProperty); set => SetValue(FallbackForegroundProperty, value); }
+    public bool ArtistHero { get => GetValue(ArtistHeroProperty); set => SetValue(ArtistHeroProperty, value); }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
@@ -144,9 +148,22 @@ public sealed class ArtworkImage : Control
         var bitmap = _bitmap;
         if (bitmap is not null)
         {
+            if (ArtistHero && ArtworkPresentation.ShouldUseCircularArtistPortrait(bitmap.Size.Width, bitmap.Size.Height))
+            {
+                DrawFallback(context, bounds, rounded);
+                var side = Math.Min(bounds.Width, bounds.Height) * 0.58;
+                side = Math.Clamp(side, 132, Math.Min(220, Math.Min(bounds.Width, bounds.Height)));
+                var target = new Rect((bounds.Width - side) / 2, (bounds.Height - side) / 2, side, side);
+                using (context.PushClip(new RoundedRect(target, side / 2)))
+                {
+                    context.DrawImage(bitmap, CropRect(bitmap.Size, target.Size), target);
+                }
+                return;
+            }
+
             using (context.PushClip(rounded))
             {
-                context.DrawImage(bitmap, CenteredSquare(bitmap.Size), bounds);
+                context.DrawImage(bitmap, CropRect(bitmap.Size, bounds.Size), bounds);
             }
             return;
         }
@@ -182,23 +199,15 @@ public sealed class ArtworkImage : Control
         context.DrawText(text, origin);
     }
 
-    /// <summary>
-    /// The centred square of a (possibly non-square) source, so a cover fills the
-    /// tile without stretching — the equivalent of UniformToFill for the square
-    /// tiles this draws into.
-    /// </summary>
-    private static Rect CenteredSquare(Size source)
-    {
-        var side = Math.Min(source.Width, source.Height);
-        if (side <= 0) return new Rect(source);
-        var x = (source.Width - side) / 2;
-        var y = (source.Height - side) / 2;
-        return new Rect(x, y, side, side);
-    }
-
     protected override Size MeasureOverride(Size availableSize)
     {
         var size = DisplaySize > 0 ? DisplaySize : 0;
         return new Size(size, size);
+    }
+
+    private static Rect CropRect(Size source, Size destination)
+    {
+        var crop = ArtworkPresentation.CoverCrop(source.Width, source.Height, destination.Width, destination.Height);
+        return new Rect(crop.X, crop.Y, crop.Width, crop.Height);
     }
 }

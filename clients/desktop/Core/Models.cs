@@ -17,7 +17,11 @@ public sealed record Artist(
     string RemoteId,
     string ServerId,
     string Name,
-    string? ArtworkKey);
+    string? ArtworkKey,
+    string? SortName = null,
+    int? AlbumCount = null,
+    IReadOnlyList<string>? Genres = null,
+    bool IsFavorite = false);
 
 public sealed record Album(
     long Id,
@@ -29,7 +33,13 @@ public sealed record Album(
     int? Year,
     int? TrackCount,
     string? ArtworkKey,
-    string GroupKey);
+    string GroupKey,
+    string? SortTitle = null,
+    IReadOnlyList<string>? Genres = null,
+    bool IsFavorite = false,
+    double? AddedAt = null,
+    string? ReleaseKind = null,
+    bool? IsSingleOrEp = null);
 
 public sealed record Track(
     long Id,
@@ -65,7 +75,9 @@ public sealed record Playlist(
     string RemoteId,
     string ServerId,
     string Title,
-    int? TrackCount);
+    int? TrackCount,
+    string? ArtworkKey = null,
+    string? Description = null);
 
 public sealed record LibraryCounts(
     int Artists,
@@ -93,6 +105,7 @@ public sealed record CoreRequest(
     [JsonPropertyName("remoteId")] public string? RemoteId { get; init; }
     [JsonPropertyName("groupKey")] public string? GroupKey { get; init; }
     [JsonPropertyName("genre")] public string? Genre { get; init; }
+    [JsonPropertyName("artistRemoteId")] public string? ArtistRemoteId { get; init; }
     /// <summary>Opaque resume position from a previous page's <c>nextCursor</c>.</summary>
     [JsonPropertyName("cursor")] public string? Cursor { get; init; }
 }

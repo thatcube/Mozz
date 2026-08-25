@@ -63,15 +63,91 @@ public class MediaDetailFormattingTests
     [Fact]
     public void AlbumMetaOmitsUnknownPieces()
     {
-        var album = new Album(1, "album", "server", "Title", "Artist", null, 2024, 12, null, "group");
+        var album = new Album(1, "album", "server", "Title", "Artist", null, 2024, 12, null, "group", Genres: ["Rock"]);
         var tracks = new[]
         {
             Track("a", duration: 120),
             Track("b", duration: 180),
         };
 
-        Assert.Equal("2024 · 2 songs · 5 min", MediaDetailFormatting.AlbumMeta(album, tracks));
+        Assert.Equal("Rock · 2024 · 2 songs · 5 min", MediaDetailFormatting.AlbumMeta(album, tracks));
     }
+
+    [Fact]
+    public void PlaylistMetaFallsBackToDeclaredTrackCount()
+    {
+        var playlist = new Playlist(1, "mix", "server", "Favorites", 12);
+
+        Assert.Equal("12 songs", MediaDetailFormatting.PlaylistMeta(playlist, []));
+    }
+
+    [Fact]
+    public void LatestReleaseUsesNewestKnownYear()
+    {
+        var latest = MediaDetailFormatting.LatestRelease([
+            Album("older", 2018),
+            Album("unknown", null),
+            Album("newer", 2024),
+        ]);
+
+        Assert.Equal("newer", latest?.Title);
+    }
+
+    [Fact]
+    public void MoreByArtistExcludesCurrentAlbum()
+    {
+        var current = Album("current", 2024);
+        var more = MediaDetailFormatting.MoreByArtist([
+            Album("other", 2023),
+            current,
+            current with { Id = 99, Title = "duplicate" },
+        ], current);
+
+        Assert.Equal(["other"], more.Select(a => a.Title));
+    }
+
+    [Theory]
+    [InlineData(1600, 900, false)]
+    [InlineData(1000, 1000, true)]
+    [InlineData(900, 1200, true)]
+    public void ArtistHeroUsesCircularPortraitForSquareishArtwork(double width, double height, bool expected)
+    {
+        Assert.Equal(expected, ArtworkPresentation.ShouldUseCircularArtistPortrait(width, height));
+    }
+
+    [Fact]
+    public void SinglesAndEpsOnlyUsesCoreClassification()
+    {
+        var longAlbum = Album("three-track-album", 2024) with { TrackCount = 3 };
+        var ep = Album("core-ep", 2024) with { ReleaseKind = "ep" };
+        var single = Album("core-single", 2024) with { IsSingleOrEp = true };
+
+        var singles = MediaDetailFormatting.SinglesAndEps([longAlbum, ep, single]);
+
+        Assert.Equal(["core-ep", "core-single"], singles.Select(a => a.Title));
+    }
+
+    [Fact]
+    public void TrackSubtitleIncludesAlbumAndYearWhenKnown()
+    {
+        Assert.Equal("Album · 2024",
+            MediaDetailFormatting.TrackAlbumYear(Track("song"), Album("Album", 2024)));
+        Assert.Equal("Album", MediaDetailFormatting.TrackAlbumYear(Track("song")));
+    }
+
+    [Fact]
+    public void ShelfRowsChunkWithoutDroppingItems()
+    {
+        var albums = Enumerable.Range(1, 5).Select(i => Album($"album-{i}", 2024)).ToList();
+
+        var rows = MediaDetailFormatting.ChunkRows(albums, columns: 2);
+
+        Assert.Equal([2, 2, 1], rows.Select(r => r.Count));
+        Assert.Equal(albums, rows.SelectMany(r => r));
+    }
+
+    private static Album Album(string title, int? year) =>
+        new(1, $"remote-{title}", "server", title, "Artist", "artist", year, 10, null, $"group-{title}");
 
     private static Track Track(
         string title,
