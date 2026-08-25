@@ -20,8 +20,22 @@ namespace Mozz.Desktop.Tests;
 /// </summary>
 public class SecretStoreTests : IDisposable
 {
+    // A scratch directory the file-backed store is pointed at explicitly.
+    // These tests used to write into the real credential directory, beside a
+    // live install's actual token — a run left six files there. It is injected
+    // rather than set through an environment variable because the runner
+    // parallelises test classes and an environment variable is process-global:
+    // one class tearing it down would pull it out from under another.
+    private readonly string _scratch = CreateScratchDirectory();
     private readonly ISecretStore _store = SecretStore.ForCurrentPlatform();
     private readonly List<string> _keys = [];
+
+    private static string CreateScratchDirectory()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"mozz-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
 
     private string Key(string name)
     {
@@ -34,6 +48,9 @@ public class SecretStoreTests : IDisposable
 
     public void Dispose()
     {
+        try { if (Directory.Exists(_scratch)) Directory.Delete(_scratch, recursive: true); }
+        catch { /* best effort */ }
+
         foreach (var key in _keys)
         {
             try { _store.Set(key, null); } catch { /* best effort cleanup */ }
@@ -150,7 +167,8 @@ public class SecretStoreTests : IDisposable
 
         var store = new MacKeychainSecretStore(
             $"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}",
-            allowLocalFileFallback: true);
+            allowLocalFileFallback: true,
+            fileFallbackDirectory: _scratch);
         var key = Key("legacy-file-migration");
         store.SetLegacyForMigrationTest(key, "legacy-token");
 
@@ -174,7 +192,7 @@ public class SecretStoreTests : IDisposable
         store.Set(key, "keychain-token");
 
         Assert.Equal("keychain-token", store.GetLegacyForMigrationTest(key));
-        Assert.Null(new FileSecretStore().Get(key));
+        Assert.Null(new FileSecretStore(_scratch).Get(key));
         Assert.Equal("keychain-token", store.Get(key));
     }
 
