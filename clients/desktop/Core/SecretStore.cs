@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using System.Xml.Linq;
 
 namespace Mozz.Desktop.Core;
 
@@ -174,8 +175,9 @@ internal sealed class WindowsSecretStore : ISecretStore
 [SupportedOSPlatform("macos")]
 internal sealed class MacKeychainSecretStore : ISecretStore
 {
-    public string Description =>
-        "macOS Data Protection Keychain when available; otherwise a file readable only by your user account";
+    public string Description => _allowLocalFileFallback
+        ? "macOS local development credential file — not encrypted at rest; release builds use the Keychain"
+        : "macOS Keychain";
 
     private const string Security = "/System/Library/Frameworks/Security.framework/Security";
     private const string CoreFoundation =
@@ -238,15 +240,20 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     private const string DefaultServiceName = "com.thatcube.Mozz.desktop";
     private readonly string _serviceName;
     private readonly bool _requireDataProtectionKeychain;
+    private readonly bool _allowLocalFileFallback;
     private readonly FileSecretStore _fileFallback = new();
     private bool _dataProtectionUnavailable;
 
-    public MacKeychainSecretStore() : this(DefaultServiceName) { }
+    public MacKeychainSecretStore() : this(DefaultServiceName, allowLocalFileFallback: IsLocalDevelopmentBundle()) { }
 
-    internal MacKeychainSecretStore(string serviceName, bool requireDataProtectionKeychain = false)
+    internal MacKeychainSecretStore(
+        string serviceName,
+        bool requireDataProtectionKeychain = false,
+        bool allowLocalFileFallback = false)
     {
         _serviceName = serviceName;
         _requireDataProtectionKeychain = requireDataProtectionKeychain;
+        _allowLocalFileFallback = allowLocalFileFallback;
     }
 
     internal static bool CanUseDataProtectionKeychainForTests()
@@ -263,6 +270,39 @@ internal sealed class MacKeychainSecretStore : ISecretStore
         {
             return false;
         }
+    }
+
+    internal static bool IsLocalDevelopmentBundle()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(processPath)) return false;
+
+        var macOsMarker = $"{Path.DirectorySeparatorChar}Contents{Path.DirectorySeparatorChar}MacOS{Path.DirectorySeparatorChar}";
+        var markerIndex = processPath.IndexOf(macOsMarker, StringComparison.Ordinal);
+        if (markerIndex < 0) return false;
+
+        var plistPath = Path.Combine(processPath[..markerIndex], "Contents", "Info.plist");
+        try
+        {
+            var root = XDocument.Load(plistPath).Root?.Element("dict");
+            if (root is null) return false;
+
+            var elements = root.Elements().ToList();
+            for (var i = 0; i < elements.Count - 1; i++)
+            {
+                if (elements[i].Name.LocalName == "key"
+                    && elements[i].Value == "MozzLocalDevelopmentBuild")
+                {
+                    return elements[i + 1].Name.LocalName == "true";
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private static nint CFString(string value)
@@ -294,18 +334,18 @@ internal sealed class MacKeychainSecretStore : ISecretStore
                 var protectedValue = Get(key, dataProtectionKeychain: true);
                 if (protectedValue is not null) return protectedValue;
             }
-            catch (InvalidOperationException ex) when (CanUseFileFallbackAfter(ex))
+            catch (InvalidOperationException ex) when (CanContinueAfterUnavailableDataProtection(ex))
             {
                 _dataProtectionUnavailable = true;
             }
         }
 
-        if (_dataProtectionUnavailable && _fileFallback.Get(key) is { } fileValue) return fileValue;
+        if (_allowLocalFileFallback && _fileFallback.Get(key) is { } fileValue) return fileValue;
 
         var value = Get(key, dataProtectionKeychain: false);
         if (value is null) return null;
 
-        if (_dataProtectionUnavailable)
+        if (_dataProtectionUnavailable && _allowLocalFileFallback)
         {
             _fileFallback.Set(key, value);
             Delete(key, dataProtectionKeychain: false);
@@ -317,11 +357,14 @@ internal sealed class MacKeychainSecretStore : ISecretStore
             Set(key, value, dataProtectionKeychain: true);
             Delete(key, dataProtectionKeychain: false);
         }
-        catch (InvalidOperationException ex) when (CanUseFileFallbackAfter(ex))
+        catch (InvalidOperationException ex) when (CanContinueAfterUnavailableDataProtection(ex))
         {
             _dataProtectionUnavailable = true;
-            _fileFallback.Set(key, value);
-            Delete(key, dataProtectionKeychain: false);
+            if (_allowLocalFileFallback)
+            {
+                _fileFallback.Set(key, value);
+                Delete(key, dataProtectionKeychain: false);
+            }
         }
         return value;
     }
@@ -385,14 +428,21 @@ internal sealed class MacKeychainSecretStore : ISecretStore
                 _fileFallback.Set(key, null);
                 return;
             }
-            catch (InvalidOperationException ex) when (CanUseFileFallbackAfter(ex))
+            catch (InvalidOperationException ex) when (CanContinueAfterUnavailableDataProtection(ex))
             {
                 _dataProtectionUnavailable = true;
             }
         }
 
-        _fileFallback.Set(key, value);
-        Delete(key, dataProtectionKeychain: false);
+        if (_allowLocalFileFallback)
+        {
+            _fileFallback.Set(key, value);
+            Delete(key, dataProtectionKeychain: false);
+            return;
+        }
+
+        if (value is null) Delete(key, dataProtectionKeychain: false);
+        else Set(key, value, dataProtectionKeychain: false);
     }
 
     internal void SetLegacyForMigrationTest(string key, string? value)
@@ -469,7 +519,7 @@ internal sealed class MacKeychainSecretStore : ISecretStore
         }
     }
 
-    private bool CanUseFileFallbackAfter(InvalidOperationException ex) =>
+    private bool CanContinueAfterUnavailableDataProtection(InvalidOperationException ex) =>
         !_requireDataProtectionKeychain && ex.Message.Contains($"OSStatus {ErrSecMissingEntitlement}", StringComparison.Ordinal);
 
     private static InvalidOperationException KeychainException(string operation, int status)

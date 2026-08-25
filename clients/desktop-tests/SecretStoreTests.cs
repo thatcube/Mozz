@@ -148,7 +148,9 @@ public class SecretStoreTests : IDisposable
         if (!OperatingSystem.IsMacOS()) return;
         if (MacKeychainSecretStore.CanUseDataProtectionKeychainForTests()) return;
 
-        var store = new MacKeychainSecretStore($"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}");
+        var store = new MacKeychainSecretStore(
+            $"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}",
+            allowLocalFileFallback: true);
         var key = Key("legacy-file-migration");
         store.SetLegacyForMigrationTest(key, "legacy-token");
 
@@ -158,6 +160,22 @@ public class SecretStoreTests : IDisposable
         store.SetLegacyForMigrationTest(key, "stale-legacy-token");
         Assert.Equal("legacy-token", store.Get(key));
         store.SetLegacyForMigrationTest(key, null);
+    }
+
+    [Fact]
+    public void MacKeychainUsesLegacyKeychainBeforeFileFallbackForNonLocalBuilds()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        if (MacKeychainSecretStore.CanUseDataProtectionKeychainForTests()) return;
+
+        var store = new MacKeychainSecretStore($"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}");
+        var key = Key("non-local-keychain");
+
+        store.Set(key, "keychain-token");
+
+        Assert.Equal("keychain-token", store.GetLegacyForMigrationTest(key));
+        Assert.Null(new FileSecretStore().Get(key));
+        Assert.Equal("keychain-token", store.Get(key));
     }
 
     [Fact]
