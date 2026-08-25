@@ -2,8 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:Mozz.Desktop"
              x:Class="Mozz.Desktop.App"
-             Name="Mozz"
-             RequestedThemeVariant="Dark">
+             Name="Mozz">
 
     <Application.DataTemplates>
         <local:ViewLocator />
@@ -30,43 +29,43 @@
 
             <FontFamily x:Key="InterFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
 
-            <!-- Mozz crimson, taken from the iOS app icon so the two read as
-                 one product rather than two apps that share a name. -->
-            <SolidColorBrush x:Key="Accent" Color="#D8213F" />
-            <SolidColorBrush x:Key="AccentHover" Color="#E63A55" />
-            <SolidColorBrush x:Key="AccentDeep" Color="#B00023" />
+            <!-- Initial values are replaced by MozzThemeApplicator after preferences
+                 load. They match the iOS dark-dim ladder so startup never flashes red. -->
+            <SolidColorBrush x:Key="Accent" Color="#F50031" />
+            <SolidColorBrush x:Key="AccentHover" Color="#FF244E" />
+            <SolidColorBrush x:Key="AccentDeep" Color="#C80028" />
+            <SolidColorBrush x:Key="Brand" Color="#F50031" />
 
-            <!-- Near-black rather than black: Apple Music and Spotify both do
-                 this, and it stops album art appearing to float. -->
-            <SolidColorBrush x:Key="AppBackground" Color="#0B0B0D" />
-            <SolidColorBrush x:Key="SidebarBackground" Color="#121214" />
-            <SolidColorBrush x:Key="BarBackground" Color="#141416" />
-            <SolidColorBrush x:Key="SurfaceRaised" Color="#1C1C20" />
-            <SolidColorBrush x:Key="SurfaceHover" Color="#232328" />
-            <SolidColorBrush x:Key="SurfaceSelected" Color="#2A2A30" />
-            <SolidColorBrush x:Key="Divider" Color="#232327" />
+            <SolidColorBrush x:Key="AppBackground" Color="#1C1C1E" />
+            <SolidColorBrush x:Key="SidebarBackground" Color="#2C2C2E" />
+            <SolidColorBrush x:Key="BarBackground" Color="#2C2C2E" />
+            <SolidColorBrush x:Key="Surface" Color="#2C2C2E" />
+            <SolidColorBrush x:Key="SurfaceRaised" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="SurfaceHover" Color="#48484A" />
+            <SolidColorBrush x:Key="SurfaceSelected" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="DetailBackground" Color="#121212" />
+            <SolidColorBrush x:Key="Divider" Color="#99545458" />
 
-            <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
-            <SolidColorBrush x:Key="TextSecondary" Color="#9A9AA2" />
-            <SolidColorBrush x:Key="TextTertiary" Color="#6A6A72" />
+            <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#99EBEBF5" />
+            <SolidColorBrush x:Key="TextTertiary" Color="#4DEBEBF5" />
+            <SolidColorBrush x:Key="SearchBackground" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="ArtworkFallbackPrimary" Color="#66FFFFFF" />
+            <SolidColorBrush x:Key="ArtworkFallbackSecondary" Color="#88FFFFFF" />
+            <SolidColorBrush x:Key="ArtworkFallbackTertiary" Color="#55FFFFFF" />
+            <SolidColorBrush x:Key="ArtworkHeroFallback" Color="#44FFFFFF" />
+            <Color x:Key="HeroGradientStart">#00000000</Color>
+            <Color x:Key="HeroGradientEnd">#CC121212</Color>
 
-            <!-- Fluent's own accent, overridden to the same crimson.
-                 The brushes above only reach controls we style by hand. Every
-                 built-in control — the sliders, the progress bar, list
-                 selection, focus rings — reads SystemAccentColor instead, which
-                 ships as a Windows blue. Leaving it meant the seek bar, the
-                 volume slider and the selected row were all bright blue in an
-                 otherwise crimson app, which read as unfinished rather than as
-                 a choice. The Light/Dark ramp is what Fluent reaches for on
-                 hover, press and disabled states, so all six are given rather
-                 than just the base. -->
-            <Color x:Key="SystemAccentColor">#D8213F</Color>
-            <Color x:Key="SystemAccentColorLight1">#E63A55</Color>
-            <Color x:Key="SystemAccentColorLight2">#EE5C73</Color>
-            <Color x:Key="SystemAccentColorLight3">#F58193</Color>
-            <Color x:Key="SystemAccentColorDark1">#B00023</Color>
-            <Color x:Key="SystemAccentColorDark2">#8C001C</Color>
-            <Color x:Key="SystemAccentColorDark3">#680015</Color>
+            <!-- Fluent's accent powers built-in controls. Keep it neutral; use Mozz
+                 brand red only through the explicit primary/play/destructive styles. -->
+            <Color x:Key="SystemAccentColor">#8E8E93</Color>
+            <Color x:Key="SystemAccentColorLight1">#AEAEB2</Color>
+            <Color x:Key="SystemAccentColorLight2">#C7C7CC</Color>
+            <Color x:Key="SystemAccentColorLight3">#D1D1D6</Color>
+            <Color x:Key="SystemAccentColorDark1">#6C6C70</Color>
+            <Color x:Key="SystemAccentColorDark2">#545458</Color>
+            <Color x:Key="SystemAccentColorDark3">#3A3A3C</Color>
 
             <!-- Slider geometry.
                  Fluent's horizontal slider is a three-row grid — a 15px spacer,
@@ -84,21 +83,19 @@
             <CornerRadius x:Key="SliderThumbCornerRadius">6</CornerRadius>
             <x:Double x:Key="SliderTrackThemeHeight">4</x:Double>
 
-            <!-- Slider colour. The played side is crimson, the rest is a muted
-                 rail that stays visible against the near-black bar, and the
-                 handle is near-white so it reads against the played side. -->
-            <SolidColorBrush x:Key="SliderTrackFill" Color="#3A3A42" />
-            <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#45454F" />
-            <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#45454F" />
-            <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="#2A2A30" />
-            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#D8213F" />
-            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#E63A55" />
-            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#E63A55" />
-            <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#5A2A32" />
-            <SolidColorBrush x:Key="SliderThumbBackground" Color="#F2F2F4" />
+            <!-- Slider colour: neutral chrome, not brand red. -->
+            <SolidColorBrush x:Key="SliderTrackFill" Color="#48484A" />
+            <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#545458" />
+            <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#545458" />
+            <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#8E8E93" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#AEAEB2" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#AEAEB2" />
+            <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#545458" />
+            <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#6A6A72" />
+            <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#636366" />
 
             <!-- The template paints a plate behind the whole slider on hover.
                  In a transport bar that is a grey rectangle appearing under the
@@ -192,6 +189,62 @@
             <Setter Property="Background" Value="Transparent" />
         </Style>
 
+        <Style Selector="Button.primary, Button.secondary, Button.ghost, Button.destructive">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.primary:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
+        </Style>
+        <Style Selector="Button.secondary">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.secondary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Button.secondary:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.destructive">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+        </Style>
+        <Style Selector="Button.destructive:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.primary:focus-visible /template/ ContentPresenter,
+                         Button.secondary:focus-visible /template/ ContentPresenter,
+                         Button.ghost:focus-visible /template/ ContentPresenter,
+                         Button.destructive:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource TextTertiary}" />
+            <Setter Property="BorderThickness" Value="1.5" />
+        </Style>
+
         <Style Selector="Button.transport">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -256,36 +309,6 @@
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
-        <Style Selector="Button.accent">
-            <Setter Property="Background" Value="{DynamicResource Accent}" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="18,9" />
-            <Setter Property="CornerRadius" Value="18" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusAdorner" Value="{x:Null}" />
-        </Style>
-        <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
-        </Style>
-        <Style Selector="Button.detailAction">
-            <Setter Property="Padding" Value="18,9" />
-            <Setter Property="CornerRadius" Value="18" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusAdorner" Value="{x:Null}" />
-        </Style>
-        <Style Selector="Button.secondaryAction">
-            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
-        </Style>
-        <Style Selector="Button.secondaryAction:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
-        </Style>
-        <Style Selector="Button.secondaryAction:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
-        </Style>
-
         <Style Selector="TextBlock.pageTitle">
             <Setter Property="FontSize" Value="30" />
             <Setter Property="FontWeight" Value="Bold" />
@@ -305,6 +328,21 @@
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="{DynamicResource SearchBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="PlaceholderForeground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource SearchBackground}" />
+        </Style>
+        <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource SearchBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource TextTertiary}" />
         </Style>
 
         <Style Selector="Border.albumArt">

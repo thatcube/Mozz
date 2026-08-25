@@ -54,7 +54,7 @@
                              Margin="0,0,0,18"
                              CornerRadius="8"
                              FontSize="13"
-                             Background="{DynamicResource SurfaceRaised}"
+                             Background="{DynamicResource SearchBackground}"
                              BorderThickness="0"
                              Padding="4,9,11,9">
                         <TextBox.InnerLeftContent>
@@ -175,7 +175,7 @@
                                    Text="Connect a Plex, Jellyfin or Subsonic server and Mozz will sync your library." />
                         <Button Content="Connect a server"
                                 HorizontalAlignment="Center"
-                                Classes="accent"
+                                Classes="primary"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Connect}" />
                     </StackPanel>
@@ -230,7 +230,7 @@
                                                <Border Background="{DynamicResource SurfaceRaised}"
                                                        CornerRadius="12" ClipToBounds="True">
                                                    <Grid ColumnDefinitions="88,*" Height="88">
-                                                       <Border Grid.Column="0" Background="{DynamicResource Accent}"
+                                                       <Border Grid.Column="0" Background="{DynamicResource SurfaceRaised}"
                                                                IsVisible="{Binding IsLiked}">
                                                            <controls:TablerIcon Size="30" Filled="True"
                                                                                 Data="{StaticResource IconHeart}"
@@ -247,7 +247,7 @@
                                                                FallbackText="{Binding FallbackText}"
                                                                FallbackFontSize="24"
                                                                FallbackFontWeight="SemiBold"
-                                                               FallbackForeground="#66FFFFFF" />
+                                                               FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
                                                        <StackPanel Grid.Column="1" Spacing="4"
                                                                    VerticalAlignment="Center" Margin="18,0,16,0">
                                                            <TextBlock Text="{Binding Title}" Classes="primary"
@@ -282,7 +282,7 @@
                                                    <Grid ColumnDefinitions="44,*,64" Height="44">
                                                        <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                                               FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="#88FFFFFF" />
+                                                               FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                                        <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" Spacing="1">
                                                            <TextBlock Text="{Binding Track.Title}" Classes="primary" />
                                                            <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
@@ -310,7 +310,7 @@
                                                <StackPanel Spacing="9">
                                                    <controls:ArtworkImage Width="176" Height="176" DisplaySize="176" CornerRadius="8"
                                                            ServerId="{Binding ServerId}" ArtworkKey="{Binding ArtworkKey}"
-                                                           FallbackText="{Binding Title}" FallbackFontSize="52" FallbackForeground="#55FFFFFF" />
+                                                           FallbackText="{Binding Title}" FallbackFontSize="52" FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                    <StackPanel Spacing="2">
                                                        <TextBlock Text="{Binding Title}" Classes="primary" />
                                                        <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
@@ -336,7 +336,7 @@
                                                        CornerRadius="12" Padding="18" Height="148">
                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
-                                                                            Brush="{DynamicResource Accent}" />
+                                                                            Brush="{DynamicResource TextSecondary}" />
                                                        <TextBlock Text="{Binding Title}" Classes="primary" FontSize="16" />
                                                        <TextBlock Text="{Binding TrackCount, StringFormat='{}{0} songs'}"
                                                                   Classes="secondary" />
@@ -377,7 +377,7 @@
                                             FallbackText="{Binding AlbumTitle}"
                                             FallbackFontSize="15"
                                             FallbackFontWeight="SemiBold"
-                                            FallbackForeground="#88FFFFFF" />
+                                            FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center"
                                                 Margin="13,0" Spacing="1">
                                         <TextBlock Text="{Binding Title}" Classes="primary" />
@@ -456,7 +456,7 @@
                                                         ArtworkKey="{Binding ArtworkKey}"
                                                         FallbackText="{Binding Title}"
                                                         FallbackFontSize="52"
-                                                        FallbackForeground="#55FFFFFF" />
+                                                        FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                 <StackPanel Spacing="2">
                                                     <TextBlock Text="{Binding Title}" Classes="primary" />
                                                     <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
@@ -520,7 +520,7 @@
                                                         ArtworkKey="{Binding ArtworkKey}"
                                                         FallbackText="{Binding Name}"
                                                         FallbackFontSize="44"
-                                                        FallbackForeground="#55FFFFFF" />
+                                                        FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                 <TextBlock Text="{Binding Name}" Classes="primary"
                                                            TextAlignment="Center" />
                                             </StackPanel>
@@ -559,7 +559,7 @@
                                                                         ArtworkKey="{Binding ArtworkKey}"
                                                                         FallbackText="{Binding Title}"
                                                                         FallbackFontSize="52"
-                                                                        FallbackForeground="#55FFFFFF" />
+                                                                        FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                                 <StackPanel Spacing="2">
                                                                     <TextBlock Text="{Binding Title}" Classes="primary" />
                                                                     <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
@@ -598,7 +598,7 @@
                                                                         ArtworkKey="{Binding ArtworkKey}"
                                                                         FallbackText="{Binding Name}"
                                                                         FallbackFontSize="44"
-                                                                        FallbackForeground="#55FFFFFF" />
+                                                                        FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                                 <TextBlock Text="{Binding Name}" Classes="primary" TextAlignment="Center" />
                                                             </StackPanel>
                                                         </Button>
@@ -625,7 +625,7 @@
                                                         FallbackText="{Binding AlbumTitle}"
                                                         FallbackFontSize="15"
                                                         FallbackFontWeight="SemiBold"
-                                                        FallbackForeground="#88FFFFFF" />
+                                                        FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
                                                     <TextBlock Text="{Binding Title}" Classes="primary" />
                                                     <Button Classes="link" HorizontalAlignment="Left"
@@ -690,7 +690,7 @@
                                                         CornerRadius="12" Padding="18" Height="148">
                                                     <StackPanel Spacing="8" VerticalAlignment="Center">
                                                         <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
-                                                                             Brush="{DynamicResource Accent}" />
+                                                                             Brush="{DynamicResource TextSecondary}" />
                                                         <TextBlock Text="{Binding Title}" Classes="primary" FontSize="16" />
                                                         <TextBlock Text="{Binding TrackCount, StringFormat='{}{0} songs'}"
                                                                    Classes="secondary" />
@@ -732,24 +732,24 @@
                                     <controls:ArtworkImage Grid.Column="0" Width="220" Height="220" DisplaySize="220"
                                             CornerRadius="13" ServerId="{Binding Album.ServerId}"
                                             ArtworkKey="{Binding Album.ArtworkKey}" FallbackText="{Binding Album.Title}"
-                                            FallbackFontSize="62" FallbackForeground="#55FFFFFF" />
+                                            FallbackFontSize="62" FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                     <StackPanel Grid.Column="1" Spacing="11" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Album.Title}" FontSize="36" FontWeight="Bold"
                                                    Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
                                         <Button Classes="link" HorizontalAlignment="Left"
                                                 Command="{Binding $parent[Window].DataContext.OpenSelectedAlbumArtistCommand}">
                                             <TextBlock Text="{Binding Album.ArtistName}" FontSize="17"
-                                                       Foreground="{DynamicResource Accent}" />
+                                                       Foreground="{DynamicResource TextSecondary}" />
                                         </Button>
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                                            <Button Classes="accent detailAction" Command="{Binding $parent[Window].DataContext.PlaySelectedAlbumCommand}">
+                                            <Button Classes="primary" Command="{Binding $parent[Window].DataContext.PlaySelectedAlbumCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                                     <TextBlock Text="Play" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="detailAction secondaryAction" Command="{Binding $parent[Window].DataContext.ShuffleSelectedAlbumCommand}">
+                                            <Button Classes="secondary" Command="{Binding $parent[Window].DataContext.ShuffleSelectedAlbumCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
@@ -767,13 +767,13 @@
                                                 ArtistHero="True" CornerRadius="16"
                                                 ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.HeroArtworkKey}"
                                                 FallbackText="{Binding Artist.Name}" FallbackFontSize="72"
-                                                FallbackForeground="#44FFFFFF" />
+                                                FallbackForeground="{DynamicResource ArtworkHeroFallback}" />
                                     </Border>
                                     <Border VerticalAlignment="Bottom" Height="130">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                                <GradientStop Color="#00000000" Offset="0" />
-                                                <GradientStop Color="#CC0B0B0D" Offset="1" />
+                                                <GradientStop Color="{DynamicResource HeroGradientStart}" Offset="0" />
+                                                <GradientStop Color="{DynamicResource HeroGradientEnd}" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.Background>
                                     </Border>
@@ -802,7 +802,7 @@
                                     <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource SurfaceRaised}"
                                             CornerRadius="13" Padding="28">
                                         <controls:TablerIcon Size="74" Data="{StaticResource IconPlaylist}"
-                                                             Brush="{DynamicResource Accent}"
+                                                             Brush="{DynamicResource TextSecondary}"
                                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="11" VerticalAlignment="Center">
@@ -810,13 +810,13 @@
                                                    Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                                            <Button Classes="accent detailAction" Command="{Binding $parent[Window].DataContext.PlaySelectedPlaylistCommand}">
+                                            <Button Classes="primary" Command="{Binding $parent[Window].DataContext.PlaySelectedPlaylistCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                                     <TextBlock Text="Play" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="detailAction secondaryAction" Command="{Binding $parent[Window].DataContext.ShuffleSelectedPlaylistCommand}">
+                                            <Button Classes="secondary" Command="{Binding $parent[Window].DataContext.ShuffleSelectedPlaylistCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
@@ -829,7 +829,7 @@
 
                             <DataTemplate DataType="vm:MixHeroRow">
                                 <Grid ColumnDefinitions="236,*" Margin="0,0,0,28">
-                                    <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource Accent}"
+                                    <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource SurfaceRaised}"
                                             CornerRadius="13" IsVisible="{Binding Mix.IsLiked}">
                                         <controls:TablerIcon Size="74" Filled="True" Data="{StaticResource IconHeart}"
                                                              Brush="White"
@@ -839,7 +839,7 @@
                                             CornerRadius="13" IsVisible="{Binding !Mix.IsLiked}"
                                             ServerId="{Binding Mix.ServerId}" ArtworkKey="{Binding Mix.ArtworkKey}"
                                             FallbackText="{Binding Mix.Title}" FallbackFontSize="62"
-                                            FallbackForeground="#55FFFFFF" />
+                                            FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                     <StackPanel Grid.Column="1" Spacing="11" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Mix.Title}" FontSize="36" FontWeight="Bold"
                                                    Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
@@ -847,13 +847,13 @@
                                                    IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                                            <Button Classes="accent detailAction" Command="{Binding $parent[Window].DataContext.PlaySelectedMixCommand}">
+                                            <Button Classes="primary" Command="{Binding $parent[Window].DataContext.PlaySelectedMixCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                                     <TextBlock Text="Play" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="detailAction secondaryAction" Command="{Binding $parent[Window].DataContext.ShuffleSelectedMixCommand}">
+                                            <Button Classes="secondary" Command="{Binding $parent[Window].DataContext.ShuffleSelectedMixCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
@@ -881,7 +881,7 @@
                                                 <StackPanel Spacing="9">
                                                     <controls:ArtworkImage Width="176" Height="176" DisplaySize="176" CornerRadius="8"
                                                             ServerId="{Binding ServerId}" ArtworkKey="{Binding ArtworkKey}"
-                                                            FallbackText="{Binding Title}" FallbackFontSize="52" FallbackForeground="#55FFFFFF" />
+                                                            FallbackText="{Binding Title}" FallbackFontSize="52" FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                     <StackPanel Spacing="2">
                                                         <TextBlock Text="{Binding Title}" Classes="primary" />
                                                         <TextBlock Text="{Binding Year}" Classes="secondary" />
@@ -907,7 +907,7 @@
                                                     <Grid ColumnDefinitions="44,*,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                                                FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="#88FFFFFF" />
+                                                                FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                                         <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" Spacing="1">
                                                             <TextBlock Text="{Binding Track.Title}" Classes="primary" />
                                                             <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
@@ -948,7 +948,7 @@
                                 <Grid ColumnDefinitions="44,*,180,220,64" Height="50">
                                     <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                             ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                            FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="#88FFFFFF" />
+                                            FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                     <TextBlock Grid.Column="1" Text="{Binding Track.Title}" Classes="primary"
                                                VerticalAlignment="Center" Margin="13,0" />
                                     <Button Grid.Column="2" Classes="link" HorizontalAlignment="Left" VerticalAlignment="Center"
@@ -975,7 +975,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconServer}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconServer}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Server" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="{Binding ActiveAccount.ServerName, FallbackValue='No server signed in'}"
@@ -984,10 +984,10 @@
                                       IsVisible="{Binding HasActiveAccount}" />
                            <TextBlock Text="{Binding LibrarySummary}" Classes="secondary" />
                            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasActiveAccount}">
-                             <Button Content="Sync Now" Classes="accent"
+                             <Button Content="Sync Now" Classes="primary"
                                      IsEnabled="{Binding !Connect.IsSyncing}"
                                      Command="{Binding SyncNowCommand}" />
-                             <Button Content="Refresh Settings"
+                             <Button Content="Refresh Settings" Classes="secondary"
                                      Command="{Binding RefreshSettingsPanelCommand}" />
                            </StackPanel>
                            <StackPanel Spacing="7" IsVisible="{Binding Connect.IsSyncing}">
@@ -1003,7 +1003,7 @@
                                IsVisible="{Binding HasSettingsLibraries}">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconStack}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconStack}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Music Libraries" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="Pick the library this desktop syncs. Changing it re-attaches the server and syncs."
@@ -1021,7 +1021,7 @@
                                          <TextBlock Text="{Binding Status}" Classes="secondary" />
                                        </StackPanel>
                                        <controls:TablerIcon Grid.Column="1" Size="19" Data="{StaticResource IconCheck}"
-                                                            Brush="{DynamicResource Accent}"
+                                                            Brush="{DynamicResource TextSecondary}"
                                                             IsVisible="{Binding IsSelected}" />
                                      </Grid>
                                    </Border>
@@ -1035,7 +1035,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconVolume}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconVolume}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Playback" Classes="sectionTitle" />
                            </StackPanel>
                            <CheckBox Content="Volume Normalization"
@@ -1046,7 +1046,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconWaveform}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconWaveform}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Equalizer" Classes="sectionTitle" />
                            </StackPanel>
                            <CheckBox Content="Equalizer" IsChecked="{Binding EqualizerEnabled}" />
@@ -1056,7 +1056,7 @@
                              </ItemsControl.ItemsPanel>
                              <ItemsControl.ItemTemplate>
                                <DataTemplate>
-                                 <Button Content="{Binding Label}" Margin="0,0,8,8"
+                                 <Button Content="{Binding Label}" Classes="secondary" Margin="0,0,8,8"
                                          Command="{Binding $parent[ScrollViewer].DataContext.ApplyEqualizerPresetCommand}"
                                          CommandParameter="{Binding}" />
                                </DataTemplate>
@@ -1083,7 +1083,7 @@
                              <TextBlock Grid.Column="2" Text="{Binding EqualizerPreampText}" Classes="secondary"
                                         HorizontalAlignment="Right" VerticalAlignment="Center" />
                            </Grid>
-                           <Button Content="Reset to Flat" HorizontalAlignment="Left"
+                           <Button Content="Reset to Flat" Classes="secondary" HorizontalAlignment="Left"
                                    Command="{Binding ResetEqualizerCommand}" />
                          </StackPanel>
                        </Border>
@@ -1091,7 +1091,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconQuote}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconQuote}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Lyrics" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="Desktop lyrics display and offline lyric capture need shared core/FFI support before they can be configured here."
@@ -1102,7 +1102,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconSparkles}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconSparkles}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Recommendations" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="MusicBrainz enrichment needs a desktop FFI command before this can become a real control."
@@ -1118,7 +1118,7 @@
                                      <TextBlock Text="{Binding Title}" Classes="primary" />
                                      <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
                                    </StackPanel>
-                                   <Button Grid.Column="1" Content="Restore"
+                                   <Button Grid.Column="1" Content="Restore" Classes="secondary"
                                            Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
                                            CommandParameter="{Binding}" />
                                  </Grid>
@@ -1133,7 +1133,7 @@
                                      <TextBlock Text="{Binding Title}" Classes="primary" />
                                      <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
                                    </StackPanel>
-                                   <Button Grid.Column="1" Content="Restore"
+                                   <Button Grid.Column="1" Content="Restore" Classes="secondary"
                                            Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
                                            CommandParameter="{Binding}" />
                                  </Grid>
@@ -1146,7 +1146,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconPalette}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconPalette}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Appearance" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="Theme" Classes="primary" />
@@ -1171,7 +1171,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconStethoscope}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconStethoscope}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="Diagnostics" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="{Binding SecretStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
@@ -1184,7 +1184,7 @@
                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
-                             <controls:TablerIcon Size="21" Data="{StaticResource IconInfo}" Brush="{DynamicResource Accent}" />
+                             <controls:TablerIcon Size="21" Data="{StaticResource IconInfo}" Brush="{DynamicResource TextSecondary}" />
                              <TextBlock Text="About" Classes="sectionTitle" />
                            </StackPanel>
                            <TextBlock Text="One app for your music, wherever it lives. Free forever. Open source."
@@ -1194,8 +1194,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Button Content="Sign Out" HorizontalAlignment="Left"
-                               Foreground="{DynamicResource Accent}"
+                       <Button Content="Sign Out" Classes="destructive" HorizontalAlignment="Left"
                                IsVisible="{Binding HasActiveAccount}"
                                Command="{Binding SignOutCommand}" />
                        <TextBlock Text="{Binding SettingsMessage}" Classes="secondary" TextWrapping="Wrap"
@@ -1220,10 +1219,10 @@
                                       <TextBlock Text="{Binding ServerName}" Classes="primary" />
                                       <TextBlock Text="{Binding BaseUrl}" Classes="secondary" FontSize="11.5" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Sync" Margin="0,0,8,0"
+                                    <Button Grid.Column="1" Content="Sync" Classes="secondary" Margin="0,0,8,0"
                                             Command="{Binding $parent[ScrollViewer].DataContext.Connect.SyncAccountCommand}"
                                             CommandParameter="{Binding}" />
-                                    <Button Grid.Column="2" Content="Sign out"
+                                    <Button Grid.Column="2" Content="Sign out" Classes="destructive"
                                             Command="{Binding $parent[ScrollViewer].DataContext.Connect.ForgetAccountCommand}"
                                             CommandParameter="{Binding}" />
                                   </Grid>
@@ -1280,17 +1279,17 @@
                               <TextBlock Classes="secondary" FontSize="11.5" TextWrapping="Wrap"
                                          Text="This opens plex.tv. Sign in there and Mozz will connect by itself — nothing to type back here." />
                               <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Open Plex" Classes="accent"
+                                <Button Content="Open Plex" Classes="primary"
                                         Command="{Binding Connect.OpenPlexLinkCommand}" />
-                                <Button Content="Copy link"
+                                <Button Content="Copy link" Classes="secondary"
                                         Command="{Binding Connect.CopyPlexLinkCommand}" />
-                                <Button Content="Cancel"
+                                <Button Content="Cancel" Classes="secondary"
                                         Command="{Binding Connect.CancelPlexCommand}" />
                               </StackPanel>
                             </StackPanel>
                           </Border>
 
-                          <Button Content="Sign in" Classes="accent" HorizontalAlignment="Left"
+                          <Button Content="Sign in" Classes="primary" HorizontalAlignment="Left"
                                   IsEnabled="{Binding !Connect.IsBusy}"
                                   Command="{Binding Connect.SignInCommand}" />
 
@@ -1328,7 +1327,7 @@
                             FallbackText="{Binding NowPlaying.AlbumTitle}"
                             FallbackFontSize="20"
                             FallbackFontWeight="SemiBold"
-                            FallbackForeground="#66FFFFFF" />
+                            FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
                     <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
                         <TextBlock Classes="primary" FontWeight="Medium"
                                    Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
