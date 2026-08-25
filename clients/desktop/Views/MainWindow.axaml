@@ -136,8 +136,7 @@
                                 <Panel>
                                     <controls:ArtworkImage Width="30" Height="30" DisplaySize="30"
                                             CornerRadius="15"
-                                            ServerId="{Binding ActiveAccountAvatarServerId}"
-                                            ArtworkKey="{Binding ActiveAccountAvatarKey}"
+                                            ImageUrl="{Binding ActiveAccountAvatarUrl}"
                                             FallbackText="{Binding ActiveAccountFallbackText}"
                                             FallbackFontSize="12"
                                             FallbackFontWeight="SemiBold"
@@ -1177,8 +1176,7 @@
                                                 <Panel>
                                                     <controls:ArtworkImage Width="50" Height="50" DisplaySize="50"
                                                             CornerRadius="25"
-                                                            ServerId="{Binding ActiveAccountAvatarServerId}"
-                                                            ArtworkKey="{Binding ActiveAccountAvatarKey}"
+                                                            ImageUrl="{Binding ActiveAccountAvatarUrl}"
                                                             FallbackText="{Binding ActiveAccountFallbackText}"
                                                             FallbackFontSize="18"
                                                             FallbackFontWeight="SemiBold"

@@ -224,6 +224,15 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         return result?.Url;
     }
 
+    public Task<ServerAccountProfile?> AccountAsync(
+        string serverId, int size = 120, CancellationToken token = default)
+        => core.CallAsync<ServerAccountProfile>(new
+        {
+            cmd = "account",
+            serverId,
+            size,
+        }, token);
+
     // MARK: Saved accounts
 
     /// <summary>
@@ -279,9 +288,6 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 ? identifier
                 : session.ClientIdentifier,
             MusicSectionId = null,
-            AvatarArtworkKey = session.AvatarArtworkKey,
-            AccountArtworkKey = session.AccountArtworkKey,
-            UserAvatarArtworkKey = session.UserAvatarArtworkKey,
         };
 
         secrets.Set(SecretKey(account.ServerId), session.Token);
@@ -381,17 +387,12 @@ public sealed record ServerAccount
     public string? Username { get; init; }
     public required string ClientIdentifier { get; init; }
     public string? MusicSectionId { get; init; }
-    public string? AvatarArtworkKey { get; init; }
-    public string? AccountArtworkKey { get; init; }
-    public string? UserAvatarArtworkKey { get; init; }
-
-    [JsonIgnore]
-    public string? EffectiveAvatarArtworkKey =>
-        FirstNonEmpty(AvatarArtworkKey, AccountArtworkKey, UserAvatarArtworkKey);
-
-    private static string? FirstNonEmpty(params string?[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 }
+
+public sealed record ServerAccountProfile(
+    [property: JsonPropertyName("displayName")] string? DisplayName,
+    [property: JsonPropertyName("username")] string? Username,
+    [property: JsonPropertyName("avatarURL")] string? AvatarUrl);
 
 public sealed record PlexLink(int PinId, string Code, string ClientIdentifier, string? LinkUrl);
 
@@ -449,10 +450,7 @@ internal sealed record SessionPayload(
     [property: JsonPropertyName("userID")] string? UserId,
     [property: JsonPropertyName("serverName")] string ServerName,
     [property: JsonPropertyName("clientIdentifier")] string ClientIdentifier,
-    [property: JsonPropertyName("accountToken")] string? AccountToken,
-    [property: JsonPropertyName("avatarArtworkKey")] string? AvatarArtworkKey,
-    [property: JsonPropertyName("accountArtworkKey")] string? AccountArtworkKey,
-    [property: JsonPropertyName("userAvatarArtworkKey")] string? UserAvatarArtworkKey);
+    [property: JsonPropertyName("accountToken")] string? AccountToken);
 
 internal sealed record PlexPinPayload(
     [property: JsonPropertyName("pinId")] int PinId,

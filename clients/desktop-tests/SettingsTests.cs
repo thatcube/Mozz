@@ -145,21 +145,12 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
-    public void ServerAccountExposesFirstAvatarArtworkKey()
+    public void ServerAccountProfileAcceptsNullSubsonicAvatar()
     {
-        var account = new ServerAccount
-        {
-            ServerId = "plex-http://server",
-            Kind = BackendKind.Plex,
-            BaseUrl = "http://server",
-            ServerName = "Server",
-            ClientIdentifier = "client",
-            AvatarArtworkKey = "",
-            AccountArtworkKey = "plex-account-thumb",
-            UserAvatarArtworkKey = "fallback-thumb",
-        };
+        var profile = new ServerAccountProfile("brandon", "brandon", null);
 
-        Assert.Equal("plex-account-thumb", account.EffectiveAvatarArtworkKey);
+        Assert.Equal("brandon", profile.DisplayName);
+        Assert.Null(profile.AvatarUrl);
     }
 
     [Fact]

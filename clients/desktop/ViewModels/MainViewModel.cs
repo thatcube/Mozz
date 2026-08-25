@@ -200,10 +200,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool HasActiveAccount => ActiveAccount is not null;
     public string SidebarProfileTitle => SettingsPresentation.ProfileTitle(ActiveAccount);
     public string SidebarProfileSubtitle => SettingsPresentation.ProfileSubtitle(ActiveAccount, LibrarySummary);
-    public string? ActiveAccountAvatarServerId => ActiveAccount?.EffectiveAvatarArtworkKey is { Length: > 0 } ? ActiveAccount.ServerId : null;
-    public string? ActiveAccountAvatarKey => ActiveAccount?.EffectiveAvatarArtworkKey;
-    public bool HasActiveAccountAvatar => ActiveAccountAvatarKey is { Length: > 0 };
-    public string ActiveAccountFallbackText => ActiveAccount?.Username ?? ActiveAccount?.ServerName ?? "Settings";
+    public string? ActiveAccountAvatarUrl => ActiveAccountProfile?.AvatarUrl;
+    public bool HasActiveAccountAvatar => ActiveAccountAvatarUrl is { Length: > 0 };
+    public string ActiveAccountFallbackText =>
+        ActiveAccountProfile?.DisplayName
+        ?? ActiveAccountProfile?.Username
+        ?? ActiveAccount?.Username
+        ?? ActiveAccount?.ServerName
+        ?? "Settings";
     public string ActiveServerTitle => SettingsPresentation.ServerSectionTitle(ActiveAccount);
     public string ActiveServerSubtitle => SettingsPresentation.ServerSectionSubtitle(ActiveAccount);
     public SettingsCategory SelectedSettingsCategory => _settingsCategorySelection.Selected;
@@ -232,6 +236,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string? _settingsMessage;
     [ObservableProperty] private bool _isSettingsBusy;
     [ObservableProperty] private bool _isSettingsDialogOpen;
+    [ObservableProperty] private ServerAccountProfile? _activeAccountProfile;
 
     public MainViewModel()
     {
@@ -248,12 +253,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(HasActiveAccount));
             OnPropertyChanged(nameof(SidebarProfileTitle));
             OnPropertyChanged(nameof(SidebarProfileSubtitle));
-            OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
-            OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+            OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
             OnPropertyChanged(nameof(HasActiveAccountAvatar));
             OnPropertyChanged(nameof(ActiveAccountFallbackText));
             OnPropertyChanged(nameof(ActiveServerTitle));
             OnPropertyChanged(nameof(ActiveServerSubtitle));
+            _ = RefreshActiveAccountProfileAsync();
         };
         RestoreSettings();
 
@@ -298,6 +303,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _seekDebounce.Tick += OnSeekDebounceTick;
 
         _ = InitializeAsync();
+    }
+
+    partial void OnActiveAccountProfileChanged(ServerAccountProfile? value)
+    {
+        OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+        OnPropertyChanged(nameof(HasActiveAccountAvatar));
+        OnPropertyChanged(nameof(ActiveAccountFallbackText));
     }
 
     private void RestoreSettings()
@@ -414,6 +426,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // Before anything can be played: the tracks come from the local
             // database, but their stream URLs come from an attached backend.
             await Connect.AttachSavedAccountsAsync();
+            await RefreshActiveAccountProfileAsync();
 
             await RefreshCountsAsync();
             await LoadSectionAsync(LibrarySection.Home, clearBackStack: true);
@@ -466,13 +479,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
-            OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
-            OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+            OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
             OnPropertyChanged(nameof(HasActiveAccountAvatar));
             OnPropertyChanged(nameof(ActiveAccountFallbackText));
             SettingsLibraries.Clear();
             SuppressedArtists.Clear();
             SuppressedTracks.Clear();
+            await RefreshActiveAccountProfileAsync();
 
             if (ActiveAccount is not { } account || !_core.IsOpen) return;
 
@@ -502,6 +515,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task RefreshActiveAccountProfileAsync()
+    {
+        var account = ActiveAccount;
+        if (account is null || !_core.IsOpen)
+        {
+            ActiveAccountProfile = null;
+            return;
+        }
+
+        try
+        {
+            ActiveAccountProfile = await _server.AccountAsync(account.ServerId, size: 120);
+        }
+        catch
+        {
+            ActiveAccountProfile = null;
+        }
+    }
+
     [RelayCommand]
     private Task RefreshSettingsPanel() => RefreshSettingsAsync();
 
@@ -525,6 +557,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             IsSettingsBusy = true;
             await _server.AttachAsync(account);
+            await RefreshActiveAccountProfileAsync();
             await RefreshCountsAsync();
             await RefreshSettingsAsync();
         }
@@ -616,10 +649,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         StopPlayback();
         _server.ForgetAllAccounts();
         Connect.Accounts.Clear();
+        ActiveAccountProfile = null;
         OnPropertyChanged(nameof(ActiveAccount));
         OnPropertyChanged(nameof(HasActiveAccount));
-        OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
-        OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+        OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
         OnPropertyChanged(nameof(HasActiveAccountAvatar));
         OnPropertyChanged(nameof(ActiveAccountFallbackText));
         SettingsLibraries.Clear();
@@ -641,8 +674,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Connect.Accounts[i] = updated;
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
-            OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
-            OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+            OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
             OnPropertyChanged(nameof(HasActiveAccountAvatar));
             OnPropertyChanged(nameof(ActiveAccountFallbackText));
             return;
@@ -2167,8 +2199,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasActiveAccount));
         OnPropertyChanged(nameof(SidebarProfileTitle));
         OnPropertyChanged(nameof(SidebarProfileSubtitle));
-        OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
-        OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+        OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
         OnPropertyChanged(nameof(HasActiveAccountAvatar));
         OnPropertyChanged(nameof(ActiveAccountFallbackText));
         OnPropertyChanged(nameof(ActiveServerTitle));
