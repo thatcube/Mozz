@@ -239,57 +239,49 @@
                                            <Button Classes="tile" Width="410" Margin="0,0,20,16"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Panel>
-                                                   <Border Background="{DynamicResource Accent}"
-                                                           CornerRadius="12" ClipToBounds="True"
-                                                           IsVisible="{Binding IsLiked}">
-                                                       <Grid ColumnDefinitions="88,*" Height="88">
-                                                           <controls:TablerIcon Grid.Column="0" Size="30" Filled="True"
+                                               <Border Background="{DynamicResource SurfaceRaised}"
+                                                       CornerRadius="12" ClipToBounds="True">
+                                                   <Grid ColumnDefinitions="88,*" Height="88">
+                                                       <Border Grid.Column="0" Width="88" Height="88"
+                                                               Background="{DynamicResource Accent}"
+                                                               IsVisible="{Binding IsLiked}">
+                                                           <controls:TablerIcon Size="30" Filled="True"
                                                                                 Data="{StaticResource IconHeart}"
                                                                                 Brush="{DynamicResource BrandForeground}"
                                                                                 HorizontalAlignment="Center"
                                                                                 VerticalAlignment="Center" />
-                                                           <StackPanel Grid.Column="1" Spacing="4"
-                                                                       VerticalAlignment="Center" Margin="18,0,16,0">
-                                                               <TextBlock Text="{Binding Title}"
-                                                                          Foreground="{DynamicResource BrandForeground}"
-                                                                          FontSize="22" FontWeight="SemiBold" />
-                                                               <TextBlock Text="{Binding Subtitle}"
-                                                                          Foreground="{DynamicResource BrandForeground}"
-                                                                          Opacity="0.75"
-                                                                          FontSize="15"
-                                                                          IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                                           </StackPanel>
-                                                       </Grid>
-                                                   </Border>
-                                                   <Border Background="{DynamicResource SurfaceRaised}"
-                                                           CornerRadius="12" ClipToBounds="True"
-                                                           IsVisible="{Binding !IsLiked}">
-                                                       <Grid ColumnDefinitions="88,*" Height="88">
-                                                           <controls:ArtworkImage Grid.Column="0"
-                                                                   Width="88" Height="88" DisplaySize="88"
-                                                                   CornerRadius="0"
-                                                                   ServerId="{Binding ServerId}"
-                                                                   ArtworkKey="{Binding ArtworkKey}"
-                                                                   FallbackText="{Binding FallbackText}"
-                                                                   FallbackFontSize="24"
-                                                                   FallbackFontWeight="SemiBold"
-                                                                   FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
-                                                           <StackPanel Grid.Column="1" Spacing="4"
-                                                                       VerticalAlignment="Center" Margin="18,0,16,0">
-                                                               <TextBlock Text="{Binding Title}" Classes="primary"
-                                                                          FontSize="22" FontWeight="SemiBold" />
-                                                               <TextBlock Text="{Binding Subtitle}" Classes="secondary"
-                                                                          FontSize="15"
-                                                                          IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                                           </StackPanel>
-                                                       </Grid>
-                                                   </Border>
-                                               </Panel>
+                                                       </Border>
+                                                       <controls:ArtworkImage Grid.Column="0"
+                                                               Width="88" Height="88" DisplaySize="88"
+                                                               CornerRadius="0"
+                                                               ServerId="{Binding ServerId}"
+                                                               ArtworkKey="{Binding ArtworkKey}"
+                                                               FallbackText="{Binding FallbackText}"
+                                                               FallbackFontSize="24"
+                                                               FallbackFontWeight="SemiBold"
+                                                               FallbackForeground="{DynamicResource ArtworkFallbackPrimary}"
+                                                               IsVisible="{Binding !IsLiked}" />
+                                                       <StackPanel Grid.Column="1" Spacing="4"
+                                                                   VerticalAlignment="Center" Margin="18,0,16,0">
+                                                           <TextBlock Text="{Binding Title}" Classes="primary"
+                                                                      FontSize="22" FontWeight="SemiBold" />
+                                                           <TextBlock Text="{Binding Subtitle}" Classes="secondary"
+                                                                      FontSize="15"
+                                                                      IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                       </StackPanel>
+                                                   </Grid>
+                                               </Border>
                                            </Button>
                                        </DataTemplate>
                                    </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+                            </DataTemplate>
+
+                            <DataTemplate DataType="vm:HomeMessageRow">
+                                <Border Background="{DynamicResource SurfaceRaised}"
+                                        CornerRadius="12" Padding="18" Margin="0,0,20,16">
+                                    <TextBlock Text="{Binding Message}" Classes="secondary" />
+                                </Border>
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:HomeSectionTitleRow">

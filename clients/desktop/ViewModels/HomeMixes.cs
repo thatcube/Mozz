@@ -34,6 +34,8 @@ public sealed record HomeMixGridRow(IReadOnlyList<HomeMixTile> Mixes) : HomeRow;
 
 public sealed record HomeSectionTitleRow(string Title) : HomeRow;
 
+public sealed record HomeMessageRow(string Message) : HomeRow;
+
 public sealed record HomeTrackCard(Track Track, string Subtitle);
 
 public sealed record HomeTrackShelfRow(IReadOnlyList<HomeTrackCard> Tracks) : HomeRow;
@@ -44,6 +46,14 @@ public sealed record HomePlaylistShelfRow(IReadOnlyList<Playlist> Playlists) : H
 
 public static class HomeMixPresentation
 {
+    public const string NoAttachedHomeServerMessage = "Choose a server in Settings to fill Home.";
+    public const string CardSurfaceToken = "SurfaceRaised";
+    public const string PrimaryTextToken = "primary";
+    public const string SecondaryTextToken = "secondary";
+    public const string LikedLeadingFillToken = "Accent";
+    public const string LikedLeadingContent = "heart";
+    public const string ArtworkLeadingContent = "artwork";
+
     public static IReadOnlyList<HomeMixTile> BuildTiles(int likedCount, IEnumerable<HomeMix> mixes, string? artworkServerId = null)
     {
         var tiles = new List<HomeMixTile>();
@@ -75,6 +85,14 @@ public static class HomeMixPresentation
 
     public static string FormatSongCount(int count) => count == 1 ? "1 song" : $"{count} songs";
 
+    public static HomeMixCardStructure BuildCardStructure(HomeMixTile tile) =>
+        new(
+            CardSurfaceToken,
+            PrimaryTextToken,
+            SecondaryTextToken,
+            tile.IsLiked ? LikedLeadingFillToken : null,
+            tile.IsLiked ? LikedLeadingContent : ArtworkLeadingContent);
+
     public static string? FormatSubtitle(string? subtitle) =>
         string.IsNullOrWhiteSpace(subtitle) ? "Made for You" : subtitle.Trim();
 
@@ -99,6 +117,13 @@ public static class HomeMixPresentation
         || metadata.StartsWith($"{subtitle} ·", StringComparison.CurrentCultureIgnoreCase);
 }
 
+public sealed record HomeMixCardStructure(
+    string CardSurfaceToken,
+    string TitleTextToken,
+    string SubtitleTextToken,
+    string? LeadingFillToken,
+    string LeadingContent);
+
 public static class HomeComposition
 {
     public static IReadOnlyList<HomeRow> BuildRows(
@@ -109,11 +134,15 @@ public static class HomeComposition
         int mixColumns,
         int trackColumns,
         int albumColumns,
-        int playlistColumns)
+        int playlistColumns,
+        string? message = null)
     {
         var rows = new List<HomeRow>();
         foreach (var row in MediaDetailFormatting.ChunkRows(mixes, mixColumns))
             rows.Add(new HomeMixGridRow(row));
+
+        if (!string.IsNullOrWhiteSpace(message))
+            rows.Add(new HomeMessageRow(message));
 
         AddTrackShelf(rows, "Recently Played", recentlyPlayed, trackColumns);
         AddAlbumShelf(rows, "Recently Added", recentlyAddedAlbums, albumColumns);
@@ -159,6 +188,29 @@ public static class HomeComposition
     }
 }
 
+public static class HomeShelfLoader
+{
+    public static async Task<IReadOnlyList<T>> LoadAsync<T>(
+        string label,
+        CoreRequest request,
+        Func<CoreRequest, Task<IReadOnlyList<T>?>> load,
+        ICollection<string> messages)
+    {
+        try
+        {
+            var rows = await load(request);
+            if (rows is not null) return rows;
+            messages.Add($"Could not load {label}: no data returned.");
+        }
+        catch (Exception ex)
+        {
+            messages.Add($"Could not load {label}: {ex.Message}");
+        }
+
+        return [];
+    }
+}
+
 public sealed record HomeMixLoadResult(
     IReadOnlyList<HomeMix> Mixes,
     IReadOnlyList<Track> LikedTracks,
@@ -176,24 +228,28 @@ public static class HomeMixLoader
     {
         var mixes = await readMixes();
         var liked = await readLikedTracks();
+        var attachedServerIds = serverIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         if (mixes.Count > 0)
         {
             return new HomeMixLoadResult(mixes, liked, Generated: false, Message: null);
         }
 
-        if (serverIds.Count == 0)
+        if (attachedServerIds.Count == 0)
         {
             return new HomeMixLoadResult(
                 mixes,
                 liked,
                 Generated: false,
-                Message: "No generated mixes yet — connect or sync a server to build Home.");
+                Message: HomeMixPresentation.NoAttachedHomeServerMessage);
         }
 
         try
         {
             generationStarted?.Invoke();
-            foreach (var serverId in serverIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+            foreach (var serverId in attachedServerIds)
             {
                 await generateMixes(serverId);
             }

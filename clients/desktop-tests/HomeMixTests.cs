@@ -31,6 +31,23 @@ public class HomeMixTests
     }
 
     [Fact]
+    public void LikedAndMixCardsShareSurfaceAndTextStructure()
+    {
+        var tiles = HomeMixPresentation.BuildTiles(2, [Mix("supermix", "Supermix", null)]);
+
+        var liked = HomeMixPresentation.BuildCardStructure(tiles[0]);
+        var mix = HomeMixPresentation.BuildCardStructure(tiles[1]);
+
+        Assert.Equal(mix.CardSurfaceToken, liked.CardSurfaceToken);
+        Assert.Equal(mix.TitleTextToken, liked.TitleTextToken);
+        Assert.Equal(mix.SubtitleTextToken, liked.SubtitleTextToken);
+        Assert.Equal(HomeMixPresentation.LikedLeadingFillToken, liked.LeadingFillToken);
+        Assert.Null(mix.LeadingFillToken);
+        Assert.Equal(HomeMixPresentation.LikedLeadingContent, liked.LeadingContent);
+        Assert.Equal(HomeMixPresentation.ArtworkLeadingContent, mix.LeadingContent);
+    }
+
+    [Fact]
     public void TrackCollectionMetaFormatsCountAndDuration()
     {
         var meta = HomeMixPresentation.TrackCollectionMeta([
@@ -102,6 +119,24 @@ public class HomeMixTests
     }
 
     [Fact]
+    public void HomeRowsShowNoServerMessageInsteadOfBlankHome()
+    {
+        var rows = HomeComposition.BuildRows(
+            [],
+            [],
+            [],
+            [],
+            mixColumns: 2,
+            trackColumns: 3,
+            albumColumns: 4,
+            playlistColumns: 4,
+            message: HomeMixPresentation.NoAttachedHomeServerMessage);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(HomeMixPresentation.NoAttachedHomeServerMessage, Assert.IsType<HomeMessageRow>(row).Message);
+    }
+
+    [Fact]
     public void HomeEmptyStateWaitsForEveryShelfToBeEmpty()
     {
         Assert.True(HomeComposition.IsEmpty([], [], [], []));
@@ -162,10 +197,40 @@ public class HomeMixTests
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([]),
             readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
             generateMixes: _ => throw new InvalidOperationException("should not run"),
-            serverIds: []);
+            serverIds: [""]);
 
         Assert.False(result.Generated);
-        Assert.Equal("No generated mixes yet — connect or sync a server to build Home.", result.Message);
+        Assert.Equal(HomeMixPresentation.NoAttachedHomeServerMessage, result.Message);
+    }
+
+    [Fact]
+    public async Task ShelfFailuresReturnNoRowsAndSurfaceStatusMessage()
+    {
+        var messages = new List<string>();
+
+        var rows = await HomeShelfLoader.LoadAsync<Track>(
+            "Recently Played",
+            new CoreRequest("recentlyPlayedTracks") { ServerId = "server" },
+            _ => throw new InvalidOperationException("server unavailable"),
+            messages);
+
+        Assert.Empty(rows);
+        Assert.Equal(["Could not load Recently Played: server unavailable"], messages);
+    }
+
+    [Fact]
+    public async Task ShelfNullPayloadReturnsNoRowsAndSurfaceStatusMessage()
+    {
+        var messages = new List<string>();
+
+        var rows = await HomeShelfLoader.LoadAsync<Album>(
+            "Recently Added",
+            new CoreRequest("recentlyAddedAlbums") { ServerId = "server" },
+            _ => Task.FromResult<IReadOnlyList<Album>?>(null),
+            messages);
+
+        Assert.Empty(rows);
+        Assert.Equal(["Could not load Recently Added: no data returned."], messages);
     }
 
     [Fact]
