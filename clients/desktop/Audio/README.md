@@ -51,11 +51,63 @@ with distributing the app under GPL-3.0:
   (`LICENSE.txt` in the package). GPL-compatible.
 - **FFmpeg** — LGPL-2.1+ for the default build, GPL if built with GPL options.
   Either is compatible with a GPL-3.0 application, and here FFmpeg is invoked as
-  a **separate executable** the user already has on `PATH`, so it is not even
-  linked into the app — the loosest possible coupling.
+  a **separate executable** (located per `FfmpegProcessDecoder.ResolveFfmpeg` /
+  `FfmpegLocator`, below), so it is not even linked into the app — the loosest
+  possible coupling.
 
 We link `Hexa.NET.MiniAudio` (MIT) and shell out to `ffmpeg` ((L)GPL). Nothing
 proprietary is linked or shipped.
+
+## Finding ffmpeg, and why "on PATH" was not enough
+
+Playback failed on macOS with *"Could not open …"* for a reason that had nothing
+to do with the audio: a double-clicked `.app` is launched by `launchd`, not a
+shell, and inherits `launchd`'s minimal `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin`,
+which does **not** include `/opt/homebrew/bin`. Homebrew's ffmpeg lives there, so
+`Process.Start("ffmpeg")` threw *"No such file or directory"* even though ffmpeg
+was installed and worked perfectly from a terminal. Launching from a shell (or
+`open` from one) hides the bug, because then the process inherits the shell's
+full `PATH` — which is exactly why it looked like it had been ruled out. Windows
+never saw it: its release bundles ffmpeg beside the app.
+
+So the decoder no longer trusts the process `PATH` alone. `FfmpegLocator` resolves
+ffmpeg in this order, and the first hit wins: an explicit `MOZZ_FFMPEG` override →
+a copy shipped beside the app → the absolute directories a package manager
+actually installs into (`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`,
+`/usr/bin`, `/bin`, `/snap/bin`) → the bare name for the OS to resolve. The
+ordering is unit-tested with an injected filesystem, no subprocess required
+(`FfmpegDiagnosticsTests`). The fix needs nothing from the user: a normal Mac
+with Homebrew ffmpeg just works, GUI-launched or not.
+
+## Surfacing failures (and never printing the token)
+
+Two diagnostics bugs made this hard to see, both fixed:
+
+- **The reason was lost.** The old message led with the whole track URL and
+  appended `ex.Message`; on Plex that URL is hundreds of characters, so a status
+  bar truncated away the one part that mattered. Messages now lead with the
+  reason and put the (redacted) source second — `AudioDiagnostics.DescribeOpenFailure`.
+- **A network/TLS/HTTP failure was silent.** When ffmpeg *is* found but dies at
+  the network layer (bad certificate, 401, 404, refused), it exits non-zero and
+  writes the reason to stderr — but the pipeline treats a decoder that stops
+  producing frames as a finished track. `FfmpegProcessDecoder` now implements
+  `IDecoderDiagnostics`; `PcmPipeline.OnCurrentEnded` asks a drained decoder
+  whether it *failed* (before disposing it, which would kill the process and
+  erase the evidence) and raises `Error` with a one-line summary of ffmpeg's
+  stderr. A decode we tear down deliberately (seek/stop/dispose) is never
+  mistaken for a failure.
+
+`X-Plex-Token` (and `api_key`, `access_token`, …) is a credential and is
+**redacted** from every user-facing string and stderr summary via
+`AudioDiagnostics.Redact`, so it can never reach a status bar or a log.
+
+On **TLS specifically**: this was investigated and is *not* a Mozz problem. ffmpeg
+9's OpenSSL build validates publicly-trusted certificates — Plex's `*.plex.direct`
+certs included — against its compiled-in CA bundle with no help from us, and query
+strings pass through `ProcessStartInfo.ArgumentList` unmangled. A local self-signed
+server did fail verification (correctly), but a real Plex server presents a trusted
+cert, so no `-ca_file`/`SSL_CERT_FILE` override is shipped: it is unnecessary here
+and would risk masking a genuine bad-certificate warning.
 
 ## Gapless — genuinely supported, and how
 
@@ -90,9 +142,12 @@ Dsp/RingBuffer.cs            Lock-free single-producer/single-consumer float rin
 Dsp/Biquad.cs                RBJ biquads + a 10-band parametric equalizer.
 Dsp/ReplayGain.cs            dB→linear and track/album gain selection with pre-amp.
 Decoding/IPcmDecoder.cs      Decoder contract: interleaved F32 at the device rate.
+Decoding/IDecoderDiagnostics.cs  Optional: lets a drained decoder report why it failed.
 Decoding/WavPcmDecoder.cs    Pure-managed RIFF/WAVE reader (the ffmpeg-free path).
 Decoding/FfmpegProcessDecoder.cs  ffmpeg subprocess: all codecs + HTTP + seek.
+Decoding/FfmpegLocator.cs    Finds ffmpeg without trusting a GUI process's PATH.
 Decoding/DecoderFactory.cs   Picks WAV vs ffmpeg per source.
+AudioDiagnostics.cs          Token redaction + ffmpeg-stderr → one readable line.
 Platform/INowPlayingIntegration.cs  OS "now playing" seam (SMTC / MPNowPlayingInfoCenter).
 ```
 
