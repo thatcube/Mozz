@@ -36,11 +36,12 @@
                 <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14,18,14,14">
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="11" Margin="6,0,0,20">
-                        <Border Width="28" Height="28" CornerRadius="7"
-                                Background="{DynamicResource AccentDeep}">
-                            <TextBlock Text="M" FontSize="16" FontWeight="Bold" Foreground="White"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
+                        <!-- The actual app icon, not a letter in a box. The art
+                             is a pixel-art disc with transparent corners, so it
+                             needs no rounded plate behind it. -->
+                        <Image Source="avares://Mozz.Desktop/Assets/mozz.png"
+                               Width="28" Height="28"
+                               RenderOptions.BitmapInterpolationMode="HighQuality" />
                         <TextBlock Text="Mozz" FontSize="21" FontWeight="Bold"
                                    Foreground="{DynamicResource TextPrimary}"
                                    VerticalAlignment="Center" />
