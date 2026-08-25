@@ -42,12 +42,7 @@ public class PcmPipelineGaplessTests
 
         var captured = new List<float>(total * ch + rate);
         var buf = new float[512 * ch];
-        int guard = 0;
-        while (!ended.IsSet && guard++ < 100_000)
-        {
-            pipe.Render(buf);
-            captured.AddRange(buf);
-        }
+        PipelinePump.RenderUntil(pipe, buf, ended, onRendered: captured.AddRange);
         // Flush any trailing partial buffer the loop may have missed.
         pipe.Render(buf);
         captured.AddRange(buf);
@@ -55,7 +50,7 @@ public class PcmPipelineGaplessTests
         // The queue advanced exactly once, into the track we preloaded.
         Assert.Equal(1, changedCount);
         Assert.Equal("B", changedToken);
-        Assert.True(ended.IsSet, "playback should have ended after the queue drained");
+        Assert.True(ended.Wait(TimeSpan.FromSeconds(10)), "playback should have ended after the queue drained");
 
         // Every frame of the drained stream equals the single continuous sine —
         // this is the gapless guarantee. Trim two frames at the very end to stay
@@ -119,12 +114,7 @@ public class PcmPipelineGaplessTests
 
         var captured = new List<float>(total * ch + rate);
         var buf = new float[512 * ch];
-        int guard = 0;
-        while (!ended.IsSet && guard++ < 100_000)
-        {
-            pipe.Render(buf);
-            captured.AddRange(buf);
-        }
+        PipelinePump.RenderUntil(pipe, buf, ended, onRendered: captured.AddRange);
         pipe.Render(buf);
         captured.AddRange(buf);
 
@@ -162,9 +152,7 @@ public class PcmPipelineGaplessTests
         Thread.Sleep(200);
 
         var buf = new float[512 * ch];
-        int guard = 0;
-        while (!ended.IsSet && guard++ < 100_000) pipe.Render(buf);
-        Assert.True(ended.IsSet);
+        PipelinePump.RenderUntilOrFail(pipe, buf, ended, "playback should have ended");
 
         pipe.PreloadNext(decB, new AudioSource("mem://b"), "B");
         Thread.Sleep(200);
@@ -188,11 +176,8 @@ public class PcmPipelineGaplessTests
         Thread.Sleep(200);
 
         var buf = new float[512 * ch];
-        int guard = 0;
-        while (!ended.IsSet && guard++ < 100_000)
-            pipe.Render(buf);
-
-        Assert.True(ended.IsSet, "PlaybackEnded should fire once a single-track queue drains");
+        PipelinePump.RenderUntilOrFail(pipe, buf, ended,
+            "PlaybackEnded should fire once a single-track queue drains");
         Assert.Equal(PlaybackState.Stopped, pipe.State);
         Assert.True(pipe.Position.TotalSeconds > 0.05, "position should have advanced during playback");
     }
@@ -225,12 +210,13 @@ public class ReplayGainPipelineTests
 
         var buf = new float[512 * ch];
         float peak = 0;
-        int guard = 0;
-        while (!ended.IsSet && guard++ < 100_000)
-        {
-            pipe.Render(buf);
-            foreach (var s in buf) peak = Math.Max(peak, Math.Abs(s));
-        }
+
+        // Drain the whole track: a short read would measure the peak of a
+        // fragment, and the gain comparison would be against the wrong number.
+        PipelinePump.RenderUntilOrFail(pipe, buf, ended,
+            "the track should have drained before its peak is measured",
+            onRendered: b => { foreach (var s in b) peak = Math.Max(peak, Math.Abs(s)); });
+
         return peak;
     }
 
