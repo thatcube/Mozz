@@ -1,10 +1,10 @@
-using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 using Mozz.Desktop.Views;
 
@@ -37,13 +37,7 @@ public partial class App : Application
     /// </summary>
     private void OnAboutMozz(object? sender, System.EventArgs e)
     {
-        var version = typeof(App).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? typeof(App).Assembly.GetName().Version?.ToString()
-            ?? "unknown";
-        // Strip the "+<commit sha>" the SDK appends to an informational version.
-        var plus = version.IndexOf('+');
-        if (plus > 0) version = version[..plus];
+        var version = AppVersion.FromAssembly(typeof(App).Assembly);
 
         var window = new Window
         {
