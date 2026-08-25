@@ -161,6 +161,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nowPlaying_os.PlayPauseRequested += (_, _) => Dispatcher.UIThread.Post(TogglePlayPause);
         _nowPlaying_os.NextRequested += (_, _) => Dispatcher.UIThread.Post(() => _ = NextAsync());
         _nowPlaying_os.PreviousRequested += (_, _) => Dispatcher.UIThread.Post(() => _ = PreviousAsync());
+        _nowPlaying_os.StopRequested += (_, _) => Dispatcher.UIThread.Post(StopPlayback);
 
         // ~10 Hz is enough for a smooth progress bar and costs almost nothing.
         _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -576,6 +577,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             await PlayIndexAsync(_queueIndex - 1);
         }
+    }
+
+    private void StopPlayback()
+    {
+        _engine?.Stop();
+        IsPlaying = false;
+        _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
     }
 
     private void OnPositionTick(object? sender, EventArgs e)
