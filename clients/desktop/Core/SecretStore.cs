@@ -241,7 +241,7 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     private readonly string _serviceName;
     private readonly bool _requireDataProtectionKeychain;
     private readonly bool _allowLocalFileFallback;
-    private readonly FileSecretStore _fileFallback = new();
+    private readonly FileSecretStore _fileFallback;
     private bool _dataProtectionUnavailable;
 
     public MacKeychainSecretStore() : this(DefaultServiceName, allowLocalFileFallback: IsLocalDevelopmentBundle()) { }
@@ -249,11 +249,13 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     internal MacKeychainSecretStore(
         string serviceName,
         bool requireDataProtectionKeychain = false,
-        bool allowLocalFileFallback = false)
+        bool allowLocalFileFallback = false,
+        string? fileFallbackDirectory = null)
     {
         _serviceName = serviceName;
         _requireDataProtectionKeychain = requireDataProtectionKeychain;
         _allowLocalFileFallback = allowLocalFileFallback;
+        _fileFallback = new FileSecretStore(fileFallbackDirectory);
     }
 
     internal static bool CanUseDataProtectionKeychainForTests()
@@ -546,7 +548,24 @@ internal sealed class FileSecretStore : ISecretStore
     public string Description =>
         $"a file readable only by your user account ({Directory}) — not encrypted at rest";
 
-    private static string Directory => Path.Combine(AppPaths.SupportDirectory, "credentials");
+    /// <summary>
+    /// Where the credential files live. Injectable so a test can be pointed at
+    /// a scratch directory.
+    /// </summary>
+    /// <remarks>
+    /// A constructor parameter rather than an environment variable, because the
+    /// test runner parallelises test classes and an environment variable is
+    /// process-global: one class tearing it down would pull it out from under
+    /// another. It needs to be injectable at all because these tests were
+    /// writing into the real credential directory, beside a live install's
+    /// actual token.
+    /// </remarks>
+    private readonly string _directory;
+
+    public FileSecretStore(string? directory = null) =>
+        _directory = directory ?? Path.Combine(AppPaths.SupportDirectory, "credentials");
+
+    private string Directory => _directory;
 
     public string? Get(string key)
     {
