@@ -29,12 +29,25 @@ public struct HistorySyncStore: Sendable {
     /// column existed. Returns how many rows were filled, so a caller can loop
     /// until it reaches zero.
     ///
+    /// `legacyLocalKind` migrates the *older* scheme, where Apple clients wrote
+    /// a platform kind — "iphone" or "mac" — instead of a device identity. Those
+    /// have to become a real device id, because a kind is not unique and two
+    /// phones would merge as though they were one device.
+    ///
+    /// Only rows matching this device's own kind are rewritten. That restriction
+    /// is the whole point: on a phone, a row marked "mac" arrived from a Mac
+    /// through history sync, and claiming it as local would attribute someone
+    /// else's listening to this device and then export it back as ours. Pass
+    /// nil on a client that never wrote the old kinds.
+    ///
     /// A conflict is possible in principle (two identical events on the same
     /// device in the same millisecond), so the write ignores it: the row simply
     /// keeps a NULL uid and never syncs, which is a far better outcome than
     /// failing the migration for everyone.
     @discardableResult
-    public func backfillUIDs(localDeviceID: String, limit: Int = 5_000) async throws -> Int {
+    public func backfillUIDs(localDeviceID: String,
+                             legacyLocalKind: String? = nil,
+                             limit: Int = 5_000) async throws -> Int {
         // A named type rather than a tuple: a six-element tuple of mixed
         // optionals is expensive enough to type-check that the release compiler
         // gives up on it ("unable to type-check this expression in reasonable
@@ -87,8 +100,17 @@ public struct HistorySyncStore: Sendable {
             var filled = 0
             for (id, uid) in assignments {
                 try db.execute(
-                    sql: "UPDATE OR IGNORE play_event SET event_uid = ? WHERE id = ?",
-                    arguments: [uid, id]
+                    sql: """
+                        UPDATE OR IGNORE play_event
+                        SET event_uid = ?,
+                            device = CASE
+                                WHEN device IS NULL THEN ?
+                                WHEN ? IS NOT NULL AND device = ? THEN ?
+                                ELSE device
+                            END
+                        WHERE id = ?
+                        """,
+                    arguments: [uid, localDeviceID, legacyLocalKind, legacyLocalKind, localDeviceID, id]
                 )
                 filled += db.changesCount
             }

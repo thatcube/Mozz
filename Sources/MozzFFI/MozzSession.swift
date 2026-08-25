@@ -48,6 +48,7 @@ struct SessionRequest: Decodable {
     /// Spec-name alias for cursor-paged detail shelves.
     var after: String?
     var trackCount: Int?
+    var year: Int?
 
     // Server connection / sync / streaming. See `MozzSessionServer.swift`.
     var kind: String?
@@ -66,6 +67,25 @@ struct SessionRequest: Decodable {
     var size: Int?
     var maxBitrateKbps: Int?
     var forceTranscode: Bool?
+
+    // Listening history.
+    var eventKind: String?
+    var positionSeconds: Double?
+    var durationSeconds: Double?
+    var positionMS: Int64?
+    var durationMS: Int64?
+    var createdAtMS: Int64?
+    var context: String?
+    var contextId: String?
+    var contextID: String?
+    var deviceId: String?
+    var deviceID: String?
+    var deviceName: String?
+    var sinceMS: Int64?
+    var windowDays: Int?
+    var maxBytes: Int?
+    var batch: HistoryExchangeBatch?
+    var batches: [HistoryExchangeBatch]?
 
     // Recommendations.
     var setId: String?
@@ -291,6 +311,10 @@ private struct WireSuppression: Encodable {
 
 private struct WireAction: Encodable {
     var ok: Bool
+}
+
+private struct WireHistoryImport: Encodable {
+    var imported: Int
 }
 
 // MARK: - Mapping
@@ -630,6 +654,86 @@ private func dispatch(
         let rows = try await repo.recentlyPlayedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
 
+    case "recordPlayEvent":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "recordPlayEvent needs serverId and remoteId")
+        }
+        let kindRaw = request.eventKind ?? request.kind
+        guard let kindRaw, let eventKind = PlayEventKind(rawValue: kindRaw) else {
+            return sessionFailure(request.id, request.cmd, "recordPlayEvent needs kind")
+        }
+        guard let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty else {
+            return sessionFailure(request.id, request.cmd, "recordPlayEvent needs deviceID")
+        }
+        let createdAt = request.createdAtMS
+            .map { Date(timeIntervalSince1970: Double($0) / 1000) }
+            ?? Date()
+        let positionSeconds = request.positionSeconds
+            ?? request.positionMS.map { Double($0) / 1000 }
+        let durationSeconds = request.durationSeconds
+            ?? request.durationMS.map { Double($0) / 1000 }
+        let recorded = try await HistoryExchangeStore(session.database).recordLocalPlayEvent(
+            PlayEvent(
+                trackID: remoteId,
+                kind: eventKind,
+                positionSeconds: positionSeconds,
+                durationSeconds: durationSeconds,
+                context: request.context,
+                contextID: request.contextID ?? request.contextId,
+                createdAt: createdAt
+            ),
+            serverId: serverId,
+            deviceID: deviceID
+        )
+        return sessionSuccess(request, recorded)
+
+    case "playHistory":
+        let page = try await HistoryExchangeStore(session.database).recentEventsPage(
+            serverId: serverId,
+            after: (request.after ?? request.cursor).flatMap(HistoryEventPageCursor.init(token:)),
+            limit: limit
+        )
+        return sessionSuccess(request, page.rows, nextCursor: page.next?.token)
+
+    case "historyExportBatch":
+        guard let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty else {
+            return sessionFailure(request.id, request.cmd, "historyExportBatch needs deviceID")
+        }
+        let batch = try await HistoryExchangeStore(session.database).exportBatch(
+            localDeviceID: deviceID,
+            deviceName: request.deviceName ?? "",
+            sinceMS: request.sinceMS,
+            windowDays: request.windowDays ?? 180,
+            maximumBytes: min(max(1, request.maxBytes ?? HistoryExchangeStore.defaultMaximumBatchBytes), 1_048_576)
+        )
+        return sessionSuccess(request, batch)
+
+    case "historyImportBatches":
+        guard let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty else {
+            return sessionFailure(request.id, request.cmd, "historyImportBatches needs deviceID")
+        }
+        let batches = request.batches ?? request.batch.map { [$0] }
+        guard let batches else {
+            return sessionFailure(request.id, request.cmd, "historyImportBatches needs batches")
+        }
+        let imported = try await HistoryExchangeStore(session.database).importBatches(
+            batches,
+            localDeviceID: deviceID
+        )
+        return sessionSuccess(request, WireHistoryImport(imported: imported))
+
+    case "historyYearRollup":
+        guard let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty else {
+            return sessionFailure(request.id, request.cmd, "historyYearRollup needs deviceID")
+        }
+        let calendar = HistoryRollupBuilder.utcCalendar
+        let year = request.year ?? calendar.component(.year, from: Date())
+        let rollup = try await HistoryExchangeStore(session.database).yearRollup(
+            year: year,
+            localDeviceID: deviceID
+        )
+        return sessionSuccess(request, rollup)
+
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
@@ -773,6 +877,8 @@ let mozzSessionCommands = [
     "artist", "album", "artistAlbums", "artistTopTracks", "artistAppearsOn",
     "albumTracks", "albumReleaseKind", "playlists", "playlistTracks",
     "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
+    "recordPlayEvent", "playHistory", "historyExportBatch",
+    "historyImportBatches", "historyYearRollup",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",

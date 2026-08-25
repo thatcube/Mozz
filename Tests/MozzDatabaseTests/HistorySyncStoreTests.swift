@@ -38,6 +38,37 @@ final class HistorySyncStoreTests: XCTestCase {
 
     // MARK: Backfill
 
+    /// Apple clients used to write a platform *kind* — "iphone" or "mac" —
+    /// where a device identity belongs. Migrating those is right, but only for
+    /// the rows this device itself wrote: a row marked "mac" sitting in a
+    /// phone's database arrived over history sync from a Mac, and rewriting it
+    /// would attribute that listening to the phone and then publish it back as
+    /// the phone's own.
+    func testBackfillClaimsOnlyItsOwnLegacyKind() async throws {
+        let db = try makeDatabase()
+        let sync = HistorySyncStore(db)
+
+        try await db.write { database in
+            for (i, device) in [nil, "iphone", "mac"].enumerated() {
+                try database.execute(
+                    sql: """
+                        INSERT INTO play_event (track_ref, kind, created_at, device)
+                        VALUES (?, 'completed', ?, ?)
+                        """,
+                    arguments: ["srv:t\(i)", 1_800_000_000 + Double(i), device])
+            }
+        }
+
+        // Standing in for a phone: its own kind is "iphone".
+        _ = try await sync.backfillUIDs(localDeviceID: "phone-uuid", legacyLocalKind: "iphone")
+
+        let devices = try await db.read { database in
+            try String.fetchAll(database, sql: "SELECT device FROM play_event ORDER BY track_ref")
+        }
+        XCTAssertEqual(devices, ["phone-uuid", "phone-uuid", "mac"],
+                       "a row that came from a Mac must keep its provenance")
+    }
+
     func testBackfillAssignsDeterministicUIDs() async throws {
         let db = try makeDatabase()
         let events = PlayEventStore(db)
@@ -81,6 +112,30 @@ final class HistorySyncStoreTests: XCTestCase {
         // stop looping.
         let secondPass = try await sync.backfillUIDs(localDeviceID: "dev-a")
         XCTAssertEqual(secondPass, 0)
+    }
+
+    func testBackfillNormalizesLegacyAppleDeviceLabels() async throws {
+        let db = try makeDatabase()
+        let events = PlayEventStore(db)
+        let sync = HistorySyncStore(db)
+
+        try await appendLocalEvent(
+            events,
+            trackID: "t1",
+            at: Date(timeIntervalSince1970: 1_800_000_000),
+            device: "iphone"
+        )
+
+        // The kind has to be named, rather than any legacy label being claimed:
+        // see testBackfillClaimsOnlyItsOwnLegacyKind for why the broad version
+        // would steal a Mac's listening and republish it as this device's.
+        let filled = try await sync.backfillUIDs(localDeviceID: "dev-a", legacyLocalKind: "iphone")
+        XCTAssertEqual(filled, 1)
+
+        let device = try await db.read { database in
+            try String.fetchOne(database, sql: "SELECT device FROM play_event")
+        }
+        XCTAssertEqual(device, "dev-a")
     }
 
     // MARK: Export

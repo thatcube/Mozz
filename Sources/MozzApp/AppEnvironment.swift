@@ -2288,7 +2288,11 @@ public final class AppEnvironment: ObservableObject {
         playback.onPlayEvent = { [weak self] event in
             Task { @MainActor in
                 guard let self, let serverId = self.active?.connection.id else { return }
-                try? await self.playEvents.append(event, serverId: serverId, device: Self.deviceKind)
+                try? await self.playEvents.append(
+                    event,
+                    serverId: serverId,
+                    device: Self.continuityDeviceID(from: self.clientIdentifier)
+                )
             }
         }
     }

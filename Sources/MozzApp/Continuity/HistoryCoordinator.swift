@@ -48,6 +48,17 @@ public final class HistoryCoordinator: ObservableObject {
     /// Set once the pre-`event_uid` rows have all been given one. Until then a
     /// device cannot publish, because rows without a uid have no identity to
     /// merge on.
+    /// The value Apple clients wrote into `play_event.device` before the column
+    /// held a device identity. Kept here only so the old rows can be recognised
+    /// and migrated; nothing writes it any more.
+    private static let legacyLocalDeviceKind: String = {
+        #if os(iOS)
+        return "iphone"
+        #else
+        return "mac"
+        #endif
+    }()
+
     private var hasBackfilled = false
 
     public init() {}
@@ -103,7 +114,15 @@ public final class HistoryCoordinator: ObservableObject {
         if !hasBackfilled {
             var remaining = 4
             while remaining > 0 {
-                let filled = (try? await sync.backfillUIDs(localDeviceID: deviceID)) ?? 0
+                // Apple clients used to stamp a platform kind rather than a
+                // device identity, so those rows are migrated here too — but
+                // only the ones this platform itself wrote. A row marked with
+                // the *other* kind came in over history sync from a different
+                // machine, and claiming it would attribute that listening to
+                // this device and then publish it back as ours.
+                let filled = (try? await sync.backfillUIDs(
+                    localDeviceID: deviceID,
+                    legacyLocalKind: Self.legacyLocalDeviceKind)) ?? 0
                 if filled == 0 { break }
                 remaining -= 1
             }
