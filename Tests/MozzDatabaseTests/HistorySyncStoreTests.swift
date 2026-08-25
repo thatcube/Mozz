@@ -83,6 +83,27 @@ final class HistorySyncStoreTests: XCTestCase {
         XCTAssertEqual(secondPass, 0)
     }
 
+    func testBackfillNormalizesLegacyAppleDeviceLabels() async throws {
+        let db = try makeDatabase()
+        let events = PlayEventStore(db)
+        let sync = HistorySyncStore(db)
+
+        try await appendLocalEvent(
+            events,
+            trackID: "t1",
+            at: Date(timeIntervalSince1970: 1_800_000_000),
+            device: "iphone"
+        )
+
+        let filled = try await sync.backfillUIDs(localDeviceID: "dev-a")
+        XCTAssertEqual(filled, 1)
+
+        let device = try await db.read { database in
+            try String.fetchOne(database, sql: "SELECT device FROM play_event")
+        }
+        XCTAssertEqual(device, "dev-a")
+    }
+
     // MARK: Export
 
     func testExportReturnsOnlyThisDevicesEvents() async throws {
