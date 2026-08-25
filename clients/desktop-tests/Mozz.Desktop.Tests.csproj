@@ -39,6 +39,7 @@
     <Compile Include="..\desktop\ViewModels\DetailRows.cs" />
     <Compile Include="..\desktop\ViewModels\MediaDetailFormatting.cs" />
     <Compile Include="..\desktop\ViewModels\PlaybackQueue.cs" />
+    <Compile Include="..\desktop\ViewModels\ContinuityPresentation.cs" />
     <Compile Include="..\desktop\ViewModels\SearchPresentation.cs" />
     <Compile Include="..\desktop\ViewModels\GenrePresentation.cs" />
     <Compile Include="..\desktop\ViewModels\SettingsModels.cs" />

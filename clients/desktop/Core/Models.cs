@@ -219,6 +219,13 @@ public sealed record CoreRequest(
     [JsonPropertyName("state")] public string? State { get; init; }
     [JsonPropertyName("positionSeconds")] public double? PositionSeconds { get; init; }
     [JsonPropertyName("useLRCLIB")] public bool? UseLRCLIB { get; init; }
+
+    [JsonPropertyName("playbackRunID")] public string? PlaybackRunID { get; init; }
+    [JsonPropertyName("cursorSequence")] public ulong? CursorSequence { get; init; }
+    [JsonPropertyName("capturedAtMS")] public long? CapturedAtMS { get; init; }
+    [JsonPropertyName("currentRemoteID")] public string? CurrentRemoteID { get; init; }
+    [JsonPropertyName("currentAbsoluteIndex")] public int? CurrentAbsoluteIndex { get; init; }
+    [JsonPropertyName("queue")] public ContinuityQueueInput? Queue { get; init; }
 }
 
 /// <summary>
@@ -228,3 +235,84 @@ public sealed record CoreRequest(
 /// background sync added one.
 /// </summary>
 public sealed record Page<T>(T? Rows, string? NextCursor);
+
+public sealed record ContinuityDescriptor(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("sourceID")] string? SourceID = null,
+    [property: JsonPropertyName("sourceRevision")] string? SourceRevision = null);
+
+public sealed record ContinuityItemInput(
+    [property: JsonPropertyName("remoteID")] string RemoteID,
+    [property: JsonPropertyName("backend")] string Backend,
+    [property: JsonPropertyName("serverID")] string ServerID,
+    [property: JsonPropertyName("accountID")] string AccountID,
+    [property: JsonPropertyName("baseOrdinal")] int BaseOrdinal,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("artist")] string Artist,
+    [property: JsonPropertyName("durationMS")] long DurationMS,
+    [property: JsonPropertyName("artworkKey")] string? ArtworkKey);
+
+public sealed record ContinuityQueueInput(
+    [property: JsonPropertyName("descriptor")] ContinuityDescriptor Descriptor,
+    [property: JsonPropertyName("items")] IReadOnlyList<ContinuityItemInput> Items,
+    [property: JsonPropertyName("repeatMode")] string RepeatMode,
+    [property: JsonPropertyName("isShuffled")] bool IsShuffled,
+    [property: JsonPropertyName("totalCount")] int TotalCount,
+    [property: JsonPropertyName("startAbsoluteIndex")] int? StartAbsoluteIndex = null,
+    [property: JsonPropertyName("windowStartAbsoluteIndex")] int? WindowStartAbsoluteIndex = null,
+    [property: JsonPropertyName("isTruncated")] bool? IsTruncated = null);
+
+public sealed record ContinuityHash(
+    [property: JsonPropertyName("queueHash")] string QueueHash,
+    [property: JsonPropertyName("canonicalByteCount")] int CanonicalByteCount,
+    [property: JsonPropertyName("canonicalBytesHex")] string CanonicalBytesHex);
+
+public sealed record ContinuitySaveResult(
+    [property: JsonPropertyName("saved")] bool Saved,
+    [property: JsonPropertyName("queueHash")] string? QueueHash);
+
+public sealed record ContinuityFingerprint(
+    [property: JsonPropertyName("backend")] string Backend,
+    [property: JsonPropertyName("serverID")] string ServerID,
+    [property: JsonPropertyName("accountID")] string AccountID);
+
+public sealed record ContinuityTrackLocator(
+    [property: JsonPropertyName("server")] ContinuityFingerprint Server,
+    [property: JsonPropertyName("remoteID")] string RemoteID);
+
+public sealed record ContinuityCursor(
+    [property: JsonPropertyName("playbackRunID")] string PlaybackRunID,
+    [property: JsonPropertyName("deviceID")] string DeviceID,
+    [property: JsonPropertyName("deviceName")] string DeviceName,
+    [property: JsonPropertyName("deviceKind")] string? DeviceKind,
+    [property: JsonPropertyName("cursorSequence")] ulong CursorSequence,
+    [property: JsonPropertyName("capturedAtMS")] long CapturedAtMS,
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("current")] ContinuityTrackLocator Current,
+    [property: JsonPropertyName("currentAbsoluteIndex")] int CurrentAbsoluteIndex,
+    [property: JsonPropertyName("positionMS")] long PositionMS,
+    [property: JsonPropertyName("queueHash")] string? QueueHash);
+
+public sealed record ContinuityItem(
+    [property: JsonPropertyName("locator")] ContinuityTrackLocator Locator,
+    [property: JsonPropertyName("baseOrdinal")] int BaseOrdinal,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("artist")] string Artist,
+    [property: JsonPropertyName("durationMS")] long DurationMS,
+    [property: JsonPropertyName("artworkKey")] string? ArtworkKey);
+
+public sealed record ContinuityQueue(
+    [property: JsonPropertyName("queueHash")] string QueueHash,
+    [property: JsonPropertyName("descriptor")] ContinuityDescriptor Descriptor,
+    [property: JsonPropertyName("items")] IReadOnlyList<ContinuityItem> Items,
+    [property: JsonPropertyName("startAbsoluteIndex")] int StartAbsoluteIndex,
+    [property: JsonPropertyName("totalCount")] int TotalCount,
+    [property: JsonPropertyName("isTruncated")] bool IsTruncated,
+    [property: JsonPropertyName("repeatMode")] string RepeatMode,
+    [property: JsonPropertyName("isShuffled")] bool IsShuffled);
+
+public sealed record ContinuitySnapshot(
+    [property: JsonPropertyName("cursor")] ContinuityCursor Cursor,
+    [property: JsonPropertyName("queue")] ContinuityQueue? Queue,
+    [property: JsonPropertyName("isQueueMissing")] bool IsQueueMissing,
+    [property: JsonPropertyName("hydratedTracks")] IReadOnlyList<Track> HydratedTracks);
