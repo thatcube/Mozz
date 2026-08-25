@@ -45,6 +45,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnDetailRowActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || sender is not ListBox { SelectedItem: { } item }) return;
+
+        switch (item)
+        {
+            case AlbumTrackItemRow { Row: var row } when vm.PlayAlbumTrackCommand.CanExecute(row):
+                vm.PlayAlbumTrackCommand.Execute(row);
+                break;
+            case PlaylistTrackItemRow { Track: var track } when vm.PlayTrackCommand.CanExecute(track):
+                vm.PlayTrackCommand.Execute(track);
+                break;
+        }
+    }
+
     /// <summary>
     /// Tell the view model how much width the tiles have, so it can chunk the
     /// album and artist walls into rows of the right length. Layout drives this

@@ -19,6 +19,7 @@ public enum LibraryPageKind
     Section,
     AlbumDetail,
     ArtistDetail,
+    PlaylistDetail,
     MixDetail,
 }
 
@@ -27,6 +28,7 @@ public sealed record LibraryPage(
     LibrarySection? Section = null,
     Album? Album = null,
     Artist? Artist = null,
+    Playlist? Playlist = null,
     string? MixId = null,
     string? Title = null)
 {
@@ -38,6 +40,9 @@ public sealed record LibraryPage(
 
     public static LibraryPage ForArtist(Artist artist) =>
         new(LibraryPageKind.ArtistDetail, Artist: artist, Title: artist.Name);
+
+    public static LibraryPage ForPlaylist(Playlist playlist) =>
+        new(LibraryPageKind.PlaylistDetail, Playlist: playlist, Title: playlist.Title);
 
     public static LibraryPage ForMix(string id, string title) =>
         new(LibraryPageKind.MixDetail, MixId: id, Title: title);

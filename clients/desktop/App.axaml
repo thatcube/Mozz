@@ -256,6 +256,19 @@
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
+        <Style Selector="Button.accent">
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="18,9" />
+            <Setter Property="CornerRadius" Value="18" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+        </Style>
+
         <Style Selector="TextBlock.pageTitle">
             <Setter Property="FontSize" Value="30" />
             <Setter Property="FontWeight" Value="Bold" />
