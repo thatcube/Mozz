@@ -279,6 +279,17 @@ func dispatchServerCommand(
         let libraries = try await backend.fetchLibraries()
         return session.success(request, libraries.map { WireLibrary(id: $0.id, name: $0.name) })
 
+    case "account":
+        guard let backend = try requireBackend(request, session) else {
+            return session.failure(request, "account needs an attached serverId")
+        }
+        let account = await backend.signedInAccount(size: request.size ?? 120)
+        return session.success(request, WireAccount(
+            displayName: account.displayName,
+            username: account.username,
+            avatarURL: account.avatarURL?.absoluteString
+        ))
+
     case "sync":
         return try startSync(request, session)
 
@@ -414,7 +425,7 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
         kind: kind,
         name: request.serverName ?? kind.rawValue.capitalized,
         baseURL: baseURL,
-        userID: request.userID,
+        userID: request.userID ?? (kind == .subsonic ? request.username : nil),
         clientIdentifier: identifier
     )
     connection.musicSectionID = request.musicSectionID
@@ -427,7 +438,8 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
     case .plex:
         return PlexBackend(
             connection: connection, token: token, clientInfo: clientInfo(),
-            musicSectionIDs: request.musicSectionID.map { [$0] })
+            musicSectionIDs: request.musicSectionID.map { [$0] },
+            accountToken: request.accountToken)
     case .subsonic:
         guard let credential = SubsonicCredential.decode(token) else {
             throw MozzError.unsupported("subsonic attach needs an encoded credential as token")

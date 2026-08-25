@@ -97,10 +97,21 @@ public struct PlexAuthenticator: Sendable {
     /// publicly by plex.tv (no token), so it can be handed straight to an image
     /// loader.
     public func accountAvatarURL(accountToken: String) async throws -> URL? {
+        try await accountProfile(accountToken: accountToken).avatarURL
+    }
+
+    /// The plex.tv account identity. This is account-level (not server-level), so
+    /// it needs the PIN-flow account token; a per-server token is not accepted.
+    public func accountProfile(accountToken: String) async throws -> SignedInAccount {
         let authedClient = client.withDefaultHeaders(["X-Plex-Token": accountToken])
         let user = try await authedClient.send(Endpoint(path: "api/v2/user"), as: PlexAccountUser.self)
-        guard let thumb = user.thumb, !thumb.isEmpty else { return nil }
-        return URL(string: thumb)
+        let username = user.username.nonEmpty ?? user.email.nonEmpty
+        let displayName = user.title.nonEmpty ?? username
+        return SignedInAccount(
+            displayName: displayName,
+            username: username,
+            avatarURL: user.thumb.nonEmpty.flatMap(URL.init(string:))
+        )
     }
 
     /// Discover the account's servers and flatten them into candidate
@@ -130,6 +141,7 @@ public struct PlexAuthenticator: Sendable {
                 ))
             }
         }
+
         return connections.sorted(by: Self.preferLocal)
     }
 
@@ -152,6 +164,7 @@ public struct PlexAuthenticator: Sendable {
                 return connection
             }
         }
+
         return connections.first
     }
 
@@ -223,5 +236,12 @@ public struct PlexAuthenticator: Sendable {
             return connection.isLocal ? 0 : 1
         }
         return rank(lhs) < rank(rhs)
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var nonEmpty: String? {
+        guard let value = self, !value.isEmpty else { return nil }
+        return value
     }
 }
