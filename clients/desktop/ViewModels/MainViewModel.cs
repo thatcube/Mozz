@@ -185,7 +185,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// Servers pane, which is where someone goes precisely because the library
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
-    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
+    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false && ShowSettings == false
                                   && ShowDetailPage == false && ShowHomeRows == false;
 
     public string LibrarySummary =>
@@ -195,6 +195,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public ServerAccount? ActiveAccount => Connect.Accounts.FirstOrDefault();
     public bool HasActiveAccount => ActiveAccount is not null;
+    public string SidebarProfileTitle => SettingsPresentation.ProfileTitle(ActiveAccount);
+    public string SidebarProfileSubtitle => SettingsPresentation.ProfileSubtitle(ActiveAccount, LibrarySummary);
+    public string ActiveServerTitle => SettingsPresentation.ServerSectionTitle(ActiveAccount);
+    public string ActiveServerSubtitle => SettingsPresentation.ServerSectionSubtitle(ActiveAccount);
     public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
     public string SettingsStorageDescription => $"Preferences: {_preferences.Path}";
@@ -223,6 +227,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(SidebarProfileTitle));
+            OnPropertyChanged(nameof(SidebarProfileSubtitle));
+            OnPropertyChanged(nameof(ActiveServerTitle));
+            OnPropertyChanged(nameof(ActiveServerSubtitle));
         };
         RestoreSettings();
 
@@ -365,7 +373,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task ReloadAfterSyncAsync()
     {
         await RefreshCountsAsync();
-        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Home : Section, clearBackStack: true);
+        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Settings : Section, clearBackStack: true);
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
     }
 
@@ -480,6 +488,31 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task UseServerAsync(ServerAccount? account)
+    {
+        if (account is null) return;
+        var index = Connect.Accounts.IndexOf(account);
+        if (index > 0) Connect.Accounts.Move(index, 0);
+
+        try
+        {
+            IsSettingsBusy = true;
+            await _server.AttachAsync(account);
+            await RefreshCountsAsync();
+            await RefreshSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = ex.Message;
+        }
+        finally
+        {
+            IsSettingsBusy = false;
+            RaiseDerived();
+        }
+    }
+
+    [RelayCommand]
     private async Task SelectMusicLibraryAsync(SettingsLibraryOption? option)
     {
         if (option is null || ActiveAccount is null) return;
@@ -566,7 +599,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ClearLibrary();
         TrackCount = AlbumCount = ArtistCount = 0;
         SettingsMessage = "Signed out.";
-        await LoadSectionAsync(LibrarySection.Connect, clearBackStack: true);
+        await LoadSectionAsync(LibrarySection.Settings, clearBackStack: true);
     }
 
     private void ReplaceAccount(ServerAccount updated)
@@ -2057,6 +2090,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibrarySummary));
         OnPropertyChanged(nameof(ActiveAccount));
         OnPropertyChanged(nameof(HasActiveAccount));
+        OnPropertyChanged(nameof(SidebarProfileTitle));
+        OnPropertyChanged(nameof(SidebarProfileSubtitle));
+        OnPropertyChanged(nameof(ActiveServerTitle));
+        OnPropertyChanged(nameof(ActiveServerSubtitle));
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IReadOnlyList<T>? source)

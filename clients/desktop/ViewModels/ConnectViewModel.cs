@@ -25,6 +25,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
         _server = server;
         _onLibraryChanged = onLibraryChanged;
         Accounts = new(server.SavedAccounts());
+        Accounts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasAccounts));
     }
 
     public System.Collections.ObjectModel.ObservableCollection<ServerAccount> Accounts { get; }

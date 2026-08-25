@@ -16,6 +16,36 @@ public sealed record SuppressedSettingsItem(string Scope, string Ref, double Cre
     public string Subtitle => Scope == "artist" ? "Artist" : "Track";
 }
 
+public static class SettingsPresentation
+{
+    public static string ProfileTitle(ServerAccount? account) =>
+        account?.ServerName is { Length: > 0 } name ? name : "Settings";
+
+    public static string ProfileSubtitle(ServerAccount? account, string librarySummary) =>
+        account is null ? "Connect a server" : librarySummary;
+
+    public static string ServerSectionTitle(ServerAccount? account) =>
+        account is null ? "No server signed in" : account.ServerName;
+
+    public static string ServerSectionSubtitle(ServerAccount? account) =>
+        account is null
+            ? "Add Plex, Jellyfin or Subsonic to sync your music."
+            : $"{account.Kind.Display()} · {account.BaseUrl}";
+}
+
+public static class EqualizerFaderScale
+{
+    public static double NormalizedPosition(double db)
+    {
+        var clamped = DesktopEqualizerProfile.ClampGain(db);
+        return (clamped - DesktopEqualizerProfile.MinGainDb)
+            / (DesktopEqualizerProfile.MaxGainDb - DesktopEqualizerProfile.MinGainDb);
+    }
+
+    public static double ZeroLinePosition =>
+        NormalizedPosition(0);
+}
+
 public sealed partial class EqualizerBandSetting(
     int index,
     string label,
@@ -30,6 +60,7 @@ public sealed partial class EqualizerBandSetting(
     [ObservableProperty] private double _gain = gain;
 
     public string GainText => FormatGain(Gain);
+    public double NormalizedPosition => EqualizerFaderScale.NormalizedPosition(Gain);
 
     partial void OnGainChanged(double value)
     {
@@ -42,6 +73,7 @@ public sealed partial class EqualizerBandSetting(
         }
 
         OnPropertyChanged(nameof(GainText));
+        OnPropertyChanged(nameof(NormalizedPosition));
         _onChanged(Index, clamped);
     }
 
@@ -52,6 +84,7 @@ public sealed partial class EqualizerBandSetting(
         {
             Gain = DesktopEqualizerProfile.ClampGain(value);
             OnPropertyChanged(nameof(GainText));
+            OnPropertyChanged(nameof(NormalizedPosition));
         }
         finally
         {
