@@ -92,7 +92,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// </summary>
     public async Task AttachAsync(ServerAccount account, CancellationToken token = default)
     {
-        var secret = secrets.Get(SecretKey(account.ServerId))
+        var secret = await Task.Run(() => secrets.Get(SecretKey(account.ServerId)), token).ConfigureAwait(false)
             ?? throw new MozzCoreException(
                 $"No stored credential for {account.ServerName}. Sign in again.");
 

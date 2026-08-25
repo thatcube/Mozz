@@ -128,6 +128,57 @@ public class SecretStoreTests : IDisposable
     }
 
     [Fact]
+    public void MacKeychainMigratesLegacyItemsToTheDataProtectionKeychain()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        if (!MacKeychainSecretStore.CanUseDataProtectionKeychainForTests()) return;
+
+        var store = new MacKeychainSecretStore($"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}", true);
+        var key = Key("legacy-migration");
+        store.SetLegacyForMigrationTest(key, "legacy-token");
+
+        Assert.Equal("legacy-token", store.Get(key));
+        Assert.Null(store.GetLegacyForMigrationTest(key));
+        Assert.Equal("legacy-token", store.Get(key));
+    }
+
+    [Fact]
+    public void MacKeychainMigratesLegacyItemsToFileFallbackWhenDataProtectionIsUnavailable()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        if (MacKeychainSecretStore.CanUseDataProtectionKeychainForTests()) return;
+
+        var store = new MacKeychainSecretStore(
+            $"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}",
+            allowLocalFileFallback: true);
+        var key = Key("legacy-file-migration");
+        store.SetLegacyForMigrationTest(key, "legacy-token");
+
+        Assert.Equal("legacy-token", store.Get(key));
+        Assert.Null(store.GetLegacyForMigrationTest(key));
+
+        store.SetLegacyForMigrationTest(key, "stale-legacy-token");
+        Assert.Equal("legacy-token", store.Get(key));
+        store.SetLegacyForMigrationTest(key, null);
+    }
+
+    [Fact]
+    public void MacKeychainUsesLegacyKeychainBeforeFileFallbackForNonLocalBuilds()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        if (MacKeychainSecretStore.CanUseDataProtectionKeychainForTests()) return;
+
+        var store = new MacKeychainSecretStore($"com.thatcube.Mozz.desktop.tests.{Guid.NewGuid():N}");
+        var key = Key("non-local-keychain");
+
+        store.Set(key, "keychain-token");
+
+        Assert.Equal("keychain-token", store.GetLegacyForMigrationTest(key));
+        Assert.Null(new FileSecretStore().Get(key));
+        Assert.Equal("keychain-token", store.Get(key));
+    }
+
+    [Fact]
     public void KeysDoNotCollideAcrossServers()
     {
         // Server ids contain a URL, so they are full of characters a filename

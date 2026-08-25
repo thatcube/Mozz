@@ -112,6 +112,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$MOZZ_RESOLVED_BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- This script is the local developer bundler. Marking its bundles lets the
+       credential store avoid legacy Keychain ACL prompts that only happen
+       because this binary is rebuilt constantly. Release/notarised bundles are
+       not produced here and therefore keep using the Keychain. -->
+  <key>MozzLocalDevelopmentBuild</key><true/>
   <!-- Without this the process is a background agent: no Dock icon, no menu
        bar, and the window cannot be brought to the front. -->
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>

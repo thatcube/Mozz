@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using System.Xml.Linq;
 
 namespace Mozz.Desktop.Core;
 
@@ -174,7 +175,9 @@ internal sealed class WindowsSecretStore : ISecretStore
 [SupportedOSPlatform("macos")]
 internal sealed class MacKeychainSecretStore : ISecretStore
 {
-    public string Description => "macOS Keychain";
+    public string Description => _allowLocalFileFallback
+        ? "macOS local development credential file — not encrypted at rest; release builds use the Keychain"
+        : "macOS Keychain";
 
     private const string Security = "/System/Library/Frameworks/Security.framework/Security";
     private const string CoreFoundation =
@@ -183,6 +186,7 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     private const int ErrSecSuccess = 0;
     private const int ErrSecItemNotFound = -25300;
     private const int ErrSecDuplicateItem = -25299;
+    private const int ErrSecMissingEntitlement = -34018;
 
     [DllImport(Security)] private static extern int SecItemAdd(nint query, nint result);
     [DllImport(Security)] private static extern int SecItemCopyMatching(nint query, out nint result);
@@ -221,6 +225,7 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     private static readonly nint SecReturnData = Constant("kSecReturnData");
     private static readonly nint SecMatchLimit = Constant("kSecMatchLimit");
     private static readonly nint SecMatchLimitOne = Constant("kSecMatchLimitOne");
+    private static readonly nint SecUseDataProtectionKeychain = Constant("kSecUseDataProtectionKeychain");
     private static readonly nint CFBooleanTrue = Marshal.ReadIntPtr(
         NativeLibrary.GetExport(NativeLibrary.Load(CoreFoundation), "kCFBooleanTrue"));
 
@@ -232,28 +237,142 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     /// name buys nothing — macOS would still prompt — while making the access
     /// dialog name a bundle the user may not even have installed.
     /// </summary>
-    private const string ServiceName = "com.thatcube.Mozz.desktop";
+    private const string DefaultServiceName = "com.thatcube.Mozz.desktop";
+    private readonly string _serviceName;
+    private readonly bool _requireDataProtectionKeychain;
+    private readonly bool _allowLocalFileFallback;
+    private readonly FileSecretStore _fileFallback = new();
+    private bool _dataProtectionUnavailable;
+
+    public MacKeychainSecretStore() : this(DefaultServiceName, allowLocalFileFallback: IsLocalDevelopmentBundle()) { }
+
+    internal MacKeychainSecretStore(
+        string serviceName,
+        bool requireDataProtectionKeychain = false,
+        bool allowLocalFileFallback = false)
+    {
+        _serviceName = serviceName;
+        _requireDataProtectionKeychain = requireDataProtectionKeychain;
+        _allowLocalFileFallback = allowLocalFileFallback;
+    }
+
+    internal static bool CanUseDataProtectionKeychainForTests()
+    {
+        var store = new MacKeychainSecretStore($"com.thatcube.Mozz.desktop.probe.{Guid.NewGuid():N}", true);
+        try
+        {
+            store.Set("probe", "ok", dataProtectionKeychain: true);
+            store.Delete("probe", dataProtectionKeychain: true);
+            return true;
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message.Contains($"OSStatus {ErrSecMissingEntitlement}", StringComparison.Ordinal))
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsLocalDevelopmentBundle()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(processPath)) return false;
+
+        var macOsMarker = $"{Path.DirectorySeparatorChar}Contents{Path.DirectorySeparatorChar}MacOS{Path.DirectorySeparatorChar}";
+        var markerIndex = processPath.IndexOf(macOsMarker, StringComparison.Ordinal);
+        if (markerIndex < 0) return false;
+
+        var plistPath = Path.Combine(processPath[..markerIndex], "Contents", "Info.plist");
+        try
+        {
+            var root = XDocument.Load(plistPath).Root?.Element("dict");
+            if (root is null) return false;
+
+            var elements = root.Elements().ToList();
+            for (var i = 0; i < elements.Count - 1; i++)
+            {
+                if (elements[i].Name.LocalName == "key"
+                    && elements[i].Value == "MozzLocalDevelopmentBuild")
+                {
+                    return elements[i + 1].Name.LocalName == "true";
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
 
     private static nint CFString(string value)
         => CFStringCreateWithCString(0, Encoding.UTF8.GetBytes(value + "\0"), Utf8);
 
-    private nint BaseQuery(string key, List<nint> owned)
+    private nint BaseQuery(string key, List<nint> owned, bool dataProtectionKeychain)
     {
         var dict = CFDictionaryCreateMutable(0, 0, 0, 0);
-        var service = CFString(ServiceName);
+        var service = CFString(_serviceName);
         var account = CFString(key);
         owned.Add(service);
         owned.Add(account);
         CFDictionarySetValue(dict, SecClass, SecClassGenericPassword);
         CFDictionarySetValue(dict, SecAttrService, service);
         CFDictionarySetValue(dict, SecAttrAccount, account);
+        if (dataProtectionKeychain)
+        {
+            CFDictionarySetValue(dict, SecUseDataProtectionKeychain, CFBooleanTrue);
+        }
         return dict;
     }
 
     public string? Get(string key)
     {
+        if (!_dataProtectionUnavailable)
+        {
+            try
+            {
+                var protectedValue = Get(key, dataProtectionKeychain: true);
+                if (protectedValue is not null) return protectedValue;
+            }
+            catch (InvalidOperationException ex) when (CanContinueAfterUnavailableDataProtection(ex))
+            {
+                _dataProtectionUnavailable = true;
+            }
+        }
+
+        if (_allowLocalFileFallback && _fileFallback.Get(key) is { } fileValue) return fileValue;
+
+        var value = Get(key, dataProtectionKeychain: false);
+        if (value is null) return null;
+
+        if (_dataProtectionUnavailable && _allowLocalFileFallback)
+        {
+            _fileFallback.Set(key, value);
+            Delete(key, dataProtectionKeychain: false);
+            return value;
+        }
+
+        try
+        {
+            Set(key, value, dataProtectionKeychain: true);
+            Delete(key, dataProtectionKeychain: false);
+        }
+        catch (InvalidOperationException ex) when (CanContinueAfterUnavailableDataProtection(ex))
+        {
+            _dataProtectionUnavailable = true;
+            if (_allowLocalFileFallback)
+            {
+                _fileFallback.Set(key, value);
+                Delete(key, dataProtectionKeychain: false);
+            }
+        }
+        return value;
+    }
+
+    private string? Get(string key, bool dataProtectionKeychain)
+    {
         var owned = new List<nint>();
-        var query = BaseQuery(key, owned);
+        var query = BaseQuery(key, owned, dataProtectionKeychain);
         owned.Add(query);
         try
         {
@@ -264,7 +383,7 @@ internal sealed class MacKeychainSecretStore : ISecretStore
             if (status == ErrSecItemNotFound) return null;
             if (status != ErrSecSuccess)
             {
-                throw new InvalidOperationException($"Keychain read failed (OSStatus {status})");
+                throw KeychainException("read", status);
             }
             try
             {
@@ -292,21 +411,75 @@ internal sealed class MacKeychainSecretStore : ISecretStore
 
     public void Set(string key, string? value)
     {
+        if (!_dataProtectionUnavailable)
+        {
+            try
+            {
+                if (value is null)
+                {
+                    Delete(key, dataProtectionKeychain: true);
+                    Delete(key, dataProtectionKeychain: false);
+                    _fileFallback.Set(key, null);
+                    return;
+                }
+
+                Set(key, value, dataProtectionKeychain: true);
+                Delete(key, dataProtectionKeychain: false);
+                _fileFallback.Set(key, null);
+                return;
+            }
+            catch (InvalidOperationException ex) when (CanContinueAfterUnavailableDataProtection(ex))
+            {
+                _dataProtectionUnavailable = true;
+            }
+        }
+
+        if (_allowLocalFileFallback)
+        {
+            _fileFallback.Set(key, value);
+            Delete(key, dataProtectionKeychain: false);
+            return;
+        }
+
+        if (value is null) Delete(key, dataProtectionKeychain: false);
+        else Set(key, value, dataProtectionKeychain: false);
+    }
+
+    internal void SetLegacyForMigrationTest(string key, string? value)
+    {
+        if (value is null) Delete(key, dataProtectionKeychain: false);
+        else Set(key, value, dataProtectionKeychain: false);
+    }
+
+    internal string? GetLegacyForMigrationTest(string key)
+        => Get(key, dataProtectionKeychain: false);
+
+    private void Delete(string key, bool dataProtectionKeychain)
+    {
         var owned = new List<nint>();
-        var query = BaseQuery(key, owned);
+        var query = BaseQuery(key, owned, dataProtectionKeychain);
         owned.Add(query);
         try
         {
-            if (value is null)
+            var deleted = SecItemDelete(query);
+            if (deleted != ErrSecSuccess && deleted != ErrSecItemNotFound)
             {
-                var deleted = SecItemDelete(query);
-                if (deleted != ErrSecSuccess && deleted != ErrSecItemNotFound)
-                {
-                    throw new InvalidOperationException($"Keychain delete failed (OSStatus {deleted})");
-                }
-                return;
+                throw KeychainException("delete", deleted);
             }
+        }
+        finally
+        {
+            foreach (var handle in owned) CFRelease(handle);
+        }
+    }
 
+    private void Set(string key, string value, bool dataProtectionKeychain)
+    {
+        var owned = new List<nint>();
+        var query = BaseQuery(key, owned, dataProtectionKeychain);
+        owned.Add(query);
+        try
+        {
             var bytes = Encoding.UTF8.GetBytes(value);
             var data = CFDataCreate(0, bytes, bytes.Length);
             owned.Add(data);
@@ -319,7 +492,7 @@ internal sealed class MacKeychainSecretStore : ISecretStore
                 // An add on an existing item fails rather than replacing, so
                 // signing in again to the same server has to update instead.
                 var updateOwned = new List<nint>();
-                var findQuery = BaseQuery(key, updateOwned);
+                var findQuery = BaseQuery(key, updateOwned, dataProtectionKeychain);
                 updateOwned.Add(findQuery);
                 var attributes = CFDictionaryCreateMutable(0, 0, 0, 0);
                 updateOwned.Add(attributes);
@@ -337,13 +510,24 @@ internal sealed class MacKeychainSecretStore : ISecretStore
             Array.Clear(bytes);
             if (status != ErrSecSuccess)
             {
-                throw new InvalidOperationException($"Keychain write failed (OSStatus {status})");
+                throw KeychainException("write", status);
             }
         }
         finally
         {
             foreach (var handle in owned) CFRelease(handle);
         }
+    }
+
+    private bool CanContinueAfterUnavailableDataProtection(InvalidOperationException ex) =>
+        !_requireDataProtectionKeychain && ex.Message.Contains($"OSStatus {ErrSecMissingEntitlement}", StringComparison.Ordinal);
+
+    private static InvalidOperationException KeychainException(string operation, int status)
+    {
+        var suffix = status == ErrSecMissingEntitlement
+            ? "; the macOS Data Protection Keychain requires the app to be signed with a keychain-access-groups entitlement"
+            : "";
+        return new InvalidOperationException($"Keychain {operation} failed (OSStatus {status}{suffix})");
     }
 }
 
