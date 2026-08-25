@@ -273,6 +273,7 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertEqual(payload["running"] as? Bool, false)
         XCTAssertEqual(payload["finished"] as? Bool, false)
         XCTAssertEqual(payload["itemsSynced"] as? Int, 0)
+        XCTAssertTrue(try XCTUnwrap(payload["details"] as? [[String: Any]]).isEmpty)
     }
 
     /// A sync against an unreachable host must land in `finished` + `error`

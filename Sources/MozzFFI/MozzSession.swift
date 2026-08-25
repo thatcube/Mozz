@@ -1,6 +1,7 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+import MozzEnrichment
 import MozzRecommend
 
 // MARK: - The session facade
@@ -88,6 +89,11 @@ struct SessionRequest: Decodable {
     var maxBytes: Int?
     var batch: HistoryExchangeBatch?
     var batches: [HistoryExchangeBatch]?
+
+    // Lyrics.
+    var useLRCLIB: Bool?
+    var userInitiated: Bool?
+    var leadSeconds: Double?
 
     // Recommendations.
     var setId: String?
@@ -336,6 +342,59 @@ private struct WireHistoryImport: Encodable {
     var imported: Int
 }
 
+private struct WireLyricsLine: Encodable {
+    var text: String
+    var startSeconds: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case text, startSeconds
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(startSeconds, forKey: .startSeconds)
+    }
+}
+
+private struct WireLyrics: Encodable {
+    var source: String?
+    var sourceDisplayName: String?
+    var isSynced: Bool
+    var lines: [WireLyricsLine]
+
+    enum CodingKeys: String, CodingKey {
+        case source, sourceDisplayName, isSynced, lines
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(source, forKey: .source)
+        try container.encode(sourceDisplayName, forKey: .sourceDisplayName)
+        try container.encode(isSynced, forKey: .isSynced)
+        try container.encode(lines, forKey: .lines)
+    }
+}
+
+private struct WireLyricsResolution: Encodable {
+    var status: String
+    var staySilent: Bool
+    var activeLineIndex: Int?
+    var lyrics: WireLyrics?
+
+    enum CodingKeys: String, CodingKey {
+        case status, staySilent, activeLineIndex, lyrics
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encode(staySilent, forKey: .staySilent)
+        try container.encode(activeLineIndex, forKey: .activeLineIndex)
+        try container.encode(lyrics, forKey: .lyrics)
+    }
+}
+
 // MARK: - Mapping
 
 private func wire(_ r: ArtistRecord) -> WireArtist {
@@ -405,6 +464,15 @@ private func wire(_ r: RecommendationItemRecord) -> WireRecommendationItem {
                            score: r.score, inLibrary: r.inLibrary, reason: r.reason)
 }
 
+private func wire(_ lyrics: Lyrics) -> WireLyrics {
+    WireLyrics(
+        source: lyrics.source?.rawValue,
+        sourceDisplayName: lyrics.source?.displayName,
+        isSynced: lyrics.isSynced,
+        lines: lyrics.lines.map { WireLyricsLine(text: $0.text, startSeconds: $0.start) }
+    )
+}
+
 // MARK: - Session
 
 /// One open library, owning the database pool for its lifetime.
@@ -412,6 +480,7 @@ final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
     let recommendations: RecommendationService
+    let lyrics: LyricsService
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
@@ -420,6 +489,7 @@ final class MozzSession: @unchecked Sendable {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
+        self.lyrics = LyricsService()
     }
 }
 
@@ -429,6 +499,7 @@ protocol SessionContext: AnyObject {
     var database: MusicDatabase { get }
     var repository: LibraryRepository { get }
     var recommendations: RecommendationService { get }
+    var lyrics: LyricsService { get }
     var backends: BackendTable { get }
 }
 
@@ -842,6 +913,38 @@ private func dispatch(
         }
         return sessionSuccess(request, WireRadioBatch(remoteIds: remoteIds, tracks: tracks))
 
+    case "lyrics":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "lyrics needs serverId and remoteId")
+        }
+        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "lyrics track not found: \(remoteId)")
+        }
+        let backend = session.backends.backend(serverId)
+        let resolution = await session.lyrics.resolve(
+            track: record.toDomain(),
+            backend: backend,
+            context: .visible,
+            useLRCLIB: request.useLRCLIB ?? true,
+            userInitiated: request.userInitiated ?? false
+        )
+        let lyrics = resolution.lyrics.flatMap { $0.isEmpty ? nil : $0 }
+        let activeIndex: Int?
+        if let lyrics, let positionSeconds = request.positionSeconds {
+            activeIndex = lyrics.activeLineIndex(
+                at: positionSeconds,
+                lead: request.leadSeconds ?? 0
+            )
+        } else {
+            activeIndex = nil
+        }
+        return sessionSuccess(request, WireLyricsResolution(
+            status: lyrics != nil ? "loaded" : (resolution.staySilent ? "silent" : "unavailable"),
+            staySilent: resolution.staySilent,
+            activeLineIndex: activeIndex,
+            lyrics: lyrics.map(wire)
+        ))
+
     case "suppressTrack":
         guard let remoteId = request.remoteId, let serverId else {
             return sessionFailure(request.id, request.cmd, "suppressTrack needs remoteId and serverId")
@@ -900,7 +1003,7 @@ let mozzSessionCommands = [
     "historyImportBatches", "historyYearRollup",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
-    "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
+    "mozzWeeklyItems", "radioBatch", "lyrics", "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
     "connect", "plexPin", "plexPinCheck", "attach", "libraries", "account",
     "sync", "syncStatus", "streamURL", "artworkURL",
