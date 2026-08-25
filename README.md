@@ -1,214 +1,210 @@
-# Mozz
+<p align="center"><img src="docs/brand/mozz_logo.svg" alt="Mozz logo" width="128" /></p>
 
-**One app for your music, wherever it lives. Free forever. Open source.**
+<h1 align="center">Mozz</h1>
 
-Mozz is a SwiftUI music client for iPhone and iPad that connects to the media
-server you already run. Point it at **Plex**, **Jellyfin**, or a
-**Subsonic / OpenSubsonic** server (tested against Navidrome) and it mirrors your
-library onto the device, then lets you stream it or take it with you.
+<p align="center">One app for your music, wherever it lives.<br />
+A free, open-source player for the Plex, Jellyfin, or Subsonic server you already run.</p>
 
-Streaming from your own server and offline playback of downloaded tracks are both
-first-class here. Many people will stream everything and never download a thing;
-others live on the subway with everything saved. Mozz is built for both, equally.
+<p align="center">
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" /></a>
+  <img alt="Platform: iOS and iPadOS" src="https://img.shields.io/badge/Platform-iOS%20%C2%B7%20iPadOS-lightgrey.svg" />
+  <a href="https://github.com/sponsors/thatcube"><img alt="Sponsor" src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa.svg" /></a>
+</p>
 
-Licensed under **GPL-3.0** (see [`LICENSE`](LICENSE)).
+Mozz plays the music that lives on your own media server. Point it at **Plex**,
+**Jellyfin**, or a **Subsonic / OpenSubsonic** server (tested against Navidrome)
+and your whole library shows up on your iPhone and iPad — ready to stream over
+the network or download and take with you.
+
+Streaming and offline both matter here, equally. Some people stream everything
+and never download a thing; others save their library and live underground on
+the subway. Mozz is built for both, and it does not push you toward either.
+
+**Free forever. Open source. No account, no tracking.**
 
 ---
 
-## What it does
+## Who it's for
 
-**Your servers, one library.** Plex, Jellyfin, and Subsonic/OpenSubsonic sit
-behind a single `MusicBackend` abstraction. Sign in the way each expects — Plex
-PIN/OAuth with connection discovery, Jellyfin Quick Connect or password, Subsonic
-MD5 token or OpenSubsonic API key.
+You already self-host your music — on Plex, Jellyfin, Navidrome, or another
+Subsonic-compatible server — and you want a fast, native iPhone and iPad player
+that respects it: no second subscription, no re-uploading your library to
+someone else's cloud, and no telemetry watching what you listen to.
 
-**The catalog lives on-device.** Your library is mirrored into a local SQLite
-database that the whole UI reads from — artists, albums, tracks, playlists,
-genres, favourites, and artwork *references*, never the audio. Lists paginate
-instantly, search is full-text and diacritic-insensitive as you type, and
-browsing works with the server unreachable.
+## Features
 
-**Near-gapless playback.** One `AVQueuePlayer` kept fed with pre-created items so
-tracks cross boundaries without a load gap. The queue is a pure, fully tested
-value type with repeat and a **balanced shuffle** that spreads artists out
-instead of clumping them. Loudness normalization is on by default; a 10-band ISO
-equalizer (31 Hz–16 kHz, ±12 dB) with presets is available in Settings.
+### Your library, your servers
 
-**Offline downloads.** Transfers run on a background `URLSession` and survive the
-app being suspended. Mozz saves the original file and keys it to stable internal
-ids, so re-syncing your library never orphans a download. At playback time a
-downloaded file is played straight from disk without touching the network.
+- **Bring your own server.** Connect Plex, Jellyfin, or Subsonic/OpenSubsonic and
+  sign in the normal way for each — a Plex login, Jellyfin Quick Connect or
+  password, or a Subsonic account. Choose exactly which libraries to pull in.
+- **One tidy library.** Artists, albums, songs, playlists, and genres all live in
+  one place, however your server organizes them.
+- **Works when the network doesn't.** Your catalog is kept on the device, so
+  browsing, searching, and opening albums stay instant even when the server is
+  slow, far away, or offline.
+- **Search that keeps up.** Results appear as you type, and accents and
+  punctuation don't get in the way — "bjork" finds "Björk".
 
-**Lyrics.** Time-synced, highlighting and auto-scrolling the current line, or
-plain — from your server first and [LRCLIB](https://lrclib.net) as a fallback,
-cached and saved alongside downloads. A full-screen mode hides the chrome for
-just the words.
+### Playback
 
-**Siri and HomePod.** Ask for a song, album, artist, playlist, genre, liked
-songs, or a mix. That includes from a HomePod, which has no apps of its own and
-forwards the request to your iPhone to play and AirPlay back; the same handler
-serves the Siri button, CarPlay, and Shortcuts. Plays started in the app are
-donated, so Siri learns to reach your library from a plain "play music".
+- **Near-gapless.** Tracks flow into one another without a silent gap between
+  them, the way an album is meant to play.
+- **Smart shuffle.** Shuffle spreads your artists out instead of clumping the same
+  one back to back, plus the usual repeat modes.
+- **Even loudness.** Volume normalization keeps quiet and loud tracks at a
+  comfortable level, so you're not reaching for the volume between songs.
+- **A real equalizer.** A 10-band graphic EQ (31 Hz–16 kHz) with presets, for when
+  you want to shape the sound.
+- **Lyrics.** Time-synced lyrics that highlight and scroll the current line, with a
+  full-screen mode for just the words. Mozz uses your server's lyrics first and
+  falls back to [LRCLIB](https://lrclib.net) when there are none.
+- **A player that flows.** Now Playing glides between a small bar above the tabs
+  and the full-screen player — no jarring pop-up. Scrub, reorder what's up next,
+  or tap through to the artist or album.
 
-**CarPlay.** Home and Library tabs mirroring the phone's layout, with row
-artwork, a Shuffle row leading long lists, and an Up Next screen. Browsing reads
-the on-device database, so it stays responsive where signal is poor, and
-downloaded tracks stay playable when the server is unreachable. There is no
-CarPlay search by design — Apple's audio templates don't allow
-`CPSearchTemplate`, so Siri is the search path in the car.
+### Take it offline
 
-**Now Playing that morphs.** One view, not two: it morphs continuously between a
-docked island above the tab bar and the full-screen player, so there is no
-jarring present/dismiss. Drag to dismiss, scrub, reorder the up-next queue in
-place, or jump from the title to the artist or album.
+- **Download for the road.** Save albums, playlists, or tracks to the device and
+  play them straight from storage — no network needed, no quality loss.
+- **Downloads that stick around.** Transfers keep going while the app is in the
+  background, and re-syncing your library never loses what you've already saved.
+- **Lyrics come too.** Saved lyrics travel with your downloads, so they're there
+  when you're offline.
 
-**Widgets and system integration.** Now Playing and recently played widgets
-render from compact snapshots in a shared App Group, without reaching into the
-app's database. `mozz://` deep links open straight to a tab, album, artist,
-playlist, genre, or library section, and the same destinations are advertised as
-Handoff activities. Sign-in travels between devices through the iCloud Keychain.
+### Across your devices
 
-**Discovery and metadata.** "Mozz Weekly" rediscovers music already in your
-library, on-device. Optional enrichment resolves MusicBrainz IDs and ListenBrainz
-similarity to sharpen radio and mixes; turn it off and local genre-based
-recommendations still work.
+- **Continue here.** Leave off on one device and Mozz can offer to pick playback up
+  where you left it on another — resumed only when you choose, never yanked away.
+- **Handoff & deep links.** Hand a screen off between your Apple devices, and
+  `mozz://` links open straight to an album, artist, playlist, genre, or tab.
+- **Sign in once.** Your server credentials travel between your own devices through
+  the iCloud Keychain, so you don't retype them.
 
-**Ratings and favourites.** Jellyfin/Subsonic favourites and Plex's 0–5 star
-ratings are unified as likes and ratings, and written back where the server
-supports it.
+### Siri, CarPlay, HomePod & widgets
+
+- **Ask for anything.** "Play …" a song, album, artist, playlist, genre, your liked
+  songs, or a mix — from the Siri button, Shortcuts, or a **HomePod**, which hands
+  the request to your iPhone and plays it back through the speaker.
+- **CarPlay.** Your Home and Library on the car screen, with artwork, a shuffle
+  shortcut, and an Up Next list. It reads the on-device library, so it stays quick
+  where signal is poor and downloaded tracks keep playing when the server can't be
+  reached.
+- **Widgets.** Now Playing and Recently Played widgets for your Home Screen.
+
+### Discovery
+
+- **Mozz Weekly.** A weekly mix that rediscovers music already in your library,
+  built right on the device.
+- **Radio and mixes** seeded from what you're listening to.
+- **Optional enrichment.** Turn it on to sharpen radio and mixes using open music
+  databases (only song and artist names are sent); leave it off and recommendations
+  stay entirely on your device.
+
+### Ratings & favourites
+
+- **Likes and stars, unified.** Jellyfin and Subsonic favourites and Plex's star
+  ratings show up together as likes and ratings, and Mozz writes them back to your
+  server where it's supported.
+
+### Make it yours
+
+- **Themes & appearance.** Light, dark, or follow the system, with a choice of dark
+  looks and an optional Liquid Glass player finish on newer iOS.
+
+### Also on the desktop
+
+A companion **Mozz Desktop** app for **Windows, macOS, and Linux** shares the same
+library, history, and taste as the phone. It's early and distributed as a build you
+download rather than through an app store — see
+[`clients/desktop/README.md`](clients/desktop/README.md).
 
 ---
 
 ## Requirements
 
-- iOS / iPadOS 17 or later (iPhone and iPad).
-- A media server: Plex, Jellyfin, or Subsonic / OpenSubsonic (Navidrome is the
-  QA'd target; other OpenSubsonic servers are best-effort).
-- No Mozz account, no server of ours, no telemetry. Mozz talks to your media
-  server, to Plex sign-in/discovery when you use Plex, and — only when you enable
-  them — to LRCLIB, MusicBrainz, and ListenBrainz.
+- **iPhone or iPad** running iOS / iPadOS 17 or later.
+- **A media server** you can reach: Plex, Jellyfin, or Subsonic / OpenSubsonic.
+  Navidrome is the tested Subsonic target; other OpenSubsonic servers are
+  best-effort.
 
----
+## Getting started
 
-## Architecture
-
-The design thesis is simple: **the on-device database is the single source of
-truth.** Backends sync your catalog into a GRDB/SQLite store with FTS5 search;
-the UI reads only from that store; playback and downloads resolve URLs, never
-bytes. That is what keeps a large library fast, makes offline automatic, and
-makes adding a backend a new `MusicBackend` conformer rather than a rewrite.
-
-Everything ships as one Swift package, `MozzKit`, with one library per concern and
-strict downward dependencies — the domain core and the backends never import UI,
-and the backends never import the database. The iOS app target (`App/Mozz`) links
-only the composed `MozzApp` product.
-
-| Module | Responsibility |
-|---|---|
-| **MozzCore** | Domain models, the `MusicBackend` protocol, auth / capability / error types, URL resolution, Keychain store. No third-party dependencies. |
-| **MozzNetworking** | Async `HTTPClient`, endpoint builder, URL normalization, retry/backoff, rate limiting, secret-redacting logger. |
-| **MozzDatabase** | The GRDB + FTS5 source-of-truth store: migrations, records, the read repository the UI binds to, the single write API sync uses. |
-| **MozzPlex** | `PlexBackend` — PIN/OAuth auth, connection discovery, DTOs/mapper, signed request headers. |
-| **MozzJellyfin** | `JellyfinBackend` — Quick Connect / password auth, DTOs, mapper. |
-| **MozzSubsonic** | `SubsonicBackend` — Subsonic / OpenSubsonic with MD5 token and API-key auth (Navidrome QA'd). |
-| **MozzSync** | `LibrarySyncEngine` — mirrors a backend's catalog into the database, paged and off-main, with stable ids and pruning. |
-| **MozzPlayback** | The near-gapless `AVQueuePlayer` engine, the pure `PlayQueue`, equalizer DSP, Now Playing / remote commands, audio-session handling. |
-| **MozzDownloads** | Background `URLSession` downloads, on-disk file store, storage accounting, the download-aware track resolver. |
-| **MozzRecommend** | On-device recommenders and the blender behind "Mozz Weekly"; network-free at its core. |
-| **MozzEnrichment** | Open-metadata clients: MusicBrainz IDs, ListenBrainz similarity, LRCLIB lyrics, and the lyrics cache. |
-| **MozzApp** | The SwiftUI feature layer (onboarding, Home, Library, Search, Siri, CarPlay, Now Playing, downloads, settings, widgets bridge) and the `AppEnvironment` composition root. |
-
-Differences between servers are expressed through `ServerCapabilities`
-(transcoding, original-file download, favourites, ratings, lyrics, synced lyrics,
-normalization gain, progress reporting) detected once per server. The UI and
-playback gate on those flags rather than branching on which backend is connected,
-so a server that can't do something degrades gracefully and a backend gains a
-feature just by reporting it.
-
-For the full design record — schema, indexing, the sync pipeline, playback
-internals, and measured performance — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
-
----
-
-## Building and running
-
-Mozz uses [XcodeGen](https://github.com/yonaskolb/XcodeGen): `Mozz.xcodeproj` is
-generated from [`project.yml`](project.yml) and is **gitignored**, so generate it
-before opening Xcode.
-
-You need XcodeGen (`brew install xcodegen`) and an Xcode with the iOS 26 SDK
-(currently the beta), because the code compiles SwiftUI's iOS 26 Liquid Glass
-APIs behind availability checks. The deployment target stays at iOS 17.
-
-```bash
-tools/generate-project.sh     # produces Mozz.xcodeproj from project.yml
-tools/build-ios.sh            # simulator compile check (no signing)
-tools/run-ios.sh              # build, install, and launch on a Simulator
-tools/run-carplay-sim.sh      # the CarPlay simulator flow
-tools/deploy-device.sh        # signed device build (--build-only to skip install)
-```
-
-`tools/build-ios.sh` regenerates the project first, so it always reflects
-`project.yml`. Override the destination with `MOZZ_DEST`.
-
-Releases go through fastlane — `fastlane beta` builds and uploads to TestFlight
-(lanes: `build`, `beta`, `release`). Credentials come from a gitignored
-`.env.fastlane`; copy [`.env.fastlane.example`](.env.fastlane.example) and fill
-it in. See [`fastlane/README.md`](fastlane/README.md).
-
-## Testing
-
-The logic layers (domain, networking, database/search, sync, playback queue,
-downloads, recommendations, enrichment) are macOS-clean and unit-tested
-off-device — no simulator required. iOS-only code is guarded behind
-`#if os(iOS)`, and providers are tested against recorded JSON fixtures rather
-than a live server.
-
-```bash
-swift test                    # all logic-layer tests on the host toolchain
-tools/run-tests.sh            # the same, via the helper (--filter, --sim)
-tools/run-tests.sh --sim      # run the suite on an iOS Simulator
-```
-
-> Running raw `swift`/`xcodebuild` inside a git worktree can trip SwiftPM's
-> package resolution; the helper scripts handle it. Invoking the tools directly,
-> first `export GIT_CONFIG_PARAMETERS="'safe.bareRepository=all'"`.
-
----
-
-## Project layout
-
-```
-App/            iOS app target (Mozz) and the WidgetKit extension (MozzWidget)
-Sources/        the MozzKit package — one library per concern (see the table above)
-Tests/          unit tests and recorded provider fixtures
-docs/           architecture notes, ADRs, privacy, and research
-fastlane/       TestFlight and App Store lanes
-project.yml     XcodeGen project definition (source of the generated .xcodeproj)
-Package.swift   the MozzKit package graph
-```
-
-## Contributing
-
-Issues and pull requests are welcome. The core is deliberately UI-free and
-protocol-first, so the highest-leverage contributions are new backends (a single
-`MusicBackend` conformer), capability coverage, and tests against recorded
-fixtures. Please keep work off the main thread and reads flowing only through the
-database, in keeping with the architecture above.
+1. Install Mozz on your iPhone or iPad (see [building it yourself](#contributing--development)
+   below while a public release is in progress).
+2. Open the app and choose your server type — Plex, Jellyfin, or Subsonic.
+3. Sign in the way that server expects and pick the libraries you want.
+4. Wait for your library to appear, then start streaming — or download some albums
+   for offline.
 
 ## Privacy
 
-Mozz has no backend of its own and collects nothing. It connects to your media
-server, to Plex sign-in/discovery when you use Plex, and, when enabled, to
-LRCLIB, MusicBrainz, and ListenBrainz. See [`docs/PRIVACY.md`](docs/PRIVACY.md).
+Mozz has no backend of its own and collects nothing about you — no account, no
+analytics, no tracking. It talks to **your** media server, to Plex's sign-in and
+discovery service when you use Plex, and — only when you turn those features on — to
+LRCLIB for lyrics and open music databases for recommendations, sending only the
+minimum needed (song and artist names). Full details are in
+[`docs/PRIVACY.md`](docs/PRIVACY.md).
+
+## Reporting bugs & requesting features
+
+Found a bug or have an idea? Please open an issue on
+[GitHub Issues](https://github.com/thatcube/Mozz/issues). Clear steps to reproduce,
+your server type, and what you expected all help.
+
+## Contributing & development
+
+Mozz is open source and contributions are welcome. Build instructions, the code
+layout, testing, and how releases work live in
+[`CONTRIBUTING.md`](CONTRIBUTING.md); the deeper design rationale is in
+[`ARCHITECTURE.md`](ARCHITECTURE.md) and the notes and decision records under
+[`docs/`](docs).
+
+## Donate
+
+Mozz is **free forever**, and that isn't going to change. If it's earned a place on
+your Home Screen and you'd like to chip in, you can sponsor development through
+[GitHub Sponsors](https://github.com/sponsors/thatcube). It genuinely helps — but
+not donating is completely fine, and you get every feature either way.
 
 ## License
 
-Mozz is free software licensed under the **GNU General Public License v3.0**, with
-an additional permission under section 7 allowing distribution through Apple's App
-Store despite its DRM and code-signing requirements. See [`LICENSE`](LICENSE) for
-the full terms.
+Mozz is free software licensed under the **GNU General Public License v3.0**, with an
+additional permission under section 7 allowing distribution through Apple's App Store
+despite its DRM and code-signing requirements. See [`LICENSE`](LICENSE) for the full
+terms.
 
 Mozz is not affiliated with or endorsed by Plex, Jellyfin, Navidrome,
-Subsonic/OpenSubsonic, MusicBrainz, ListenBrainz, or LRCLIB. All trademarks belong
-to their respective owners.
+Subsonic/OpenSubsonic, MusicBrainz, ListenBrainz, or LRCLIB. All trademarks belong to
+their respective owners.
+
+<!-- app-family:start -->
+<!-- Generated by https://github.com/thatcube/brando — edit apps.json there, not this block. -->
+
+---
+
+<p align="center"><b>More open source from Brandon</b></p>
+
+<p align="center">
+  <a href="https://github.com/thatcube/hozz" title="Hozz — Apple Health, exported to storage you own"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/hozz.svg" width="48" height="48" alt="Hozz" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Mozz" title="Mozz — Your music, wherever it lives — iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/mozz.svg" width="48" height="48" alt="Mozz" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Plozz" title="Plozz — Movies &amp; TV on Apple TV, iPhone &amp; iPad"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/plozz.svg" width="48" height="48" alt="Plozz" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/thatcube/Twozz" title="Twozz — Twitch on Apple TV, with real emotes"><img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/twozz.svg" width="48" height="48" alt="Twozz" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/thatcube/hozz"><b>Hozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Mozz"><b>Mozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Plozz"><b>Plozz</b></a> &nbsp;·&nbsp; <a href="https://github.com/thatcube/Twozz"><b>Twozz</b></a>
+</p>
+
+<p align="center">
+  <a href="https://brando.page">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thatcube/brando/main/logos/brando-white.svg" />
+      <img src="https://raw.githubusercontent.com/thatcube/brando/main/logos/brando-black.svg" height="22" alt="Brandon Moore" />
+    </picture>
+  </a>
+</p>
+<!-- app-family:end -->
