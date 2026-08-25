@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Collections.Concurrent;
 
 namespace Mozz.Desktop.Audio.Platform;
 
@@ -25,23 +26,23 @@ namespace Mozz.Desktop.Audio.Platform;
 /// reports whether the lookups succeeded, and every method is a no-op when they
 /// did not.
 ///
-/// WHAT IS NOT HERE
+/// MEDIA KEYS
 ///
-/// Media *keys*. Those need <c>MPRemoteCommandCenter</c>, whose API takes
-/// Objective-C blocks — a struct with an isa pointer, flags and a function
-/// pointer, which is a materially different and riskier piece of interop than
-/// message sending. The transport events on <see cref="INowPlayingIntegration"/>
-/// are declared and never raised here, so wiring that in later changes this file
-/// and nothing else.
+/// <c>MPRemoteCommandCenter</c> takes Objective-C blocks, not selectors, so the
+/// command handlers below use global block literals allocated for the process
+/// lifetime. The unmanaged trampoline is static, and the block carries a small
+/// token so it can find the live integration instance without capturing one.
 /// </summary>
 [SupportedOSPlatform("macos")]
-internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
+internal sealed unsafe class MacNowPlayingIntegration : INowPlayingIntegration
 {
     private const string Objc = "/usr/lib/libobjc.A.dylib";
+    private const string LibSystem = "/usr/lib/libSystem.B.dylib";
     private const string Foundation =
         "/System/Library/Frameworks/Foundation.framework/Foundation";
     private const string MediaPlayerPath =
         "/System/Library/Frameworks/MediaPlayer.framework/MediaPlayer";
+    private const int BlockIsGlobal = 1 << 28;
 
     [DllImport(Objc, EntryPoint = "objc_getClass")]
     private static extern nint GetClass([MarshalAs(UnmanagedType.LPStr)] string name);
@@ -68,6 +69,12 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
     private static extern void SendVoidLong(nint receiver, nint selector, long value);
 
     [DllImport(Objc, EntryPoint = "objc_msgSend")]
+    private static extern void SendVoidByte(nint receiver, nint selector, byte value);
+
+    [DllImport(Objc, EntryPoint = "objc_msgSend")]
+    private static extern byte SendBool(nint receiver, nint selector, nint a1);
+
+    [DllImport(Objc, EntryPoint = "objc_msgSend")]
     private static extern nint SendUtf8(
         nint receiver, nint selector, [MarshalAs(UnmanagedType.LPUTF8Str)] string value);
 
@@ -75,6 +82,37 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
     private const long StatePlaying = 1;
     private const long StatePaused = 2;
     private const long StateStopped = 3;
+
+    private enum RemoteCommandKind : long
+    {
+        PlayPause,
+        Next,
+        Previous,
+        Stop,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BlockDescriptor
+    {
+        public nuint Reserved;
+        public nuint Size;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RemoteCommandBlock
+    {
+        public nint Isa;
+        public int Flags;
+        public int Reserved;
+        public delegate* unmanaged<nint, nint, nint> Invoke;
+        public nint Descriptor;
+        public long Token;
+        public RemoteCommandKind Kind;
+    }
+
+    private static readonly ConcurrentDictionary<long, WeakReference<MacNowPlayingIntegration>> Instances = new();
+    private static long _nextToken;
+    private static readonly Lazy<nint> BlockDescriptorPointer = new(CreateBlockDescriptor);
 
     private readonly nint _center;
     private readonly nint _nsString;
@@ -87,6 +125,8 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
     private readonly nint _selSetObjectForKey;
     private readonly nint _selSetNowPlayingInfo;
     private readonly nint _selSetPlaybackState;
+    private readonly nint _selRespondsToSelector;
+    private readonly nint _selRemoveTarget;
 
     // Keys are CFStringRef globals exported by the framework.
     private readonly nint _keyTitle;
@@ -95,6 +135,15 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
     private readonly nint _keyDuration;
     private readonly nint _keyElapsed;
     private readonly nint _keyRate;
+    private readonly long _token;
+    private readonly List<(nint Command, nint Target)> _remoteTargets = [];
+
+    private nint _togglePlayPauseBlock;
+    private nint _playBlock;
+    private nint _pauseBlock;
+    private nint _nextBlock;
+    private nint _previousBlock;
+    private nint _stopBlock;
 
     public bool IsAvailable { get; }
 
@@ -104,6 +153,7 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
         {
             if (!NativeLibrary.TryLoad(MediaPlayerPath, out var mediaPlayer)) return;
             if (!NativeLibrary.TryLoad(Foundation, out _)) return;
+            if (!NativeLibrary.TryLoad(LibSystem, out var libSystem)) return;
 
             var centerClass = GetClass("MPNowPlayingInfoCenter");
             _nsString = GetClass("NSString");
@@ -120,6 +170,8 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
             _selSetObjectForKey = Selector("setObject:forKey:");
             _selSetNowPlayingInfo = Selector("setNowPlayingInfo:");
             _selSetPlaybackState = Selector("setPlaybackState:");
+            _selRespondsToSelector = Selector("respondsToSelector:");
+            _selRemoveTarget = Selector("removeTarget:");
 
             _keyTitle = ReadGlobal(mediaPlayer, "MPMediaItemPropertyTitle");
             _keyArtist = ReadGlobal(mediaPlayer, "MPMediaItemPropertyArtist");
@@ -129,6 +181,14 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
             _keyRate = ReadGlobal(mediaPlayer, "MPNowPlayingInfoPropertyPlaybackRate");
 
             IsAvailable = _keyTitle != 0 && _keyArtist != 0 && _keyDuration != 0;
+            if (!IsAvailable) return;
+
+            if (!NativeLibrary.TryGetExport(libSystem, "_NSConcreteGlobalBlock", out var concreteGlobalBlock))
+                return;
+
+            _token = Interlocked.Increment(ref _nextToken);
+            Instances[_token] = new WeakReference<MacNowPlayingIntegration>(this);
+            WireRemoteCommands(concreteGlobalBlock);
         }
         catch (DllNotFoundException) { /* not macOS, or a stripped system */ }
         catch (EntryPointNotFoundException) { /* runtime shape changed */ }
@@ -139,6 +199,112 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
         => NativeLibrary.TryGetExport(library, symbol, out var address)
             ? Marshal.ReadIntPtr(address)
             : 0;
+
+    private static nint CreateBlockDescriptor()
+    {
+        var descriptor = (BlockDescriptor*)Marshal.AllocHGlobal(sizeof(BlockDescriptor));
+        descriptor->Reserved = 0;
+        descriptor->Size = (nuint)sizeof(RemoteCommandBlock);
+        return (nint)descriptor;
+    }
+
+    private static nint CreateRemoteCommandBlock(
+        nint concreteGlobalBlock,
+        long token,
+        RemoteCommandKind kind)
+    {
+        if (concreteGlobalBlock == 0 || token == 0) return 0;
+        var block = (RemoteCommandBlock*)Marshal.AllocHGlobal(sizeof(RemoteCommandBlock));
+        block->Isa = concreteGlobalBlock;
+        block->Flags = BlockIsGlobal;
+        block->Reserved = 0;
+        block->Invoke = &HandleRemoteCommand;
+        block->Descriptor = BlockDescriptorPointer.Value;
+        block->Token = token;
+        block->Kind = kind;
+        return (nint)block;
+    }
+
+    [UnmanagedCallersOnly]
+    private static nint HandleRemoteCommand(nint block, nint _)
+    {
+        try
+        {
+            if (block == 0) return 0;
+            var literal = (RemoteCommandBlock*)block;
+            if (Instances.TryGetValue(literal->Token, out var weak)
+                && weak.TryGetTarget(out var integration))
+            {
+                integration.RaiseRemoteCommand(literal->Kind);
+            }
+        }
+        catch
+        {
+            // A native callback must never let managed exceptions cross the ABI.
+        }
+        return 0; // MPRemoteCommandHandlerStatusSuccess
+    }
+
+    private static bool RespondsTo(nint receiver, nint selector, nint respondsToSelector)
+        => receiver != 0
+           && selector != 0
+           && respondsToSelector != 0
+           && SendBool(receiver, respondsToSelector, selector) != 0;
+
+    private void WireRemoteCommands(nint concreteGlobalBlock)
+    {
+        try
+        {
+            var commandCenterClass = GetClass("MPRemoteCommandCenter");
+            var sharedCommandCenter = Selector("sharedCommandCenter");
+            if (!RespondsTo(commandCenterClass, sharedCommandCenter, _selRespondsToSelector)) return;
+
+            var commandCenter = Send(commandCenterClass, sharedCommandCenter);
+            if (commandCenter == 0) return;
+
+            _togglePlayPauseBlock = AddRemoteCommand(
+                commandCenter, Selector("togglePlayPauseCommand"), concreteGlobalBlock, RemoteCommandKind.PlayPause);
+            _playBlock = AddRemoteCommand(
+                commandCenter, Selector("playCommand"), concreteGlobalBlock, RemoteCommandKind.PlayPause);
+            _pauseBlock = AddRemoteCommand(
+                commandCenter, Selector("pauseCommand"), concreteGlobalBlock, RemoteCommandKind.PlayPause);
+            _nextBlock = AddRemoteCommand(
+                commandCenter, Selector("nextTrackCommand"), concreteGlobalBlock, RemoteCommandKind.Next);
+            _previousBlock = AddRemoteCommand(
+                commandCenter, Selector("previousTrackCommand"), concreteGlobalBlock, RemoteCommandKind.Previous);
+            _stopBlock = AddRemoteCommand(
+                commandCenter, Selector("stopCommand"), concreteGlobalBlock, RemoteCommandKind.Stop);
+        }
+        catch
+        {
+            // Remote commands are optional; the now-playing card still works.
+        }
+    }
+
+    private nint AddRemoteCommand(
+        nint commandCenter,
+        nint commandSelector,
+        nint concreteGlobalBlock,
+        RemoteCommandKind kind)
+    {
+        if (!RespondsTo(commandCenter, commandSelector, _selRespondsToSelector)) return 0;
+
+        var command = Send(commandCenter, commandSelector);
+        if (command == 0) return 0;
+
+        var setEnabled = Selector("setEnabled:");
+        var addTargetWithHandler = Selector("addTargetWithHandler:");
+        if (RespondsTo(command, setEnabled, _selRespondsToSelector))
+            SendVoidByte(command, setEnabled, 1);
+        if (!RespondsTo(command, addTargetWithHandler, _selRespondsToSelector)) return 0;
+
+        var block = CreateRemoteCommandBlock(concreteGlobalBlock, _token, kind);
+        if (block == 0) return 0;
+
+        var target = Send(command, addTargetWithHandler, block);
+        if (target != 0) _remoteTargets.Add((command, target));
+        return block;
+    }
 
     private nint NsString(string value)
         => SendUtf8(_nsString, _selStringWithUTF8, value);
@@ -218,14 +384,86 @@ internal sealed class MacNowPlayingIntegration : INowPlayingIntegration
         return utf8 == 0 ? null : Marshal.PtrToStringUTF8(utf8);
     }
 
-    public event EventHandler? PlayPauseRequested { add { } remove { } }
-    public event EventHandler? NextRequested { add { } remove { } }
-    public event EventHandler? PreviousRequested { add { } remove { } }
-    public event EventHandler? StopRequested { add { } remove { } }
+    private event EventHandler? PlayPauseRequestedCore;
+    private event EventHandler? NextRequestedCore;
+    private event EventHandler? PreviousRequestedCore;
+    private event EventHandler? StopRequestedCore;
+
+    public event EventHandler? PlayPauseRequested
+    {
+        add => PlayPauseRequestedCore += value;
+        remove => PlayPauseRequestedCore -= value;
+    }
+
+    public event EventHandler? NextRequested
+    {
+        add => NextRequestedCore += value;
+        remove => NextRequestedCore -= value;
+    }
+
+    public event EventHandler? PreviousRequested
+    {
+        add => PreviousRequestedCore += value;
+        remove => PreviousRequestedCore -= value;
+    }
+
+    public event EventHandler? StopRequested
+    {
+        add => StopRequestedCore += value;
+        remove => StopRequestedCore -= value;
+    }
+
+    internal nint DebugTogglePlayPauseBlock => _togglePlayPauseBlock;
+    internal nint DebugPlayBlock => _playBlock;
+    internal nint DebugPauseBlock => _pauseBlock;
+    internal nint DebugNextBlock => _nextBlock;
+    internal nint DebugPreviousBlock => _previousBlock;
+    internal nint DebugStopBlock => _stopBlock;
+
+    private void RaiseRemoteCommand(RemoteCommandKind kind)
+    {
+        try
+        {
+            switch (kind)
+            {
+                case RemoteCommandKind.PlayPause:
+                    PlayPauseRequestedCore?.Invoke(this, EventArgs.Empty);
+                    break;
+                case RemoteCommandKind.Next:
+                    NextRequestedCore?.Invoke(this, EventArgs.Empty);
+                    break;
+                case RemoteCommandKind.Previous:
+                    PreviousRequestedCore?.Invoke(this, EventArgs.Empty);
+                    break;
+                case RemoteCommandKind.Stop:
+                    StopRequestedCore?.Invoke(this, EventArgs.Empty);
+                    break;
+            }
+        }
+        catch
+        {
+            // The native media-key path is best-effort; it must not take the player down.
+        }
+    }
 
     public void Dispose()
     {
         if (!IsAvailable) return;
+        foreach (var (command, target) in _remoteTargets)
+        {
+            try
+            {
+                if (RespondsTo(command, _selRemoveTarget, _selRespondsToSelector))
+                    Send(command, _selRemoveTarget, target);
+            }
+            catch
+            {
+                // App shutdown must remain best-effort.
+            }
+        }
+        _remoteTargets.Clear();
+        if (_token != 0) Instances.TryRemove(_token, out _);
+
         // Clear the card rather than leaving a stopped track sitting in Control
         // Center after the app is gone.
         Send(_center, _selSetNowPlayingInfo, 0);

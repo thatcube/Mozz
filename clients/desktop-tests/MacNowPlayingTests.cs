@@ -1,5 +1,7 @@
 using Mozz.Desktop.Audio;
 using Mozz.Desktop.Audio.Platform;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Xunit;
 
 namespace Mozz.Desktop.Tests;
@@ -17,9 +19,20 @@ namespace Mozz.Desktop.Tests;
 /// Skipped off macOS rather than failed: the class under test is the platform
 /// surface, and its absence elsewhere is the design.
 /// </summary>
+[SupportedOSPlatform("macos")]
 public class MacNowPlayingTests
 {
     private static bool OnMac => OperatingSystem.IsMacOS();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct ObjcBlockLiteral
+    {
+        public nint Isa;
+        public int Flags;
+        public int Reserved;
+        public delegate* unmanaged<nint, nint, nint> Invoke;
+        public nint Descriptor;
+    }
 
     [Fact]
     public void TheFrameworkResolves()
@@ -109,5 +122,58 @@ public class MacNowPlayingTests
         using var chosen = NowPlayingIntegration.Create();
         if (OnMac) Assert.IsType<MacNowPlayingIntegration>(chosen);
         else Assert.IsType<NoopNowPlayingIntegration>(chosen);
+    }
+
+    [Fact]
+    public unsafe void RemoteCommandBlocksRaiseTransportEvents()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        using var np = new MacNowPlayingIntegration();
+        if (!np.IsAvailable) return;
+
+        AssertBlockRaises(np.DebugTogglePlayPauseBlock,
+            handler => np.PlayPauseRequested += handler,
+            handler => np.PlayPauseRequested -= handler);
+        AssertBlockRaises(np.DebugPlayBlock,
+            handler => np.PlayPauseRequested += handler,
+            handler => np.PlayPauseRequested -= handler);
+        AssertBlockRaises(np.DebugPauseBlock,
+            handler => np.PlayPauseRequested += handler,
+            handler => np.PlayPauseRequested -= handler);
+        AssertBlockRaises(np.DebugNextBlock,
+            handler => np.NextRequested += handler,
+            handler => np.NextRequested -= handler);
+        AssertBlockRaises(np.DebugPreviousBlock,
+            handler => np.PreviousRequested += handler,
+            handler => np.PreviousRequested -= handler);
+        AssertBlockRaises(np.DebugStopBlock,
+            handler => np.StopRequested += handler,
+            handler => np.StopRequested -= handler);
+    }
+
+    private static unsafe void AssertBlockRaises(
+        nint block,
+        Action<EventHandler> subscribe,
+        Action<EventHandler> unsubscribe)
+    {
+        Assert.NotEqual(0, block);
+        var literal = (ObjcBlockLiteral*)block;
+        Assert.NotEqual(0, literal->Isa);
+        Assert.NotEqual(0, (nint)literal->Invoke);
+        Assert.NotEqual(0, literal->Descriptor);
+
+        var count = 0;
+        EventHandler handler = (_, _) => Interlocked.Increment(ref count);
+        subscribe(handler);
+        try
+        {
+            var status = literal->Invoke(block, 0);
+            Assert.Equal(0, status);
+            Assert.Equal(1, Volatile.Read(ref count));
+        }
+        finally
+        {
+            unsubscribe(handler);
+        }
     }
 }
