@@ -42,6 +42,7 @@ CLAUDE.local.md
 .agents/
 *.agent.md
 .project.yml.verbak
+.mozz-dev-build
 
 # Screenshot fixture: large binary covers + audio, generated locally.
 ScreenshotAssets/

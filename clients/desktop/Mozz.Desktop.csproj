@@ -6,9 +6,37 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- LibraryImport (the source-generated P/Invoke) emits unsafe marshalling code. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>Assets\mozz.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+
+  <Target Name="ComputeMozzVersion" BeforeTargets="GetAssemblyVersion">
+    <PropertyGroup>
+      <MozzPythonExecutable Condition="'$(MozzPythonExecutable)' == '' and '$(OS)' == 'Windows_NT'">python</MozzPythonExecutable>
+      <MozzPythonExecutable Condition="'$(MozzPythonExecutable)' == ''">python3</MozzPythonExecutable>
+      <MozzVersionScript>$(MSBuildThisFileDirectory)../../tools/version-info.py</MozzVersionScript>
+    </PropertyGroup>
+    <Exec
+      Command="&quot;$(MozzPythonExecutable)&quot; &quot;$(MozzVersionScript)&quot; --format msbuild-lines"
+      ConsoleToMSBuild="true"
+      StandardOutputImportance="Low"
+      Condition="'$(MozzMarketingVersion)' == '' or '$(MozzBuildNumber)' == '' or '$(MozzDisplayVersion)' == '' or '$(MozzAssemblyVersion)' == '' or '$(MozzFileVersion)' == ''">
+      <Output TaskParameter="ConsoleOutput" ItemName="_MozzVersionLine" />
+    </Exec>
+    <PropertyGroup>
+      <_MozzVersionOutput>@(_MozzVersionLine, '|')</_MozzVersionOutput>
+      <MozzMarketingVersion Condition="'$(MozzMarketingVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzMarketingVersion=([^|]+)').Groups[1].Value)</MozzMarketingVersion>
+      <MozzBuildNumber Condition="'$(MozzBuildNumber)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzBuildNumber=([^|]+)').Groups[1].Value)</MozzBuildNumber>
+      <MozzDisplayVersion Condition="'$(MozzDisplayVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzDisplayVersion=([^|]+)').Groups[1].Value)</MozzDisplayVersion>
+      <MozzAssemblyVersion Condition="'$(MozzAssemblyVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzAssemblyVersion=([^|]+)').Groups[1].Value)</MozzAssemblyVersion>
+      <MozzFileVersion Condition="'$(MozzFileVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzFileVersion=([^|]+)').Groups[1].Value)</MozzFileVersion>
+      <Version>$(MozzMarketingVersion)</Version>
+      <AssemblyVersion>$(MozzAssemblyVersion)</AssemblyVersion>
+      <FileVersion>$(MozzFileVersion)</FileVersion>
+      <InformationalVersion>$(MozzDisplayVersion)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 
   <ItemGroup>
     <Folder Include="Models\" />

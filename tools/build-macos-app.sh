@@ -44,6 +44,7 @@ export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
 export PATH="$DOTNET_ROOT:$PATH"
 # ~/.nuget is root-owned on this machine.
 export NUGET_PACKAGES="${NUGET_PACKAGES:-$HOME/Development/.nuget-packages}"
+eval "$(tools/version-info.py --format shell)"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -63,6 +64,11 @@ rm -rf "$STAGE"
 dotnet publish clients/desktop/Mozz.Desktop.csproj \
   -c Release -r "$RID" --self-contained true \
   -p:UseAppHost=true \
+  -p:MozzMarketingVersion="$MOZZ_RESOLVED_MARKETING_VERSION" \
+  -p:MozzBuildNumber="$MOZZ_RESOLVED_BUILD_NUMBER" \
+  -p:MozzDisplayVersion="$MOZZ_RESOLVED_DISPLAY_VERSION" \
+  -p:MozzAssemblyVersion="$MOZZ_RESOLVED_ASSEMBLY_VERSION" \
+  -p:MozzFileVersion="$MOZZ_RESOLVED_FILE_VERSION" \
   -o "$STAGE" \
   --nologo -v quiet
 cp .build/release/libMozzFFI.dylib "$STAGE/"
@@ -91,10 +97,6 @@ else
   echo "  (no source icon at $SOURCE_ICON — bundle will use the generic one)"
 fi
 
-# CalVer, matching the iOS app's scheme.
-VERSION="$(date +%Y.%-m.%-d)"
-BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
-
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,8 +108,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Mozz.Desktop</string>
   <key>CFBundleIconFile</key><string>Mozz</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>$BUILD</string>
+  <key>CFBundleShortVersionString</key><string>$MOZZ_RESOLVED_MARKETING_VERSION</string>
+  <key>CFBundleVersion</key><string>$MOZZ_RESOLVED_BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- Without this the process is a background agent: no Dock icon, no menu
@@ -158,7 +160,7 @@ codesign "${SIGN[@]}" --deep "$APP" 2>/dev/null \
   || echo "  (codesign reported an issue; the app may still run)"
 
 SIZE="$(du -sh "$APP" | cut -f1)"
-echo "✓ $APP ($SIZE) — version $VERSION build $BUILD"
+echo "✓ $APP ($SIZE) — version $MOZZ_RESOLVED_DISPLAY_VERSION"
 
 if [ "$RUN" = "1" ]; then
   echo "▸ Launching…"
