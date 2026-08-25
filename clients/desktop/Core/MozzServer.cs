@@ -224,6 +224,15 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         return result?.Url;
     }
 
+    public Task<ServerAccountProfile?> AccountAsync(
+        string serverId, int size = 120, CancellationToken token = default)
+        => core.CallAsync<ServerAccountProfile>(new
+        {
+            cmd = "account",
+            serverId,
+            size,
+        }, token);
+
     // MARK: Saved accounts
 
     /// <summary>
@@ -379,6 +388,11 @@ public sealed record ServerAccount
     public required string ClientIdentifier { get; init; }
     public string? MusicSectionId { get; init; }
 }
+
+public sealed record ServerAccountProfile(
+    [property: JsonPropertyName("displayName")] string? DisplayName,
+    [property: JsonPropertyName("username")] string? Username,
+    [property: JsonPropertyName("avatarURL")] string? AvatarUrl);
 
 public sealed record PlexLink(int PinId, string Code, string ClientIdentifier, string? LinkUrl);
 

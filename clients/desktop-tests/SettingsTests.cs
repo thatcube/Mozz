@@ -75,6 +75,46 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void SettingsCategoriesMirrorIosOrderWithDesktopAccountFirst()
+    {
+        var labels = SettingsCategories.All.Select(c => c.Label).ToArray();
+
+        Assert.Equal([
+            "Account & Servers",
+            "Library",
+            "Playback",
+            "Lyrics",
+            "Recommendations",
+            "Appearance",
+            "Diagnostics",
+            "About",
+        ], labels);
+    }
+
+    [Fact]
+    public void SettingsPlacementPutsEqualizerInsidePlayback()
+    {
+        Assert.Equal(SettingsCategory.AccountServers, SettingsCategories.CategoryFor(SettingsSetting.ServerAccounts));
+        Assert.Equal(SettingsCategory.Library, SettingsCategories.CategoryFor(SettingsSetting.MusicLibraries));
+        Assert.Equal(SettingsCategory.Playback, SettingsCategories.CategoryFor(SettingsSetting.VolumeNormalization));
+        Assert.Equal(SettingsCategory.Playback, SettingsCategories.CategoryFor(SettingsSetting.Equalizer));
+        Assert.Equal(SettingsCategory.Recommendations, SettingsCategories.CategoryFor(SettingsSetting.SuppressedItems));
+        Assert.Equal(SettingsCategory.Diagnostics, SettingsCategories.CategoryFor(SettingsSetting.Diagnostics));
+    }
+
+    [Fact]
+    public void SettingsCategorySelectionTracksCurrentCategory()
+    {
+        var state = new SettingsCategorySelectionState();
+
+        Assert.True(state.IsSelected(SettingsCategory.AccountServers));
+        Assert.True(state.Select(SettingsCategory.Playback));
+        Assert.False(state.Select(SettingsCategory.Playback));
+        Assert.True(state.IsSelected(SettingsCategory.Playback));
+        Assert.Equal("Playback", state.SelectedDefinition.Label);
+    }
+
+    [Fact]
     public void EqualizerFaderScaleCentersZeroDb()
     {
         Assert.Equal(0, EqualizerFaderScale.NormalizedPosition(-12));
@@ -102,6 +142,15 @@ public sealed class SettingsTests : IDisposable
             SettingsPresentation.ProfileSubtitle(account, "152 songs · 12 albums · 4 artists"));
         Assert.Equal("Living Room", SettingsPresentation.ServerSectionTitle(account));
         Assert.Equal("Jellyfin · http://server", SettingsPresentation.ServerSectionSubtitle(account));
+    }
+
+    [Fact]
+    public void ServerAccountProfileAcceptsNullSubsonicAvatar()
+    {
+        var profile = new ServerAccountProfile("brandon", "brandon", null);
+
+        Assert.Equal("brandon", profile.DisplayName);
+        Assert.Null(profile.AvatarUrl);
     }
 
     [Fact]

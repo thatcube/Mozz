@@ -21,6 +21,8 @@ namespace Mozz.Desktop.Core;
 /// </summary>
 public sealed class ArtworkService : IDisposable
 {
+    public const string DirectUrlNamespace = "__direct-url__";
+
     /// <summary>
     /// The process-wide instance the tiles read. Null in the designer and before
     /// the main view model is constructed, in which case tiles just draw their
@@ -31,6 +33,7 @@ public sealed class ArtworkService : IDisposable
     private readonly MozzServer _server;
     private readonly HttpClient _http;
     private readonly ArtworkCache<Bitmap> _cache;
+    private readonly ArtworkCache<Bitmap> _directUrlCache;
 
     public ArtworkService(MozzServer server, string? diskDirectory)
     {
@@ -49,6 +52,12 @@ public sealed class ArtworkService : IDisposable
             memoryCapacity: 384,
             maxConcurrency: 6,
             diskDirectory: diskDirectory);
+        _directUrlCache = new ArtworkCache<Bitmap>(
+            fetch: FetchDirectUrlAsync,
+            decode: Decode,
+            memoryCapacity: 64,
+            maxConcurrency: 3,
+            diskDirectory: diskDirectory is null ? null : Path.Combine(diskDirectory, "direct-url"));
     }
 
     /// <summary>
@@ -66,6 +75,14 @@ public sealed class ArtworkService : IDisposable
     /// <summary>The decoded cover for a request, or null when there is none.</summary>
     public Task<Bitmap?> LoadAsync(ArtworkRef request, CancellationToken token)
         => _cache.GetAsync(request, token);
+
+    /// <summary>
+    /// Load an already-resolved image URL through the same bounded, recycling-safe
+    /// cache as server artwork. Account avatars arrive this way: they are not
+    /// catalog artwork keys and must not be sent through the artworkURL command.
+    /// </summary>
+    public Task<Bitmap?> LoadDirectUrlAsync(ArtworkRef request, CancellationToken token)
+        => _directUrlCache.GetAsync(request, token);
 
     private async Task<byte[]?> FetchAsync(ArtworkRef request, CancellationToken token)
     {
@@ -100,6 +117,25 @@ public sealed class ArtworkService : IDisposable
         }
     }
 
+    private async Task<byte[]?> FetchDirectUrlAsync(ArtworkRef request, CancellationToken token)
+    {
+        if (!Uri.TryCreate(request.ArtworkKey, UriKind.Absolute, out var uri)) return null;
+        if (uri.Scheme is not ("http" or "https")) return null;
+
+        try
+        {
+            using var response = await _http
+                .GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static Bitmap? Decode(byte[] bytes)
     {
         try
@@ -118,6 +154,7 @@ public sealed class ArtworkService : IDisposable
     {
         if (ReferenceEquals(Current, this)) Current = null;
         _cache.Dispose();
+        _directUrlCache.Dispose();
         _http.Dispose();
     }
 }

@@ -5,6 +5,93 @@ namespace Mozz.Desktop.ViewModels;
 
 public sealed record SettingsOption(string Id, string Label);
 
+public enum SettingsCategory
+{
+    AccountServers,
+    Library,
+    Playback,
+    Lyrics,
+    Recommendations,
+    Appearance,
+    Diagnostics,
+    About,
+}
+
+public enum SettingsSetting
+{
+    AccountHeader,
+    ServerAccounts,
+    AddServer,
+    SyncNow,
+    MusicLibraries,
+    VolumeNormalization,
+    Equalizer,
+    LyricsOnlineLookup,
+    LyricsOfflineCapture,
+    ImproveRecommendations,
+    SuppressedItems,
+    AppearanceTheme,
+    DarkStyle,
+    Diagnostics,
+    About,
+}
+
+public sealed record SettingsCategoryDefinition(SettingsCategory Category, string Label, string Subtitle);
+
+public static class SettingsCategories
+{
+    public static readonly IReadOnlyList<SettingsCategoryDefinition> All =
+    [
+        new(SettingsCategory.AccountServers, "Account & Servers", "Sign in, switch servers and sync"),
+        new(SettingsCategory.Library, "Library", "Music libraries"),
+        new(SettingsCategory.Playback, "Playback", "Normalization and equalizer"),
+        new(SettingsCategory.Lyrics, "Lyrics", "Lookup and offline lyrics"),
+        new(SettingsCategory.Recommendations, "Recommendations", "Enrichment and hidden items"),
+        new(SettingsCategory.Appearance, "Appearance", "Theme"),
+        new(SettingsCategory.Diagnostics, "Diagnostics", "Storage and sync details"),
+        new(SettingsCategory.About, "About", "Version and source"),
+    ];
+
+    public static SettingsCategory CategoryFor(SettingsSetting setting) => setting switch
+    {
+        SettingsSetting.AccountHeader or
+        SettingsSetting.ServerAccounts or
+        SettingsSetting.AddServer or
+        SettingsSetting.SyncNow => SettingsCategory.AccountServers,
+        SettingsSetting.MusicLibraries => SettingsCategory.Library,
+        SettingsSetting.VolumeNormalization or
+        SettingsSetting.Equalizer => SettingsCategory.Playback,
+        SettingsSetting.LyricsOnlineLookup or
+        SettingsSetting.LyricsOfflineCapture => SettingsCategory.Lyrics,
+        SettingsSetting.ImproveRecommendations or
+        SettingsSetting.SuppressedItems => SettingsCategory.Recommendations,
+        SettingsSetting.AppearanceTheme or
+        SettingsSetting.DarkStyle => SettingsCategory.Appearance,
+        SettingsSetting.Diagnostics => SettingsCategory.Diagnostics,
+        SettingsSetting.About => SettingsCategory.About,
+        _ => throw new ArgumentOutOfRangeException(nameof(setting), setting, null),
+    };
+
+    public static SettingsCategoryDefinition Definition(SettingsCategory category) =>
+        All.First(d => d.Category == category);
+}
+
+public sealed class SettingsCategorySelectionState
+{
+    public SettingsCategory Selected { get; private set; } = SettingsCategory.AccountServers;
+
+    public SettingsCategoryDefinition SelectedDefinition => SettingsCategories.Definition(Selected);
+
+    public bool Select(SettingsCategory category)
+    {
+        if (Selected == category) return false;
+        Selected = category;
+        return true;
+    }
+
+    public bool IsSelected(SettingsCategory category) => Selected == category;
+}
+
 public sealed record SettingsLibraryOption(string Id, string Name, bool IsSelected)
 {
     public string Status => IsSelected ? "Syncing" : "Not syncing";

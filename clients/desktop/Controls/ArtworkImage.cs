@@ -44,6 +44,9 @@ public sealed class ArtworkImage : Control
     public static readonly StyledProperty<string?> ArtworkKeyProperty =
         AvaloniaProperty.Register<ArtworkImage, string?>(nameof(ArtworkKey));
 
+    public static readonly StyledProperty<string?> ImageUrlProperty =
+        AvaloniaProperty.Register<ArtworkImage, string?>(nameof(ImageUrl));
+
     /// <summary>The drawn size in DIPs; also what the cover is requested at (×2).</summary>
     public static readonly StyledProperty<double> DisplaySizeProperty =
         AvaloniaProperty.Register<ArtworkImage, double>(nameof(DisplaySize), 48);
@@ -83,6 +86,7 @@ public sealed class ArtworkImage : Control
 
     public string? ServerId { get => GetValue(ServerIdProperty); set => SetValue(ServerIdProperty, value); }
     public string? ArtworkKey { get => GetValue(ArtworkKeyProperty); set => SetValue(ArtworkKeyProperty, value); }
+    public string? ImageUrl { get => GetValue(ImageUrlProperty); set => SetValue(ImageUrlProperty, value); }
     public double DisplaySize { get => GetValue(DisplaySizeProperty); set => SetValue(DisplaySizeProperty, value); }
     public CornerRadius CornerRadius { get => GetValue(CornerRadiusProperty); set => SetValue(CornerRadiusProperty, value); }
     public string? FallbackText { get => GetValue(FallbackTextProperty); set => SetValue(FallbackTextProperty, value); }
@@ -96,6 +100,7 @@ public sealed class ArtworkImage : Control
         base.OnPropertyChanged(change);
         if (change.Property == ServerIdProperty ||
             change.Property == ArtworkKeyProperty ||
+            change.Property == ImageUrlProperty ||
             change.Property == DisplaySizeProperty)
         {
             Rebind();
@@ -117,25 +122,39 @@ public sealed class ArtworkImage : Control
 
     private ArtworkRef? BuildRequest()
     {
+        var url = ImageUrl;
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            return new ArtworkRef(ArtworkService.DirectUrlNamespace, url, RequestedPixels());
+        }
+
         var server = ServerId;
         var key = ArtworkKey;
         if (string.IsNullOrEmpty(server) || string.IsNullOrEmpty(key)) return null;
 
-        var pixels = (int)Math.Ceiling(Math.Max(1, DisplaySize) * RetinaScale);
-        return new ArtworkRef(server, key, pixels);
+        return new ArtworkRef(server, key, RequestedPixels());
     }
+
+    private int RequestedPixels() => (int)Math.Ceiling(Math.Max(1, DisplaySize) * RetinaScale);
 
     private ArtworkBinder<Bitmap> EnsureBinder()
         => _binder ??= new ArtworkBinder<Bitmap>(
-            load: static (request, token) =>
-                ArtworkService.Current?.LoadAsync(request, token)
-                ?? Task.FromResult<Bitmap?>(null),
+            load: LoadArtworkAsync,
             apply: bitmap =>
             {
                 _bitmap = bitmap;
                 InvalidateVisual();
             },
             post: action => Dispatcher.UIThread.Post(action));
+
+    private static Task<Bitmap?> LoadArtworkAsync(ArtworkRef request, CancellationToken token)
+    {
+        var service = ArtworkService.Current;
+        if (service is null) return Task.FromResult<Bitmap?>(null);
+        return request.ServerId == ArtworkService.DirectUrlNamespace
+            ? service.LoadDirectUrlAsync(request, token)
+            : service.LoadAsync(request, token);
+    }
 
     public override void Render(DrawingContext context)
     {
