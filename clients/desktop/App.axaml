@@ -9,6 +9,16 @@
         <local:ViewLocator />
     </Application.DataTemplates>
 
+    <!-- The macOS application menu.
+         Without one, Avalonia installs its own default, whose first item is
+         "About Avalonia" — so the app told anyone who looked what it was built
+         with rather than what it is. -->
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="About Mozz" Click="OnAboutMozz" />
+        </NativeMenu>
+    </NativeMenu.Menu>
+
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -39,6 +49,24 @@
             <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
             <SolidColorBrush x:Key="TextSecondary" Color="#9A9AA2" />
             <SolidColorBrush x:Key="TextTertiary" Color="#6A6A72" />
+
+            <!-- Fluent's own accent, overridden to the same crimson.
+                 The brushes above only reach controls we style by hand. Every
+                 built-in control — the sliders, the progress bar, list
+                 selection, focus rings — reads SystemAccentColor instead, which
+                 ships as a Windows blue. Leaving it meant the seek bar, the
+                 volume slider and the selected row were all bright blue in an
+                 otherwise crimson app, which read as unfinished rather than as
+                 a choice. The Light/Dark ramp is what Fluent reaches for on
+                 hover, press and disabled states, so all six are given rather
+                 than just the base. -->
+            <Color x:Key="SystemAccentColor">#D8213F</Color>
+            <Color x:Key="SystemAccentColorLight1">#E63A55</Color>
+            <Color x:Key="SystemAccentColorLight2">#EE5C73</Color>
+            <Color x:Key="SystemAccentColorLight3">#F58193</Color>
+            <Color x:Key="SystemAccentColorDark1">#B00023</Color>
+            <Color x:Key="SystemAccentColorDark2">#8C001C</Color>
+            <Color x:Key="SystemAccentColorDark3">#680015</Color>
         </ResourceDictionary>
     </Application.Resources>
 
@@ -48,6 +76,33 @@
         <Style Selector="Window">
             <Setter Property="Background" Value="{DynamicResource AppBackground}" />
             <Setter Property="FontFamily" Value="{StaticResource InterFont}" />
+        </Style>
+
+        <!-- Selection, for every list that does not say otherwise.
+             Fluent fills the selected row edge to edge with the accent colour.
+             Next to album art that is a solid bar of paint across the window,
+             and it looks nothing like the sidebar, which marks its current item
+             with a quiet raised surface and crimson text. Do the same here: the
+             surface carries the selection and the title carries the colour.
+             Lists whose rows are only a layout device — the album and artist
+             walls — still override this locally to nothing. -->
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="ListBoxItem:selected:focus /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="ListBoxItem:selected:focus-within /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="ListBoxItem:selected TextBlock.primary">
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
         </Style>
 
         <Style Selector="Button.nav">
