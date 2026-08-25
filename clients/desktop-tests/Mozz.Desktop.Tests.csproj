@@ -37,6 +37,9 @@
     <Compile Include="..\desktop\ViewModels\HomeMixes.cs" />
     <Compile Include="..\desktop\ViewModels\LibraryNavigation.cs" />
     <Compile Include="..\desktop\ViewModels\MediaDetailFormatting.cs" />
+    <Compile Include="..\desktop\ViewModels\PlaybackQueue.cs" />
+    <Compile Include="..\desktop\ViewModels\SearchPresentation.cs" />
+    <Compile Include="..\desktop\ViewModels\GenrePresentation.cs" />
     <Compile Include="..\desktop\ViewModels\SettingsModels.cs" />
     <Compile Include="..\desktop\Core\ArtworkCache.cs" />
     <Compile Include="..\desktop\Core\ArtworkBinder.cs" />

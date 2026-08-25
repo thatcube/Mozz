@@ -105,6 +105,16 @@
                                 <TextBlock x:Name="LblArtists" Text="Artists" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
+                        <Button Classes="nav" Classes.selected="{Binding IsGenresSelected}"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Genres}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconStack}"
+                                                     Brush="{Binding #LblGenres.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblGenres" Text="Genres" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="nav" Classes.selected="{Binding IsPlaylistsSelected}"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Playlists}">
@@ -552,122 +562,142 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
+                    <!-- Genres -->
+                    <ListBox IsVisible="{Binding ShowGenres}"
+                             ItemsSource="{Binding GenreGrid.Rows}"
+                             Background="Transparent" BorderThickness="0"
+                             SelectionMode="Single" Padding="0,0,8,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.Styles>
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Focusable" Value="False" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <ItemsControl ItemsSource="{Binding}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Classes="tile" Width="216" Margin="0,0,20,24"
+                                                    Command="{Binding $parent[Window].DataContext.OpenGenreCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <Border Background="{DynamicResource SurfaceRaised}"
+                                                        CornerRadius="12" Padding="18" Height="128">
+                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
+                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconStack}"
+                                                                             Brush="{DynamicResource TextSecondary}" />
+                                                        <TextBlock Text="{Binding Name}" Classes="primary" FontSize="17" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
                     <!-- Search: compact result groups. Each item pushes onto the
                          same navigation stack as the library walls. -->
-                    <ScrollViewer IsVisible="{Binding ShowSearch}">
-                        <StackPanel Spacing="28" Margin="0,0,8,24">
-                            <StackPanel Spacing="12" IsVisible="{Binding HasSearchAlbums}">
-                                <TextBlock Text="Albums" Classes="sectionTitle" />
-                                <ItemsControl ItemsSource="{Binding AlbumGrid.Rows}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <ItemsControl ItemsSource="{Binding}">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal" />
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Button Classes="tile" Width="176" Margin="0,0,20,12"
-                                                                Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
-                                                                CommandParameter="{Binding}">
-                                                            <StackPanel Spacing="9">
-                                                                <controls:ArtworkImage Width="176" Height="176" DisplaySize="176"
-                                                                        CornerRadius="8"
-                                                                        ServerId="{Binding ServerId}"
-                                                                        ArtworkKey="{Binding ArtworkKey}"
-                                                                        FallbackText="{Binding Title}"
-                                                                        FallbackFontSize="52"
-                                                                        FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
-                                                                <StackPanel Spacing="2">
-                                                                    <TextBlock Text="{Binding Title}" Classes="primary" />
-                                                                    <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
-                                                                </StackPanel>
-                                                            </StackPanel>
-                                                        </Button>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-
-                            <StackPanel Spacing="12" IsVisible="{Binding HasSearchArtists}">
-                                <TextBlock Text="Artists" Classes="sectionTitle" />
-                                <ItemsControl ItemsSource="{Binding ArtistGrid.Rows}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <ItemsControl ItemsSource="{Binding}">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal" />
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Button Classes="tile" Width="158" Margin="0,0,20,12"
-                                                                Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
-                                                                CommandParameter="{Binding}">
-                                                            <StackPanel Spacing="10">
-                                                                <controls:ArtworkImage Width="138" Height="138" DisplaySize="138"
-                                                                        CornerRadius="69"
-                                                                        HorizontalAlignment="Center"
-                                                                        ServerId="{Binding ServerId}"
-                                                                        ArtworkKey="{Binding ArtworkKey}"
-                                                                        FallbackText="{Binding Name}"
-                                                                        FallbackFontSize="44"
-                                                                        FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
-                                                                <TextBlock Text="{Binding Name}" Classes="primary" TextAlignment="Center" />
-                                                            </StackPanel>
-                                                        </Button>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-
-                            <StackPanel Spacing="12" IsVisible="{Binding HasSearchTracks}">
-                                <TextBlock Text="Songs" Classes="sectionTitle" />
-                                <ListBox ItemsSource="{Binding Tracks}"
-                                         DoubleTapped="OnTrackActivated"
-                                         Background="Transparent" BorderThickness="0">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <Grid ColumnDefinitions="44,*,200,64" Height="50">
-                                                <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38"
-                                                        CornerRadius="6"
-                                                        ServerId="{Binding ServerId}"
-                                                        ArtworkKey="{Binding ArtworkKey}"
-                                                        FallbackText="{Binding AlbumTitle}"
-                                                        FallbackFontSize="15"
-                                                        FallbackFontWeight="SemiBold"
-                                                        FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
-                                                    <TextBlock Text="{Binding Title}" Classes="primary" />
-                                                    <Button Classes="link" HorizontalAlignment="Left"
-                                                            Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
-                                                            CommandParameter="{Binding}">
-                                                        <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
-                                                    </Button>
-                                                </StackPanel>
-                                                <Button Grid.Column="2" Classes="link" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                        Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                                        CommandParameter="{Binding}">
-                                                    <TextBlock Text="{Binding AlbumTitle}" Classes="secondary" />
-                                                </Button>
-                                                <TextBlock Grid.Column="3" Text="{Binding Duration}" Classes="secondary"
-                                                           VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
+                    <ListBox IsVisible="{Binding ShowSearch}"
+                             ItemsSource="{Binding SearchRows}"
+                             DoubleTapped="OnSearchRowActivated"
+                             Background="Transparent" BorderThickness="0"
+                             Padding="0,0,8,24">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.DataTemplates>
+                            <DataTemplate DataType="vm:SearchHeaderRow">
+                                <TextBlock Text="{Binding Title}" Classes="sectionTitle" Margin="0,18,0,10" />
+                            </DataTemplate>
+                            <DataTemplate DataType="vm:SearchEmptyRow">
+                                <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18" Margin="0,8,0,0">
+                                    <TextBlock Text="{Binding Message}" Classes="secondary" />
+                                </Border>
+                            </DataTemplate>
+                            <DataTemplate DataType="vm:SearchTrackRow">
+                                <Grid ColumnDefinitions="44,*,200,64" Height="50">
+                                    <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
+                                            ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
+                                            FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
+                                        <TextBlock Text="{Binding Track.Title}" Classes="primary" />
+                                        <Button Classes="link" HorizontalAlignment="Left"
+                                                Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                                CommandParameter="{Binding Track}">
+                                            <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
+                                        </Button>
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Classes="link" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                            Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
+                                            CommandParameter="{Binding Track}">
+                                        <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
+                                    </Button>
+                                    <TextBlock Grid.Column="3" Text="{Binding Track.Duration}" Classes="secondary"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                </Grid>
+                            </DataTemplate>
+                            <DataTemplate DataType="vm:SearchAlbumRow">
+                                <Button Classes="tile" HorizontalAlignment="Stretch"
+                                        Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
+                                        CommandParameter="{Binding Album}">
+                                    <Grid ColumnDefinitions="54,*,120" Height="58">
+                                        <controls:ArtworkImage Grid.Column="0" Width="46" Height="46" DisplaySize="46" CornerRadius="7"
+                                                ServerId="{Binding Album.ServerId}" ArtworkKey="{Binding Album.ArtworkKey}"
+                                                FallbackText="{Binding Album.Title}" FallbackFontSize="16" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0" Spacing="2">
+                                            <TextBlock Text="{Binding Album.Title}" Classes="primary" />
+                                            <TextBlock Text="{Binding Album.ArtistName}" Classes="secondary" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2" Text="{Binding Album.Year}" Classes="secondary" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                            <DataTemplate DataType="vm:SearchArtistRow">
+                                <Button Classes="tile" HorizontalAlignment="Stretch"
+                                        Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
+                                        CommandParameter="{Binding Artist}">
+                                    <Grid ColumnDefinitions="54,*" Height="58">
+                                        <controls:ArtworkImage Grid.Column="0" Width="46" Height="46" DisplaySize="46" CornerRadius="23"
+                                                ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.ArtworkKey}"
+                                                FallbackText="{Binding Artist.Name}" FallbackFontSize="16" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Artist.Name}" Classes="primary" VerticalAlignment="Center" Margin="12,0" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                            <DataTemplate DataType="vm:SearchPlaylistRow">
+                                <Button Classes="tile" HorizontalAlignment="Stretch"
+                                        Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
+                                        CommandParameter="{Binding Playlist}">
+                                    <Grid ColumnDefinitions="54,*,120" Height="58">
+                                        <Border Grid.Column="0" Width="46" Height="46" CornerRadius="7" Background="{DynamicResource SurfaceRaised}">
+                                            <controls:TablerIcon Size="22" Data="{StaticResource IconPlaylist}" Brush="{DynamicResource TextSecondary}"
+                                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Grid.Column="1" Text="{Binding Playlist.Title}" Classes="primary" VerticalAlignment="Center" Margin="12,0" />
+                                        <TextBlock Grid.Column="2" Text="{Binding Playlist.TrackCount, StringFormat='{}{0} songs'}"
+                                                   Classes="secondary" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ListBox.DataTemplates>
+                    </ListBox>
 
                     <!-- Playlists -->
                     <ListBox IsVisible="{Binding ShowPlaylists}"
@@ -884,6 +914,22 @@
                                 </Grid>
                             </DataTemplate>
 
+                            <DataTemplate DataType="vm:GenreHeroRow">
+                                <Grid ColumnDefinitions="236,*" Margin="0,0,0,28">
+                                    <Border Grid.Column="0" Width="220" Height="160" Background="{DynamicResource SurfaceRaised}"
+                                            CornerRadius="13" Padding="28">
+                                        <controls:TablerIcon Size="74" Data="{StaticResource IconStack}"
+                                                             Brush="{DynamicResource TextSecondary}"
+                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="11" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Genre}" FontSize="36" FontWeight="Bold"
+                                                   Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+
                             <DataTemplate DataType="vm:DetailSectionRow">
                                 <TextBlock Text="{Binding Title}" Classes="sectionTitle" Margin="0,14,0,12" />
                             </DataTemplate>
@@ -988,6 +1034,119 @@
                         </ListBox.DataTemplates>
                     </ListBox>
 
+                    <!-- Full Now Playing -->
+                    <Grid IsVisible="{Binding ShowNowPlaying}" RowDefinitions="Auto,*" Margin="0,0,8,24">
+                        <Grid Grid.Row="0" ColumnDefinitions="320,*" ColumnSpacing="30" Margin="0,0,0,26">
+                            <controls:ArtworkImage Grid.Column="0" Width="300" Height="300" DisplaySize="300"
+                                    CornerRadius="18"
+                                    ServerId="{Binding NowPlaying.ServerId}"
+                                    ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+                                    FallbackText="{Binding NowPlaying.AlbumTitle}"
+                                    FallbackFontSize="82"
+                                    FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
+                            <StackPanel Grid.Column="1" Spacing="14" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}"
+                                           FontSize="40" FontWeight="Bold"
+                                           Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Classes="link" Command="{Binding OpenTrackArtistCommand}" CommandParameter="{Binding NowPlaying}">
+                                        <TextBlock Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" FontSize="17"
+                                                   Foreground="{DynamicResource TextSecondary}" />
+                                    </Button>
+                                    <TextBlock Text="·" Classes="secondary" FontSize="17" />
+                                    <Button Classes="link" Command="{Binding OpenTrackAlbumCommand}" CommandParameter="{Binding NowPlaying}">
+                                        <TextBlock Text="{Binding NowPlaying.AlbumTitle, FallbackValue=''}" FontSize="17"
+                                                   Foreground="{DynamicResource TextSecondary}" />
+                                    </Button>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="9">
+                                    <TextBlock Text="{Binding PositionText}" Classes="secondary" VerticalAlignment="Center" />
+                                    <Slider Classes="scrub" Width="520" Minimum="0"
+                                            Maximum="{Binding DurationSeconds}"
+                                            Value="{Binding PositionSeconds, Mode=TwoWay}" />
+                                    <TextBlock Text="{Binding DurationText}" Classes="secondary" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Button Classes="ghost" Command="{Binding ToggleShuffleCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <controls:TablerIcon Size="17" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
+                                            <TextBlock Text="{Binding ShuffleStateText}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="secondary" Command="{Binding PreviousCommand}">
+                                        <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipBack}" Brush="{Binding $parent[Button].Foreground}" />
+                                    </Button>
+                                    <Button Classes="play" Command="{Binding TogglePlayPauseCommand}">
+                                        <Panel>
+                                            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}"
+                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsPlaying}" />
+                                            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPause}"
+                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding IsPlaying}" />
+                                        </Panel>
+                                    </Button>
+                                    <Button Classes="secondary" Command="{Binding NextCommand}">
+                                        <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}" Brush="{Binding $parent[Button].Foreground}" />
+                                    </Button>
+                                    <Button Classes="ghost" Command="{Binding CycleRepeatCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <controls:TablerIcon Size="17" Data="{StaticResource IconRepeat}" Brush="{Binding $parent[Button].Foreground}" />
+                                            <TextBlock Text="{Binding RepeatStateText}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <controls:TablerIcon Size="18" Data="{StaticResource IconVolume}" Brush="{DynamicResource TextSecondary}" />
+                                    <Slider Classes="scrub" Width="180" Minimum="0" Maximum="1"
+                                            Value="{Binding Volume, Mode=TwoWay}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Grid.Row="1" RowDefinitions="Auto,*">
+                            <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12" />
+                            <ListBox Grid.Row="1"
+                                     ItemsSource="{Binding QueueRows}"
+                                     DoubleTapped="OnQueueRowActivated"
+                                     Background="Transparent" BorderThickness="0">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid ColumnDefinitions="78,44,*,180,220,Auto" Height="54">
+                                            <TextBlock Grid.Column="0" Text="{Binding NumberText}" Classes="secondary" VerticalAlignment="Center" />
+                                            <controls:ArtworkImage Grid.Column="1" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
+                                                    ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
+                                                    FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                            <TextBlock Grid.Column="2" Text="{Binding Track.Title}" Classes="primary" VerticalAlignment="Center" Margin="13,0" />
+                                            <Button Grid.Column="3" Classes="link" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                    Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                                    CommandParameter="{Binding Track}">
+                                                <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
+                                            </Button>
+                                            <Button Grid.Column="4" Classes="link" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                    Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
+                                                    CommandParameter="{Binding Track}">
+                                                <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
+                                            </Button>
+                                            <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemUpCommand}" CommandParameter="{Binding}">
+                                                    <TextBlock Text="Up" />
+                                                </Button>
+                                                <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemDownCommand}" CommandParameter="{Binding}">
+                                                    <TextBlock Text="Down" />
+                                                </Button>
+                                                <Button Classes="destructive" Command="{Binding $parent[Window].DataContext.RemoveQueueItemCommand}" CommandParameter="{Binding}">
+                                                    <TextBlock Text="Remove" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Grid>
+
                 </Panel>
             </Grid>
         </Grid>
@@ -999,27 +1158,29 @@
                 BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="*,Auto,*" Margin="22,0">
 
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="13"
-                            VerticalAlignment="Center">
-                    <controls:ArtworkImage Width="56" Height="56" DisplaySize="56"
-                            CornerRadius="7"
-                            ServerId="{Binding NowPlaying.ServerId}"
-                            ArtworkKey="{Binding NowPlaying.ArtworkKey}"
-                            FallbackText="{Binding NowPlaying.AlbumTitle}"
-                            FallbackFontSize="20"
-                            FallbackFontWeight="SemiBold"
-                            FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
-                    <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
-                        <TextBlock Classes="primary" FontWeight="Medium"
-                                   Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
-                        <TextBlock Classes="secondary"
-                                   Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+                <Button Grid.Column="0" Classes="tile" HorizontalAlignment="Left"
+                        Command="{Binding OpenNowPlayingCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="13" VerticalAlignment="Center">
+                        <controls:ArtworkImage Width="56" Height="56" DisplaySize="56"
+                                CornerRadius="7"
+                                ServerId="{Binding NowPlaying.ServerId}"
+                                ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+                                FallbackText="{Binding NowPlaying.AlbumTitle}"
+                                FallbackFontSize="20"
+                                FallbackFontWeight="SemiBold"
+                                FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
+                        <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
+                            <TextBlock Classes="primary" FontWeight="Medium"
+                                       Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
+                            <TextBlock Classes="secondary"
+                                       Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+                        </StackPanel>
                     </StackPanel>
-                </StackPanel>
+                </Button>
 
                 <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
-                        <Button Classes="transport">
+                        <Button Classes="transport" Command="{Binding ToggleShuffleCommand}">
                             <controls:TablerIcon Size="19" Data="{StaticResource IconShuffle}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
@@ -1041,7 +1202,7 @@
                             <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
-                        <Button Classes="transport">
+                        <Button Classes="transport" Command="{Binding CycleRepeatCommand}">
                             <controls:TablerIcon Size="19" Data="{StaticResource IconRepeat}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
@@ -1060,7 +1221,7 @@
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Classes="transport">
+                    <Button Classes="transport" Command="{Binding OpenNowPlayingCommand}">
                         <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
                                              Brush="{Binding $parent[Button].Foreground}" />
                     </Button>

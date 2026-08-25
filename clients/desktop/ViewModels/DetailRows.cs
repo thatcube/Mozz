@@ -12,6 +12,8 @@ public sealed record PlaylistHeroRow(Playlist Playlist, string Metadata) : Detai
 
 public sealed record MixHeroRow(HomeMixTile Mix, string Metadata, string? Subtitle) : DetailRow;
 
+public sealed record GenreHeroRow(string Genre, string Metadata) : DetailRow;
+
 public sealed record DetailSectionRow(string Title) : DetailRow;
 
 public sealed record DetailAlbumShelfRow(IReadOnlyList<Album> Albums) : DetailRow;

@@ -6,6 +6,7 @@ public static class DesktopLayout
 {
     public const double AlbumTilePitch = 196;
     public const double ArtistTilePitch = 178;
+    public const double GenreTilePitch = 236;
     public const double PlaylistTilePitch = 236;
     public const double TrackCardPitch = 320;
     public const double HomeMixTilePitch = 430;

@@ -60,6 +60,37 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnSearchRowActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || sender is not ListBox { SelectedItem: { } item }) return;
+
+        switch (item)
+        {
+            case SearchTrackRow { Track: var track } when vm.PlayTrackCommand.CanExecute(track):
+                vm.PlayTrackCommand.Execute(track);
+                break;
+            case SearchAlbumRow { Album: var album } when vm.OpenAlbumCommand.CanExecute(album):
+                vm.OpenAlbumCommand.Execute(album);
+                break;
+            case SearchArtistRow { Artist: var artist } when vm.OpenArtistCommand.CanExecute(artist):
+                vm.OpenArtistCommand.Execute(artist);
+                break;
+            case SearchPlaylistRow { Playlist: var playlist } when vm.OpenPlaylistCommand.CanExecute(playlist):
+                vm.OpenPlaylistCommand.Execute(playlist);
+                break;
+        }
+    }
+
+    private void OnQueueRowActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm &&
+            sender is ListBox { SelectedItem: QueueItemRow row } &&
+            vm.JumpToQueueItemCommand.CanExecute(row))
+        {
+            vm.JumpToQueueItemCommand.Execute(row);
+        }
+    }
+
     /// <summary>
     /// Tell the view model how much width the tiles have, so it can chunk the
     /// album and artist walls into rows of the right length. Layout drives this
