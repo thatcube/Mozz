@@ -82,18 +82,6 @@ public class MediaDetailFormattingTests
     }
 
     [Fact]
-    public void LatestReleaseUsesNewestKnownYear()
-    {
-        var latest = MediaDetailFormatting.LatestRelease([
-            Album("older", 2018),
-            Album("unknown", null),
-            Album("newer", 2024),
-        ]);
-
-        Assert.Equal("newer", latest?.Title);
-    }
-
-    [Fact]
     public void MoreByArtistExcludesCurrentAlbum()
     {
         var current = Album("current", 2024);
@@ -118,13 +106,22 @@ public class MediaDetailFormattingTests
     [Fact]
     public void SinglesAndEpsOnlyUsesCoreClassification()
     {
-        var longAlbum = Album("three-track-album", 2024) with { TrackCount = 3 };
-        var ep = Album("core-ep", 2024) with { ReleaseKind = "ep" };
+        var coreContract = new AlbumReleaseKindLookup(
+            unknownIsSingleOrEp: false,
+            new Dictionary<int, bool> { [1] = true, [2] = true, [3] = true, [4] = false });
+        var unknownAlbum = Album("unknown-count", 2024) with { TrackCount = null };
+        var singleFromContract = Album("three-track-single", 2024) with { TrackCount = 3 };
+        var albumFromContract = Album("four-track-album", 2024) with { TrackCount = 4 };
         var single = Album("core-single", 2024) with { IsSingleOrEp = true };
 
-        var singles = MediaDetailFormatting.SinglesAndEps([longAlbum, ep, single]);
+        var singles = MediaDetailFormatting.SinglesAndEps(
+            [unknownAlbum, singleFromContract, albumFromContract, single],
+            coreContract);
 
-        Assert.Equal(["core-ep", "core-single"], singles.Select(a => a.Title));
+        Assert.Equal(["core-single", "three-track-single"], singles.Select(a => a.Title));
+        Assert.Equal(["four-track-album", "unknown-count"],
+            MediaDetailFormatting.StudioAlbums([unknownAlbum, singleFromContract, albumFromContract], coreContract)
+                .Select(a => a.Title));
     }
 
     [Fact]
@@ -144,19 +141,6 @@ public class MediaDetailFormattingTests
 
         Assert.Equal([2, 2, 1], rows.Select(r => r.Count));
         Assert.Equal(albums, rows.SelectMany(r => r));
-    }
-
-    [Fact]
-    public void ArtistHeroArtworkPrefersResolvedThenArtistThenAlbum()
-    {
-        var artist = new Artist(1, "artist", "server", "Artist", "artist-art", HeroArtworkKey: "hero-art");
-        Assert.Equal("hero-art", MediaDetailFormatting.ArtistHeroArtworkKey(artist, [Album("album", 2024) with { ArtworkKey = "album-art" }]));
-
-        artist = artist with { HeroArtworkKey = null };
-        Assert.Equal("artist-art", MediaDetailFormatting.ArtistHeroArtworkKey(artist, [Album("album", 2024) with { ArtworkKey = "album-art" }]));
-
-        artist = artist with { ArtworkKey = null };
-        Assert.Equal("album-art", MediaDetailFormatting.ArtistHeroArtworkKey(artist, [Album("album", 2024) with { ArtworkKey = "album-art" }]));
     }
 
     private static Album Album(string title, int? year) =>

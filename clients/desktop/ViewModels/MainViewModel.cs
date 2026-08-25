@@ -112,8 +112,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Album> _detailArtistSingles = [];
     private List<Album> _detailArtistAppearsOn = [];
     private List<Track> _detailArtistTopTracks = [];
-    private Album? _detailLatestRelease;
     private List<Track> _detailPlaylistTracks = [];
+    private AlbumReleaseKindLookup? _releaseKindLookup;
 
     private int ColumnsFor(double pitch) => Math.Max(1, (int)(_contentWidth / pitch));
 
@@ -642,7 +642,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _detailArtistSingles = [];
         _detailArtistAppearsOn = [];
         _detailArtistTopTracks = [];
-        _detailLatestRelease = null;
         DetailMeta = null;
         RebuildDetailRows();
         RaiseDerived();
@@ -653,14 +652,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             IsBusy = true;
             artist = await ResolveArtistAsync(artist);
+            SelectedArtist = artist;
 
             var albums = await LoadAlbumsForArtistAsync(artist, MediaDetailFormatting.ShelfPageSize);
-            artist = ResolveArtistHeroFallback(artist, albums);
-            SelectedArtist = artist;
             albums = await EnrichReleaseKindsAsync(albums);
-            _detailLatestRelease = MediaDetailFormatting.LatestRelease(albums);
-            _detailArtistAlbums = MediaDetailFormatting.StudioAlbums(albums).ToList();
-            _detailArtistSingles = MediaDetailFormatting.SinglesAndEps(albums).ToList();
+            var releaseKinds = await EnsureAlbumReleaseKindsAsync();
+            _detailArtistAlbums = MediaDetailFormatting.StudioAlbums(albums, releaseKinds).ToList();
+            _detailArtistSingles = MediaDetailFormatting.SinglesAndEps(albums, releaseKinds).ToList();
             Replace(ArtistAlbums, _detailArtistAlbums);
             ArtistAlbumGrid.Reset(_detailArtistAlbums);
 
@@ -706,12 +704,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             && a.ServerId == artist.ServerId) ?? artist;
     }
 
-    private static Artist ResolveArtistHeroFallback(Artist artist, IReadOnlyList<Album> albums)
-    {
-        var hero = MediaDetailFormatting.ArtistHeroArtworkKey(artist, albums);
-        return string.IsNullOrWhiteSpace(hero) ? artist : artist with { HeroArtworkKey = hero };
-    }
-
     private async Task<Album> ResolveAlbumAsync(Album album)
     {
         if (string.IsNullOrWhiteSpace(album.RemoteId)) return album;
@@ -753,30 +745,34 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task<List<Album>> EnrichReleaseKindsAsync(IReadOnlyList<Album> albums)
     {
-        var result = new List<Album>(albums.Count);
-        foreach (var album in albums)
-        {
-            if (album.IsSingleOrEp is not null)
-            {
-                result.Add(album);
-                continue;
-            }
-
-            try
-            {
-                var kind = await _core.CallAsync<AlbumReleaseKind>(new CoreRequest("albumReleaseKind")
-                {
-                    TrackCount = album.TrackCount,
-                });
-                result.Add(album with { ReleaseKind = kind?.Kind, IsSingleOrEp = kind?.IsSingleOrEp });
-            }
-            catch (MozzCoreException)
-            {
-                result.Add(album);
-            }
-        }
-        return result;
+        var releaseKinds = await EnsureAlbumReleaseKindsAsync();
+        return albums
+            .Select(album => album.IsSingleOrEp is not null
+                ? album
+                : album with { IsSingleOrEp = releaseKinds.IsSingleOrEp(album.TrackCount) })
+            .ToList();
     }
+
+    private async Task<AlbumReleaseKindLookup> EnsureAlbumReleaseKindsAsync()
+    {
+        if (_releaseKindLookup is not null) return _releaseKindLookup;
+
+        var unknown = await AlbumReleaseKindForAsync(null);
+        var byTrackCount = new Dictionary<int, bool>();
+        for (var count = 1; count <= 8; count++)
+        {
+            byTrackCount[count] = (await AlbumReleaseKindForAsync(count)).IsSingleOrEp;
+        }
+
+        _releaseKindLookup = new AlbumReleaseKindLookup(unknown.IsSingleOrEp, byTrackCount);
+        return _releaseKindLookup;
+    }
+
+    private async Task<AlbumReleaseKind> AlbumReleaseKindForAsync(int? trackCount) =>
+        await _core.CallAsync<AlbumReleaseKind>(new CoreRequest("albumReleaseKind")
+        {
+            TrackCount = trackCount,
+        }) ?? new AlbumReleaseKind("album", false);
 
     private async Task LoadPlaylistDetailAsync(Playlist playlist)
     {
@@ -910,7 +906,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _detailArtistSingles = [];
         _detailArtistAppearsOn = [];
         _detailArtistTopTracks = [];
-        _detailLatestRelease = null;
         _detailPlaylistTracks = [];
     }
 
@@ -937,11 +932,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             case LibraryPageKind.ArtistDetail when SelectedArtist is not null:
                 rows.Add(new ArtistHeroRow(SelectedArtist));
-                if (_detailLatestRelease is not null)
-                {
-                    rows.Add(new DetailSectionRow("Latest Release"));
-                    rows.Add(new DetailAlbumShelfRow([_detailLatestRelease]));
-                }
                 AddTrackGrid(rows, "Top Songs", _detailArtistTopTracks, _detailArtistAlbums.Concat(_detailArtistSingles).ToList());
                 AddAlbumShelf(rows, "Albums", _detailArtistAlbums);
                 AddAlbumShelf(rows, "Singles & EPs", _detailArtistSingles);

@@ -8,6 +8,22 @@ public sealed record AlbumTrackRow(
     bool StartsDisc,
     string? DiscTitle);
 
+public sealed class AlbumReleaseKindLookup(bool unknownIsSingleOrEp, IReadOnlyDictionary<int, bool> byTrackCount)
+{
+    private readonly int _largestSingleOrEpCount = byTrackCount
+        .Where(kv => kv.Value)
+        .Select(kv => kv.Key)
+        .DefaultIfEmpty(-1)
+        .Max();
+
+    public bool IsSingleOrEp(int? trackCount)
+    {
+        if (trackCount is null) return unknownIsSingleOrEp;
+        if (byTrackCount.TryGetValue(trackCount.Value, out var exact)) return exact;
+        return trackCount.Value <= _largestSingleOrEpCount;
+    }
+}
+
 public static class MediaDetailFormatting
 {
     public const int ShelfPageSize = 20;
@@ -120,11 +136,6 @@ public static class MediaDetailFormatting
         };
     }
 
-    public static Album? LatestRelease(IEnumerable<Album> albums) =>
-        albums.OrderByDescending(a => a.Year ?? int.MinValue)
-              .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
-              .FirstOrDefault();
-
     public static IReadOnlyList<Album> MoreByArtist(IEnumerable<Album> albums, Album current) =>
         albums.Where(a => !SameAlbum(a, current))
               .OrderByDescending(a => a.Year ?? int.MinValue)
@@ -132,34 +143,26 @@ public static class MediaDetailFormatting
               .Take(ShelfPageSize)
               .ToList();
 
-    public static IReadOnlyList<Album> StudioAlbums(IEnumerable<Album> albums) =>
-        albums.Where(a => !IsSingleOrEpFromCore(a))
+    public static IReadOnlyList<Album> StudioAlbums(IEnumerable<Album> albums, AlbumReleaseKindLookup? releaseKinds = null) =>
+        albums.Where(a => !IsSingleOrEpFromCore(a, releaseKinds))
               .OrderByDescending(a => a.Year ?? int.MinValue)
               .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
               .Take(ShelfPageSize)
               .ToList();
 
-    public static IReadOnlyList<Album> SinglesAndEps(IEnumerable<Album> albums) =>
-        albums.Where(IsSingleOrEpFromCore)
+    public static IReadOnlyList<Album> SinglesAndEps(IEnumerable<Album> albums, AlbumReleaseKindLookup? releaseKinds = null) =>
+        albums.Where(a => IsSingleOrEpFromCore(a, releaseKinds))
               .OrderByDescending(a => a.Year ?? int.MinValue)
               .ThenBy(a => a.Title, StringComparer.CurrentCultureIgnoreCase)
               .Take(ShelfPageSize)
               .ToList();
 
-    public static bool IsSingleOrEpFromCore(Album album)
+    public static bool IsSingleOrEpFromCore(Album album, AlbumReleaseKindLookup? releaseKinds = null)
     {
         if (album.IsSingleOrEp is not null) return album.IsSingleOrEp.Value;
-        return album.ReleaseKind?.Equals("single", StringComparison.OrdinalIgnoreCase) == true
-               || album.ReleaseKind?.Equals("ep", StringComparison.OrdinalIgnoreCase) == true
-               || album.ReleaseKind?.Equals("singleEp", StringComparison.OrdinalIgnoreCase) == true
-               || album.ReleaseKind?.Equals("single_or_ep", StringComparison.OrdinalIgnoreCase) == true;
-    }
-
-    public static string? ArtistHeroArtworkKey(Artist artist, IReadOnlyList<Album> albums)
-    {
-        if (!string.IsNullOrWhiteSpace(artist.HeroArtworkKey)) return artist.HeroArtworkKey;
-        if (!string.IsNullOrWhiteSpace(artist.ArtworkKey)) return artist.ArtworkKey;
-        return albums.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a.ArtworkKey))?.ArtworkKey;
+        if (!string.IsNullOrWhiteSpace(album.ReleaseKind))
+            return album.ReleaseKind.Equals("singleOrEP", StringComparison.OrdinalIgnoreCase);
+        return releaseKinds?.IsSingleOrEp(album.TrackCount) ?? false;
     }
 
     public static IReadOnlyList<IReadOnlyList<T>> ChunkRows<T>(IReadOnlyList<T> items, int columns)
