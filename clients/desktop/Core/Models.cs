@@ -17,7 +17,12 @@ public sealed record Artist(
     string RemoteId,
     string ServerId,
     string Name,
-    string? ArtworkKey);
+    string? ArtworkKey,
+    string? HeroArtworkKey = null,
+    string? SortName = null,
+    int? AlbumCount = null,
+    IReadOnlyList<string>? Genres = null,
+    bool IsFavorite = false);
 
 public sealed record Album(
     long Id,
@@ -29,7 +34,14 @@ public sealed record Album(
     int? Year,
     int? TrackCount,
     string? ArtworkKey,
-    string GroupKey);
+    string GroupKey = "",
+    string? SortTitle = null,
+    IReadOnlyList<string>? Genres = null,
+    bool IsFavorite = false,
+    double? AddedAt = null,
+    string? ReleaseKind = null,
+    [property: JsonPropertyName("isSingleOrEP")]
+    bool? IsSingleOrEp = null);
 
 public sealed record Track(
     long Id,
@@ -65,7 +77,9 @@ public sealed record Playlist(
     string RemoteId,
     string ServerId,
     string Title,
-    int? TrackCount);
+    int? TrackCount,
+    string? ArtworkKey = null,
+    string? Description = null);
 
 public sealed record LibraryCounts(
     int Artists,
@@ -76,6 +90,18 @@ public sealed record SearchResults(
     IReadOnlyList<Artist> Artists,
     IReadOnlyList<Album> Albums,
     IReadOnlyList<Track> Tracks);
+
+public sealed record AlbumReleaseKind(
+    string Kind,
+    [property: JsonPropertyName("isSingleOrEP")] bool IsSingleOrEp);
+
+public sealed record RadioBatch(
+    IReadOnlyList<string> RemoteIds,
+    IReadOnlyList<Track> Tracks);
+
+public sealed record AlbumPagePayload(
+    IReadOnlyList<Album> Items,
+    string? NextCursor);
 
 // MARK: - Requests
 
@@ -93,6 +119,13 @@ public sealed record CoreRequest(
     [JsonPropertyName("remoteId")] public string? RemoteId { get; init; }
     [JsonPropertyName("groupKey")] public string? GroupKey { get; init; }
     [JsonPropertyName("genre")] public string? Genre { get; init; }
+    [JsonPropertyName("artistRemoteId")] public string? ArtistRemoteId { get; init; }
+    [JsonPropertyName("trackCount")] public int? TrackCount { get; init; }
+    [JsonPropertyName("seedTitle")] public string? SeedTitle { get; init; }
+    [JsonPropertyName("seedGenres")] public IReadOnlyList<string>? SeedGenres { get; init; }
+    [JsonPropertyName("seedArtistIds")] public IReadOnlyList<string>? SeedArtistIds { get; init; }
+    [JsonPropertyName("seedTrackRef")] public string? SeedTrackRef { get; init; }
+    [JsonPropertyName("excluding")] public IReadOnlyList<string>? Excluding { get; init; }
     /// <summary>Opaque resume position from a previous page's <c>nextCursor</c>.</summary>
     [JsonPropertyName("cursor")] public string? Cursor { get; init; }
 }
