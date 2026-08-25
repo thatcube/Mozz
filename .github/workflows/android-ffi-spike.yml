@@ -27,17 +27,15 @@ on:
     # Windows spike learned when a release-mode break in MozzDatabase slipped
     # through unwatched. This job cross-compiles the whole core, so it watches
     # the whole core.
+    # Every module, not a hand-kept list. The spike builds the whole MozzFFI
+    # dependency graph, so any module in it can break the build — and a list
+    # written by hand goes stale the moment the graph gains a member. It already
+    # has, twice: a MozzDatabase break went unnoticed through four runs, and
+    # linking MozzRecommend/MozzEnrichment left both spikes blind to the modules
+    # they had just started compiling. `Sources/**` costs a few extra runs on
+    # Apple-only edits and cannot go stale.
     paths:
-      - "Sources/MozzFFI/**"
-      - "Sources/MozzCore/**"
-      - "Sources/MozzDatabase/**"
-      - "Sources/MozzContinuity/**"
-      - "Sources/MozzHistory/**"
-      - "Sources/MozzNetworking/**"
-      - "Sources/MozzPlex/**"
-      - "Sources/MozzJellyfin/**"
-      - "Sources/MozzSubsonic/**"
-      - "Sources/MozzSync/**"
+      - "Sources/**"
       - "Package.swift"
       - "spec/**"
       - "spike/android-ffi/**"
