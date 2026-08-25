@@ -584,7 +584,7 @@
                                     <Border CornerRadius="16" ClipToBounds="True">
                                         <controls:ArtworkImage Width="980" Height="282" DisplaySize="282"
                                                 ArtistHero="True" CornerRadius="16"
-                                                ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.ArtworkKey}"
+                                                ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.HeroArtworkKey}"
                                                 FallbackText="{Binding Artist.Name}" FallbackFontSize="72"
                                                 FallbackForeground="#44FFFFFF" />
                                     </Border>
@@ -596,12 +596,22 @@
                                             </LinearGradientBrush>
                                         </Border.Background>
                                     </Border>
-                                    <StackPanel Orientation="Horizontal" Spacing="14" Margin="24" VerticalAlignment="Bottom">
+                                    <StackPanel Orientation="Horizontal" Spacing="12" Margin="24" VerticalAlignment="Bottom">
                                         <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
                                             <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                         </Button>
                                         <TextBlock Text="{Binding Artist.Name}" FontSize="38" FontWeight="Bold"
                                                    Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
+                                        <Button Classes="transport lead" Command="{Binding $parent[Window].DataContext.ShuffleSelectedArtistCommand}"
+                                                VerticalAlignment="Center">
+                                            <controls:TablerIcon Size="18" Data="{StaticResource IconShuffle}"
+                                                                 Brush="{Binding $parent[Button].Foreground}" />
+                                        </Button>
+                                        <Button Classes="transport lead" Command="{Binding $parent[Window].DataContext.StartSelectedArtistRadioCommand}"
+                                                VerticalAlignment="Center">
+                                            <controls:TablerIcon Size="18" Data="{StaticResource IconMusic}"
+                                                                 Brush="{Binding $parent[Button].Foreground}" />
+                                        </Button>
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>

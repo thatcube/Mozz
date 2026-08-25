@@ -155,6 +155,13 @@ public static class MediaDetailFormatting
                || album.ReleaseKind?.Equals("single_or_ep", StringComparison.OrdinalIgnoreCase) == true;
     }
 
+    public static string? ArtistHeroArtworkKey(Artist artist, IReadOnlyList<Album> albums)
+    {
+        if (!string.IsNullOrWhiteSpace(artist.HeroArtworkKey)) return artist.HeroArtworkKey;
+        if (!string.IsNullOrWhiteSpace(artist.ArtworkKey)) return artist.ArtworkKey;
+        return albums.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a.ArtworkKey))?.ArtworkKey;
+    }
+
     public static IReadOnlyList<IReadOnlyList<T>> ChunkRows<T>(IReadOnlyList<T> items, int columns)
     {
         columns = Math.Max(1, columns);

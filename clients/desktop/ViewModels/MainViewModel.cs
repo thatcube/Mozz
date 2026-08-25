@@ -653,9 +653,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             IsBusy = true;
             artist = await ResolveArtistAsync(artist);
-            SelectedArtist = artist;
 
             var albums = await LoadAlbumsForArtistAsync(artist, MediaDetailFormatting.ShelfPageSize);
+            artist = ResolveArtistHeroFallback(artist, albums);
+            SelectedArtist = artist;
+            albums = await EnrichReleaseKindsAsync(albums);
             _detailLatestRelease = MediaDetailFormatting.LatestRelease(albums);
             _detailArtistAlbums = MediaDetailFormatting.StudioAlbums(albums).ToList();
             _detailArtistSingles = MediaDetailFormatting.SinglesAndEps(albums).ToList();
@@ -704,6 +706,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             && a.ServerId == artist.ServerId) ?? artist;
     }
 
+    private static Artist ResolveArtistHeroFallback(Artist artist, IReadOnlyList<Album> albums)
+    {
+        var hero = MediaDetailFormatting.ArtistHeroArtworkKey(artist, albums);
+        return string.IsNullOrWhiteSpace(hero) ? artist : artist with { HeroArtworkKey = hero };
+    }
+
     private async Task<Album> ResolveAlbumAsync(Album album)
     {
         if (string.IsNullOrWhiteSpace(album.RemoteId)) return album;
@@ -741,6 +749,33 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             .Where(a => string.Equals(a.ArtistName, artist.Name, StringComparison.CurrentCultureIgnoreCase))
             .Take(limit)
             .ToList() ?? [];
+    }
+
+    private async Task<List<Album>> EnrichReleaseKindsAsync(IReadOnlyList<Album> albums)
+    {
+        var result = new List<Album>(albums.Count);
+        foreach (var album in albums)
+        {
+            if (album.IsSingleOrEp is not null)
+            {
+                result.Add(album);
+                continue;
+            }
+
+            try
+            {
+                var kind = await _core.CallAsync<AlbumReleaseKind>(new CoreRequest("albumReleaseKind")
+                {
+                    TrackCount = album.TrackCount,
+                });
+                result.Add(album with { ReleaseKind = kind?.Kind, IsSingleOrEp = kind?.IsSingleOrEp });
+            }
+            catch (MozzCoreException)
+            {
+                result.Add(album);
+            }
+        }
+        return result;
     }
 
     private async Task LoadPlaylistDetailAsync(Playlist playlist)
@@ -826,16 +861,38 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(artist.RemoteId)) return [];
         try
         {
-            var page = await _core.CallPageAsync<List<Album>>(new CoreRequest("artistAppearsOn")
+            var page = await _core.CallAsync<AlbumPagePayload>(new CoreRequest("artistAppearsOn")
             {
                 ServerId = artist.ServerId,
                 ArtistRemoteId = artist.RemoteId,
                 Limit = MediaDetailFormatting.ShelfPageSize,
             });
-            return page.Rows ?? [];
+            return page?.Items.ToList() ?? [];
         }
         catch (MozzCoreException)
         {
+            return [];
+        }
+    }
+
+    private async Task<List<Track>> LoadArtistRadioAsync(Artist artist)
+    {
+        if (string.IsNullOrWhiteSpace(artist.RemoteId)) return [];
+        try
+        {
+            var batch = await _core.CallAsync<RadioBatch>(new CoreRequest("radioBatch")
+            {
+                ServerId = artist.ServerId,
+                Limit = PageSize,
+                SeedTitle = $"{artist.Name} Radio",
+                SeedGenres = artist.Genres,
+                SeedArtistIds = [artist.RemoteId],
+            });
+            return batch?.Tracks.ToList() ?? [];
+        }
+        catch (MozzCoreException ex)
+        {
+            StatusMessage = $"Could not start radio: {ex.Message}";
             return [];
         }
     }
@@ -1022,6 +1079,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         var context = ArtistTracks.ToList();
         if (context.Count > 0) _ = StartQueueAsync(context, 0);
+    }
+
+    [RelayCommand]
+    private void ShuffleSelectedArtist()
+    {
+        var context = ArtistTracks.OrderBy(_ => Random.Shared.Next()).ToList();
+        if (context.Count > 0) _ = StartQueueAsync(context, 0);
+    }
+
+    [RelayCommand]
+    private async Task StartSelectedArtistRadio()
+    {
+        if (SelectedArtist is null) return;
+        var tracks = await LoadArtistRadioAsync(SelectedArtist);
+        if (tracks.Count > 0) await StartQueueAsync(tracks, 0);
     }
 
     [RelayCommand]

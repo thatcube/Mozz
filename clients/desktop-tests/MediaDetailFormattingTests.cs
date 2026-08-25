@@ -146,6 +146,19 @@ public class MediaDetailFormattingTests
         Assert.Equal(albums, rows.SelectMany(r => r));
     }
 
+    [Fact]
+    public void ArtistHeroArtworkPrefersResolvedThenArtistThenAlbum()
+    {
+        var artist = new Artist(1, "artist", "server", "Artist", "artist-art", HeroArtworkKey: "hero-art");
+        Assert.Equal("hero-art", MediaDetailFormatting.ArtistHeroArtworkKey(artist, [Album("album", 2024) with { ArtworkKey = "album-art" }]));
+
+        artist = artist with { HeroArtworkKey = null };
+        Assert.Equal("artist-art", MediaDetailFormatting.ArtistHeroArtworkKey(artist, [Album("album", 2024) with { ArtworkKey = "album-art" }]));
+
+        artist = artist with { ArtworkKey = null };
+        Assert.Equal("album-art", MediaDetailFormatting.ArtistHeroArtworkKey(artist, [Album("album", 2024) with { ArtworkKey = "album-art" }]));
+    }
+
     private static Album Album(string title, int? year) =>
         new(1, $"remote-{title}", "server", title, "Artist", "artist", year, 10, null, $"group-{title}");
 
