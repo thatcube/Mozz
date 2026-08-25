@@ -1,4 +1,5 @@
 using Mozz.Desktop.Core;
+using Mozz.Desktop.ViewModels;
 using Xunit;
 
 namespace Mozz.Desktop.Tests;
@@ -71,6 +72,46 @@ public sealed class SettingsTests : IDisposable
         Assert.Equal("1k", DesktopEqualizerProfile.FrequencyLabel(5));
         Assert.Equal(DesktopEqualizerPreset.Rock,
             DesktopEqualizerPresets.Matching(DesktopEqualizerPreset.Rock.Profile()));
+    }
+
+    [Fact]
+    public void EqualizerFaderScaleCentersZeroDb()
+    {
+        Assert.Equal(0, EqualizerFaderScale.NormalizedPosition(-12));
+        Assert.Equal(0.5, EqualizerFaderScale.ZeroLinePosition);
+        Assert.Equal(0.5, EqualizerFaderScale.NormalizedPosition(0));
+        Assert.Equal(1, EqualizerFaderScale.NormalizedPosition(12));
+        Assert.Equal(1, EqualizerFaderScale.NormalizedPosition(99));
+        Assert.Equal(0.5, EqualizerFaderScale.NormalizedPosition(double.NaN));
+    }
+
+    [Fact]
+    public void SettingsPresentationUsesServerWhenSignedIn()
+    {
+        var account = new ServerAccount
+        {
+            ServerId = "jellyfin-http://server",
+            Kind = BackendKind.Jellyfin,
+            BaseUrl = "http://server",
+            ServerName = "Living Room",
+            ClientIdentifier = "client",
+        };
+
+        Assert.Equal("Living Room", SettingsPresentation.ProfileTitle(account));
+        Assert.Equal("152 songs · 12 albums · 4 artists",
+            SettingsPresentation.ProfileSubtitle(account, "152 songs · 12 albums · 4 artists"));
+        Assert.Equal("Living Room", SettingsPresentation.ServerSectionTitle(account));
+        Assert.Equal("Jellyfin · http://server", SettingsPresentation.ServerSectionSubtitle(account));
+    }
+
+    [Fact]
+    public void SettingsPresentationPromptsForServerWhenSignedOut()
+    {
+        Assert.Equal("Settings", SettingsPresentation.ProfileTitle(null));
+        Assert.Equal("Connect a server", SettingsPresentation.ProfileSubtitle(null, "No music yet"));
+        Assert.Equal("No server signed in", SettingsPresentation.ServerSectionTitle(null));
+        Assert.Equal("Add Plex, Jellyfin or Subsonic to sync your music.",
+            SettingsPresentation.ServerSectionSubtitle(null));
     }
 
     [Fact]

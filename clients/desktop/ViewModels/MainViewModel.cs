@@ -32,6 +32,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly INowPlayingIntegration? _nowPlaying_os;
     private readonly DispatcherTimer? _positionTimer;
     private readonly DispatcherTimer? _seekDebounce;
+    private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
     private readonly List<Track> _queue = [];
     private int _queueIndex = -1;
@@ -184,7 +185,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// Servers pane, which is where someone goes precisely because the library
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
-    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
+    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false && ShowSettings == false
                                   && ShowDetailPage == false && ShowHomeRows == false;
 
     public string LibrarySummary =>
@@ -194,6 +195,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public ServerAccount? ActiveAccount => Connect.Accounts.FirstOrDefault();
     public bool HasActiveAccount => ActiveAccount is not null;
+    public string SidebarProfileTitle => SettingsPresentation.ProfileTitle(ActiveAccount);
+    public string SidebarProfileSubtitle => SettingsPresentation.ProfileSubtitle(ActiveAccount, LibrarySummary);
+    public string ActiveServerTitle => SettingsPresentation.ServerSectionTitle(ActiveAccount);
+    public string ActiveServerSubtitle => SettingsPresentation.ServerSectionSubtitle(ActiveAccount);
     public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
     public string SettingsStorageDescription => $"Preferences: {_preferences.Path}";
@@ -222,6 +227,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(SidebarProfileTitle));
+            OnPropertyChanged(nameof(SidebarProfileSubtitle));
+            OnPropertyChanged(nameof(ActiveServerTitle));
+            OnPropertyChanged(nameof(ActiveServerSubtitle));
         };
         RestoreSettings();
 
@@ -348,34 +357,23 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private void ApplyAppearance()
     {
         if (Avalonia.Application.Current is not { } app) return;
-        app.RequestedThemeVariant = Appearance switch
+        if (!_themeObserverAttached)
         {
-            "light" => ThemeVariant.Light,
-            "dark" => ThemeVariant.Dark,
-            _ => ThemeVariant.Default,
-        };
+            app.ActualThemeVariantChanged += OnActualThemeVariantChanged;
+            _themeObserverAttached = true;
+        }
 
-        var oled = DarkStyle == "black";
-        SetBrush(app, "AppBackground", oled ? "#000000" : "#0B0B0D");
-        SetBrush(app, "SidebarBackground", oled ? "#070708" : "#121214");
-        SetBrush(app, "BarBackground", oled ? "#08080A" : "#141416");
-        SetBrush(app, "SurfaceRaised", oled ? "#121216" : "#1C1C20");
-        SetBrush(app, "SurfaceHover", oled ? "#1A1A1F" : "#232328");
-        SetBrush(app, "SurfaceSelected", oled ? "#202027" : "#2A2A30");
-        SetBrush(app, "Divider", oled ? "#17171B" : "#232327");
+        MozzThemeApplicator.Apply(app, Appearance, DarkStyle);
     }
 
-    private static void SetBrush(Avalonia.Application app, string key, string color)
-    {
-        app.Resources[key] = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(color));
-    }
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => ApplyAppearance();
 
     /// Called when a sync finishes: the counts and whatever page is showing are
     /// both stale, and the empty-library message may no longer be true.
     private async Task ReloadAfterSyncAsync()
     {
         await RefreshCountsAsync();
-        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Home : Section, clearBackStack: true);
+        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Settings : Section, clearBackStack: true);
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
     }
 
@@ -490,6 +488,31 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task UseServerAsync(ServerAccount? account)
+    {
+        if (account is null) return;
+        var index = Connect.Accounts.IndexOf(account);
+        if (index > 0) Connect.Accounts.Move(index, 0);
+
+        try
+        {
+            IsSettingsBusy = true;
+            await _server.AttachAsync(account);
+            await RefreshCountsAsync();
+            await RefreshSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = ex.Message;
+        }
+        finally
+        {
+            IsSettingsBusy = false;
+            RaiseDerived();
+        }
+    }
+
+    [RelayCommand]
     private async Task SelectMusicLibraryAsync(SettingsLibraryOption? option)
     {
         if (option is null || ActiveAccount is null) return;
@@ -576,7 +599,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ClearLibrary();
         TrackCount = AlbumCount = ArtistCount = 0;
         SettingsMessage = "Signed out.";
-        await LoadSectionAsync(LibrarySection.Connect, clearBackStack: true);
+        await LoadSectionAsync(LibrarySection.Settings, clearBackStack: true);
     }
 
     private void ReplaceAccount(ServerAccount updated)
@@ -2067,6 +2090,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibrarySummary));
         OnPropertyChanged(nameof(ActiveAccount));
         OnPropertyChanged(nameof(HasActiveAccount));
+        OnPropertyChanged(nameof(SidebarProfileTitle));
+        OnPropertyChanged(nameof(SidebarProfileSubtitle));
+        OnPropertyChanged(nameof(ActiveServerTitle));
+        OnPropertyChanged(nameof(ActiveServerSubtitle));
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IReadOnlyList<T>? source)
@@ -2078,6 +2105,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        if (_themeObserverAttached && Avalonia.Application.Current is { } app)
+            app.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         _positionTimer?.Stop();
         _seekDebounce?.Stop();
         _engine?.Dispose();
