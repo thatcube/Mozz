@@ -88,7 +88,8 @@ public sealed unsafe class MiniAudioEngine : IAudioEngine
         catch (Exception ex)
         {
             decoder = null!;
-            Error?.Invoke(this, new AudioErrorEventArgs($"Could not open “{source.Uri}”: {ex.Message}", ex));
+            Error?.Invoke(this, new AudioErrorEventArgs(
+                AudioDiagnostics.DescribeOpenFailure(source.Uri, ex.Message), ex));
             return false;
         }
     }

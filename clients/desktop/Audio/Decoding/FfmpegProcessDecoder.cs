@@ -18,17 +18,23 @@ namespace Mozz.Desktop.Audio.Decoding;
 /// only decoding; the device keeps draining the ring buffer and the UI never
 /// feels it.
 /// </summary>
-internal sealed class FfmpegProcessDecoder : IPcmDecoder
+internal sealed class FfmpegProcessDecoder : IPcmDecoder, IDecoderDiagnostics
 {
     private readonly AudioSource _source;
     private readonly string _ffmpegPath;
     private Process? _process;
     private Stream? _stdout;
+    private Thread? _stderrThread;
 
     private readonly int _frameBytes;
     private byte[] _buffer = [];
     private readonly byte[] _residual;
     private int _residualLen;
+
+    // Both mutated only on the pump thread (ReadFrames / Seek / the pipeline's
+    // end-of-track handling), so no synchronisation is needed for them.
+    private long _producedFrames;
+    private volatile bool _killed;
 
     private readonly StringBuilder _stderrTail = new();
     private readonly object _stderrLock = new();
@@ -55,41 +61,29 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
 
     /// <summary>
     /// Where to find ffmpeg, in priority order: an explicit <c>MOZZ_FFMPEG</c>
-    /// override, a copy shipped beside the app, then <c>PATH</c>.
+    /// override, a copy shipped beside the app, well-known absolute install
+    /// locations, then <c>PATH</c>.
     ///
-    /// The bundled copy is checked before PATH, not after, because it is the one
-    /// we tested against. A user with a decade-old ffmpeg on PATH — or one built
-    /// without the decoders we need — should get the working one.
+    /// The bundled copy is checked before the install locations, not after,
+    /// because it is the one we tested against. A user with a decade-old ffmpeg —
+    /// or one built without the decoders we need — should get the working one.
     ///
-    /// This matters most on Windows, which has no package manager the way macOS
-    /// and Linux do: a gaming PC will not have ffmpeg, and "download the zip and
-    /// your music works" cannot survive a missing-prerequisite dialog. The
-    /// Windows release bundles it; on macOS and Linux, PATH is the normal answer.
+    /// The absolute install locations matter most on macOS, where a
+    /// double-clicked <c>.app</c> is launched by <c>launchd</c> with a minimal
+    /// <c>PATH</c> that excludes <c>/opt/homebrew/bin</c>: without them,
+    /// <c>Process.Start("ffmpeg")</c> throws "No such file or directory" even
+    /// though ffmpeg is installed and works from a terminal. On Windows, which
+    /// has no package manager the way macOS and Linux do, the release bundles
+    /// ffmpeg beside the app and the app-directory probe finds it. See
+    /// <see cref="FfmpegLocator"/> for the full ordering and why.
     /// </summary>
     private static string ResolveFfmpeg()
     {
         if (_resolved is not null) return _resolved;
 
-        if (Environment.GetEnvironmentVariable("MOZZ_FFMPEG") is { Length: > 0 } configured)
-        {
-            return _resolved = configured;
-        }
-
-        var exe = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        var appDir = AppContext.BaseDirectory;
-        foreach (var candidate in new[]
-                 {
-                     Path.Combine(appDir, exe),
-                     Path.Combine(appDir, "ffmpeg", exe),
-                     Path.Combine(appDir, "runtimes", "ffmpeg", exe),
-                 })
-        {
-            if (File.Exists(candidate)) return _resolved = candidate;
-        }
-
-        // Let the OS resolve it. If it isn't there either, Process.Start throws
-        // and the catch below turns it into a message naming MOZZ_FFMPEG.
-        return _resolved = exe;
+        var mozzOverride = Environment.GetEnvironmentVariable("MOZZ_FFMPEG");
+        return _resolved = FfmpegLocator.Resolve(
+            AppContext.BaseDirectory, OperatingSystem.IsWindows(), mozzOverride, File.Exists);
     }
 
     /// <summary>The last few stderr lines, for surfacing a decode failure to the user.</summary>
@@ -173,6 +167,8 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
         _process = process;
         _stdout = process.StandardOutput.BaseStream;
         _residualLen = 0;
+        _producedFrames = 0;
+        _killed = false;
 
         // Drain stderr so the pipe never fills (which would stall FFmpeg), and
         // keep the tail for diagnostics.
@@ -191,6 +187,7 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
             }
         })
         { IsBackground = true, Name = "ffmpeg-stderr" };
+        _stderrThread = t;
         t.Start();
     }
 
@@ -230,6 +227,7 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
 
         if (frames > 0)
         {
+            _producedFrames += frames;
             var src = MemoryMarshal.Cast<byte, float>(_buffer.AsSpan(0, used));
             src.CopyTo(destination[..(frames * Channels)]);
         }
@@ -244,6 +242,10 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
 
     private void KillProcess()
     {
+        // Mark the teardown as ours first, so a non-zero exit code from the kill
+        // is never mistaken for a playback failure by TryGetFailure.
+        _killed = true;
+
         var process = _process;
         _process = null;
         _stdout = null;
@@ -261,6 +263,54 @@ internal sealed class FfmpegProcessDecoder : IPcmDecoder
         {
             process.Dispose();
         }
+    }
+
+    /// <summary>
+    /// After the stream has ended, report whether it ended in failure. Called by
+    /// the pipeline when a decoder stops producing frames, so that a track which
+    /// never actually played — a bad certificate, a 404, an expired token — is
+    /// surfaced to the user instead of passing for a finished track.
+    ///
+    /// Must be called before <see cref="Dispose"/>: dispose tears the process
+    /// down, and a deliberate teardown deliberately reports no failure.
+    /// </summary>
+    public bool TryGetFailure(out string reason)
+    {
+        reason = "";
+
+        // We tore it down (seek/stop/dispose): a normal, expected end.
+        if (_killed) return false;
+
+        var process = _process;
+        if (process is null) return false;
+
+        // Give a process that has just closed its stdout a brief moment to exit,
+        // then let the stderr reader catch up so LastError is complete. If it is
+        // still running it has not failed — it is slow or stalled, not finished.
+        try
+        {
+            if (!process.WaitForExit(400)) return false;
+        }
+        catch
+        {
+            return false;
+        }
+        _stderrThread?.Join(200);
+
+        int exitCode;
+        try { exitCode = process.ExitCode; }
+        catch { return false; }
+
+        var stderr = LastError;
+
+        // A non-zero exit is a failure outright. A clean exit that produced no
+        // audio yet said something on stderr (no audio stream, unreadable input)
+        // is one too. A clean exit that produced audio is just a finished track.
+        bool failed = exitCode != 0 || (_producedFrames == 0 && stderr.Length > 0);
+        if (!failed) return false;
+
+        reason = AudioDiagnostics.DescribeFfmpegFailure(exitCode, stderr);
+        return true;
     }
 
     public void Dispose() => KillProcess();
