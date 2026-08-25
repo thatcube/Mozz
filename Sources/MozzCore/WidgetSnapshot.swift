@@ -69,7 +69,17 @@ public struct RecentlyPlayedWidgetSnapshot: Codable, Equatable, Sendable {
 /// never need to special-case it.
 public enum WidgetSnapshotStore {
     private static var containerURL: URL? {
+        #if canImport(Darwin)
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: MozzWidget.appGroupID)
+        #else
+        // App Groups are an Apple concept and the API does not exist elsewhere.
+        // Returning nil makes every method below a no-op — which is exactly the
+        // behaviour they already have on an Apple build that lacks the
+        // provisioned entitlement, so this needs no special-casing anywhere
+        // else. The snapshot *types* stay cross-platform on purpose: they are
+        // plain Codable data a future Windows or Android client may well want.
+        nil
+        #endif
     }
 
     private static var artworkDir: URL? {

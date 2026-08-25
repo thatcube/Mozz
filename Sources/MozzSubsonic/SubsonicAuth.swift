@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 import MozzCore
 
 /// How a ``SubsonicCredential`` authenticates each request.

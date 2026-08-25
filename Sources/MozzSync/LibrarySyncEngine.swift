@@ -1,8 +1,11 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+#if canImport(os)
 import os
+#endif
 
+// Off Apple this resolves to MozzCore's stand-in; see PortableLogger.swift.
 private let syncLog = Logger(subsystem: "com.thatcube.Mozz", category: "sync")
 
 /// Progress emitted as a catalog sync advances, for a progress bar / status

@@ -1,5 +1,18 @@
 import Foundation
+#if canImport(Security)
 import Security
+#endif
+
+// The Keychain is an Apple framework, so this whole file is an Apple-only
+// *implementation* of the platform-free ``CredentialStore`` protocol — which is
+// precisely why that protocol exists. Windows and Android supply their own
+// (Credential Manager / DPAPI, the Android Keystore) behind the same seam, and
+// nothing above this layer changes.
+//
+// Without the guard, importing `Security` unconditionally makes MozzCore
+// unbuildable off Apple platforms, which defeats the point of MozzCore being
+// the portable layer.
+#if canImport(Security)
 
 /// Keychain-backed ``CredentialStore`` used by the app.
 ///
@@ -99,3 +112,4 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
         }
     }
 }
+#endif
