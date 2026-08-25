@@ -11,6 +11,19 @@ namespace Mozz.Desktop.Tests;
 /// </summary>
 public class ArtworkBinderTests
 {
+    /// <summary>
+    /// Polls until <paramref name="condition"/> holds, or the deadline passes.
+    /// Waiting on the condition rather than on a fixed delay is what keeps these
+    /// tests honest on a machine that is busy.
+    /// </summary>
+    private static async Task<bool> WaitUntil(Func<bool> condition, int timeoutMs = 10_000)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < timeoutMs)
+            await Task.Delay(5);
+        return condition();
+    }
+
     private static ArtworkRef Ref(string key) => new("srv", key, 100);
 
     [Fact]
@@ -61,14 +74,21 @@ public class ArtworkBinderTests
         binder.Bind(Ref("A")); // load for A is now pending
         binder.Bind(Ref("B")); // tile recycled to B; A's load is superseded
 
-        // A finishes late — its container is B now, so this result is stale.
+        // These loads complete on the thread pool (RunContinuationsAsynchronously),
+        // so the test has to wait for a condition rather than sleep a guessed
+        // number of milliseconds — a fixed delay passed here and failed on a
+        // loaded Windows runner, where 20ms elapsed before the continuation ran
+        // and the list still held only the clearing null.
+        //
+        // A is completed first and B second, and the wait below does not return
+        // until B has been applied. A's continuation was queued ahead of B's, so
+        // by then it has had its turn: if it were going to paint, it would have.
         gates["A"].SetResult("cover-A");
-        await Task.Delay(20);
-        Assert.DoesNotContain("cover-A", applied);
-
-        // B finishes and is current, so it applies.
         gates["B"].SetResult("cover-B");
-        await Task.Delay(20);
+
+        Assert.True(await WaitUntil(() => applied.Contains("cover-B")),
+            "the current request's cover should have been applied");
+        Assert.DoesNotContain("cover-A", applied);
         Assert.Equal("cover-B", applied[^1]);
     }
 
