@@ -12,6 +12,6 @@ public partial class App
 
         owner.Activate();
         if (owner.DataContext is MainViewModel vm)
-            _ = vm.SelectSectionCommand.ExecuteAsync(LibrarySection.Settings);
+            _ = vm.OpenSettingsCommand.ExecuteAsync(null);
     }
 }

@@ -131,10 +131,23 @@
                             CommandParameter="{x:Static vm:LibrarySection.Settings}">
                         <Grid ColumnDefinitions="34,*" ColumnSpacing="11">
                             <Border Grid.Column="0" Width="30" Height="30" CornerRadius="15"
-                                    Background="{DynamicResource SurfaceRaised}">
-                                <controls:TablerIcon Size="18" Data="{StaticResource IconArtist}"
-                                                     Brush="{Binding #LblProfile.Foreground}"
-                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    Background="{DynamicResource SurfaceRaised}"
+                                    ClipToBounds="True">
+                                <Panel>
+                                    <controls:ArtworkImage Width="30" Height="30" DisplaySize="30"
+                                            CornerRadius="15"
+                                            ServerId="{Binding ActiveAccountAvatarServerId}"
+                                            ArtworkKey="{Binding ActiveAccountAvatarKey}"
+                                            FallbackText="{Binding ActiveAccountFallbackText}"
+                                            FallbackFontSize="12"
+                                            FallbackFontWeight="SemiBold"
+                                            FallbackForeground="{DynamicResource ArtworkFallbackPrimary}"
+                                            IsVisible="{Binding HasActiveAccountAvatar}" />
+                                    <controls:TablerIcon Size="18" Data="{StaticResource IconArtist}"
+                                                         Brush="{Binding #LblProfile.Foreground}"
+                                                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                         IsVisible="{Binding !HasActiveAccountAvatar}" />
+                                </Panel>
                             </Border>
                             <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
                                 <TextBlock x:Name="LblProfile" Text="{Binding SidebarProfileTitle}"
@@ -227,37 +240,53 @@
                                            <Button Classes="tile" Width="410" Margin="0,0,20,16"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}"
-                                                       CornerRadius="12" ClipToBounds="True">
-                                                   <Grid ColumnDefinitions="88,*" Height="88">
-                                                       <Border Grid.Column="0" Background="{DynamicResource SurfaceRaised}"
-                                                               IsVisible="{Binding IsLiked}">
-                                                           <controls:TablerIcon Size="30" Filled="True"
+                                               <Panel>
+                                                   <Border Background="{DynamicResource Accent}"
+                                                           CornerRadius="12" ClipToBounds="True"
+                                                           IsVisible="{Binding IsLiked}">
+                                                       <Grid ColumnDefinitions="88,*" Height="88">
+                                                           <controls:TablerIcon Grid.Column="0" Size="30" Filled="True"
                                                                                 Data="{StaticResource IconHeart}"
-                                                                                Brush="{DynamicResource TextPrimary}"
+                                                                                Brush="{DynamicResource BrandForeground}"
                                                                                 HorizontalAlignment="Center"
                                                                                 VerticalAlignment="Center" />
-                                                       </Border>
-                                                       <controls:ArtworkImage Grid.Column="0"
-                                                               Width="88" Height="88" DisplaySize="88"
-                                                               CornerRadius="0"
-                                                               IsVisible="{Binding !IsLiked}"
-                                                               ServerId="{Binding ServerId}"
-                                                               ArtworkKey="{Binding ArtworkKey}"
-                                                               FallbackText="{Binding FallbackText}"
-                                                               FallbackFontSize="24"
-                                                               FallbackFontWeight="SemiBold"
-                                                               FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
-                                                       <StackPanel Grid.Column="1" Spacing="4"
-                                                                   VerticalAlignment="Center" Margin="18,0,16,0">
-                                                           <TextBlock Text="{Binding Title}" Classes="primary"
-                                                                      FontSize="22" FontWeight="SemiBold" />
-                                                           <TextBlock Text="{Binding Subtitle}" Classes="secondary"
-                                                                      FontSize="15"
-                                                                      IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                                       </StackPanel>
-                                                   </Grid>
-                                               </Border>
+                                                           <StackPanel Grid.Column="1" Spacing="4"
+                                                                       VerticalAlignment="Center" Margin="18,0,16,0">
+                                                               <TextBlock Text="{Binding Title}"
+                                                                          Foreground="{DynamicResource BrandForeground}"
+                                                                          FontSize="22" FontWeight="SemiBold" />
+                                                               <TextBlock Text="{Binding Subtitle}"
+                                                                          Foreground="{DynamicResource BrandForeground}"
+                                                                          Opacity="0.75"
+                                                                          FontSize="15"
+                                                                          IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                           </StackPanel>
+                                                       </Grid>
+                                                   </Border>
+                                                   <Border Background="{DynamicResource SurfaceRaised}"
+                                                           CornerRadius="12" ClipToBounds="True"
+                                                           IsVisible="{Binding !IsLiked}">
+                                                       <Grid ColumnDefinitions="88,*" Height="88">
+                                                           <controls:ArtworkImage Grid.Column="0"
+                                                                   Width="88" Height="88" DisplaySize="88"
+                                                                   CornerRadius="0"
+                                                                   ServerId="{Binding ServerId}"
+                                                                   ArtworkKey="{Binding ArtworkKey}"
+                                                                   FallbackText="{Binding FallbackText}"
+                                                                   FallbackFontSize="24"
+                                                                   FallbackFontWeight="SemiBold"
+                                                                   FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
+                                                           <StackPanel Grid.Column="1" Spacing="4"
+                                                                       VerticalAlignment="Center" Margin="18,0,16,0">
+                                                               <TextBlock Text="{Binding Title}" Classes="primary"
+                                                                          FontSize="22" FontWeight="SemiBold" />
+                                                               <TextBlock Text="{Binding Subtitle}" Classes="secondary"
+                                                                          FontSize="15"
+                                                                          IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                           </StackPanel>
+                                                       </Grid>
+                                                   </Border>
+                                               </Panel>
                                            </Button>
                                        </DataTemplate>
                                    </ItemsControl.ItemTemplate>
@@ -968,353 +997,6 @@
                         </ListBox.DataTemplates>
                     </ListBox>
 
-                    <!-- Settings: the bottom profile row and macOS menu both open this single surface. -->
-                    <ScrollViewer IsVisible="{Binding ShowSettings}">
-                      <StackPanel Spacing="18" MaxWidth="860" HorizontalAlignment="Left" Margin="0,0,8,28">
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <Grid ColumnDefinitions="48,*,Auto" ColumnSpacing="14">
-                            <Border Grid.Column="0" Width="44" Height="44" CornerRadius="22"
-                                    Background="{DynamicResource Surface}">
-                              <controls:TablerIcon Size="24" Data="{StaticResource IconArtist}"
-                                                   Brush="{DynamicResource TextSecondary}"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
-                              <TextBlock Text="{Binding ActiveServerTitle}" Classes="sectionTitle" />
-                              <TextBlock Text="{Binding ActiveServerSubtitle}" Classes="secondary" TextWrapping="Wrap" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
-                                        IsVisible="{Binding HasActiveAccount}">
-                              <Button Content="Sync Now" Classes="primary"
-                                      IsEnabled="{Binding !Connect.IsSyncing}"
-                                      Command="{Binding SyncNowCommand}" />
-                              <Button Content="Refresh" Classes="secondary"
-                                      Command="{Binding RefreshSettingsPanelCommand}" />
-                            </StackPanel>
-                          </Grid>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="16">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                              <StackPanel Grid.Column="0" Spacing="4">
-                                <TextBlock Text="Servers" Classes="sectionTitle" />
-                                <TextBlock Text="Switch, sync, add or sign out of Plex, Jellyfin and Subsonic." Classes="secondary" TextWrapping="Wrap" />
-                              </StackPanel>
-                              <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Classes="secondary" VerticalAlignment="Center" />
-                            </Grid>
-
-                            <StackPanel Spacing="10" IsVisible="{Binding Connect.HasAccounts}">
-                              <ItemsControl ItemsSource="{Binding Connect.Accounts}">
-                                <ItemsControl.ItemTemplate>
-                                  <DataTemplate>
-                                    <Border Background="{DynamicResource Surface}" CornerRadius="12" Padding="14" Margin="0,0,0,9">
-                                      <Grid ColumnDefinitions="32,*,Auto" ColumnSpacing="12">
-                                        <Border Grid.Column="0" Width="30" Height="30" CornerRadius="15" Background="{DynamicResource SurfaceRaised}">
-                                          <controls:TablerIcon Size="17" Data="{StaticResource IconServer}"
-                                                               Brush="{DynamicResource TextSecondary}"
-                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                          <TextBlock Text="{Binding ServerName}" Classes="primary" FontWeight="SemiBold" />
-                                          <TextBlock Text="{Binding BaseUrl}" Classes="secondary" FontSize="11.5" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                          <Button Content="Use" Classes="secondary"
-                                                  Command="{Binding $parent[ScrollViewer].DataContext.UseServerCommand}"
-                                                  CommandParameter="{Binding}" />
-                                          <Button Content="Sync" Classes="secondary"
-                                                  Command="{Binding $parent[ScrollViewer].DataContext.Connect.SyncAccountCommand}"
-                                                  CommandParameter="{Binding}" />
-                                          <Button Content="Sign out" Classes="destructive"
-                                                  Command="{Binding $parent[ScrollViewer].DataContext.Connect.ForgetAccountCommand}"
-                                                  CommandParameter="{Binding}" />
-                                        </StackPanel>
-                                      </Grid>
-                                    </Border>
-                                  </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                              </ItemsControl>
-                            </StackPanel>
-                            <TextBlock Text="No saved servers yet." Classes="secondary" IsVisible="{Binding !Connect.HasAccounts}" />
-
-                            <Border Background="{DynamicResource Surface}" CornerRadius="12" Padding="16">
-                              <StackPanel Spacing="13">
-                                <TextBlock Text="Add a server" Classes="primary" FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                  <RadioButton Content="Jellyfin" GroupName="kind"
-                                               IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Jellyfin}" />
-                                  <RadioButton Content="Plex" GroupName="kind"
-                                               IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Plex}" />
-                                  <RadioButton Content="Subsonic" GroupName="kind"
-                                               IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Subsonic}" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="9" IsVisible="{Binding Connect.NeedsCredentials}">
-                                  <TextBox Text="{Binding Connect.ServerUrl}"
-                                           PlaceholderText="192.168.1.10:8096"
-                                           CornerRadius="8" Padding="11,9" BorderThickness="0"
-                                           Background="{DynamicResource SearchBackground}" />
-                                  <TextBox Text="{Binding Connect.Username}"
-                                           PlaceholderText="Username"
-                                           CornerRadius="8" Padding="11,9" BorderThickness="0"
-                                           Background="{DynamicResource SearchBackground}" />
-                                  <TextBox Text="{Binding Connect.Password}"
-                                           PasswordChar="•"
-                                           PlaceholderText="Password"
-                                           CornerRadius="8" Padding="11,9" BorderThickness="0"
-                                           Background="{DynamicResource SearchBackground}" />
-                                </StackPanel>
-
-                                <TextBlock Classes="secondary" TextWrapping="Wrap"
-                                           IsVisible="{Binding Connect.IsPlex}"
-                                           Text="Plex signs in through plex.tv. Mozz will give you a link to approve in your browser." />
-
-                                <Border IsVisible="{Binding Connect.PlexLinkUrl, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                        Background="{DynamicResource SurfaceRaised}"
-                                        CornerRadius="10" Padding="15,14">
-                                  <StackPanel Spacing="11">
-                                    <TextBlock Text="Approve Mozz in your browser" Classes="primary" FontWeight="SemiBold" />
-                                    <TextBlock Classes="secondary" FontSize="11.5" TextWrapping="Wrap"
-                                               Text="Open plex.tv, sign in, and Mozz will connect by itself — nothing to type back here." />
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                      <Button Content="Open Plex" Classes="primary" Command="{Binding Connect.OpenPlexLinkCommand}" />
-                                      <Button Content="Copy link" Classes="secondary" Command="{Binding Connect.CopyPlexLinkCommand}" />
-                                      <Button Content="Cancel" Classes="secondary" Command="{Binding Connect.CancelPlexCommand}" />
-                                    </StackPanel>
-                                  </StackPanel>
-                                </Border>
-
-                                <Button Content="Sign in" Classes="primary" HorizontalAlignment="Left"
-                                        IsEnabled="{Binding !Connect.IsBusy}"
-                                        Command="{Binding Connect.SignInCommand}" />
-
-                                <TextBlock Text="{Binding Connect.Message}" Classes="secondary" TextWrapping="Wrap"
-                                           IsVisible="{Binding Connect.Message, Converter={x:Static ObjectConverters.IsNotNull}}" />
-
-                                <StackPanel Spacing="7" IsVisible="{Binding Connect.IsSyncing}">
-                                  <ProgressBar Value="{Binding Connect.SyncProgress}" Maximum="1"
-                                               IsIndeterminate="{Binding !Connect.SyncProgress}"
-                                               Height="4" CornerRadius="2" />
-                                  <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5" />
-                                </StackPanel>
-                                <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5"
-                                           IsVisible="{Binding !Connect.IsSyncing}" />
-                              </StackPanel>
-                            </Border>
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20"
-                                IsVisible="{Binding HasSettingsLibraries}">
-                          <StackPanel Spacing="12">
-                            <TextBlock Text="Music Libraries" Classes="sectionTitle" />
-                            <TextBlock Text="Pick the library this desktop syncs. Changing it re-attaches the server and syncs." Classes="secondary" TextWrapping="Wrap" />
-                            <ItemsControl ItemsSource="{Binding SettingsLibraries}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <Button Classes="tile" Margin="0,0,0,8"
-                                          Command="{Binding $parent[ScrollViewer].DataContext.SelectMusicLibraryCommand}"
-                                          CommandParameter="{Binding}">
-                                    <Border Background="{DynamicResource Surface}" CornerRadius="10" Padding="13">
-                                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <StackPanel Grid.Column="0" Spacing="3">
-                                          <TextBlock Text="{Binding Name}" Classes="primary" />
-                                          <TextBlock Text="{Binding Status}" Classes="secondary" />
-                                        </StackPanel>
-                                        <controls:TablerIcon Grid.Column="1" Size="19" Data="{StaticResource IconCheck}"
-                                                             Brush="{DynamicResource TextSecondary}"
-                                                             IsVisible="{Binding IsSelected}" />
-                                      </Grid>
-                                    </Border>
-                                  </Button>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="14">
-                            <TextBlock Text="Playback" Classes="sectionTitle" />
-                            <Border Background="{DynamicResource Surface}" CornerRadius="12" Padding="14">
-                              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                                <StackPanel Grid.Column="0" Spacing="3">
-                                  <TextBlock Text="Volume normalization" Classes="primary" FontWeight="SemiBold" />
-                                  <TextBlock Text="Keep songs near the same loudness using ReplayGain track values." Classes="secondary" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <CheckBox Grid.Column="1" IsChecked="{Binding NormalizationEnabled}" VerticalAlignment="Center" />
-                              </Grid>
-                            </Border>
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="18">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                              <StackPanel Grid.Column="0" Spacing="4">
-                                <TextBlock Text="Equalizer" Classes="sectionTitle" />
-                                <TextBlock Text="Shape the curve with vertical faders. The center line is 0 dB." Classes="secondary" TextWrapping="Wrap" />
-                              </StackPanel>
-                              <CheckBox Grid.Column="1" IsChecked="{Binding EqualizerEnabled}" VerticalAlignment="Center" />
-                            </Grid>
-
-                            <StackPanel Spacing="8">
-                              <TextBlock Text="Presets" Classes="primary" FontWeight="SemiBold" />
-                              <ItemsControl ItemsSource="{Binding EqualizerPresetOptions}">
-                                <ItemsControl.ItemsPanel>
-                                  <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                  <DataTemplate>
-                                    <Button Content="{Binding Label}" Classes="secondary" Margin="0,0,8,8"
-                                            Command="{Binding $parent[ScrollViewer].DataContext.ApplyEqualizerPresetCommand}"
-                                            CommandParameter="{Binding}" />
-                                  </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                              </ItemsControl>
-                            </StackPanel>
-
-                            <Grid ColumnDefinitions="104,*" ColumnSpacing="24">
-                              <Border Grid.Column="0" Background="{DynamicResource Surface}" CornerRadius="12" Padding="14">
-                                <StackPanel Spacing="10" HorizontalAlignment="Center">
-                                  <TextBlock Text="Preamp" Classes="primary" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                  <TextBlock Text="{Binding EqualizerPreampText}" Classes="secondary" HorizontalAlignment="Center" />
-                                  <Slider Minimum="-12" Maximum="12" TickFrequency="0.5"
-                                          Orientation="Vertical" Height="188" Width="34"
-                                          Value="{Binding EqualizerPreamp}" />
-                                </StackPanel>
-                              </Border>
-
-                              <Border Grid.Column="1" Background="{DynamicResource Surface}" CornerRadius="12" Padding="18,16">
-                                <Grid RowDefinitions="*,Auto,*">
-                                  <Border Grid.Row="1" Height="1" Background="{DynamicResource Divider}"
-                                          VerticalAlignment="Center" />
-                                  <ItemsControl Grid.RowSpan="3" ItemsSource="{Binding EqualizerBands}">
-                                    <ItemsControl.ItemsPanel>
-                                      <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                      <DataTemplate>
-                                        <StackPanel Spacing="8" HorizontalAlignment="Center">
-                                          <TextBlock Text="{Binding GainText}" Classes="secondary" FontSize="11" HorizontalAlignment="Center" />
-                                          <Slider Minimum="-12" Maximum="12" TickFrequency="0.5"
-                                                  Orientation="Vertical" Height="188" Width="34"
-                                                  Value="{Binding Gain}" />
-                                          <TextBlock Text="{Binding Label}" Classes="secondary" FontSize="11" HorizontalAlignment="Center" />
-                                        </StackPanel>
-                                      </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                  </ItemsControl>
-                                </Grid>
-                              </Border>
-                            </Grid>
-                            <Button Content="Reset to Flat" Classes="secondary" HorizontalAlignment="Left"
-                                    Command="{Binding ResetEqualizerCommand}" />
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="14">
-                            <TextBlock Text="Lyrics" Classes="sectionTitle" />
-                            <TextBlock Text="Desktop lyrics display and offline lyric capture need shared core/FFI support before they can be configured here."
-                                       Classes="secondary" TextWrapping="Wrap" />
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="14">
-                            <TextBlock Text="Recommendations" Classes="sectionTitle" />
-                            <TextBlock Text="MusicBrainz enrichment needs a desktop FFI command before this can become a real control."
-                                       Classes="secondary" TextWrapping="Wrap" />
-                            <TextBlock Text="Not Recommended" Classes="primary" FontWeight="SemiBold" />
-                            <TextBlock Text="Nothing hidden" Classes="secondary" IsVisible="{Binding !HasSuppressions}" />
-                            <ItemsControl ItemsSource="{Binding SuppressedArtists}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-                                    <StackPanel Grid.Column="0">
-                                      <TextBlock Text="{Binding Title}" Classes="primary" />
-                                      <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Content="Restore" Classes="secondary"
-                                            Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
-                                            CommandParameter="{Binding}" />
-                                  </Grid>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <ItemsControl ItemsSource="{Binding SuppressedTracks}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-                                    <StackPanel Grid.Column="0">
-                                      <TextBlock Text="{Binding Title}" Classes="primary" />
-                                      <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Content="Restore" Classes="secondary"
-                                            Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
-                                            CommandParameter="{Binding}" />
-                                  </Grid>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="14">
-                            <TextBlock Text="Appearance" Classes="sectionTitle" />
-                            <TextBlock Text="Theme" Classes="primary" FontWeight="SemiBold" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                              <RadioButton Content="System" GroupName="appearance"
-                                           IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=system}" />
-                              <RadioButton Content="Light" GroupName="appearance"
-                                           IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=light}" />
-                              <RadioButton Content="Dark" GroupName="appearance"
-                                           IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=dark}" />
-                            </StackPanel>
-                            <TextBlock Text="Dark Style" Classes="primary" FontWeight="SemiBold" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                              <RadioButton Content="Dim" GroupName="darkstyle"
-                                           IsChecked="{Binding DarkStyle, Converter={StaticResource StringMatch}, ConverterParameter=dim}" />
-                              <RadioButton Content="Black" GroupName="darkstyle"
-                                           IsChecked="{Binding DarkStyle, Converter={StaticResource StringMatch}, ConverterParameter=black}" />
-                            </StackPanel>
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="12">
-                            <TextBlock Text="Diagnostics" Classes="sectionTitle" />
-                            <TextBlock Text="{Binding SecretStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding SettingsStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding DeviceIdentityDescription}" Classes="secondary" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" TextWrapping="Wrap" />
-                          </StackPanel>
-                        </Border>
-
-                        <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="16" Padding="20">
-                          <StackPanel Spacing="12">
-                            <TextBlock Text="About" Classes="sectionTitle" />
-                            <TextBlock Text="One app for your music, wherever it lives. Free forever. Open source."
-                                       Classes="primary" TextWrapping="Wrap" />
-                            <TextBlock Text="GPL-3.0 · Source on GitHub: https://github.com/thatcube/Mozz"
-                                       Classes="secondary" TextWrapping="Wrap" />
-                          </StackPanel>
-                        </Border>
-
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                          <Button Content="Sign Out Everywhere" Classes="destructive" HorizontalAlignment="Left"
-                                  IsVisible="{Binding HasActiveAccount}"
-                                  Command="{Binding SignOutCommand}" />
-                          <TextBlock Text="{Binding SettingsMessage}" Classes="secondary" TextWrapping="Wrap"
-                                     VerticalAlignment="Center"
-                                     IsVisible="{Binding SettingsMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                        </StackPanel>
-                      </StackPanel>
-                    </ScrollViewer>
                 </Panel>
             </Grid>
         </Grid>
@@ -1401,5 +1083,467 @@
                 </StackPanel>
             </Grid>
         </Border>
+
+
+        <!-- Settings dialog. The same categories mirror iOS's pushed settings list; desktop presents them as a rail. -->
+        <Grid Grid.RowSpan="2" IsVisible="{Binding IsSettingsDialogOpen}">
+            <Border Background="{DynamicResource AppBackground}" Opacity="0.86" />
+            <Border Margin="56,46"
+                    Background="{DynamicResource SurfaceRaised}"
+                    BorderBrush="{DynamicResource Divider}"
+                    BorderThickness="1"
+                    CornerRadius="18"
+                    Padding="0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch">
+                <Grid ColumnDefinitions="260,*">
+                    <Border Grid.Column="0" Background="{DynamicResource Surface}" CornerRadius="18,0,0,18" Padding="18">
+                        <Grid RowDefinitions="Auto,*,Auto">
+                            <StackPanel Grid.Row="0" Spacing="4" Margin="2,0,0,18">
+                                <TextBlock Text="Settings" Classes="sectionTitle" />
+                                <TextBlock Text="Mozz" Classes="secondary" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="1" Spacing="4">
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsAccountSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.AccountServers}">
+                                    <TextBlock Text="Account &amp; Servers" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsLibrarySelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Library}">
+                                    <TextBlock Text="Library" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsPlaybackSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Playback}">
+                                    <TextBlock Text="Playback" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsLyricsSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Lyrics}">
+                                    <TextBlock Text="Lyrics" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsRecommendationsSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Recommendations}">
+                                    <TextBlock Text="Recommendations" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsAppearanceSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Appearance}">
+                                    <TextBlock Text="Appearance" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsDiagnosticsSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Diagnostics}">
+                                    <TextBlock Text="Diagnostics" />
+                                </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsAboutSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.About}">
+                                    <TextBlock Text="About" />
+                                </Button>
+                            </StackPanel>
+
+                            <Button Grid.Row="2" Classes="destructive" HorizontalAlignment="Stretch"
+                                    IsVisible="{Binding HasActiveAccount}"
+                                    Command="{Binding SignOutCommand}">
+                                <TextBlock Text="Sign Out Everywhere" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="28,24,28,24">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,20">
+                            <StackPanel Grid.Column="0" Spacing="4">
+                                <TextBlock Text="{Binding SettingsCategoryTitle}" Classes="pageTitle" />
+                                <TextBlock Text="{Binding SettingsCategorySubtitle}" Classes="secondary" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="ghost" Command="{Binding CloseSettingsCommand}">
+                                <controls:TablerIcon Size="20" Data="{StaticResource IconX}"
+                                                     Brush="{Binding $parent[Button].Foreground}" />
+                            </Button>
+                        </Grid>
+
+                        <ScrollViewer Grid.Row="1" Padding="0,0,8,0">
+                            <Panel>
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsAccountSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <Grid ColumnDefinitions="56,*,Auto" ColumnSpacing="14">
+                                            <Border Grid.Column="0" Width="50" Height="50" CornerRadius="25"
+                                                    Background="{DynamicResource SurfaceRaised}" ClipToBounds="True">
+                                                <Panel>
+                                                    <controls:ArtworkImage Width="50" Height="50" DisplaySize="50"
+                                                            CornerRadius="25"
+                                                            ServerId="{Binding ActiveAccountAvatarServerId}"
+                                                            ArtworkKey="{Binding ActiveAccountAvatarKey}"
+                                                            FallbackText="{Binding ActiveAccountFallbackText}"
+                                                            FallbackFontSize="18"
+                                                            FallbackFontWeight="SemiBold"
+                                                            FallbackForeground="{DynamicResource ArtworkFallbackPrimary}"
+                                                            IsVisible="{Binding HasActiveAccountAvatar}" />
+                                                    <controls:TablerIcon Size="26" Data="{StaticResource IconArtist}"
+                                                                         Brush="{DynamicResource TextSecondary}"
+                                                                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                         IsVisible="{Binding !HasActiveAccountAvatar}" />
+                                                </Panel>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding ActiveServerTitle}" Classes="sectionTitle" />
+                                                <TextBlock Text="{Binding ActiveServerSubtitle}" Classes="secondary" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                                                        IsVisible="{Binding HasActiveAccount}">
+                                                <Button Content="Sync Now" Classes="primary"
+                                                        IsEnabled="{Binding !Connect.IsSyncing}"
+                                                        Command="{Binding SyncNowCommand}" />
+                                                <Button Content="Refresh" Classes="secondary"
+                                                        Command="{Binding RefreshSettingsPanelCommand}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="16">
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                                <StackPanel Grid.Column="0" Spacing="4">
+                                                    <TextBlock Text="Servers" Classes="sectionTitle" />
+                                                    <TextBlock Text="Switch, sync, add or sign out of Plex, Jellyfin and Subsonic." Classes="secondary" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="{Binding LibrarySummary}" Classes="secondary" VerticalAlignment="Center" />
+                                            </Grid>
+
+                                            <StackPanel Spacing="10" IsVisible="{Binding Connect.HasAccounts}">
+                                                <ItemsControl ItemsSource="{Binding Connect.Accounts}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="14" Margin="0,0,0,9">
+                                                                <Grid ColumnDefinitions="32,*,Auto" ColumnSpacing="12">
+                                                                    <Border Grid.Column="0" Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Surface}">
+                                                                        <controls:TablerIcon Size="17" Data="{StaticResource IconServer}"
+                                                                                             Brush="{DynamicResource TextSecondary}"
+                                                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                                                        <TextBlock Text="{Binding ServerName}" Classes="primary" FontWeight="SemiBold" />
+                                                                        <TextBlock Text="{Binding BaseUrl}" Classes="secondary" FontSize="11.5" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                        <Button Content="Use" Classes="secondary"
+                                                                                Command="{Binding $parent[Window].DataContext.UseServerCommand}"
+                                                                                CommandParameter="{Binding}" />
+                                                                        <Button Content="Sync" Classes="secondary"
+                                                                                Command="{Binding $parent[Window].DataContext.Connect.SyncAccountCommand}"
+                                                                                CommandParameter="{Binding}" />
+                                                                        <Button Content="Sign out" Classes="destructive"
+                                                                                Command="{Binding $parent[Window].DataContext.Connect.ForgetAccountCommand}"
+                                                                                CommandParameter="{Binding}" />
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                            <TextBlock Text="No saved servers yet." Classes="secondary" IsVisible="{Binding !Connect.HasAccounts}" />
+
+                                            <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="16">
+                                                <StackPanel Spacing="13">
+                                                    <TextBlock Text="Add a server" Classes="primary" FontWeight="SemiBold" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <RadioButton Content="Jellyfin" GroupName="kind"
+                                                                     IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Jellyfin}" />
+                                                        <RadioButton Content="Plex" GroupName="kind"
+                                                                     IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Plex}" />
+                                                        <RadioButton Content="Subsonic" GroupName="kind"
+                                                                     IsChecked="{Binding Connect.Kind, Converter={StaticResource EnumMatch}, ConverterParameter=Subsonic}" />
+                                                    </StackPanel>
+
+                                                    <StackPanel Spacing="9" IsVisible="{Binding Connect.NeedsCredentials}">
+                                                        <TextBox Text="{Binding Connect.ServerUrl}"
+                                                                 PlaceholderText="192.168.1.10:8096"
+                                                                 CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                                                 Background="{DynamicResource SearchBackground}" />
+                                                        <TextBox Text="{Binding Connect.Username}"
+                                                                 PlaceholderText="Username"
+                                                                 CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                                                 Background="{DynamicResource SearchBackground}" />
+                                                        <TextBox Text="{Binding Connect.Password}"
+                                                                 PasswordChar="•"
+                                                                 PlaceholderText="Password"
+                                                                 CornerRadius="8" Padding="11,9" BorderThickness="0"
+                                                                 Background="{DynamicResource SearchBackground}" />
+                                                    </StackPanel>
+
+                                                    <TextBlock Classes="secondary" TextWrapping="Wrap"
+                                                               IsVisible="{Binding Connect.IsPlex}"
+                                                               Text="Plex signs in through plex.tv. Mozz will give you a link to approve in your browser." />
+
+                                                    <Border IsVisible="{Binding Connect.PlexLinkUrl, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                            Background="{DynamicResource Surface}"
+                                                            CornerRadius="10" Padding="15,14">
+                                                        <StackPanel Spacing="11">
+                                                            <TextBlock Text="Approve Mozz in your browser" Classes="primary" FontWeight="SemiBold" />
+                                                            <TextBlock Classes="secondary" FontSize="11.5" TextWrapping="Wrap"
+                                                                       Text="Open plex.tv, sign in, and Mozz will connect by itself — nothing to type back here." />
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <Button Content="Open Plex" Classes="primary" Command="{Binding Connect.OpenPlexLinkCommand}" />
+                                                                <Button Content="Copy link" Classes="secondary" Command="{Binding Connect.CopyPlexLinkCommand}" />
+                                                                <Button Content="Cancel" Classes="secondary" Command="{Binding Connect.CancelPlexCommand}" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+
+                                                    <Button Content="Sign in" Classes="primary" HorizontalAlignment="Left"
+                                                            IsEnabled="{Binding !Connect.IsBusy}"
+                                                            Command="{Binding Connect.SignInCommand}" />
+
+                                                    <TextBlock Text="{Binding Connect.Message}" Classes="secondary" TextWrapping="Wrap"
+                                                               IsVisible="{Binding Connect.Message, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                                                    <StackPanel Spacing="7" IsVisible="{Binding Connect.IsSyncing}">
+                                                        <ProgressBar Value="{Binding Connect.SyncProgress}" Maximum="1"
+                                                                     IsIndeterminate="{Binding !Connect.SyncProgress}"
+                                                                     Height="4" CornerRadius="2" />
+                                                        <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5" />
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" FontSize="11.5"
+                                                               IsVisible="{Binding !Connect.IsSyncing}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsLibrarySelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18"
+                                            IsVisible="{Binding HasSettingsLibraries}">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="Music Libraries" Classes="sectionTitle" />
+                                            <TextBlock Text="Pick the library this desktop syncs. Changing it re-attaches the server and syncs." Classes="secondary" TextWrapping="Wrap" />
+                                            <ItemsControl ItemsSource="{Binding SettingsLibraries}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Button Classes="tile" Margin="0,0,0,8"
+                                                                Command="{Binding $parent[Window].DataContext.SelectMusicLibraryCommand}"
+                                                                CommandParameter="{Binding}">
+                                                            <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="10" Padding="13">
+                                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                                    <StackPanel Grid.Column="0" Spacing="3">
+                                                                        <TextBlock Text="{Binding Name}" Classes="primary" />
+                                                                        <TextBlock Text="{Binding Status}" Classes="secondary" />
+                                                                    </StackPanel>
+                                                                    <controls:TablerIcon Grid.Column="1" Size="19" Data="{StaticResource IconCheck}"
+                                                                                         Brush="{DynamicResource TextSecondary}"
+                                                                                         IsVisible="{Binding IsSelected}" />
+                                                                </Grid>
+                                                            </Border>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18"
+                                            IsVisible="{Binding !HasSettingsLibraries}">
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Text="Music Library" Classes="sectionTitle" />
+                                            <TextBlock Text="No alternate music libraries are available for the active server." Classes="secondary" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsPlaybackSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="Playback" Classes="sectionTitle" />
+                                            <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="14">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                                    <StackPanel Grid.Column="0" Spacing="3">
+                                                        <TextBlock Text="Volume normalization" Classes="primary" FontWeight="SemiBold" />
+                                                        <TextBlock Text="Keep songs near the same loudness using ReplayGain track values." Classes="secondary" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <CheckBox Grid.Column="1" IsChecked="{Binding NormalizationEnabled}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="18">
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                                <StackPanel Grid.Column="0" Spacing="4">
+                                                    <TextBlock Text="Equalizer" Classes="sectionTitle" />
+                                                    <TextBlock Text="Shape the curve with vertical faders. The center line is 0 dB." Classes="secondary" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="1" IsChecked="{Binding EqualizerEnabled}" VerticalAlignment="Center" />
+                                            </Grid>
+
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="Presets" Classes="primary" FontWeight="SemiBold" />
+                                                <ItemsControl ItemsSource="{Binding EqualizerPresetOptions}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Button Content="{Binding Label}" Classes="secondary" Margin="0,0,8,8"
+                                                                    Command="{Binding $parent[Window].DataContext.ApplyEqualizerPresetCommand}"
+                                                                    CommandParameter="{Binding}" />
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+
+                                            <Grid ColumnDefinitions="104,*" ColumnSpacing="24">
+                                                <Border Grid.Column="0" Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="14">
+                                                    <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                                        <TextBlock Text="Preamp" Classes="primary" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                                        <TextBlock Text="{Binding EqualizerPreampText}" Classes="secondary" HorizontalAlignment="Center" />
+                                                        <Slider Minimum="-12" Maximum="12" TickFrequency="0.5"
+                                                                Orientation="Vertical" Height="188" Width="34"
+                                                                Value="{Binding EqualizerPreamp}" />
+                                                    </StackPanel>
+                                                </Border>
+
+                                                <Border Grid.Column="1" Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18,16">
+                                                    <Grid RowDefinitions="*,Auto,*">
+                                                        <Border Grid.Row="1" Height="1" Background="{DynamicResource Divider}"
+                                                                VerticalAlignment="Center" />
+                                                        <ItemsControl Grid.RowSpan="3" ItemsSource="{Binding EqualizerBands}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <StackPanel Spacing="8" HorizontalAlignment="Center">
+                                                                        <TextBlock Text="{Binding GainText}" Classes="secondary" FontSize="11" HorizontalAlignment="Center" />
+                                                                        <Slider Minimum="-12" Maximum="12" TickFrequency="0.5"
+                                                                                Orientation="Vertical" Height="188" Width="34"
+                                                                                Value="{Binding Gain}" />
+                                                                        <TextBlock Text="{Binding Label}" Classes="secondary" FontSize="11" HorizontalAlignment="Center" />
+                                                                    </StackPanel>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Grid>
+                                                </Border>
+                                            </Grid>
+                                            <Button Content="Reset to Flat" Classes="secondary" HorizontalAlignment="Left"
+                                                    Command="{Binding ResetEqualizerCommand}" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsLyricsSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="Lyrics" Classes="sectionTitle" />
+                                            <TextBlock Text="Desktop lyrics display and offline lyric capture need shared core/FFI support before they can be configured here. This mirrors iOS placement without pretending the controls exist yet."
+                                                       Classes="secondary" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsRecommendationsSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="Recommendations" Classes="sectionTitle" />
+                                            <TextBlock Text="MusicBrainz enrichment needs a desktop FFI command before this can become a real control."
+                                                       Classes="secondary" TextWrapping="Wrap" />
+                                            <TextBlock Text="Not Recommended" Classes="primary" FontWeight="SemiBold" />
+                                            <TextBlock Text="Nothing hidden" Classes="secondary" IsVisible="{Binding !HasSuppressions}" />
+                                            <ItemsControl ItemsSource="{Binding SuppressedArtists}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                                                            <StackPanel Grid.Column="0">
+                                                                <TextBlock Text="{Binding Title}" Classes="primary" />
+                                                                <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
+                                                            </StackPanel>
+                                                            <Button Grid.Column="1" Content="Restore" Classes="secondary"
+                                                                    Command="{Binding $parent[Window].DataContext.RestoreSuppressionCommand}"
+                                                                    CommandParameter="{Binding}" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <ItemsControl ItemsSource="{Binding SuppressedTracks}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                                                            <StackPanel Grid.Column="0">
+                                                                <TextBlock Text="{Binding Title}" Classes="primary" />
+                                                                <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
+                                                            </StackPanel>
+                                                            <Button Grid.Column="1" Content="Restore" Classes="secondary"
+                                                                    Command="{Binding $parent[Window].DataContext.RestoreSuppressionCommand}"
+                                                                    CommandParameter="{Binding}" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsAppearanceSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="Appearance" Classes="sectionTitle" />
+                                            <TextBlock Text="Theme" Classes="primary" FontWeight="SemiBold" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <RadioButton Content="System" GroupName="appearance"
+                                                             IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=system}" />
+                                                <RadioButton Content="Light" GroupName="appearance"
+                                                             IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=light}" />
+                                                <RadioButton Content="Dark" GroupName="appearance"
+                                                             IsChecked="{Binding Appearance, Converter={StaticResource StringMatch}, ConverterParameter=dark}" />
+                                            </StackPanel>
+                                            <TextBlock Text="Dark Style" Classes="primary" FontWeight="SemiBold" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <RadioButton Content="Dim" GroupName="darkstyle"
+                                                             IsChecked="{Binding DarkStyle, Converter={StaticResource StringMatch}, ConverterParameter=dim}" />
+                                                <RadioButton Content="Black" GroupName="darkstyle"
+                                                             IsChecked="{Binding DarkStyle, Converter={StaticResource StringMatch}, ConverterParameter=black}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsDiagnosticsSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="Diagnostics" Classes="sectionTitle" />
+                                            <TextBlock Text="{Binding SecretStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding SettingsStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding DeviceIdentityDescription}" Classes="secondary" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsAboutSelected}">
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="About" Classes="sectionTitle" />
+                                            <TextBlock Text="One app for your music, wherever it lives. Free forever. Open source."
+                                                       Classes="primary" TextWrapping="Wrap" />
+                                            <TextBlock Text="GPL-3.0 · Source on GitHub: https://github.com/thatcube/Mozz"
+                                                       Classes="secondary" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding SettingsMessage}" Classes="secondary" TextWrapping="Wrap"
+                                           IsVisible="{Binding SettingsMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                            </Panel>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

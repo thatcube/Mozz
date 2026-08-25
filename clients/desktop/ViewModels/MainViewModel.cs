@@ -85,6 +85,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<SuppressedSettingsItem> SuppressedArtists { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedTracks { get; } = [];
     public ObservableCollection<EqualizerBandSetting> EqualizerBands { get; } = [];
+    public IReadOnlyList<SettingsCategoryDefinition> SettingsCategories { get; } =
+        Mozz.Desktop.ViewModels.SettingsCategories.All;
     public IReadOnlyList<SettingsOption> AppearanceOptions { get; } =
     [
         new("system", "System"),
@@ -141,6 +143,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Playlist> _homePlaylists = [];
     private HomeMixTile? _selectedMix;
     private AlbumReleaseKindLookup? _releaseKindLookup;
+    private readonly SettingsCategorySelectionState _settingsCategorySelection = new();
 
     private int ColumnsFor(double pitch) => DesktopLayout.ColumnsFor(_contentWidth, pitch);
 
@@ -151,7 +154,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsArtistsSelected => Section == LibrarySection.Artists;
     public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
     public bool IsConnectSelected => Section == LibrarySection.Connect;
-    public bool IsSettingsSelected => Section == LibrarySection.Settings;
+    public bool IsSettingsSelected => IsSettingsDialogOpen;
 
     public bool ShowTracks => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Songs };
     public bool ShowHomeRows => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
@@ -169,7 +172,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool ShowPlaylists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Playlists };
     public bool ShowSearch => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Search };
     public bool ShowConnect => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Connect };
-    public bool ShowSettings => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Settings };
+    public bool ShowSettings => false;
     public bool ShowAlbumDetail => _navigation.Current.Kind == LibraryPageKind.AlbumDetail;
     public bool ShowArtistDetail => _navigation.Current.Kind == LibraryPageKind.ArtistDetail;
     public bool ShowPlaylistDetail => _navigation.Current.Kind == LibraryPageKind.PlaylistDetail;
@@ -197,8 +200,23 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool HasActiveAccount => ActiveAccount is not null;
     public string SidebarProfileTitle => SettingsPresentation.ProfileTitle(ActiveAccount);
     public string SidebarProfileSubtitle => SettingsPresentation.ProfileSubtitle(ActiveAccount, LibrarySummary);
+    public string? ActiveAccountAvatarServerId => ActiveAccount?.EffectiveAvatarArtworkKey is { Length: > 0 } ? ActiveAccount.ServerId : null;
+    public string? ActiveAccountAvatarKey => ActiveAccount?.EffectiveAvatarArtworkKey;
+    public bool HasActiveAccountAvatar => ActiveAccountAvatarKey is { Length: > 0 };
+    public string ActiveAccountFallbackText => ActiveAccount?.Username ?? ActiveAccount?.ServerName ?? "Settings";
     public string ActiveServerTitle => SettingsPresentation.ServerSectionTitle(ActiveAccount);
     public string ActiveServerSubtitle => SettingsPresentation.ServerSectionSubtitle(ActiveAccount);
+    public SettingsCategory SelectedSettingsCategory => _settingsCategorySelection.Selected;
+    public string SettingsCategoryTitle => _settingsCategorySelection.SelectedDefinition.Label;
+    public string SettingsCategorySubtitle => _settingsCategorySelection.SelectedDefinition.Subtitle;
+    public bool IsSettingsAccountSelected => _settingsCategorySelection.IsSelected(SettingsCategory.AccountServers);
+    public bool IsSettingsLibrarySelected => _settingsCategorySelection.IsSelected(SettingsCategory.Library);
+    public bool IsSettingsPlaybackSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Playback);
+    public bool IsSettingsLyricsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Lyrics);
+    public bool IsSettingsRecommendationsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Recommendations);
+    public bool IsSettingsAppearanceSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Appearance);
+    public bool IsSettingsDiagnosticsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Diagnostics);
+    public bool IsSettingsAboutSelected => _settingsCategorySelection.IsSelected(SettingsCategory.About);
     public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
     public string SettingsStorageDescription => $"Preferences: {_preferences.Path}";
@@ -213,6 +231,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _equalizerPreamp;
     [ObservableProperty] private string? _settingsMessage;
     [ObservableProperty] private bool _isSettingsBusy;
+    [ObservableProperty] private bool _isSettingsDialogOpen;
 
     public MainViewModel()
     {
@@ -229,6 +248,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(HasActiveAccount));
             OnPropertyChanged(nameof(SidebarProfileTitle));
             OnPropertyChanged(nameof(SidebarProfileSubtitle));
+            OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
+            OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+            OnPropertyChanged(nameof(HasActiveAccountAvatar));
+            OnPropertyChanged(nameof(ActiveAccountFallbackText));
             OnPropertyChanged(nameof(ActiveServerTitle));
             OnPropertyChanged(nameof(ActiveServerSubtitle));
         };
@@ -443,6 +466,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
+            OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+            OnPropertyChanged(nameof(HasActiveAccountAvatar));
+            OnPropertyChanged(nameof(ActiveAccountFallbackText));
             SettingsLibraries.Clear();
             SuppressedArtists.Clear();
             SuppressedTracks.Clear();
@@ -591,6 +618,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Connect.Accounts.Clear();
         OnPropertyChanged(nameof(ActiveAccount));
         OnPropertyChanged(nameof(HasActiveAccount));
+        OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
+        OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+        OnPropertyChanged(nameof(HasActiveAccountAvatar));
+        OnPropertyChanged(nameof(ActiveAccountFallbackText));
         SettingsLibraries.Clear();
         SuppressedArtists.Clear();
         SuppressedTracks.Clear();
@@ -599,7 +630,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ClearLibrary();
         TrackCount = AlbumCount = ArtistCount = 0;
         SettingsMessage = "Signed out.";
-        await LoadSectionAsync(LibrarySection.Settings, clearBackStack: true);
+        await Task.CompletedTask;
     }
 
     private void ReplaceAccount(ServerAccount updated)
@@ -610,6 +641,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Connect.Accounts[i] = updated;
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
+            OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+            OnPropertyChanged(nameof(HasActiveAccountAvatar));
+            OnPropertyChanged(nameof(ActiveAccountFallbackText));
             return;
         }
     }
@@ -701,7 +736,47 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    private Task SelectSection(LibrarySection section) => LoadSectionAsync(section, clearBackStack: true);
+    private Task SelectSection(LibrarySection section) =>
+        section == LibrarySection.Settings
+            ? OpenSettingsAsync()
+            : LoadSectionAsync(section, clearBackStack: true);
+
+    [RelayCommand]
+    private async Task OpenSettingsAsync()
+    {
+        IsSettingsDialogOpen = true;
+        OnPropertyChanged(nameof(IsSettingsSelected));
+        await RefreshSettingsAsync();
+    }
+
+    [RelayCommand]
+    private void CloseSettings()
+    {
+        IsSettingsDialogOpen = false;
+        OnPropertyChanged(nameof(IsSettingsSelected));
+    }
+
+    [RelayCommand]
+    private void SelectSettingsCategory(SettingsCategory category)
+    {
+        if (!_settingsCategorySelection.Select(category)) return;
+        RaiseSettingsCategoryDerived();
+    }
+
+    private void RaiseSettingsCategoryDerived()
+    {
+        OnPropertyChanged(nameof(SelectedSettingsCategory));
+        OnPropertyChanged(nameof(SettingsCategoryTitle));
+        OnPropertyChanged(nameof(SettingsCategorySubtitle));
+        OnPropertyChanged(nameof(IsSettingsAccountSelected));
+        OnPropertyChanged(nameof(IsSettingsLibrarySelected));
+        OnPropertyChanged(nameof(IsSettingsPlaybackSelected));
+        OnPropertyChanged(nameof(IsSettingsLyricsSelected));
+        OnPropertyChanged(nameof(IsSettingsRecommendationsSelected));
+        OnPropertyChanged(nameof(IsSettingsAppearanceSelected));
+        OnPropertyChanged(nameof(IsSettingsDiagnosticsSelected));
+        OnPropertyChanged(nameof(IsSettingsAboutSelected));
+    }
 
     private async Task LoadSectionAsync(LibrarySection section, bool clearBackStack)
     {
@@ -2092,6 +2167,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasActiveAccount));
         OnPropertyChanged(nameof(SidebarProfileTitle));
         OnPropertyChanged(nameof(SidebarProfileSubtitle));
+        OnPropertyChanged(nameof(ActiveAccountAvatarServerId));
+        OnPropertyChanged(nameof(ActiveAccountAvatarKey));
+        OnPropertyChanged(nameof(HasActiveAccountAvatar));
+        OnPropertyChanged(nameof(ActiveAccountFallbackText));
         OnPropertyChanged(nameof(ActiveServerTitle));
         OnPropertyChanged(nameof(ActiveServerSubtitle));
     }

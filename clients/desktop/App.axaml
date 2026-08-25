@@ -36,6 +36,7 @@
             <SolidColorBrush x:Key="AccentHover" Color="#FF244E" />
             <SolidColorBrush x:Key="AccentDeep" Color="#C80028" />
             <SolidColorBrush x:Key="Brand" Color="#F50031" />
+            <SolidColorBrush x:Key="BrandForeground" Color="#FFFFFF" />
 
             <SolidColorBrush x:Key="AppBackground" Color="#1C1C1E" />
             <SolidColorBrush x:Key="SidebarBackground" Color="#2C2C2E" />
