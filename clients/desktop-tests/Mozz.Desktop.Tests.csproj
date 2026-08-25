@@ -36,6 +36,7 @@
     <Compile Include="..\desktop\ViewModels\GridRows.cs" />
     <Compile Include="..\desktop\ViewModels\HomeMixes.cs" />
     <Compile Include="..\desktop\ViewModels\LibraryNavigation.cs" />
+    <Compile Include="..\desktop\ViewModels\DetailRows.cs" />
     <Compile Include="..\desktop\ViewModels\MediaDetailFormatting.cs" />
     <Compile Include="..\desktop\ViewModels\PlaybackQueue.cs" />
     <Compile Include="..\desktop\ViewModels\SearchPresentation.cs" />

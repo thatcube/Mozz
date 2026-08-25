@@ -122,3 +122,24 @@ public sealed class StringMatchConverter : IValueConverter
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => value is true && parameter is string expected ? expected : BindingOperations.DoNothing;
 }
+
+public sealed class PendingOpacityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? 0.55 : 1.0;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+public sealed class RatingAtLeastConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (parameter is not string text || !int.TryParse(text, out var threshold)) return false;
+        return value is int rating && rating >= threshold;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}

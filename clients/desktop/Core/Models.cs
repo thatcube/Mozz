@@ -56,7 +56,10 @@ public sealed record Track(
     double DurationSeconds,
     string? ArtworkKey,
     bool IsFavorite,
-    double? NormalizationGainDB = null)
+    double? NormalizationGainDB = null,
+    int? Rating = null,
+    bool FavoritePending = false,
+    bool RatingPending = false)
 {
     /// <summary>m:ss, the form every music player uses.</summary>
     public string Duration
@@ -70,6 +73,65 @@ public sealed record Track(
                 : $"{span.Minutes}:{span.Seconds:00}";
         }
     }
+
+    public string FavoriteLabel => IsFavorite
+        ? (FavoritePending ? "Liked, waiting to sync" : "Liked")
+        : (FavoritePending ? "Unliked, waiting to sync" : "Like");
+
+    public string RatingText => Rating is > 0 ? $"{Rating}/5" : "Not rated";
+}
+
+public sealed record FavoriteMutationResult(
+    string ServerId,
+    string RemoteId,
+    string ItemType,
+    string Kind,
+    int? Value,
+    bool Liked,
+    bool Queued,
+    bool Synced);
+
+public sealed record RatingMutationResult(
+    string ServerId,
+    string RemoteId,
+    string ItemType,
+    string Kind,
+    int? Value,
+    bool? Liked,
+    bool Queued,
+    bool Synced);
+
+public sealed record PlaybackReportResult(bool Reported);
+
+public sealed record LyricsPayload(
+    string Status,
+    bool StaySilent,
+    int? ActiveLineIndex,
+    LyricsDocument? Lyrics);
+
+public sealed record LyricsDocument(
+    string? Source,
+    string? SourceDisplayName,
+    bool IsSynced,
+    IReadOnlyList<LyricLine> Lines);
+
+public sealed record LyricLine(string Text, double? StartSeconds);
+
+public sealed record SyncPhaseDetail(
+    string Phase,
+    string Label,
+    string State,
+    int Synced,
+    int? Total,
+    bool IsComplete);
+
+public static class FavoriteStateProjector
+{
+    public static Track Optimistic(Track track, bool liked) =>
+        track with { IsFavorite = liked, FavoritePending = true };
+
+    public static Track Reconciled(Track track, FavoriteMutationResult result) =>
+        track with { IsFavorite = result.Liked, FavoritePending = !result.Synced };
 }
 
 public sealed record Playlist(
@@ -151,6 +213,12 @@ public sealed record CoreRequest(
     [JsonPropertyName("sinceMS")] public long? SinceMS { get; init; }
     [JsonPropertyName("maxBytes")] public int? MaxBytes { get; init; }
     [JsonPropertyName("year")] public int? Year { get; init; }
+    [JsonPropertyName("liked")] public bool? Liked { get; init; }
+    [JsonPropertyName("flush")] public bool? Flush { get; init; }
+    [JsonPropertyName("rating")] public int? Rating { get; init; }
+    [JsonPropertyName("state")] public string? State { get; init; }
+    [JsonPropertyName("positionSeconds")] public double? PositionSeconds { get; init; }
+    [JsonPropertyName("useLRCLIB")] public bool? UseLRCLIB { get; init; }
 }
 
 /// <summary>

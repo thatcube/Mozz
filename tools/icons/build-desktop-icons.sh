@@ -51,6 +51,7 @@ playlist            Playlist
 server              Server
 search              Search
 heart-filled        Heart
+heart               HeartOutline
 category            Settings
 refresh             Refresh
 waveform            Waveform

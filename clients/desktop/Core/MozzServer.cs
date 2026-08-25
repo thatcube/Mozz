@@ -596,7 +596,9 @@ public sealed record SyncStatus(
     [property: JsonPropertyName("artists")] int? Artists,
     [property: JsonPropertyName("albums")] int? Albums,
     [property: JsonPropertyName("tracks")] int? Tracks,
-    [property: JsonPropertyName("playlists")] int? Playlists)
+    [property: JsonPropertyName("playlists")] int? Playlists,
+    [property: JsonPropertyName("details")] IReadOnlyList<SyncPhaseDetail>? Details = null,
+    [property: JsonPropertyName("phaseLabel")] string? PhaseLabel = null)
 {
     /// <summary>Short label for a progress row, e.g. "Songs 3,712 / 20,004".</summary>
     public string Describe()
@@ -616,6 +618,106 @@ public sealed record SyncStatus(
         return Total is > 0
             ? $"{phase} {ItemsSynced:N0} / {Total:N0}"
             : $"{phase} {ItemsSynced:N0}";
+    }
+}
+
+public sealed record SyncPhaseRow(string Label, string State, int Synced, int? Total, bool IsComplete)
+{
+    public string CountText => State switch
+    {
+        "done" when Synced == 0 => "None",
+        "pending" when Synced == 0 && (Total ?? 0) == 0 => string.Empty,
+        _ => Total is > 0 ? $"{Synced:N0} / {Total.Value:N0}" : $"{Synced:N0}",
+    };
+
+    public bool IsDone => State == "done" || IsComplete;
+    public bool IsSyncing => State == "syncing";
+}
+
+public sealed class SyncProgressSmoother
+{
+    private readonly Dictionary<string, SyncCounterPacer> _pacers = new(StringComparer.Ordinal);
+    private DateTimeOffset? _lastUpdate;
+
+    public IReadOnlyList<SyncPhaseRow> Update(SyncStatus status, DateTimeOffset? now = null)
+    {
+        var at = now ?? DateTimeOffset.UtcNow;
+        var elapsed = _lastUpdate is { } last ? Math.Max(0, (at - last).TotalSeconds) : 0;
+        _lastUpdate = at;
+
+        var details = status.Details is { Count: > 0 }
+            ? status.Details
+            : [new SyncPhaseDetail(status.Phase ?? "syncing", status.PhaseLabel ?? "Syncing", status.Finished ? "done" : "syncing", status.ItemsSynced, status.Total, status.Finished)];
+
+        var rows = new List<SyncPhaseRow>(details.Count);
+        foreach (var detail in details)
+        {
+            var pacer = _pacers.TryGetValue(detail.Phase, out var existing) ? existing : new SyncCounterPacer();
+            if (detail.State == "done" || detail.IsComplete) pacer.Settle(detail.Synced);
+            else pacer.Report(detail.Synced, at);
+            if (elapsed > 0) pacer.Advance(elapsed);
+            _pacers[detail.Phase] = pacer;
+            rows.Add(new SyncPhaseRow(detail.Label, detail.State, pacer.Displayed, detail.Total, detail.IsComplete));
+        }
+        return rows;
+    }
+}
+
+public sealed class SyncCounterPacer
+{
+    private const double Stretch = 1.25;
+    private const double MinimumSpread = 4.0;
+    private const double MaximumSpread = 60.0;
+    private const double MinimumRate = 0.8;
+    private double _position;
+    private double _target;
+    private double _pageInterval = 15;
+    private DateTimeOffset? _lastArrival;
+    private bool _seeded;
+
+    public int Displayed => (int)Math.Floor(_position);
+
+    public void Report(int count, DateTimeOffset now)
+    {
+        var value = (double)count;
+        if (!_seeded)
+        {
+            _position = value;
+            _target = value;
+            _lastArrival = now;
+            _seeded = true;
+            return;
+        }
+        if (Math.Abs(value - _target) < 0.001) return;
+        if (value > _target && _lastArrival is { } last)
+        {
+            var elapsed = (now - last).TotalSeconds;
+            if (elapsed > 0.25 && elapsed < 300) _pageInterval = _pageInterval * 0.6 + elapsed * 0.4;
+            _lastArrival = now;
+        }
+        _target = value;
+        if (_position > _target) _position = _target;
+    }
+
+    public void Settle(int count)
+    {
+        _position = count;
+        _target = count;
+        _seeded = true;
+    }
+
+    public bool Advance(double elapsed)
+    {
+        if (_position >= _target)
+        {
+            _position = Math.Min(_position, _target);
+            return false;
+        }
+        var spread = Math.Min(Math.Max(_pageInterval * Stretch, MinimumSpread), MaximumSpread);
+        var gap = _target - _position;
+        var rate = Math.Max(gap / spread, MinimumRate);
+        _position = Math.Min(_position + rate * elapsed, _target);
+        return _position < _target;
     }
 }
 

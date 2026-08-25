@@ -83,6 +83,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<HomeRow> HomeRows { get; } = [];
     public ObservableCollection<SearchRow> SearchRows { get; } = [];
     public ObservableCollection<QueueItemRow> QueueRows { get; } = [];
+    public ObservableCollection<LyricLineRow> LyricRows { get; } = [];
     public ObservableCollection<SettingsLibraryOption> SettingsLibraries { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedArtists { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedTracks { get; } = [];
@@ -193,6 +194,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail || ShowMixDetail || ShowGenreDetail;
     public bool HasSearchRows => ShowSearch && SearchRows.Count > 0;
     public bool HasQueue => QueueRows.Count > 0;
+    public bool HasLyrics => LyricRows.Count > 0;
+    public bool ShowLyricsSilent => ShowNowPlaying && !IsLyricsLoading && LyricStatus == "silent";
     public string ShuffleStateText => _queue.Shuffle == ShuffleMode.On ? "Shuffle On" : "Shuffle";
     public string RepeatStateText => _queue.Repeat switch
     {
@@ -256,13 +259,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isSettingsBusy;
     [ObservableProperty] private bool _isSettingsDialogOpen;
     [ObservableProperty] private ServerAccountProfile? _activeAccountProfile;
+    [ObservableProperty] private string? _lyricStatus;
+    [ObservableProperty] private bool _isLyricsLoading;
+    [ObservableProperty] private string? _lyricsMessage;
 
     public MainViewModel()
     {
         // Constructed before the design-mode bail-out because the previewer binds
         // to it. Nothing here touches the disk or the network until a command runs.
         _deviceId = _preferences.GetOrCreateDeviceId();
-        _playHistory = new PlayHistoryRecorder(evt => _ = RecordPlayEventAsync(evt));
+        _playHistory = new PlayHistoryRecorder(
+            evt => _ = RecordPlayEventAsync(evt),
+            report => _ = ReportPlaybackAsync(report));
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
@@ -709,6 +717,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Genres.Clear();
         SearchRows.Clear();
         QueueRows.Clear();
+        LyricRows.Clear();
         AlbumTrackRows.Clear();
         ArtistAlbums.Clear();
         ArtistTracks.Clear();
@@ -743,6 +752,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Dispatcher.UIThread.Post(() => StatusMessage = $"Could not record play history: {ex.Message}");
+        }
+    }
+
+    private async Task ReportPlaybackAsync(DesktopPlaybackReport report)
+    {
+        if (!_core.IsOpen) return;
+        try
+        {
+            await _core.CallAsync<PlaybackReportResult>(new CoreRequest("reportPlayback")
+            {
+                ServerId = report.ServerId,
+                RemoteId = report.RemoteId,
+                State = report.State,
+                PositionSeconds = report.PositionSeconds,
+            });
+        }
+        catch
+        {
+            // Best-effort scrobbling must never interrupt or block audio.
         }
     }
 
@@ -1877,6 +1905,143 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task ToggleFavoriteAsync(Track? track)
+    {
+        if (track is null || !_core.IsOpen) return;
+        var liked = !track.IsFavorite;
+        ApplyTrackUpdate(track, t => t with { IsFavorite = liked, FavoritePending = true });
+        try
+        {
+            var result = await _core.CallAsync<FavoriteMutationResult>(new CoreRequest("setFavorite")
+            {
+                ServerId = track.ServerId,
+                RemoteId = track.RemoteId,
+                Liked = liked,
+                Flush = true,
+            });
+            ApplyTrackUpdate(track, t => t with
+            {
+                IsFavorite = result?.Liked ?? liked,
+                FavoritePending = result is { Synced: false },
+            });
+            StatusMessage = result is { Synced: false, Queued: true }
+                ? "Favorite queued — it will sync when the server is reachable."
+                : null;
+        }
+        catch (Exception ex)
+        {
+            ApplyTrackUpdate(track, t => t with { IsFavorite = track.IsFavorite, FavoritePending = false });
+            StatusMessage = $"Could not update favorite: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task RateNowPlayingAsync(string? value)
+    {
+        if (NowPlaying is not { } track || !_core.IsOpen) return;
+        var rating = int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, 5) : (int?)null;
+        ApplyTrackUpdate(track, t => t with { Rating = rating, RatingPending = true });
+        try
+        {
+            var result = await _core.CallAsync<RatingMutationResult>(new CoreRequest("setRating")
+            {
+                ServerId = track.ServerId,
+                RemoteId = track.RemoteId,
+                Rating = rating,
+                Flush = true,
+            });
+            ApplyTrackUpdate(track, t => t with
+            {
+                Rating = result?.Value ?? rating,
+                RatingPending = result is { Synced: false },
+            });
+            StatusMessage = result is { Synced: false, Queued: true }
+                ? "Rating queued — it will sync when the server is reachable."
+                : null;
+        }
+        catch (Exception ex)
+        {
+            ApplyTrackUpdate(track, t => t with { Rating = track.Rating, RatingPending = false });
+            StatusMessage = $"Could not update rating: {ex.Message}";
+        }
+    }
+
+    private void ApplyTrackUpdate(Track original, Func<Track, Track> update)
+    {
+        static bool Same(Track a, Track b) => a.ServerId == b.ServerId && a.RemoteId == b.RemoteId;
+        Track Update(Track current) => Same(current, original) ? update(current) : current;
+
+        Replace(Tracks, Tracks.Select(Update).ToList());
+        Replace(ArtistTracks, ArtistTracks.Select(Update).ToList());
+        Replace(PlaylistTracks, PlaylistTracks.Select(Update).ToList());
+        _homeRecentlyPlayed = _homeRecentlyPlayed.Select(Update).ToList();
+        _detailArtistTopTracks = _detailArtistTopTracks.Select(Update).ToList();
+        _detailPlaylistTracks = _detailPlaylistTracks.Select(Update).ToList();
+        _detailAlbumTracks = _detailAlbumTracks
+            .Select(row => row with { Track = Update(row.Track) })
+            .ToList();
+        _queue.ReplaceTracks(Update);
+        if (NowPlaying is { } now && Same(now, original)) NowPlaying = Update(now);
+        RefreshQueueRows();
+        RebuildHomeRows();
+        RebuildDetailRows();
+        RaiseDerived();
+    }
+
+    private async Task LoadLyricsAsync(Track track, double positionSeconds)
+    {
+        LyricRows.Clear();
+        LyricsMessage = null;
+        LyricStatus = null;
+        OnPropertyChanged(nameof(HasLyrics));
+        OnPropertyChanged(nameof(ShowLyricsSilent));
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsLyricsLoading = true;
+            var payload = await _core.CallAsync<LyricsPayload>(new CoreRequest("lyrics")
+            {
+                ServerId = track.ServerId,
+                RemoteId = track.RemoteId,
+                UseLRCLIB = true,
+                PositionSeconds = positionSeconds,
+            });
+            if (NowPlaying is null || NowPlaying.ServerId != track.ServerId || NowPlaying.RemoteId != track.RemoteId) return;
+            LyricStatus = payload?.Status;
+            if (payload?.Status == "silent")
+            {
+                LyricsMessage = "No lyrics for this track.";
+                LyricRows.Clear();
+                return;
+            }
+
+            var active = payload?.ActiveLineIndex ?? LyricLineSelector.ActiveIndex(payload?.Lyrics?.Lines, positionSeconds);
+            Replace(LyricRows, LyricLineSelector.Rows(payload?.Lyrics?.Lines, active));
+            LyricsMessage = LyricRows.Count == 0 ? "No lyrics for this track." : payload?.Lyrics?.SourceDisplayName;
+        }
+        catch (Exception ex)
+        {
+            LyricsMessage = $"Could not load lyrics: {ex.Message}";
+        }
+        finally
+        {
+            IsLyricsLoading = false;
+            OnPropertyChanged(nameof(HasLyrics));
+            OnPropertyChanged(nameof(ShowLyricsSilent));
+        }
+    }
+
+    private void UpdateActiveLyric(double positionSeconds)
+    {
+        if (LyricRows.Count == 0) return;
+        var lines = LyricRows.Select(r => new LyricLine(r.Text, r.StartSeconds)).ToList();
+        var active = LyricLineSelector.ActiveIndex(lines, positionSeconds);
+        Replace(LyricRows, LyricLineSelector.Rows(lines, active));
+        OnPropertyChanged(nameof(HasLyrics));
+    }
+
+    [RelayCommand]
     private void PlayTrack(Track? track)
     {
         if (track is null) return;
@@ -1995,10 +2160,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             case PlaybackState.Playing:
                 _engine.Pause();
+                _playHistory.PauseCurrent(CurrentPositionSeconds());
                 IsPlaying = false;
                 break;
             case PlaybackState.Paused:
                 _engine.Resume();
+                _playHistory.ResumeCurrent(CurrentPositionSeconds());
                 IsPlaying = true;
                 break;
             default:
@@ -2087,6 +2254,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (source is null) return; // ResolveSource reported why.
 
         NowPlaying = track;
+        _ = LoadLyricsAsync(track, 0);
+        _ = LoadLyricsAsync(track, 0);
         DurationSeconds = source.KnownDuration?.TotalSeconds
             ?? (track.DurationSeconds > 0 ? track.DurationSeconds : 0);
         _suppressSeek = true;
@@ -2171,6 +2340,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var pos = _engine.Position.TotalSeconds;
         PositionSeconds = DurationSeconds > 0 ? Math.Min(pos, DurationSeconds) : pos;
         _suppressSeek = false;
+        _playHistory.ProgressCurrent(PositionSeconds);
+        UpdateActiveLyric(PositionSeconds);
 
         _nowPlaying_os?.UpdatePosition(_engine.Position, _engine.Duration);
     }
@@ -2405,6 +2576,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowDetailPage));
         OnPropertyChanged(nameof(HasSearchRows));
         OnPropertyChanged(nameof(HasQueue));
+        OnPropertyChanged(nameof(HasLyrics));
+        OnPropertyChanged(nameof(ShowLyricsSilent));
         OnPropertyChanged(nameof(ShuffleStateText));
         OnPropertyChanged(nameof(RepeatStateText));
         OnPropertyChanged(nameof(HasArtistAlbums));
