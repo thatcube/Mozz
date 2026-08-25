@@ -43,7 +43,8 @@ public sealed record Track(
     int? DiscNumber,
     double DurationSeconds,
     string? ArtworkKey,
-    bool IsFavorite)
+    bool IsFavorite,
+    double? NormalizationGainDB = null)
 {
     /// <summary>m:ss, the form every music player uses.</summary>
     public string Duration
