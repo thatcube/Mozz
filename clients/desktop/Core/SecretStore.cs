@@ -224,7 +224,15 @@ internal sealed class MacKeychainSecretStore : ISecretStore
     private static readonly nint CFBooleanTrue = Marshal.ReadIntPtr(
         NativeLibrary.GetExport(NativeLibrary.Load(CoreFoundation), "kCFBooleanTrue"));
 
-    private const string ServiceName = "com.thatcube.Mozz";
+    /// <summary>
+    /// The Keychain service these items live under.
+    ///
+    /// Deliberately the desktop app's own identifier rather than the iOS app's.
+    /// They are different apps with different signatures, so sharing a service
+    /// name buys nothing — macOS would still prompt — while making the access
+    /// dialog name a bundle the user may not even have installed.
+    /// </summary>
+    private const string ServiceName = "com.thatcube.Mozz.desktop";
 
     private static nint CFString(string value)
         => CFStringCreateWithCString(0, Encoding.UTF8.GetBytes(value + "\0"), Utf8);
