@@ -1,0 +1,388 @@
+name: Android FFI spike
+
+# Proves (or disproves) that Mozz's platform-free Swift core cross-compiles to a
+# C-ABI shared library for Android and can be driven, on-device, from a foreign
+# (NDK C) toolchain — the same thing the Windows spike proves for x64, one step
+# further because here the host and the target are different CPUs.
+#
+# Runs on demand, and only when the spike itself changes — this is an
+# investigation, not a gate on normal iOS work.
+#
+# The steps are deliberately staged so a failure identifies its own layer:
+#   1. core compiles             -> is the Swift code portable to Android at all?
+#   2. FFI product links         -> does @_cdecl produce a usable .so?
+#   3. symbols exported          -> is the session ABI actually in the .so?
+#   4. loads + runs on a device  -> does it load on Android, and is FTS5 present?
+#   5. benchmark                 -> are the numbers within budget?
+
+on:
+  workflow_dispatch:
+    inputs:
+      trackCount:
+        description: "Synthetic catalog size (tracks)"
+        required: false
+        default: "100000"
+  push:
+    # Every module the spike links, not just the facade — the same lesson the
+    # Windows spike learned when a release-mode break in MozzDatabase slipped
+    # through unwatched. This job cross-compiles the whole core, so it watches
+    # the whole core.
+    # Every module, not a hand-kept list. The spike builds the whole MozzFFI
+    # dependency graph, so any module in it can break the build — and a list
+    # written by hand goes stale the moment the graph gains a member. It already
+    # has, twice: a MozzDatabase break went unnoticed through four runs, and
+    # linking MozzRecommend/MozzEnrichment left both spikes blind to the modules
+    # they had just started compiling. `Sources/**` costs a few extra runs on
+    # Apple-only edits and cannot go stale.
+    paths:
+      - "Sources/**"
+      - "Package.swift"
+      - "spec/**"
+      - "spike/android-ffi/**"
+      - ".github/workflows/android-ffi-spike.yml"
+
+concurrency:
+  group: android-ffi-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The official Swift Android SDK bundle (swift.org), pinned by checksum so a
+  # re-published artifact can never silently change what we built against.
+  ANDROID_SDK_URL: "https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz"
+  ANDROID_SDK_CHECKSUM: "d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5"
+  ANDROID_SDK_NAME: "swift-6.3.3-RELEASE_android"
+  # NDK r27d is the LTS the 6.3.3 Android SDK is built against. Pinned rather
+  # than taking the runner's preinstalled NDK, which moves without warning.
+  NDK_URL: "https://dl.google.com/android/repository/android-ndk-r27d-linux.zip"
+  NDK_DIR_NAME: "android-ndk-r27d"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Cross-compile the core + FFI for each Android ABI. The official Swift image
+  # gives a known-good 6.3.3 host toolchain with `swift sdk` already present;
+  # the Android SDK and NDK are layered on per run. arm64-v8a is every modern
+  # phone; x86_64 is what the emulator job below actually executes.
+  # ---------------------------------------------------------------------------
+  android-cross:
+    name: Cross-compile (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 60
+    # The swift image's default shell is dash; force bash so `set -o pipefail`
+    # and the bashisms in the steps below behave.
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            sdkTriple: aarch64-unknown-linux-android28
+            clangTriple: aarch64-linux-android28
+            ndkLibTriple: aarch64-linux-android
+          - arch: x86_64
+            sdkTriple: x86_64-unknown-linux-android28
+            clangTriple: x86_64-linux-android28
+            ndkLibTriple: x86_64-linux-android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The swift image is Ubuntu; the amalgamation and NDK ship as zips.
+      - name: Install host tools
+        run: |
+          set -euxo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends unzip file ca-certificates curl
+
+      - name: Swift version
+        run: swift --version
+
+      # If this step is what breaks, the problem is SDK distribution, not Mozz.
+      - name: Install the Swift Android SDK
+        run: |
+          set -euxo pipefail
+          # `swift sdk install` (the swift-package binary) has intermittently
+          # SIGSEGV'd mid-install on the x86_64 leg while the identical call
+          # succeeds on aarch64 — a flaky crash in the installer itself, not in
+          # anything Mozz controls. Retry it, treat an already-registered bundle
+          # as success, and scrub any half-written bundle a crashed attempt left
+          # behind so the next attempt starts clean.
+          installed=0
+          for attempt in 1 2 3; do
+            if swift sdk install "$ANDROID_SDK_URL" --checksum "$ANDROID_SDK_CHECKSUM"; then
+              installed=1; break
+            fi
+            echo "swift sdk install attempt ${attempt} failed; checking whether it registered anyway"
+            if [ "$(swift sdk list 2>/dev/null | grep -ci android || true)" -gt 0 ]; then
+              echo "an Android SDK is already registered — proceeding"
+              installed=1; break
+            fi
+            rm -rf "$HOME/.swiftpm/swift-sdks/${ANDROID_SDK_NAME}.artifactbundle" \
+                   "/root/.swiftpm/swift-sdks/${ANDROID_SDK_NAME}.artifactbundle" \
+                   "/github/home/.swiftpm/swift-sdks/${ANDROID_SDK_NAME}.artifactbundle" 2>/dev/null || true
+            sleep 5
+          done
+          test "$installed" -eq 1
+          swift sdk list
+          # `swift sdk install` writes under the toolchain's *real* home, which in
+          # this container is root's (/root), not the step's $HOME (/github/home).
+          # Resolve the bundle from the known swift-sdks locations, then fall back
+          # to a filesystem scan so a future layout change fails loudly, not silently.
+          BUNDLE=""
+          for d in "$HOME/.swiftpm/swift-sdks" /root/.swiftpm/swift-sdks /github/home/.swiftpm/swift-sdks; do
+            if [ -d "$d/${ANDROID_SDK_NAME}.artifactbundle" ]; then
+              BUNDLE="$d/${ANDROID_SDK_NAME}.artifactbundle"; break
+            fi
+          done
+          if [ -z "$BUNDLE" ]; then
+            BUNDLE="$(find / -path /proc -prune -o -path /sys -prune -o -type d -name "${ANDROID_SDK_NAME}.artifactbundle" -print 2>/dev/null | head -1)"
+          fi
+          test -n "$BUNDLE"
+          echo "resolved SDK bundle: $BUNDLE"
+          echo "SDK_BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+
+      # The SDK carries Swift's Android runtime but not an NDK; setup-android-sdk.sh
+      # links the two. Pin the NDK so the toolset is reproducible.
+      - name: Install the Android NDK and link it into the SDK
+        run: |
+          set -euxo pipefail
+          curl -fSL -o ndk.zip "$NDK_URL"
+          unzip -q ndk.zip -d "$RUNNER_TEMP"
+          export ANDROID_NDK_HOME="$RUNNER_TEMP/$NDK_DIR_NAME"
+          test -d "$ANDROID_NDK_HOME"
+          ( cd "$SDK_BUNDLE/swift-android" && ANDROID_NDK_HOME="$ANDROID_NDK_HOME" ./scripts/setup-android-sdk.sh )
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$NDK_BIN/clang"
+          {
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+            echo "NDK_BIN=$NDK_BIN"
+            echo "STATIC_LIBS=$SDK_BUNDLE/swift-android/swift-resources/usr/lib/swift_static-${{ matrix.arch }}/android"
+            echo "RUNTIME_LIBS=$SDK_BUNDLE/swift-android/swift-resources/usr/lib/swift-${{ matrix.arch }}/android"
+            echo "LIBCXX_SHARED=$NDK_BIN/../sysroot/usr/lib/${{ matrix.ndkLibTriple }}/libc++_shared.so"
+          } >> "$GITHUB_ENV"
+
+      # GRDB's `GRDBSQLite` is a systemLibrary target: it expects the OS to ship
+      # SQLite. Android *does* ship a libsqlite3, but it is a private platform
+      # library apps may not link, and the copy behind the NDK omits FTS5 — the
+      # one feature Mozz search cannot do without. So, exactly as on Windows, we
+      # compile the amalgamation ourselves with an explicit feature list. This is
+      # the central portability finding, not a workaround.
+      - name: Build SQLite with the features GRDB needs
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/sqlite-${{ matrix.arch }}"
+          mkdir -p "$root/include" "$root/lib"
+          curl -fSL -o "$root/amalgamation.zip" "https://sqlite.org/2025/sqlite-amalgamation-3510000.zip"
+          unzip -q "$root/amalgamation.zip" -d "$root"
+          src="$(find "$root" -maxdepth 1 -type d -name 'sqlite-amalgamation-*' | head -1)"
+          cp "$src/sqlite3.h" "$src/sqlite3ext.h" "$root/include/"
+          # A STATIC library on purpose: it is archived straight into libMozzFFI.so,
+          # so the shipped object is self-contained — no libsqlite3.so to push.
+          "$NDK_BIN/clang" --target=${{ matrix.clangTriple }} -c -O2 -fPIC \
+            -DSQLITE_ENABLE_FTS5 \
+            -DSQLITE_ENABLE_SNAPSHOT \
+            -DSQLITE_ENABLE_PREUPDATE_HOOK \
+            -DSQLITE_ENABLE_COLUMN_METADATA \
+            -DSQLITE_ENABLE_STAT4 \
+            -DSQLITE_ENABLE_RTREE \
+            -DSQLITE_ENABLE_JSON1 \
+            -DSQLITE_THREADSAFE=1 \
+            -DSQLITE_DQS=0 \
+            "$src/sqlite3.c" -o "$root/sqlite3.o"
+          "$NDK_BIN/llvm-ar" rcs "$root/lib/libsqlite3.a" "$root/sqlite3.o"
+          echo "SQLITE_ROOT=$root" >> "$GITHUB_ENV"
+          # Prove FTS5 actually compiled in — this is the decisive static check,
+          # done here rather than on the final .so because FTS5's functions are
+          # file-local (nm type 't') and so never reach the shared object's
+          # *dynamic* symbol table. If this passes and the runtime probe later
+          # reports fts5CreateSucceeded, search is real on Android.
+          fts5n="$("$NDK_BIN/llvm-nm" "$root/lib/libsqlite3.a" | grep -ci 'fts5' || true)"
+          test "${fts5n:-0}" -gt 0 \
+            || { echo "the amalgamation was built without FTS5 — Mozz search would be dead on arrival"; exit 1; }
+          pub="$("$NDK_BIN/llvm-nm" "$root/lib/libsqlite3.a" | grep -c 'sqlite3_' || true)"
+          echo "built libsqlite3.a (${pub} sqlite3_* symbols, FTS5 present)"
+
+      # Stage 1 — does the platform-free core cross-compile off-Apple at all?
+      # Building the library targets alone isolates a core portability failure
+      # from an FFI-facade failure. Release on purpose: the Windows spike caught
+      # a release-only type-check timeout that debug builds hid.
+      - name: Stage 1 — cross-compile the core
+        run: |
+          set -euxo pipefail
+          swift build -c release --swift-sdk ${{ matrix.sdkTriple }} --static-swift-stdlib \
+            -Xcc -I"$SQLITE_ROOT/include" \
+            -Xlinker -L"$SQLITE_ROOT/lib" \
+            -Xlinker -L"$STATIC_LIBS" \
+            --target MozzCore --target MozzDatabase
+
+      # Stage 2 — does @_cdecl give us a real, linkable .so? The nested
+      # swift_static-<arch>/android search path is required: the SDK's Foundation
+      # networking archives live one directory deeper than the driver searches.
+      - name: Stage 2 — link the FFI shared library
+        run: |
+          set -euxo pipefail
+          swift build -c release --swift-sdk ${{ matrix.sdkTriple }} --static-swift-stdlib \
+            -Xcc -I"$SQLITE_ROOT/include" \
+            -Xlinker -L"$SQLITE_ROOT/lib" \
+            -Xlinker -L"$STATIC_LIBS" \
+            --product MozzFFI
+          so="$(find .build -path "*${{ matrix.sdkTriple }}*" -name libMozzFFI.so | head -1)"
+          test -n "$so"
+          echo "SO_PATH=$so" >> "$GITHUB_ENV"
+          echo "linked $so ($(du -h "$so" | cut -f1))"
+
+      # Stage 3 — the check a static nm dump gives you and a link cannot: are the
+      # exact session + probe ABI symbols exported, is SQLite baked in with none
+      # left dangling, and is FTS5 really compiled in?
+      - name: Stage 3 — verify the exported ABI
+        run: |
+          set -euxo pipefail
+          nm="$NDK_BIN/llvm-nm"
+          readelf="$NDK_BIN/llvm-readelf"
+          # Capture the dynamic symbol table once. --defined-only already means
+          # "exported and defined", so the match tests only for the name at end of
+          # line after whitespace — deliberately NOT the ` T ` type letter or exact
+          # spacing, which differ between the macOS and Linux builds of llvm-nm.
+          defined="$("$nm" -D --defined-only "$SO_PATH")"
+          echo "=== exported mozz_ symbols (raw) ==="
+          printf '%s\n' "$defined" | grep 'mozz_' || echo "(no mozz_ symbols in the dynamic table)"
+          echo "=== exported ABI ==="
+          missing=0
+          for s in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string \
+                   mozz_ffi_probe mozz_ffi_benchmark mozz_ffi_search mozz_ffi_probe_hpke \
+                   mozz_ffi_verify_continuity_hashes; do
+            if [ "$(printf '%s\n' "$defined" | grep -cE "[[:space:]]${s}\$" || true)" -gt 0 ]; then
+              echo "  ok   $s"
+            else
+              echo "  MISSING  $s"; missing=1
+            fi
+          done
+          test "$missing" -eq 0 || { echo "the .so does not export the full session ABI"; exit 1; }
+
+          sqlite_defined="$(printf '%s\n' "$defined" | grep -c 'sqlite3_' || true)"
+          sqlite_undef="$("$nm" -D --undefined-only "$SO_PATH" | grep -c 'sqlite3_' || true)"
+          echo "=== sqlite: $sqlite_defined defined, $sqlite_undef undefined ==="
+          test "$sqlite_defined" -gt 200
+          test "$sqlite_undef" -eq 0 || { echo "SQLite symbols left unresolved — amalgamation did not bake in"; exit 1; }
+
+          echo "=== FTS5 in the shared object (authoritative check is the runtime probe) ==="
+          # FTS5's amalgamation functions are file-local, so a release .so legitimately
+          # strips them from every symbol table — their absence here is not a failure.
+          # FTS5 was already proven present in libsqlite3.a at the build step, and is
+          # confirmed decisively on the emulator by fts5CreateSucceeded. This is a report.
+          if [ "$("$nm" "$SO_PATH" 2>/dev/null | grep -ci 'fts5' || true)" -gt 0 ]; then
+            echo "  fts5 symbols retained in the object"
+          else
+            echo "  fts5 symbols are file-local and stripped from the .so — proven in libsqlite3.a, verified at runtime"
+          fi
+          echo "  ok"
+
+          echo "=== runtime shared-object deps (what the device must carry) ==="
+          "$readelf" -d "$SO_PATH" | grep NEEDED
+
+      - name: Compile the on-device harness
+        run: |
+          set -euxo pipefail
+          "$NDK_BIN/clang" --target=${{ matrix.clangTriple }} -O2 \
+            spike/android-ffi/harness/android_harness.c -o "$RUNNER_TEMP/harness" -ldl
+          file "$RUNNER_TEMP/harness"
+
+      # Assemble everything a device needs to load and run the .so: the object
+      # itself, the Swift Android runtime it links dynamically (--static-swift-stdlib
+      # still leaves these as shared deps on Android), the NDK C++ runtime, and
+      # the harness. The emulator job pushes this wholesale.
+      - name: Assemble the device payload
+        run: |
+          set -euxo pipefail
+          out="payload-${{ matrix.arch }}"
+          mkdir -p "$out"
+          cp "$SO_PATH" "$out/"
+          cp "$RUNTIME_LIBS"/*.so "$out/"
+          cp "$LIBCXX_SHARED" "$out/"
+          cp "$RUNNER_TEMP/harness" "$out/"
+          echo "payload contents ($(ls "$out" | wc -l) files):"
+          ls -1 "$out"
+
+      - name: Upload the device payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ffi-${{ matrix.arch }}
+          path: payload-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The whole point: actually run it. A hardware-accelerated x86_64 emulator
+  # (KVM) executes the harness, which dlopen()s libMozzFFI.so and drives the C
+  # ABI — proving load, FTS5, the session facade, HPKE and continuity hashes on
+  # a real Android userspace, not just that the bytes linked.
+  # ---------------------------------------------------------------------------
+  android-emulator:
+    name: Run on Android emulator (x86_64)
+    needs: android-cross
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the x86_64 device payload
+        uses: actions/download-artifact@v4
+        with:
+          name: android-ffi-x86_64
+          path: payload
+
+      # android-emulator-runner needs KVM, and the runner exposes it only after
+      # this udev rule opens the device up.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Harness on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TRACK_COUNT: ${{ github.event.inputs.trackCount || '100000' }}
+        with:
+          api-level: 28
+          arch: x86_64
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          disable-animations: true
+          # A single line on purpose: the action runs each line of `script` in its
+          # own `sh -c`, so anything multi-line loses its variables and `set` flags
+          # between lines. Hand the whole job to one bash process via a file.
+          script: bash "$GITHUB_WORKSPACE/spike/android-ffi/run-emulator.sh"
+
+  # ---------------------------------------------------------------------------
+  # A free control: the identical harness against a native macOS build. If the
+  # Android job fails and this passes, the fault is Android-specific rather than
+  # a bug in the facade or the harness itself — the same role the Windows spike's
+  # macos-control plays.
+  # ---------------------------------------------------------------------------
+  macos-control:
+    name: macOS control
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # macOS ships SQLite with FTS5, so GRDBSQLite resolves against the OS and
+      # no amalgamation step is needed — the same asymmetry the Windows control has.
+      - name: Build the FFI shared library
+        run: swift build -c release --product MozzFFI
+
+      - name: Compile the harness natively
+        run: clang -O2 spike/android-ffi/harness/android_harness.c -o harness
+
+      - name: Run the harness
+        run: |
+          set -euo pipefail
+          # A smaller catalog: this job validates the facade and the harness, not
+          # headline numbers.
+          ./harness .build/release/libMozzFFI.dylib 20000 "$RUNNER_TEMP/mozz-macos.sqlite" spec/continuity/queue-hash-fixtures.json

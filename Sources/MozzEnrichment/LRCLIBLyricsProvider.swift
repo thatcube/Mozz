@@ -1,6 +1,13 @@
 import Foundation
 import MozzCore
 import MozzNetworking
+#if canImport(FoundationNetworking)
+// Off Apple, URLSession and its configuration live in a separate module. Without
+// this import `URLSessionConfiguration` resolves to a bare `AnyObject` and every
+// member access fails with a message that names neither the module nor the
+// platform.
+import FoundationNetworking
+#endif
 
 /// Keyless public fallback for song lyrics, backed by lrclib.net.
 ///
@@ -69,8 +76,14 @@ public struct LRCLIBLyricsProvider: Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 30
+        #if canImport(Darwin)
+        // Both are get-only in swift-corelibs-foundation. `waitsForConnectivity`
+        // already defaults to false there, and constrained-network awareness is
+        // an Apple concept — Low Data Mode has no counterpart on Windows,
+        // Linux or Android, so the request simply goes out as normal.
         config.waitsForConnectivity = false
         config.allowsConstrainedNetworkAccess = false
+        #endif
         config.httpAdditionalHeaders = ["Accept-Encoding": "gzip, deflate"]
         return URLSessionTransport(session: URLSession(configuration: config))
     }()
