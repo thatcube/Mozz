@@ -119,6 +119,14 @@ public sealed class PlaybackQueue
     public IReadOnlyList<QueueItemRow> Rows() => _tracks
         .Select((track, i) => new QueueItemRow(i + 1, track, i == _index))
         .ToList();
+
+    public void ReplaceTracks(Func<Track, Track> update)
+    {
+        for (var i = 0; i < _tracks.Count; i++)
+        {
+            _tracks[i] = update(_tracks[i]);
+        }
+    }
 }
 
 public static class QueueProjection

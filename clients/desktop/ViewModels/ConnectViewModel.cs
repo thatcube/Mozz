@@ -29,6 +29,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
     }
 
     public System.Collections.ObjectModel.ObservableCollection<ServerAccount> Accounts { get; }
+    public System.Collections.ObjectModel.ObservableCollection<SyncPhaseRow> SyncPhaseRows { get; } = [];
 
     [ObservableProperty] private BackendKind _kind = BackendKind.Jellyfin;
     [ObservableProperty] private string _serverUrl = string.Empty;
@@ -219,6 +220,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
             var progress = new Progress<SyncStatus>(status =>
             {
                 SyncDetail = status.Describe();
+                ReplaceSyncRows(status);
                 // Only a fraction when the server told us a total; otherwise the
                 // bar stays indeterminate rather than inventing a position.
                 SyncProgress = status.Total is > 0
@@ -227,6 +229,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
             });
 
             var final = await _server.SyncAsync(account.ServerId, progress);
+            ReplaceSyncRows(final);
             SyncDetail = $"{final.Tracks:N0} songs · {final.Albums:N0} albums · {final.Artists:N0} artists";
             Message = $"{account.ServerName} is ready.";
             await _onLibraryChanged();
@@ -240,6 +243,15 @@ public sealed partial class ConnectViewModel : ViewModelBase
         {
             IsSyncing = false;
         }
+    }
+
+    private readonly SyncProgressSmoother _syncSmoother = new();
+
+    private void ReplaceSyncRows(SyncStatus status)
+    {
+        var rows = _syncSmoother.Update(status).ToList();
+        SyncPhaseRows.Clear();
+        foreach (var row in rows) SyncPhaseRows.Add(row);
     }
 
     [RelayCommand]
