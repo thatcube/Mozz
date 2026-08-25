@@ -24,6 +24,7 @@ public enum LibrarySection
 public sealed partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly MozzCore _core = new();
+    private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
 
     /// Sign-in and sync. Its own view model because it is its own job — see the
@@ -129,13 +130,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         // Constructed before the design-mode bail-out because the previewer binds
         // to it. Nothing here touches the disk or the network until a command runs.
-        Connect = new ConnectViewModel(
-            new MozzServer(_core, SecretStore.ForCurrentPlatform()),
-            onLibraryChanged: ReloadAfterSyncAsync);
+        var server = new MozzServer(_core, SecretStore.ForCurrentPlatform());
+        Connect = new ConnectViewModel(server, onLibraryChanged: ReloadAfterSyncAsync);
 
         // The previewer builds view models with no library present; don't try to
         // open a database from the designer.
         if (Avalonia.Controls.Design.IsDesignMode) return;
+
+        // Publish the artwork pipeline the tiles draw from. It shares this one
+        // server, so covers resolve against the same attached backends playback
+        // does, and it is ambient because the tiles are made by data templates and
+        // have no constructor to hand it to.
+        _artwork = ArtworkService.Install(server);
 
         _engine = new MiniAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far
@@ -817,6 +823,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _seekDebounce?.Stop();
         _engine?.Dispose();
         _nowPlaying_os?.Dispose();
+        _artwork?.Dispose();
         _core.Dispose();
     }
 }
