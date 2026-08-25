@@ -8,10 +8,19 @@ distinctions carry real weight.
 ## Language
 
 **Core**:
-The Swift code that every platform runs unchanged: the local database, the
-three server clients, sync, listening history, recommendations, continuity.
-Everything that does not need a screen or a speaker.
+The code every platform runs unchanged: the local database, the three server
+clients, sync, listening history, recommendations, continuity, and everything
+that turns an encoded file into finished audio samples. The line is not "needs
+a screen or a speaker" — it is the sample buffer. Producing that buffer is
+shared; handing it to an operating system is not.
 _Avoid_: shared core, backend, engine, business logic
+
+**Sink**:
+The small per-platform piece that takes finished audio samples and gives them to
+the operating system. Deliberately thin, and deliberately stupid: it decodes
+nothing, applies no gain and makes no choices, because every decision it was
+allowed to make would be a way for two platforms to sound different.
+_Avoid_: audio backend, output layer, driver, audio engine
 
 **Shell**:
 One platform's user interface, written in that platform's own framework. A

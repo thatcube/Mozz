@@ -25,23 +25,33 @@ never holds more than a page.
 Mozz runs on iOS, Windows, macOS, Linux and (proven, not yet shipped) Android. It does so
 without reimplementing anything, because the split is drawn in one place and held there:
 
-> **Everything except the user interface and the audio output device is one Swift core,
+> **Everything except the user interface and the audio sink is one shared core,
 > compiled per platform and reached over a C ABI.**
 
-That is not an aspiration. Measured, by `wc -l` on `Sources/`:
+The sink is the last few inches: the piece that hands finished samples to
+CoreAudio, WASAPI, AAudio or PipeWire. Everything upstream of it — decode,
+gapless buffering, ReplayGain, EQ — is shared, because anything a platform is
+allowed to decide for itself is a way for two platforms to sound different.
+
+Measured, by `wc -l` on `Sources/`:
 
 | | Lines | Runs on |
 |---|---:|---|
-| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment` | **17,831** | every platform |
-| `MozzFFI` — the C ABI facade over it | 1,669 | every non-Apple platform |
-| `MozzPlayback` — AVFoundation engine | 2,715 | Apple only, **correctly** |
-| `MozzDownloads` — background `URLSession` | 463 | Apple only, **correctly** |
-| `MozzApp` — SwiftUI | 21,836 | Apple only, **correctly** |
-| `clients/desktop` — C# / Avalonia UI, audio and artwork | 6,594 | Windows, macOS, Linux |
+| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment` | **18,742** | every platform |
+| `MozzFFI` — the C ABI facade over it | 2,921 | every non-Apple platform |
+| `MozzPlayback` — AVFoundation engine | 2,715 | Apple only — **to be replaced** by the shared audio core |
+| `MozzDownloads` — background `URLSession` | 463 | Apple only — **a gap, not a design**; downloads belong everywhere |
+| `MozzApp` — SwiftUI | 21,891 | Apple only, **correctly** |
+| `clients/desktop` — C# / Avalonia UI, audio and artwork | 13,391 | Windows, macOS, Linux |
 
 So the database, all three server clients, sync, search, listening history, cross-device
 continuity, recommendations and artwork enrichment are written once.
-A new platform is a UI shell and an audio backend — not a port.
+A new platform is a UI shell and a sink — not a port.
+
+Two rows above are not yet true. Audio is currently implemented twice, in Swift
+over AVFoundation and again in C# over FFmpeg, so ReplayGain and the biquad EQ
+exist in two independent versions that nothing forces to agree. Downloads exist
+only on Apple platforms. Both are gaps against the rule, not exceptions to it.
 
 ### Why the line is drawn there
 
@@ -136,17 +146,28 @@ must exist on all of them. That is the whole point of carrying a shared core: th
 moment a feature lands on one platform and not the others, the core has stopped
 paying for itself and the apps have started diverging.
 
-Concretely, a feature is finished when the logic lives once in `Sources/`, the
-C ABI in `Sources/MozzFFI` exposes it, and both UI shells — SwiftUI and Avalonia —
-present it. A feature that works on iOS because it calls a Swift API directly, and
-is invisible elsewhere because nobody widened the facade, is half-built. That is
-how the generated mixes came to exist in the core, ship on the phone, and be
-unreachable from the desktop.
+That rule is where this is going, and it is not yet where it is. Android does not
+exist, the web player does not exist, and the desktop is younger than the phone.
+While a platform is catching up it is *behind*, not *exempt*: a feature may land
+on one client first, but it is not finished until every client has it. Once the
+platforms are level the rule stops being a direction and becomes a gate.
 
-*Does it need a screen or a speaker?* If no, it belongs in `Sources/` and every
-platform gets it. If yes, it belongs in the platform layer and gets written per
-platform. When in doubt it goes in the core — the FFI facade is cheap to widen and
-a duplicated implementation never converges again.
+Concretely, a feature is finished when the logic lives once in `Sources/`, the
+C ABI in `Sources/MozzFFI` exposes it, and every UI shell presents it. A feature
+that works on iOS because it calls a Swift API directly, and is invisible
+elsewhere because nobody widened the facade, is half-built. That is how the
+generated mixes came to exist in the core, ship on the phone, and be unreachable
+from the desktop.
+
+The only features allowed to exist in one place are the ones whose entire purpose
+is a surface that exists in one place: CarPlay, Siri, SMTC, a home-screen widget.
+Everything else — downloads included — belongs everywhere.
+
+*Where does the shared part end?* Not at "needs a screen or a speaker", which
+would leave decoding and gain to each platform and guarantee they drift. It ends
+at the **sample buffer**: producing finished audio samples is shared, handing
+them to an operating system is not. When in doubt it goes in the core — the FFI
+facade is cheap to widen and a duplicated implementation never converges again.
 
 Note that "the desktop" is three operating systems, not one. Anything added to
 `clients/desktop` has to build and run on Windows, macOS and Linux, which is why
@@ -210,7 +231,7 @@ platform framework.
 | **MozzDownloads** | Background `URLSession` downloads, disk store, offline URL resolution. | MozzCore, MozzNetworking, MozzDatabase | **Apple only** | ~463 |
 | **MozzFFI** | The C ABI facade: `mozz_session_open/call/close`, one JSON command dispatcher. What every non-Apple client drives. | all shared modules | non-Apple | ~1,663 |
 | **MozzPlayback** | `AVQueuePlayer` gapless engine, `PlayQueue`, now-playing + remote commands, audio session. | MozzCore | **Apple only** | ~2,688 |
-| **MozzApp** | SwiftUI features + `AppEnvironment` composition root. | all above | **Apple only** | ~21,836 |
+| **MozzApp** | SwiftUI features + `AppEnvironment` composition root. | all above | **Apple only** | ~21,891 |
 
 The seam between "read the catalog" (`LibraryRepository`, UI-facing) and "write the catalog"
 (`CatalogWriter`, sync-facing) is deliberate: the UI has no API that can mutate catalog rows,
