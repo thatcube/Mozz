@@ -127,6 +127,11 @@ private struct WireTrack: Encodable {
     var durationSeconds: Double
     var artworkKey: String?
     var isFavorite: Bool
+    /// ReplayGain in dB, when the server supplied one. Carried across the
+    /// boundary because without it a client has no way to level a library, and
+    /// the loudness difference between two albums is the most audible thing a
+    /// music player can get wrong.
+    var normalizationGainDB: Double?
 }
 
 private struct WirePlaylist: Encodable {
@@ -173,7 +178,8 @@ private func wire(_ r: TrackRecord) -> WireTrack {
         title: r.title, artistName: r.artistName, albumTitle: r.albumTitle,
         albumRemoteId: r.albumRemoteId, trackNumber: r.trackNumber,
         discNumber: r.discNumber, durationSeconds: r.duration,
-        artworkKey: r.artworkKey, isFavorite: r.isFavorite
+        artworkKey: r.artworkKey, isFavorite: r.isFavorite,
+        normalizationGainDB: r.normalizationGainDB
     )
 }
 

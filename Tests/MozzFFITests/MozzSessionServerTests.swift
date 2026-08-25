@@ -456,6 +456,62 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertNil(response["nextCursor"], "a short page must not offer a cursor")
     }
 
+    /// ReplayGain has to survive the boundary or a non-Apple client cannot level
+    /// a library at all. It did not: the column was populated by sync and read
+    /// by iOS, and simply absent from the wire type, so the desktop engine —
+    /// which accepts a gain and applies it correctly — was never given one.
+    func testTrackGainSurvivesTheBoundary() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 1, albums: 1, tracks: 4))
+
+        // Set an unmistakable value rather than trusting the generator's, so a
+        // pass proves the number travelled rather than that two defaults agreed.
+        try await db.write { db in
+            try db.execute(sql: "UPDATE track SET normalizationGainDB = -7.5 WHERE serverId = ?",
+                           arguments: [serverId])
+        }
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "tracks", "serverId": serverId, "limit": 4])
+        let rows = try XCTUnwrap(response["payload"] as? [[String: Any]])
+        XCTAssertEqual(rows.count, 4)
+        for row in rows {
+            XCTAssertEqual(row["normalizationGainDB"] as? Double, -7.5)
+        }
+    }
+
+    /// A track without a gain must come back with the key absent rather than a
+    /// zero, because 0 dB is a real value meaning "already at reference" and a
+    /// client cannot tell the two apart afterwards.
+    func testAMissingGainIsAbsentRatherThanZero() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 1, albums: 1, tracks: 2))
+
+        // The generator gives lossless tracks a gain, so clear it — Plex reports
+        // none at all and that is the case being checked.
+        try await db.write { db in
+            try db.execute(sql: "UPDATE track SET normalizationGainDB = NULL WHERE serverId = ?",
+                           arguments: [serverId])
+        }
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "tracks", "serverId": serverId, "limit": 2])
+        let rows = try XCTUnwrap(response["payload"] as? [[String: Any]])
+        for row in rows {
+            XCTAssertNil(row["normalizationGainDB"], "an absent gain must not encode as 0 dB")
+        }
+    }
+
     // MARK: Envelope
     func testUnknownCommandStillReportsUnknownAfterTheServerTable() throws {
         let path = try makeLibrary()
