@@ -1,6 +1,7 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+import MozzRecommend
 
 // MARK: - The session facade
 //
@@ -61,6 +62,15 @@ struct SessionRequest: Decodable {
     var size: Int?
     var maxBitrateKbps: Int?
     var forceTranscode: Bool?
+
+    // Recommendations.
+    var setId: String?
+    var seed: UInt64?
+    var seedTitle: String?
+    var seedGenres: [String]?
+    var seedArtistIds: [String]?
+    var seedTrackRef: String?
+    var excluding: [String]?
 }
 
 /// The server commands take the same envelope; the alias only keeps the two
@@ -154,6 +164,46 @@ private struct WireSearchResults: Encodable {
     var tracks: [WireTrack]
 }
 
+private struct WireHomeMix: Encodable {
+    var id: String
+    var title: String
+    var subtitle: String?
+    var kind: String
+    var artworkKey: String?
+    var generatedAt: Double
+}
+
+private struct WireRecommendationSet: Encodable {
+    var id: String
+    var title: String
+    var kind: String
+    var generatedAt: Double
+}
+
+private struct WireRecommendationItem: Encodable {
+    var setId: String
+    var trackRef: String
+    var rank: Int
+    var score: Double
+    var inLibrary: Bool
+    var reason: String?
+}
+
+private struct WireRadioBatch: Encodable {
+    var remoteIds: [String]
+    var tracks: [WireTrack]
+}
+
+private struct WireSuppression: Encodable {
+    var scope: String
+    var ref: String
+    var createdAt: Double
+}
+
+private struct WireAction: Encodable {
+    var ok: Bool
+}
+
 // MARK: - Mapping
 
 private func wire(_ r: ArtistRecord) -> WireArtist {
@@ -190,12 +240,27 @@ private func wire(_ r: PlaylistRecord) -> WirePlaylist {
     )
 }
 
+private func wire(_ m: RecommendationService.HomeMix) -> WireHomeMix {
+    WireHomeMix(id: m.id, title: m.title, subtitle: m.subtitle, kind: m.kind,
+                artworkKey: m.artworkKey, generatedAt: m.generatedAt)
+}
+
+private func wire(_ r: RecommendationSetRecord) -> WireRecommendationSet {
+    WireRecommendationSet(id: r.id, title: r.title, kind: r.kind, generatedAt: r.generatedAt)
+}
+
+private func wire(_ r: RecommendationItemRecord) -> WireRecommendationItem {
+    WireRecommendationItem(setId: r.setId, trackRef: r.trackRef, rank: r.rank,
+                           score: r.score, inLibrary: r.inLibrary, reason: r.reason)
+}
+
 // MARK: - Session
 
 /// One open library, owning the database pool for its lifetime.
 final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
+    let recommendations: RecommendationService
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
@@ -203,6 +268,7 @@ final class MozzSession: @unchecked Sendable {
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
+        self.recommendations = RecommendationService(store: RecommendationStore(database))
     }
 }
 
@@ -211,6 +277,7 @@ final class MozzSession: @unchecked Sendable {
 protocol SessionContext: AnyObject {
     var database: MusicDatabase { get }
     var repository: LibraryRepository { get }
+    var recommendations: RecommendationService { get }
     var backends: BackendTable { get }
 }
 
@@ -434,6 +501,103 @@ private func dispatch(
             tracks: results.tracks.map(wire)
         ))
 
+    case "homeMixes":
+        let mixes = try await session.recommendations.homeMixes().map(wire)
+        return sessionSuccess(request, mixes)
+
+    case "generateHomeMixes":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "generateHomeMixes needs serverId")
+        }
+        try await session.recommendations.generateHomeMixes(serverId: serverId, seed: request.seed)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "mix":
+        guard let setId = request.setId else {
+            return sessionFailure(request.id, request.cmd, "mix needs setId")
+        }
+        guard let set = try await session.recommendations.set(id: setId) else {
+            return sessionFailure(request.id, request.cmd, "mix not found: \(setId)")
+        }
+        return sessionSuccess(request, wire(set))
+
+    case "mixTracks":
+        guard let setId = request.setId else {
+            return sessionFailure(request.id, request.cmd, "mixTracks needs setId")
+        }
+        let rows = try await session.recommendations.tracks(forSetId: setId)
+        return sessionSuccess(request, rows.map(wire))
+
+    case "generateMozzWeekly":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "generateMozzWeekly needs serverId")
+        }
+        let set = try await session.recommendations.generateMozzWeekly(serverId: serverId, limit: limit, seed: request.seed)
+        return sessionSuccess(request, wire(set))
+
+    case "mozzWeeklyTracks":
+        let rows = try await session.recommendations.mozzWeeklyTracks()
+        return sessionSuccess(request, rows.map(wire))
+
+    case "mozzWeeklyItems":
+        let rows = try await session.recommendations.mozzWeeklyItems()
+        return sessionSuccess(request, rows.map(wire))
+
+    case "radioBatch":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "radioBatch needs serverId")
+        }
+        let seed = RadioSeed(title: request.seedTitle ?? "Radio",
+                             genres: request.seedGenres ?? [],
+                             artistIds: request.seedArtistIds ?? [],
+                             seedTrackRef: request.seedTrackRef)
+        let remoteIds = try await session.recommendations.radioBatch(
+            seed: seed, serverId: serverId, limit: limit, excluding: Set(request.excluding ?? []))
+        var tracks: [WireTrack] = []
+        tracks.reserveCapacity(remoteIds.count)
+        for remoteId in remoteIds {
+            if let track = try await repo.track(serverId: serverId, remoteId: remoteId) {
+                tracks.append(wire(track))
+            }
+        }
+        return sessionSuccess(request, WireRadioBatch(remoteIds: remoteIds, tracks: tracks))
+
+    case "suppressTrack":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "suppressTrack needs remoteId and serverId")
+        }
+        try await session.recommendations.suppressTrack(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "suppressArtist":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "suppressArtist needs remoteId and serverId")
+        }
+        try await session.recommendations.suppressArtist(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "unsuppressTrack":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "unsuppressTrack needs remoteId and serverId")
+        }
+        try await session.recommendations.unsuppressTrack(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "unsuppressArtist":
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "unsuppressArtist needs remoteId and serverId")
+        }
+        try await session.recommendations.unsuppressArtist(remoteId: remoteId, serverId: serverId)
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "suppressions":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "suppressions needs serverId")
+        }
+        let rows = try await session.recommendations.suppressions(serverId: serverId)
+            .map { WireSuppression(scope: $0.scope, ref: $0.ref, createdAt: $0.createdAt) }
+        return sessionSuccess(request, rows)
+
     default:
         // Not a catalog command — try the server/sync/streaming table before
         // declaring it unknown, so both halves share one envelope and one error.
@@ -451,7 +615,10 @@ let mozzSessionCommands = [
     "ping", "servers", "counts", "artists", "albums", "tracks",
     "artistAlbums", "albumTracks", "playlists", "playlistTracks",
     "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
-    "genres", "genreAlbums", "search",
+    "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
+    "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
+    "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
+    "unsuppressTrack", "unsuppressArtist", "suppressions",
     "connect", "plexPin", "plexPinCheck", "attach", "libraries",
     "sync", "syncStatus", "streamURL", "artworkURL",
 ].sorted()
