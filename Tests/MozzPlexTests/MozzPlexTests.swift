@@ -315,11 +315,25 @@ final class PlexAuthTests: XCTestCase {
 
     func testDiscoverConnectionsSortsLocalFirst() async throws {
         let connections = try await makeAuthenticator().discoverConnections(accountToken: "acct")
-        XCTAssertEqual(connections.count, 2, "player-only resource is filtered out")
+        XCTAssertEqual(connections.count, 1, "one Plex resource is one server even when it advertises several connections")
         XCTAssertTrue(connections[0].isLocal)
         XCTAssertFalse(connections[0].isRelay)
-        XCTAssertTrue(connections[1].isRelay)
         XCTAssertEqual(connections[0].accessToken, "server-token-1")
+        XCTAssertEqual(connections[0].serverMachineIdentifier, "machine-1")
+    }
+
+    func testDiscoverConnectionsKeepsReachableAddressForOneMachine() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
+            .init(contains: "192-168-68-71", fixture: "plex_identity"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+
+        let connections = try await auth.discoverConnections(accountToken: "acct")
+
+        XCTAssertEqual(connections.count, 1)
+        XCTAssertEqual(connections.first?.serverMachineIdentifier, "50acfe994de74f8998deb9fc43e6262e")
+        XCTAssertEqual(connections.first?.uri.host, "192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct")
     }
 
     func testCompleteLoginPicksReachableConnection() async throws {
@@ -327,6 +341,7 @@ final class PlexAuthTests: XCTestCase {
         XCTAssertEqual(session.kind, .plex)
         XCTAssertEqual(session.token, "server-token-1")
         XCTAssertEqual(session.serverName, "Home Plex")
+        XCTAssertEqual(session.serverMachineIdentifier, "machine-1")
         XCTAssertTrue(session.baseURL.absoluteString.contains("plex.direct"))
     }
 

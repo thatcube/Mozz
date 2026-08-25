@@ -106,6 +106,8 @@ struct PlexPinResponse: Decodable {
 
 struct PlexResource: Decodable {
     let name: String?
+    /// Plex server machine id. The resource is the server; its `connections`
+    /// are alternate addresses for that same machine.
     let clientIdentifier: String?
     let provides: String?
     let accessToken: String?

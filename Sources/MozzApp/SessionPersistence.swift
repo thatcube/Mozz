@@ -11,6 +11,7 @@ struct StoredSession: Codable, Sendable {
     var userID: String?
     var serverName: String
     var clientIdentifier: String
+    var serverMachineIdentifier: String? = nil
     var musicSectionID: String?
     var isDemo: Bool = false
     /// Plex account token (for re-discovering servers in the picker). Nil for

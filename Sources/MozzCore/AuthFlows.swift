@@ -34,6 +34,9 @@ public struct AuthenticatedSession: Sendable, Hashable {
     public var userID: String?
     public var serverName: String
     public var clientIdentifier: String
+    /// Plex's server machine identifier. One Plex resource exposes several
+    /// addresses under this id, so it is the stable server identity when present.
+    public var serverMachineIdentifier: String?
     /// The Plex *account* token (distinct from the per-server access `token`),
     /// retained so the app can re-discover the account's servers later for the
     /// server picker. Nil for Jellyfin.
@@ -46,6 +49,7 @@ public struct AuthenticatedSession: Sendable, Hashable {
         userID: String? = nil,
         serverName: String,
         clientIdentifier: String,
+        serverMachineIdentifier: String? = nil,
         accountToken: String? = nil
     ) {
         self.kind = kind
@@ -54,6 +58,7 @@ public struct AuthenticatedSession: Sendable, Hashable {
         self.userID = userID
         self.serverName = serverName
         self.clientIdentifier = clientIdentifier
+        self.serverMachineIdentifier = serverMachineIdentifier
         self.accountToken = accountToken
     }
 }
@@ -116,6 +121,7 @@ public struct PlexPinSession: Sendable, Hashable {
 public struct PlexResourceConnection: Sendable, Hashable {
     public var serverName: String
     public var clientIdentifier: String
+    public var serverMachineIdentifier: String?
     public var uri: URL
     public var isLocal: Bool
     public var isRelay: Bool
@@ -124,6 +130,7 @@ public struct PlexResourceConnection: Sendable, Hashable {
     public init(
         serverName: String,
         clientIdentifier: String,
+        serverMachineIdentifier: String? = nil,
         uri: URL,
         isLocal: Bool,
         isRelay: Bool,
@@ -131,6 +138,7 @@ public struct PlexResourceConnection: Sendable, Hashable {
     ) {
         self.serverName = serverName
         self.clientIdentifier = clientIdentifier
+        self.serverMachineIdentifier = serverMachineIdentifier
         self.uri = uri
         self.isLocal = isLocal
         self.isRelay = isRelay

@@ -386,7 +386,8 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertEqual(connectId, attachId)
     }
 
-    /// Only Subsonic scopes by username. Folding a Jellyfin or Plex user id into
+    /// Only Subsonic scopes by username. Plex scopes by machine id when the
+    /// resources API supplies it; folding a Jellyfin or Plex user id into
     /// the id would silently orphan every catalog row the iOS app has written,
     /// because iOS derives those without one.
     func testOnlySubsonicScopesTheServerIdByUser() {
@@ -401,8 +402,16 @@ final class MozzSessionServerTests: XCTestCase {
             kind: .plex,
             baseURL: URL(string: "https://plex.example.com")!,
             token: "t", userID: "12345",
+            serverName: "Plex", clientIdentifier: "c",
+            serverMachineIdentifier: "machine-1"))
+        XCTAssertEqual(plex.serverId, "plex-machine-1")
+
+        let legacyPlex = wire(AuthenticatedSession(
+            kind: .plex,
+            baseURL: URL(string: "https://plex.example.com")!,
+            token: "t", userID: "12345",
             serverName: "Plex", clientIdentifier: "c"))
-        XCTAssertEqual(plex.serverId, "plex-https://plex.example.com")
+        XCTAssertEqual(legacyPlex.serverId, "plex-https://plex.example.com")
     }
 
     /// A Subsonic server with two accounts is two libraries, and they must not

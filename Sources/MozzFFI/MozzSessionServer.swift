@@ -57,6 +57,7 @@ struct WireSession: Encodable {
     var userID: String?
     var serverName: String
     var clientIdentifier: String
+    var serverMachineIdentifier: String?
     var accountToken: String?
 }
 
@@ -201,11 +202,18 @@ final class BackendTable: @unchecked Sendable {
 /// This has to agree byte for byte across clients: it is the key every catalog
 /// row is scoped by, so a desktop client that derived it differently would mirror
 /// the same server into a second, parallel library.
-func mozzServerId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
-    if kind == .subsonic, let username, !username.isEmpty {
-        return "\(kind.rawValue)-\(username.lowercased())-\(baseURL.absoluteString)"
-    }
-    return "\(kind.rawValue)-\(baseURL.absoluteString)"
+func mozzServerId(
+    kind: BackendKind,
+    baseURL: URL,
+    username: String? = nil,
+    serverMachineIdentifier: String? = nil
+) -> String {
+    ServerIdentity.id(
+        kind: kind,
+        baseURL: baseURL,
+        username: username,
+        serverMachineIdentifier: serverMachineIdentifier
+    )
 }
 
 private func clientInfo() -> ClientInfo {
@@ -395,7 +403,8 @@ func wire(_ authenticated: AuthenticatedSession) -> WireSession {
         serverId: mozzServerId(
             kind: authenticated.kind,
             baseURL: authenticated.baseURL,
-            username: authenticated.kind == .subsonic ? authenticated.userID : nil
+            username: authenticated.kind == .subsonic ? authenticated.userID : nil,
+            serverMachineIdentifier: authenticated.serverMachineIdentifier
         ),
         kind: authenticated.kind.rawValue,
         baseURL: authenticated.baseURL.absoluteString,
@@ -403,6 +412,7 @@ func wire(_ authenticated: AuthenticatedSession) -> WireSession {
         userID: authenticated.userID,
         serverName: authenticated.serverName,
         clientIdentifier: authenticated.clientIdentifier,
+        serverMachineIdentifier: authenticated.serverMachineIdentifier,
         accountToken: authenticated.accountToken
     )
 }
@@ -421,7 +431,12 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
     }
     let identifier = request.clientIdentifier ?? fallbackClientIdentifier()
     var connection = ServerConnection(
-        id: mozzServerId(kind: kind, baseURL: baseURL, username: request.username),
+        id: ServerIdentity.id(
+            kind: kind,
+            baseURL: baseURL,
+            username: request.username,
+            serverMachineIdentifier: request.serverMachineIdentifier
+        ),
         kind: kind,
         name: request.serverName ?? kind.rawValue.capitalized,
         baseURL: baseURL,

@@ -1,5 +1,6 @@
 using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
+using System.Text.Json;
 using Xunit;
 
 namespace Mozz.Desktop.Tests;
@@ -183,6 +184,46 @@ public sealed class SettingsTests : IDisposable
         Assert.Empty(server.SavedAccounts());
         Assert.Null(secrets.Get("token.plex-http://server"));
         Assert.Null(secrets.Get("plex.account.plex-http://server"));
+    }
+
+    [Fact]
+    public void SavedAccountsDeduplicatePlexMachineAndMigrateCredential()
+    {
+        var secrets = new MemorySecretStore();
+        var accountsPath = Path.Combine(_root, "accounts.json");
+        var machine = "50acfe994de74f8998deb9fc43e6262e";
+        var docker = new ServerAccount
+        {
+            ServerId = $"plex-https://172-18-0-1.{machine}.plex.direct:32400/",
+            Kind = BackendKind.Plex,
+            BaseUrl = $"https://172-18-0-1.{machine}.plex.direct:32400/",
+            ServerName = "Brandoland",
+            ClientIdentifier = "client",
+        };
+        var lan = new ServerAccount
+        {
+            ServerId = $"plex-https://192-168-68-71.{machine}.plex.direct:32400/",
+            Kind = BackendKind.Plex,
+            BaseUrl = $"https://192-168-68-71.{machine}.plex.direct:32400/",
+            ServerName = "Brandoland",
+            ClientIdentifier = "client",
+            MusicSectionId = "1",
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(accountsPath)!);
+        File.WriteAllText(accountsPath, JsonSerializer.Serialize(new[] { docker, lan }));
+        secrets.Set($"token.{lan.ServerId}", "server-token");
+        secrets.Set($"plex.account.{lan.ServerId}", "account-token");
+
+        var server = new MozzServer(new MozzCore(), secrets, accountsPath);
+        var saved = server.SavedAccounts();
+
+        var account = Assert.Single(saved);
+        Assert.Equal($"plex-{machine}", account.ServerId);
+        Assert.Equal(machine, account.ServerMachineIdentifier);
+        Assert.Equal(lan.BaseUrl, account.BaseUrl);
+        Assert.Equal("1", account.MusicSectionId);
+        Assert.Equal("server-token", secrets.Get($"token.plex-{machine}"));
+        Assert.Equal("account-token", secrets.Get($"plex.account.plex-{machine}"));
     }
 
     [Fact]
