@@ -86,6 +86,11 @@ public sealed record LibraryCounts(
     int Albums,
     int Tracks);
 
+public sealed record SuppressedRef(
+    [property: JsonPropertyName("scope")] string Scope,
+    [property: JsonPropertyName("ref")] string Ref,
+    [property: JsonPropertyName("createdAt")] double CreatedAt);
+
 public sealed record SearchResults(
     IReadOnlyList<Artist> Artists,
     IReadOnlyList<Album> Albums,
@@ -136,6 +141,15 @@ public sealed record CoreRequest(
     [JsonPropertyName("seed")] public int? Seed { get; init; }
     /// <summary>Opaque resume position from a previous page's <c>nextCursor</c>.</summary>
     [JsonPropertyName("cursor")] public string? Cursor { get; init; }
+    [JsonPropertyName("kind")] public string? Kind { get; init; }
+    [JsonPropertyName("deviceID")] public string? DeviceID { get; init; }
+    [JsonPropertyName("deviceName")] public string? DeviceName { get; init; }
+    [JsonPropertyName("positionMS")] public long? PositionMS { get; init; }
+    [JsonPropertyName("durationMS")] public long? DurationMS { get; init; }
+    [JsonPropertyName("createdAtMS")] public long? CreatedAtMS { get; init; }
+    [JsonPropertyName("sinceMS")] public long? SinceMS { get; init; }
+    [JsonPropertyName("maxBytes")] public int? MaxBytes { get; init; }
+    [JsonPropertyName("year")] public int? Year { get; init; }
 }
 
 /// <summary>

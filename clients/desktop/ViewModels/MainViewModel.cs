@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Threading;
+using Avalonia.Styling;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Mozz.Desktop.Audio;
@@ -12,6 +13,11 @@ namespace Mozz.Desktop.ViewModels;
 public sealed partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly MozzCore _core = new();
+    private readonly AppPreferences _preferences = new();
+    private readonly ISecretStore _secrets;
+    private readonly MozzServer _server;
+    private readonly string _deviceId;
+    private readonly PlayHistoryRecorder _playHistory;
     private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
     private readonly NavigationStack<LibraryPage> _navigation =
@@ -73,6 +79,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Track> ArtistTracks { get; } = [];
     public ObservableCollection<Track> PlaylistTracks { get; } = [];
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
+    public ObservableCollection<HomeRow> HomeRows { get; } = [];
+    public ObservableCollection<SettingsLibraryOption> SettingsLibraries { get; } = [];
+    public ObservableCollection<SuppressedSettingsItem> SuppressedArtists { get; } = [];
+    public ObservableCollection<SuppressedSettingsItem> SuppressedTracks { get; } = [];
+    public ObservableCollection<EqualizerBandSetting> EqualizerBands { get; } = [];
+    public IReadOnlyList<SettingsOption> AppearanceOptions { get; } =
+    [
+        new("system", "System"),
+        new("light", "Light"),
+        new("dark", "Dark"),
+    ];
+    public IReadOnlyList<SettingsOption> DarkStyleOptions { get; } =
+    [
+        new("dim", "Dim"),
+        new("black", "Black"),
+    ];
+    public IReadOnlyList<SettingsOption> EqualizerPresetOptions { get; } =
+        DesktopEqualizerPresets.All.Select(p => new SettingsOption(p.ToString(), p.DisplayName())).ToList();
 
     /// The Home mixes, album and artist walls, chunked into rows so a VirtualizingStackPanel
     /// can own them — see GridRows for why that indirection exists.
@@ -91,23 +115,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (Math.Abs(value - _contentWidth) < 1) return;
             _contentWidth = value;
-            AlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
-            ArtistGrid.SetColumns(ColumnsFor(ArtistTilePitch));
-            ArtistAlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
-            PlaylistGrid.SetColumns(ColumnsFor(PlaylistTilePitch));
-            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(HomeMixTilePitch)));
+            AlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
+            ArtistGrid.SetColumns(ColumnsFor(DesktopLayout.ArtistTilePitch));
+            ArtistAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
+            PlaylistGrid.SetColumns(ColumnsFor(DesktopLayout.PlaylistTilePitch));
+            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)));
+            RebuildHomeRows();
             RebuildDetailRows();
         }
     }
 
     private double _contentWidth;
-
-    // Tile width plus its right margin, matching the templates.
-    private const double AlbumTilePitch = 196;
-    private const double ArtistTilePitch = 178;
-    private const double PlaylistTilePitch = 236;
-    private const double TopSongPitch = 360;
-    private const double HomeMixTilePitch = 430;
 
     private List<AlbumTrackRow> _detailAlbumTracks = [];
     private List<Album> _detailMoreByAlbums = [];
@@ -116,10 +134,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Album> _detailArtistAppearsOn = [];
     private List<Track> _detailArtistTopTracks = [];
     private List<Track> _detailPlaylistTracks = [];
+    private List<HomeMixTile> _homeMixTiles = [];
+    private List<Track> _homeRecentlyPlayed = [];
+    private List<Album> _homeRecentlyAddedAlbums = [];
+    private List<Playlist> _homePlaylists = [];
     private HomeMixTile? _selectedMix;
     private AlbumReleaseKindLookup? _releaseKindLookup;
 
-    private int ColumnsFor(double pitch) => Math.Max(1, (int)(_contentWidth / pitch));
+    private int ColumnsFor(double pitch) => DesktopLayout.ColumnsFor(_contentWidth, pitch);
 
     public bool CanGoBack => _navigation.CanGoBack;
     public bool IsHomeSelected => Section == LibrarySection.Home;
@@ -128,17 +150,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsArtistsSelected => Section == LibrarySection.Artists;
     public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
     public bool IsConnectSelected => Section == LibrarySection.Connect;
+    public bool IsSettingsSelected => Section == LibrarySection.Settings;
 
     public bool ShowTracks => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Songs };
-    public bool ShowHomeMixes => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
-                                 && HomeMixGrid.Count > 0;
+    public bool ShowHomeRows => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
+                                && HomeRows.Count > 0;
     public bool ShowHomeEmpty => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
-                                 && !IsBusy && HomeMixGrid.Count == 0 && TrackCount > 0;
+                                 && !IsBusy
+                                 && TrackCount > 0
+                                 && HomeComposition.IsEmpty(
+                                     _homeMixTiles,
+                                     _homeRecentlyPlayed,
+                                     _homeRecentlyAddedAlbums,
+                                     _homePlaylists);
     public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Albums };
     public bool ShowArtists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Artists };
     public bool ShowPlaylists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Playlists };
     public bool ShowSearch => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Search };
     public bool ShowConnect => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Connect };
+    public bool ShowSettings => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Settings };
     public bool ShowAlbumDetail => _navigation.Current.Kind == LibraryPageKind.AlbumDetail;
     public bool ShowArtistDetail => _navigation.Current.Kind == LibraryPageKind.ArtistDetail;
     public bool ShowPlaylistDetail => _navigation.Current.Kind == LibraryPageKind.PlaylistDetail;
@@ -155,19 +185,45 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
     public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
-                                  && ShowDetailPage == false && ShowHomeMixes == false;
+                                  && ShowDetailPage == false && ShowHomeRows == false;
 
     public string LibrarySummary =>
         TrackCount == 0
             ? "No music yet"
             : $"{TrackCount:N0} songs · {AlbumCount:N0} albums · {ArtistCount:N0} artists";
 
+    public ServerAccount? ActiveAccount => Connect.Accounts.FirstOrDefault();
+    public bool HasActiveAccount => ActiveAccount is not null;
+    public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
+    public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
+    public string SettingsStorageDescription => $"Preferences: {_preferences.Path}";
+    public string SecretStorageDescription => $"Secrets: {_secrets.Description}";
+    public string DeviceIdentityDescription => $"History device: {_deviceId}";
+
+    [ObservableProperty] private bool _normalizationEnabled;
+    [ObservableProperty] private bool _enrichmentEnabled;
+    [ObservableProperty] private string _appearance = "system";
+    [ObservableProperty] private string _darkStyle = "dim";
+    [ObservableProperty] private bool _equalizerEnabled;
+    [ObservableProperty] private double _equalizerPreamp;
+    [ObservableProperty] private string? _settingsMessage;
+    [ObservableProperty] private bool _isSettingsBusy;
+
     public MainViewModel()
     {
         // Constructed before the design-mode bail-out because the previewer binds
         // to it. Nothing here touches the disk or the network until a command runs.
-        var server = new MozzServer(_core, SecretStore.ForCurrentPlatform());
-        Connect = new ConnectViewModel(server, onLibraryChanged: ReloadAfterSyncAsync);
+        _deviceId = _preferences.GetOrCreateDeviceId();
+        _playHistory = new PlayHistoryRecorder(evt => _ = RecordPlayEventAsync(evt));
+        _secrets = SecretStore.ForCurrentPlatform();
+        _server = new MozzServer(_core, _secrets);
+        Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
+        Connect.Accounts.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(ActiveAccount));
+            OnPropertyChanged(nameof(HasActiveAccount));
+        };
+        RestoreSettings();
 
         // The previewer builds view models with no library present; don't try to
         // open a database from the designer.
@@ -177,7 +233,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // server, so covers resolve against the same attached backends playback
         // does, and it is ambient because the tiles are made by data templates and
         // have no constructor to hand it to.
-        _artwork = ArtworkService.Install(server);
+        _artwork = ArtworkService.Install(_server);
 
         _engine = new MiniAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far
@@ -188,7 +244,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // No pre-amp. ReplayGain figures are almost always negative (they
         // attenuate to a reference level), so adding headroom back invites the
         // clipping the standard exists to avoid.
-        _engine.SetReplayGain(ReplayGainMode.Track);
+        _engine.SetReplayGain(NormalizationEnabled ? ReplayGainMode.Track : ReplayGainMode.Off);
+        ApplyEqualizerToEngine();
         _engine.TrackChanged += OnEngineTrackChanged;
         _engine.PlaybackEnded += OnEnginePlaybackEnded;
         _engine.Error += OnEngineError;
@@ -209,6 +266,108 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _seekDebounce.Tick += OnSeekDebounceTick;
 
         _ = InitializeAsync();
+    }
+
+    private void RestoreSettings()
+    {
+        NormalizationEnabled = _preferences.GetBool(AppPreferences.NormalizationEnabledKey, true);
+        EnrichmentEnabled = _preferences.GetBool(AppPreferences.EnrichmentEnabledKey, true);
+        Appearance = _preferences.GetString(AppPreferences.AppearanceKey, "system");
+        DarkStyle = _preferences.GetString(AppPreferences.DarkStyleKey, "dim");
+        EqualizerEnabled = _preferences.GetBool(AppPreferences.EqualizerEnabledKey, false);
+        var profile = _preferences.GetEqualizerProfile();
+        EqualizerPreamp = profile.PreampDB;
+        EqualizerBands.Clear();
+        for (var i = 0; i < DesktopEqualizerProfile.BandCount; i++)
+        {
+            EqualizerBands.Add(new EqualizerBandSetting(
+                i,
+                DesktopEqualizerProfile.FrequencyLabel(i),
+                profile.Gains[i],
+                (_, _) => PersistEqualizer()));
+        }
+        ApplyAppearance();
+    }
+
+    partial void OnNormalizationEnabledChanged(bool value)
+    {
+        _preferences.SetBool(AppPreferences.NormalizationEnabledKey, value);
+        _engine?.SetReplayGain(value ? ReplayGainMode.Track : ReplayGainMode.Off);
+    }
+
+    partial void OnEnrichmentEnabledChanged(bool value) =>
+        _preferences.SetBool(AppPreferences.EnrichmentEnabledKey, value);
+
+    partial void OnAppearanceChanged(string value)
+    {
+        if (value is not ("system" or "light" or "dark")) value = "system";
+        _preferences.SetString(AppPreferences.AppearanceKey, value);
+        ApplyAppearance();
+    }
+
+    partial void OnDarkStyleChanged(string value)
+    {
+        if (value is not ("dim" or "black")) value = "dim";
+        _preferences.SetString(AppPreferences.DarkStyleKey, value);
+        ApplyAppearance();
+    }
+
+    partial void OnEqualizerEnabledChanged(bool value)
+    {
+        _preferences.SetBool(AppPreferences.EqualizerEnabledKey, value);
+        ApplyEqualizerToEngine();
+    }
+
+    partial void OnEqualizerPreampChanged(double value)
+    {
+        var clamped = DesktopEqualizerProfile.ClampGain(value);
+        if (Math.Abs(clamped - value) > 0.001)
+        {
+            EqualizerPreamp = clamped;
+            return;
+        }
+        PersistEqualizer();
+    }
+
+    public string EqualizerPreampText => EqualizerBandSetting.FormatGain(EqualizerPreamp);
+
+    private DesktopEqualizerProfile CurrentEqualizerProfile() =>
+        new DesktopEqualizerProfile(EqualizerBands.Select(b => b.Gain).ToArray(), EqualizerPreamp).Normalized();
+
+    private void PersistEqualizer()
+    {
+        OnPropertyChanged(nameof(EqualizerPreampText));
+        var profile = CurrentEqualizerProfile();
+        _preferences.SetEqualizerProfile(profile);
+        ApplyEqualizerToEngine();
+    }
+
+    private void ApplyEqualizerToEngine() =>
+        _engine?.SetEqualizer(CurrentEqualizerProfile().ToAudioSettings(EqualizerEnabled));
+
+    private void ApplyAppearance()
+    {
+        if (Avalonia.Application.Current is not { } app) return;
+        app.RequestedThemeVariant = Appearance switch
+        {
+            "light" => ThemeVariant.Light,
+            "dark" => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
+
+        var oled = DarkStyle == "black";
+        SetBrush(app, "AppBackground", oled ? "#000000" : "#0B0B0D");
+        SetBrush(app, "SidebarBackground", oled ? "#070708" : "#121214");
+        SetBrush(app, "BarBackground", oled ? "#08080A" : "#141416");
+        SetBrush(app, "SurfaceRaised", oled ? "#121216" : "#1C1C20");
+        SetBrush(app, "SurfaceHover", oled ? "#1A1A1F" : "#232328");
+        SetBrush(app, "SurfaceSelected", oled ? "#202027" : "#2A2A30");
+        SetBrush(app, "Divider", oled ? "#17171B" : "#232327");
+    }
+
+    private static void SetBrush(Avalonia.Application app, string key, string color)
+    {
+        app.Resources[key] = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(color));
     }
 
     /// Called when a sync finishes: the counts and whatever page is showing are
@@ -278,6 +437,234 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         RaiseDerived();
     }
 
+    private async Task RefreshSettingsAsync()
+    {
+        IsSettingsBusy = true;
+        SettingsMessage = null;
+        try
+        {
+            OnPropertyChanged(nameof(ActiveAccount));
+            OnPropertyChanged(nameof(HasActiveAccount));
+            SettingsLibraries.Clear();
+            SuppressedArtists.Clear();
+            SuppressedTracks.Clear();
+
+            if (ActiveAccount is not { } account || !_core.IsOpen) return;
+
+            var libraries = await _server.LibrariesAsync(account.ServerId) ?? [];
+            foreach (var option in LibrarySelectionState.Build(libraries, account.MusicSectionId))
+            {
+                SettingsLibraries.Add(new SettingsLibraryOption(option.Id, option.Name, option.IsSelected));
+            }
+
+            var suppressions = await _core.CallAsync<List<SuppressedRef>>(
+                new CoreRequest("suppressions") { ServerId = account.ServerId }) ?? [];
+            foreach (var item in suppressions.Select(s => new SuppressedSettingsItem(s.Scope, s.Ref, s.CreatedAt)))
+            {
+                if (item.Scope == "artist") SuppressedArtists.Add(item);
+                else SuppressedTracks.Add(item);
+            }
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = ex.Message;
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(HasSettingsLibraries));
+            OnPropertyChanged(nameof(HasSuppressions));
+            IsSettingsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private Task RefreshSettingsPanel() => RefreshSettingsAsync();
+
+    [RelayCommand]
+    private async Task SyncNowAsync()
+    {
+        if (ActiveAccount is null) return;
+        await Connect.SyncAccountCommand.ExecuteAsync(ActiveAccount);
+        await RefreshCountsAsync();
+        await RefreshSettingsAsync();
+    }
+
+    [RelayCommand]
+    private async Task SelectMusicLibraryAsync(SettingsLibraryOption? option)
+    {
+        if (option is null || ActiveAccount is null) return;
+        var applied = LibrarySelectionState.Apply(
+            SettingsLibraries.Select(l => new MusicLibrarySelectionOption(l.Id, l.Name, l.IsSelected)).ToList(),
+            option.Id);
+        if (applied is null) return;
+
+        try
+        {
+            IsSettingsBusy = true;
+            var updated = await _server.SelectMusicLibraryAsync(ActiveAccount, applied);
+            ReplaceAccount(updated);
+            await Connect.SyncAccountCommand.ExecuteAsync(updated);
+            await RefreshCountsAsync();
+            await RefreshSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = ex.Message;
+        }
+        finally
+        {
+            IsSettingsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RestoreSuppressionAsync(SuppressedSettingsItem? item)
+    {
+        if (item is null || ActiveAccount is null || !_core.IsOpen) return;
+        try
+        {
+            var cmd = item.Scope == "artist" ? "unsuppressArtist" : "unsuppressTrack";
+            await _core.CallAsync<object>(new CoreRequest(cmd)
+            {
+                ServerId = ActiveAccount.ServerId,
+                RemoteId = item.Ref,
+            });
+            await RefreshSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ApplyEqualizerPresetAsync(SettingsOption? option)
+    {
+        if (option is null || !Enum.TryParse<DesktopEqualizerPreset>(option.Id, out var preset)) return;
+        var profile = preset.Profile().Normalized();
+        for (var i = 0; i < EqualizerBands.Count && i < profile.Gains.Count; i++)
+        {
+            EqualizerBands[i].SetSilently(profile.Gains[i]);
+        }
+        EqualizerPreamp = profile.PreampDB;
+        PersistEqualizer();
+        await Task.CompletedTask;
+    }
+
+    [RelayCommand]
+    private void ResetEqualizer()
+    {
+        var profile = DesktopEqualizerProfile.Flat;
+        for (var i = 0; i < EqualizerBands.Count; i++) EqualizerBands[i].SetSilently(profile.Gains[i]);
+        EqualizerPreamp = 0;
+        PersistEqualizer();
+    }
+
+    [RelayCommand]
+    private async Task SignOutAsync()
+    {
+        StopPlayback();
+        _server.ForgetAllAccounts();
+        Connect.Accounts.Clear();
+        OnPropertyChanged(nameof(ActiveAccount));
+        OnPropertyChanged(nameof(HasActiveAccount));
+        SettingsLibraries.Clear();
+        SuppressedArtists.Clear();
+        SuppressedTracks.Clear();
+        OnPropertyChanged(nameof(HasSettingsLibraries));
+        OnPropertyChanged(nameof(HasSuppressions));
+        ClearLibrary();
+        TrackCount = AlbumCount = ArtistCount = 0;
+        SettingsMessage = "Signed out.";
+        await LoadSectionAsync(LibrarySection.Connect, clearBackStack: true);
+    }
+
+    private void ReplaceAccount(ServerAccount updated)
+    {
+        for (var i = 0; i < Connect.Accounts.Count; i++)
+        {
+            if (Connect.Accounts[i].ServerId != updated.ServerId) continue;
+            Connect.Accounts[i] = updated;
+            OnPropertyChanged(nameof(ActiveAccount));
+            OnPropertyChanged(nameof(HasActiveAccount));
+            return;
+        }
+    }
+
+    private void ClearLibrary()
+    {
+        Tracks.Clear();
+        Albums.Clear();
+        Artists.Clear();
+        Playlists.Clear();
+        AlbumTrackRows.Clear();
+        ArtistAlbums.Clear();
+        ArtistTracks.Clear();
+        PlaylistTracks.Clear();
+        DetailRows.Clear();
+        HomeRows.Clear();
+        HomeMixGrid.Reset([]);
+        AlbumGrid.Reset([]);
+        ArtistGrid.Reset([]);
+        ArtistAlbumGrid.Reset([]);
+        PlaylistGrid.Reset([]);
+    }
+
+    private async Task RecordPlayEventAsync(DesktopPlayEvent playEvent)
+    {
+        if (!_core.IsOpen) return;
+        try
+        {
+            await _core.CallAsync<object>(new CoreRequest("recordPlayEvent")
+            {
+                ServerId = playEvent.ServerId,
+                RemoteId = playEvent.RemoteId,
+                Kind = playEvent.Kind,
+                DeviceID = _deviceId,
+                CreatedAtMS = playEvent.CreatedAt.ToUnixTimeMilliseconds(),
+                PositionMS = Milliseconds(playEvent.PositionSeconds),
+                DurationMS = Milliseconds(playEvent.DurationSeconds),
+            });
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.UIThread.Post(() => StatusMessage = $"Could not record play history: {ex.Message}");
+        }
+    }
+
+    private void StartHistoryFor(Track track) => _playHistory.Start(track);
+
+    private void CompleteHistoryForCurrent()
+    {
+        var pending = _playHistory.Pending;
+        _playHistory.CompleteCurrent(pending?.DurationSeconds, pending?.DurationSeconds);
+    }
+
+    private void SkipHistoryForCurrent() =>
+        _playHistory.SkipCurrent(CurrentPositionSeconds(), CurrentDurationSeconds());
+
+    private void SeekHistoryForCurrent(double positionSeconds) =>
+        _playHistory.SeekCurrent(positionSeconds, CurrentDurationSeconds());
+
+    private double? CurrentPositionSeconds()
+    {
+        var value = _engine?.Position.TotalSeconds ?? PositionSeconds;
+        return double.IsFinite(value) && value >= 0 ? value : null;
+    }
+
+    private double? CurrentDurationSeconds()
+    {
+        var value = _engine?.Duration.TotalSeconds is > 0 and var engineDuration
+            ? engineDuration
+            : DurationSeconds;
+        return double.IsFinite(value) && value > 0 ? value : null;
+    }
+
+    private static long? Milliseconds(double? seconds) =>
+        seconds is { } value && double.IsFinite(value)
+            ? (long)Math.Round(value * 1000.0, MidpointRounding.AwayFromZero)
+            : null;
+
     /// <summary>
     /// Verification-only convenience. When <c>MOZZ_DEMO_AUTOPLAY</c> is set, jump to
     /// Songs and start the first track so the playback pipeline can be exercised
@@ -314,6 +701,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             LibrarySection.Playlists => "Playlists",
             LibrarySection.Search => "Search",
             LibrarySection.Connect => "Servers",
+            LibrarySection.Settings => "Settings",
             _ => "Mozz",
         };
         RaiseDerived();
@@ -342,6 +730,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     break;
                 case LibrarySection.Playlists:
                     await LoadPlaylistsAsync();
+                    break;
+                case LibrarySection.Settings:
+                    await RefreshSettingsAsync();
                     break;
             }
         }
@@ -391,8 +782,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         StatusMessage = null;
         HomeMixGrid.Reset([]);
+        _homeMixTiles = [];
+        _homeRecentlyPlayed = [];
+        _homeRecentlyAddedAlbums = [];
+        _homePlaylists = [];
+        HomeRows.Clear();
         RaiseDerived();
 
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
         var result = await HomeMixLoader.LoadAsync(
             ReadHomeMixesAsync,
             LoadLikedTracksAsync,
@@ -400,10 +797,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Connect.Accounts.Select(a => a.ServerId).ToList(),
             () => StatusMessage = "Generating mixes for Home…");
 
-        HomeMixGrid.Reset(HomeMixPresentation.BuildTiles(
+        _homeMixTiles = HomeMixPresentation.BuildTiles(
             result.LikedTracks.Count,
             result.Mixes,
-            Connect.Accounts.FirstOrDefault()?.ServerId));
+            serverId).ToList();
+        HomeMixGrid.Reset(_homeMixTiles);
+        if (!string.IsNullOrWhiteSpace(serverId))
+        {
+            var server = serverId!;
+            _homeRecentlyPlayed = (await _core.CallAsync<List<Track>>(
+                new CoreRequest("recentlyPlayedTracks") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
+                .ToList();
+            _homeRecentlyAddedAlbums = (await _core.CallAsync<List<Album>>(
+                new CoreRequest("recentlyAddedAlbums") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
+                .ToList();
+            _homePlaylists = (await _core.CallAsync<List<Playlist>>(
+                new CoreRequest("playlists") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
+                .Take(MediaDetailFormatting.ShelfPageSize)
+                .ToList();
+        }
+        RebuildHomeRows();
         StatusMessage = result.Message;
         RaiseDerived();
     }
@@ -437,8 +850,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task LoadPlaylistsAsync()
     {
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
         var page = await _core.CallPageAsync<List<Playlist>>(
-            new CoreRequest("playlists") { Limit = PageSize });
+            new CoreRequest("playlists") { ServerId = serverId, Limit = PageSize });
         Replace(Playlists, page.Rows);
         PlaylistGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
@@ -453,7 +867,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // Search results are a single ranked set, not a pageable listing —
         // scrolling one must not start appending the whole library to it.
         if (_nextCursor is null || _isLoadingMore || !_core.IsOpen) return;
-        if (Section is LibrarySection.Search or LibrarySection.Connect) return;
+        if (Section is LibrarySection.Search or LibrarySection.Connect or LibrarySection.Settings) return;
 
         _isLoadingMore = true;
         try
@@ -1070,7 +1484,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 break;
 
             case LibraryPageKind.MixDetail when _selectedMix is not null:
-                rows.Add(new MixHeroRow(_selectedMix, DetailMeta ?? string.Empty));
+                var metadata = DetailMeta ?? string.Empty;
+                rows.Add(new MixHeroRow(
+                    _selectedMix,
+                    metadata,
+                    HomeMixPresentation.HeroSubtitle(_selectedMix, metadata)));
                 if (_detailPlaylistTracks.Count > 0) rows.Add(new PlaylistTrackHeaderRow());
                 rows.AddRange(_detailPlaylistTracks.Select(t => new PlaylistTrackItemRow(t)));
                 break;
@@ -1079,11 +1497,30 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Replace(DetailRows, rows);
     }
 
+    private void RebuildHomeRows()
+    {
+        if (_navigation.Current is not { Kind: LibraryPageKind.Section, Section: LibrarySection.Home })
+        {
+            HomeRows.Clear();
+            return;
+        }
+
+        Replace(HomeRows, HomeComposition.BuildRows(
+            _homeMixTiles,
+            _homeRecentlyPlayed,
+            _homeRecentlyAddedAlbums,
+            _homePlaylists,
+            Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)),
+            ColumnsFor(DesktopLayout.TrackCardPitch),
+            ColumnsFor(DesktopLayout.AlbumTilePitch),
+            ColumnsFor(DesktopLayout.PlaylistTilePitch)));
+    }
+
     private void AddAlbumShelf(List<DetailRow> rows, string title, IReadOnlyList<Album> albums)
     {
         if (albums.Count == 0) return;
         rows.Add(new DetailSectionRow(title));
-        foreach (var row in MediaDetailFormatting.ChunkRows(albums, ColumnsFor(AlbumTilePitch)))
+        foreach (var row in MediaDetailFormatting.ChunkRows(albums, ColumnsFor(DesktopLayout.AlbumTilePitch)))
             rows.Add(new DetailAlbumShelfRow(row));
     }
 
@@ -1100,7 +1537,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             return new TrackCard(track, MediaDetailFormatting.TrackAlbumYear(track, album));
         }).ToList();
         rows.Add(new DetailSectionRow(title));
-        foreach (var row in MediaDetailFormatting.ChunkRows(cards, ColumnsFor(TopSongPitch)))
+        foreach (var row in MediaDetailFormatting.ChunkRows(cards, ColumnsFor(DesktopLayout.TrackCardPitch)))
             rows.Add(new DetailTrackGridRow(row));
     }
 
@@ -1161,6 +1598,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var context = Tracks.Contains(track) ? Tracks.ToList() : [track];
         int index = context.IndexOf(track);
         _ = StartQueueAsync(context, index < 0 ? 0 : index);
+    }
+
+    [RelayCommand]
+    private void PlayHomeTrack(HomeTrackCard? card)
+    {
+        if (card is null) return;
+        var context = _homeRecentlyPlayed;
+        var index = context.IndexOf(card.Track);
+        _ = StartQueueAsync(context.Count == 0 ? [card.Track] : context, index < 0 ? 0 : index);
     }
 
     [RelayCommand]
@@ -1283,6 +1729,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task StartQueueAsync(IReadOnlyList<Track> tracks, int index)
     {
+        SkipHistoryForCurrent();
         _queue.Clear();
         _queue.AddRange(tracks);
         await PlayIndexAsync(index);
@@ -1306,7 +1753,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         PositionSeconds = 0;
         _suppressSeek = false;
 
-        _engine.Play(source, track);
+        if (!_engine.Play(source, track)) return;
+        StartHistoryFor(track);
         IsPlaying = true;
 
         _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
@@ -1330,6 +1778,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task NextAsync()
     {
+        SkipHistoryForCurrent();
         if (_queueIndex + 1 < _queue.Count)
             await PlayIndexAsync(_queueIndex + 1);
         else
@@ -1346,18 +1795,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (_engine.Position.TotalSeconds > 3 || _queueIndex <= 0)
         {
             _engine.Seek(TimeSpan.Zero);
+            SeekHistoryForCurrent(0);
             _suppressSeek = true;
             PositionSeconds = 0;
             _suppressSeek = false;
         }
         else
         {
+            SkipHistoryForCurrent();
             await PlayIndexAsync(_queueIndex - 1);
         }
     }
 
     private void StopPlayback()
     {
+        SkipHistoryForCurrent();
         _engine?.Stop();
         IsPlaying = false;
         _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
@@ -1398,6 +1850,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         _seekDebounce?.Stop();
         _engine?.Seek(TimeSpan.FromSeconds(_pendingSeek));
+        SeekHistoryForCurrent(_pendingSeek);
     }
 
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
@@ -1419,6 +1872,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             if (e.Token is not Track track) return;
+            CompleteHistoryForCurrent();
             NowPlaying = track;
             int idx = _queue.IndexOf(track);
             if (idx >= 0) _queueIndex = idx;
@@ -1427,6 +1881,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             PositionSeconds = 0;
             _suppressSeek = false;
             IsPlaying = true;
+            StartHistoryFor(track);
             _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
                 track.Title, track.ArtistName, track.AlbumTitle,
                 _engine?.Duration ?? TimeSpan.FromSeconds(track.DurationSeconds)));
@@ -1438,6 +1893,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         Dispatcher.UIThread.Post(() =>
         {
+            CompleteHistoryForCurrent();
             IsPlaying = false;
             _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
         });
@@ -1588,14 +2044,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsArtistsSelected));
         OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(IsConnectSelected));
+        OnPropertyChanged(nameof(IsSettingsSelected));
         OnPropertyChanged(nameof(ShowTracks));
-        OnPropertyChanged(nameof(ShowHomeMixes));
+        OnPropertyChanged(nameof(ShowHomeRows));
         OnPropertyChanged(nameof(ShowHomeEmpty));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
         OnPropertyChanged(nameof(ShowPlaylists));
         OnPropertyChanged(nameof(ShowSearch));
         OnPropertyChanged(nameof(ShowConnect));
+        OnPropertyChanged(nameof(ShowSettings));
         OnPropertyChanged(nameof(ShowAlbumDetail));
         OnPropertyChanged(nameof(ShowArtistDetail));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
@@ -1607,6 +2065,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasArtistAlbums));
         OnPropertyChanged(nameof(IsLibraryEmpty));
         OnPropertyChanged(nameof(LibrarySummary));
+        OnPropertyChanged(nameof(ActiveAccount));
+        OnPropertyChanged(nameof(HasActiveAccount));
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IReadOnlyList<T>? source)

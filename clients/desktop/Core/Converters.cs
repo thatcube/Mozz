@@ -123,3 +123,14 @@ public sealed class EnumMatchConverter : IValueConverter
             : BindingOperations.DoNothing;
     }
 }
+
+public sealed class StringMatchConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is string text
+           && parameter is string expected
+           && string.Equals(text, expected, StringComparison.OrdinalIgnoreCase);
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is true && parameter is string expected ? expected : BindingOperations.DoNothing;
+}

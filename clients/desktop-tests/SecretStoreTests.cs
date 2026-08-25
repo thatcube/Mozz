@@ -152,8 +152,9 @@ public class SecretStoreTests : IDisposable
         var original = Environment.GetEnvironmentVariable("MOZZ_LIBRARY");
         try
         {
-            Environment.SetEnvironmentVariable("MOZZ_LIBRARY", "/tmp/custom-library.sqlite");
-            Assert.Equal("/tmp/custom-library.sqlite", AppPaths.LibraryPath);
+            var custom = Path.Combine(Directory.GetCurrentDirectory(), "custom-library.sqlite");
+            Environment.SetEnvironmentVariable("MOZZ_LIBRARY", custom);
+            Assert.Equal(custom, AppPaths.LibraryPath);
 
             Environment.SetEnvironmentVariable("MOZZ_LIBRARY", null);
             Assert.EndsWith("library.sqlite", AppPaths.LibraryPath);

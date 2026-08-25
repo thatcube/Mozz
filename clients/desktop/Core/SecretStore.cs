@@ -408,6 +408,13 @@ public static class AppPaths
     {
         get
         {
+            var overridePath = Environment.GetEnvironmentVariable("MOZZ_SUPPORT_DIR");
+            if (!string.IsNullOrWhiteSpace(overridePath))
+            {
+                Directory.CreateDirectory(overridePath);
+                return overridePath;
+            }
+
             var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var path = Path.Combine(root, "Mozz");
             Directory.CreateDirectory(path);
