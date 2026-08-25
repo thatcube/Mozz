@@ -54,8 +54,8 @@ public partial class MainWindow : Window
             case AlbumTrackItemRow { Row: var row } when vm.PlayAlbumTrackCommand.CanExecute(row):
                 vm.PlayAlbumTrackCommand.Execute(row);
                 break;
-            case PlaylistTrackItemRow { Track: var track } when vm.PlayTrackCommand.CanExecute(track):
-                vm.PlayTrackCommand.Execute(track);
+            case PlaylistTrackItemRow { Track: var track } when vm.PlayPlaylistTrackCommand.CanExecute(track):
+                vm.PlayPlaylistTrackCommand.Execute(track);
                 break;
         }
     }
