@@ -48,13 +48,21 @@ internal static class FfmpegLocator
     {
         var exe = isWindows ? "ffmpeg.exe" : "ffmpeg";
 
-        yield return Path.Combine(appDir, exe);
-        yield return Path.Combine(appDir, "ffmpeg", exe);
-        yield return Path.Combine(appDir, "runtimes", "ffmpeg", exe);
+        // Joined against the separator of the *target* platform, not the host's.
+        // This method takes `isWindows` so the Windows and Unix orderings can
+        // both be tested from any machine; Path.Combine would quietly punctuate
+        // the Unix candidates with a backslash when those tests run on Windows,
+        // yielding "/opt/homebrew/bin\ffmpeg".
+        var sep = isWindows ? '\\' : '/';
+        string Join(params string[] parts) => string.Join(sep, parts);
+
+        yield return Join(appDir.TrimEnd('/', '\\'), exe);
+        yield return Join(appDir.TrimEnd('/', '\\'), "ffmpeg", exe);
+        yield return Join(appDir.TrimEnd('/', '\\'), "runtimes", "ffmpeg", exe);
 
         if (!isWindows)
             foreach (var dir in UnixInstallDirs)
-                yield return Path.Combine(dir, exe);
+                yield return $"{dir}/{exe}";
     }
 
     /// <summary>
