@@ -32,12 +32,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly INowPlayingIntegration? _nowPlaying_os;
     private readonly DispatcherTimer? _positionTimer;
     private readonly DispatcherTimer? _seekDebounce;
+    private readonly DispatcherTimer? _continuityReconcileTimer;
     private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
     private readonly PlaybackQueue _queue = new();
     private bool _suppressSeek;
     private double _pendingSeek;
     private long _lastUserSeekTicks;
+    private Guid _continuityRunId = Guid.NewGuid();
+    private ulong _continuitySequence;
+    private bool _continuityReconciled;
+    private string? _lastWrittenContinuityQueueHash;
+    private DateTimeOffset _lastPeriodicContinuity = DateTimeOffset.MinValue;
+    private CancellationTokenSource? _continuityFlushCts;
+    private long _continuityGeneration;
+    private readonly SemaphoreSlim _continuityFlushGate = new(1, 1);
 
     [ObservableProperty] private LibrarySection _section = LibrarySection.Home;
     [ObservableProperty] private string _pageTitle = "Home";
@@ -262,6 +271,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string? _lyricStatus;
     [ObservableProperty] private bool _isLyricsLoading;
     [ObservableProperty] private string? _lyricsMessage;
+    [ObservableProperty] private ContinuityResumeOffer? _continuityOffer;
+
+    public bool HasContinuityOffer => ContinuityOffer is not null;
 
     public MainViewModel()
     {
@@ -329,6 +341,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _seekDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
         _seekDebounce.Tick += OnSeekDebounceTick;
 
+        _continuityReconcileTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _continuityReconcileTimer.Tick += (_, _) =>
+        {
+            if (!IsPlaying) _ = ReconcileContinuityAsync();
+        };
+        _continuityReconcileTimer.Start();
+
         _ = InitializeAsync();
     }
 
@@ -338,6 +357,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasActiveAccountAvatar));
         OnPropertyChanged(nameof(ActiveAccountFallbackText));
     }
+
+    partial void OnContinuityOfferChanged(ContinuityResumeOffer? value) =>
+        OnPropertyChanged(nameof(HasContinuityOffer));
 
     private void RestoreSettings()
     {
@@ -454,6 +476,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // database, but their stream URLs come from an attached backend.
             await Connect.AttachSavedAccountsAsync();
             await RefreshActiveAccountProfileAsync();
+            await ReconcileContinuityAsync();
 
             await RefreshCountsAsync();
             await LoadSectionAsync(LibrarySection.Home, clearBackStack: true);
@@ -584,7 +607,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             IsSettingsBusy = true;
             await _server.AttachAsync(account);
+            _lastWrittenContinuityQueueHash = null;
             await RefreshActiveAccountProfileAsync();
+            await ReconcileContinuityAsync();
             await RefreshCountsAsync();
             await RefreshSettingsAsync();
         }
@@ -771,6 +796,135 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         catch
         {
             // Best-effort scrobbling must never interrupt or block audio.
+        }
+    }
+
+    private async Task ReconcileContinuityAsync()
+    {
+        if (!_core.IsOpen || ActiveAccount is not { } account)
+        {
+            _continuityReconciled = true;
+            _lastWrittenContinuityQueueHash = null;
+            ContinuityOffer = null;
+            return;
+        }
+
+        try
+        {
+            var snapshot = await _core.CallAsync<ContinuitySnapshot>(
+                new CoreRequest("continuityLoad") { ServerId = account.ServerId });
+            _continuityReconciled = true;
+            ContinuityOffer = ContinuityPresentation.OfferFor(
+                snapshot,
+                _deviceId,
+                IsPlaying,
+                DateTimeOffset.UtcNow);
+        }
+        catch
+        {
+            _continuityReconciled = true;
+        }
+    }
+
+    private void BeginContinuityRun()
+    {
+        _continuityRunId = Guid.NewGuid();
+        _continuitySequence = 0;
+        _lastPeriodicContinuity = DateTimeOffset.MinValue;
+    }
+
+    private void CheckpointContinuity(ContinuityCheckpointReason reason)
+    {
+        if (!_continuityReconciled || ActiveAccount is not { } account || NowPlaying is null || _queue.Current is null)
+            return;
+
+        if (reason == ContinuityCheckpointReason.Periodic)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (now - _lastPeriodicContinuity < TimeSpan.FromSeconds(20)) return;
+            _lastPeriodicContinuity = now;
+        }
+
+        _continuitySequence++;
+        var checkpoint = new PendingContinuityCheckpoint(
+            Interlocked.Increment(ref _continuityGeneration),
+            account,
+            _continuityRunId,
+            _continuitySequence,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            ContinuityPresentation.State(IsPlaying),
+            _queue.Current.RemoteId,
+            _queue.CurrentIndex,
+            ContinuityPresentation.Milliseconds(PositionSeconds),
+            ContinuityPresentation.QueueInput(account, _queue),
+            reason);
+        ScheduleContinuityFlush(checkpoint);
+    }
+
+    private void ScheduleContinuityFlush(PendingContinuityCheckpoint checkpoint)
+    {
+        _continuityFlushCts?.Cancel();
+        _continuityFlushCts?.Dispose();
+        _continuityFlushCts = new CancellationTokenSource();
+        var token = _continuityFlushCts.Token;
+        var delay = checkpoint.Reason == ContinuityCheckpointReason.Periodic
+            ? TimeSpan.FromSeconds(3)
+            : TimeSpan.Zero;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
+                if (!token.IsCancellationRequested) await FlushContinuityAsync(checkpoint, token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }, token);
+    }
+
+    private async Task FlushContinuityAsync(PendingContinuityCheckpoint checkpoint, CancellationToken token)
+    {
+        if (!_core.IsOpen) return;
+        await _continuityFlushGate.WaitAsync(CancellationToken.None);
+        try
+        {
+            if (checkpoint.Generation != Volatile.Read(ref _continuityGeneration)) return;
+            var hash = await _core.CallAsync<ContinuityHash>(
+                new CoreRequest("continuityQueueHash") { Queue = checkpoint.Queue },
+                token);
+            if (checkpoint.Generation != Volatile.Read(ref _continuityGeneration)) return;
+            var queueChanged = hash?.QueueHash != _lastWrittenContinuityQueueHash;
+            var shouldSendQueue = queueChanged || checkpoint.Account.Kind == BackendKind.Subsonic;
+            var saved = await _core.CallAsync<ContinuitySaveResult>(
+                new CoreRequest("continuitySave")
+                {
+                    ServerId = checkpoint.Account.ServerId,
+                    PlaybackRunID = checkpoint.RunId.ToString(),
+                    DeviceID = _deviceId,
+                    DeviceName = Environment.MachineName,
+                    Kind = "desktop",
+                    CursorSequence = checkpoint.Sequence,
+                    CapturedAtMS = checkpoint.CapturedAtMS,
+                    State = checkpoint.State,
+                    CurrentRemoteID = checkpoint.CurrentRemoteID,
+                    CurrentAbsoluteIndex = checkpoint.CurrentAbsoluteIndex,
+                    PositionMS = checkpoint.PositionMS,
+                    Queue = shouldSendQueue ? checkpoint.Queue : null,
+                },
+                token);
+
+            if (shouldSendQueue && (saved?.QueueHash ?? hash?.QueueHash) is { } written)
+                _lastWrittenContinuityQueueHash = written;
+        }
+        catch
+        {
+            // Continuity is opportunistic: the next checkpoint supersedes this one.
+        }
+        finally
+        {
+            _continuityFlushGate.Release();
         }
     }
 
@@ -2162,11 +2316,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 _engine.Pause();
                 _playHistory.PauseCurrent(CurrentPositionSeconds());
                 IsPlaying = false;
+                CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
                 break;
             case PlaybackState.Paused:
                 _engine.Resume();
                 _playHistory.ResumeCurrent(CurrentPositionSeconds());
                 IsPlaying = true;
+                CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
                 break;
             default:
                 _ = PlayIndexAsync(_queue.CurrentIndex < 0 ? 0 : _queue.CurrentIndex);
@@ -2187,6 +2343,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (_queue.ToggleShuffle() == ShuffleMode.On) _queue.ShuffleUpcoming();
         RefreshQueueRows();
         OnPropertyChanged(nameof(ShuffleStateText));
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     [RelayCommand]
@@ -2194,6 +2351,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         _queue.CycleRepeat();
         OnPropertyChanged(nameof(RepeatStateText));
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     [RelayCommand]
@@ -2209,6 +2367,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (row is null || !_queue.Move(row.Track, -1)) return;
         RefreshQueueRows();
         _ = PreloadNeighborAsync();
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     [RelayCommand]
@@ -2217,6 +2376,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (row is null || !_queue.Move(row.Track, 1)) return;
         RefreshQueueRows();
         _ = PreloadNeighborAsync();
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     [RelayCommand]
@@ -2225,6 +2385,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (row is null || !_queue.Remove(row.Track)) return;
         RefreshQueueRows();
         _ = PreloadNeighborAsync();
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     private void RefreshQueueRows()
@@ -2234,14 +2395,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     private async Task StartQueueAsync(IReadOnlyList<Track> tracks, int index)
+        => await StartQueueAsync(tracks.Select((track, ordinal) => (track, ordinal)).ToList(), index, 0);
+
+    private async Task StartQueueAsync(IReadOnlyList<(Track Track, int BaseOrdinal)> tracks, int index, double initialPositionSeconds)
     {
         SkipHistoryForCurrent();
+        BeginContinuityRun();
         _queue.Start(tracks, index);
         RefreshQueueRows();
-        await PlayIndexAsync(index);
+        await PlayIndexAsync(index, initialPositionSeconds);
     }
 
-    private async Task PlayIndexAsync(int index)
+    private async Task PlayIndexAsync(int index, double initialPositionSeconds = 0)
     {
         if (_engine is null || index < 0 || index >= _queue.Tracks.Count) return;
         var track = _queue.Tracks[index];
@@ -2259,12 +2424,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         DurationSeconds = source.KnownDuration?.TotalSeconds
             ?? (track.DurationSeconds > 0 ? track.DurationSeconds : 0);
         _suppressSeek = true;
-        PositionSeconds = 0;
+        PositionSeconds = Math.Max(0, initialPositionSeconds);
         _suppressSeek = false;
 
         if (!_engine.Play(source, track)) return;
         StartHistoryFor(track);
+        if (initialPositionSeconds > 0)
+        {
+            _engine.Seek(TimeSpan.FromSeconds(initialPositionSeconds));
+            SeekHistoryForCurrent(initialPositionSeconds);
+        }
         IsPlaying = true;
+        CheckpointContinuity(ContinuityCheckpointReason.TrackChanged);
 
         _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
             track.Title, track.ArtistName, track.AlbumTitle,
@@ -2294,6 +2465,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             _engine?.Stop();
             IsPlaying = false;
+            CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
         }
     }
 
@@ -2308,6 +2480,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _suppressSeek = true;
             PositionSeconds = 0;
             _suppressSeek = false;
+            CheckpointContinuity(ContinuityCheckpointReason.Seeked);
         }
         else
         {
@@ -2322,7 +2495,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _engine?.Stop();
         IsPlaying = false;
         _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
+        CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
     }
+
+    [RelayCommand]
+    private async Task ContinueHereAsync()
+    {
+        var offer = ContinuityOffer;
+        var account = ActiveAccount;
+        if (offer is null || account is null) return;
+
+        var tracks = ContinuityPresentation.TracksForResume(offer.Snapshot, account.ServerId);
+        if (tracks.Count == 0) return;
+
+        ContinuityOffer = null;
+        var index = ContinuityPresentation.ResumeIndex(offer.Snapshot, tracks.Count);
+        await StartQueueAsync(tracks, index, offer.Snapshot.Cursor.PositionMS / 1000.0);
+    }
+
+    [RelayCommand]
+    private void DismissContinuityOffer() => ContinuityOffer = null;
 
     private void OnPositionTick(object? sender, EventArgs e)
     {
@@ -2342,6 +2534,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _suppressSeek = false;
         _playHistory.ProgressCurrent(PositionSeconds);
         UpdateActiveLyric(PositionSeconds);
+        CheckpointContinuity(ContinuityCheckpointReason.Periodic);
 
         _nowPlaying_os?.UpdatePosition(_engine.Position, _engine.Duration);
     }
@@ -2362,6 +2555,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _seekDebounce?.Stop();
         _engine?.Seek(TimeSpan.FromSeconds(_pendingSeek));
         SeekHistoryForCurrent(_pendingSeek);
+        CheckpointContinuity(ContinuityCheckpointReason.Seeked);
     }
 
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
@@ -2370,6 +2564,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(PlayPauseGlyph));
         _nowPlaying_os?.UpdateState(value ? PlaybackState.Playing : PlaybackState.Paused);
+        if (value) ContinuityOffer = null;
     }
 
     partial void OnVolumeChanged(double value)
@@ -2384,6 +2579,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (e.Token is not Track track) return;
             CompleteHistoryForCurrent();
+            var changedTrack = NowPlaying?.RemoteId != track.RemoteId;
             NowPlaying = track;
             _queue.JumpTo(track, out _);
             RefreshQueueRows();
@@ -2396,6 +2592,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
                 track.Title, track.ArtistName, track.AlbumTitle,
                 _engine?.Duration ?? TimeSpan.FromSeconds(track.DurationSeconds)));
+            if (changedTrack) CheckpointContinuity(ContinuityCheckpointReason.TrackChanged);
             _ = PreloadNeighborAsync();
         });
     }
@@ -2546,6 +2743,19 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         [property: System.Text.Json.Serialization.JsonPropertyName("url")] string Url,
         [property: System.Text.Json.Serialization.JsonPropertyName("headers")] Dictionary<string, string>? Headers);
 
+    private sealed record PendingContinuityCheckpoint(
+        long Generation,
+        ServerAccount Account,
+        Guid RunId,
+        ulong Sequence,
+        long CapturedAtMS,
+        string State,
+        string CurrentRemoteID,
+        int CurrentAbsoluteIndex,
+        long PositionMS,
+        ContinuityQueueInput Queue,
+        ContinuityCheckpointReason Reason);
+
     private void RaiseDerived()
     {
         OnPropertyChanged(nameof(CanGoBack));
@@ -2607,6 +2817,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             app.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         _positionTimer?.Stop();
         _seekDebounce?.Stop();
+        _continuityReconcileTimer?.Stop();
+        _continuityFlushCts?.Cancel();
+        _continuityFlushCts?.Dispose();
         _engine?.Dispose();
         _nowPlaying_os?.Dispose();
         _artwork?.Dispose();

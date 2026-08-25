@@ -24,6 +24,7 @@ public sealed record QueueItemRow(int Number, Track Track, bool IsCurrent)
 public sealed class PlaybackQueue
 {
     private readonly List<Track> _tracks = [];
+    private readonly List<int> _baseOrdinals = [];
     private int _index = -1;
 
     public IReadOnlyList<Track> Tracks => _tracks;
@@ -35,11 +36,22 @@ public sealed class PlaybackQueue
     public RepeatMode Repeat { get; private set; }
 
     public void Start(IReadOnlyList<Track> tracks, int index)
+        => Start(tracks.Select((track, ordinal) => (track, ordinal)).ToList(), index);
+
+    public void Start(IReadOnlyList<(Track Track, int BaseOrdinal)> tracks, int index)
     {
         _tracks.Clear();
-        _tracks.AddRange(tracks);
+        _baseOrdinals.Clear();
+        foreach (var (track, ordinal) in tracks)
+        {
+            _tracks.Add(track);
+            _baseOrdinals.Add(ordinal);
+        }
         _index = _tracks.Count == 0 ? -1 : Math.Clamp(index, 0, _tracks.Count - 1);
     }
+
+    public int BaseOrdinalAt(int index) =>
+        index >= 0 && index < _baseOrdinals.Count ? _baseOrdinals[index] : index;
 
     public int? NextIndex()
     {
@@ -61,6 +73,7 @@ public sealed class PlaybackQueue
         var index = _tracks.IndexOf(track);
         if (index < 0) return false;
         _tracks.RemoveAt(index);
+        _baseOrdinals.RemoveAt(index);
         if (_tracks.Count == 0) _index = -1;
         else if (index < _index) _index--;
         else if (index == _index) _index = Math.Min(_index, _tracks.Count - 1);
@@ -74,8 +87,11 @@ public sealed class PlaybackQueue
         var to = from + delta;
         if (to < 0 || to >= _tracks.Count) return false;
         var item = _tracks[from];
+        var ordinal = _baseOrdinals[from];
         _tracks.RemoveAt(from);
+        _baseOrdinals.RemoveAt(from);
         _tracks.Insert(to, item);
+        _baseOrdinals.Insert(to, ordinal);
         if (_index == from) _index = to;
         else if (from < _index && to >= _index) _index--;
         else if (from > _index && to <= _index) _index++;
@@ -100,9 +116,18 @@ public sealed class PlaybackQueue
     {
         if (_tracks.Count <= 2 || _index >= _tracks.Count - 1) return;
         random ??= Random.Shared;
-        var tail = _tracks.Skip(_index + 1).OrderBy(_ => random.Next()).ToList();
+        var tail = _tracks
+            .Skip(_index + 1)
+            .Zip(_baseOrdinals.Skip(_index + 1))
+            .OrderBy(_ => random.Next())
+            .ToList();
         _tracks.RemoveRange(_index + 1, tail.Count);
-        _tracks.AddRange(tail);
+        _baseOrdinals.RemoveRange(_index + 1, tail.Count);
+        foreach (var (track, ordinal) in tail)
+        {
+            _tracks.Add(track);
+            _baseOrdinals.Add(ordinal);
+        }
     }
 
     public RepeatMode CycleRepeat()

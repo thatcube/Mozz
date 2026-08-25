@@ -1285,6 +1285,43 @@
             </Grid>
         </Grid>
 
+        <!-- Cross-device continuity: an offer only, never an automatic takeover. -->
+        <Border Grid.Row="0"
+                IsVisible="{Binding HasContinuityOffer}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,18"
+                Background="{DynamicResource SurfaceRaised}"
+                BorderBrush="{DynamicResource Divider}"
+                BorderThickness="1"
+                CornerRadius="18"
+                Padding="14">
+            <Grid ColumnDefinitions="44,*,Auto,Auto" ColumnSpacing="13" MinWidth="540" MaxWidth="760">
+                <controls:ArtworkImage Grid.Column="0"
+                        Width="42" Height="42" DisplaySize="42"
+                        CornerRadius="8"
+                        ServerId="{Binding ContinuityOffer.ServerId}"
+                        ArtworkKey="{Binding ContinuityOffer.ArtworkKey}"
+                        FallbackText="{Binding ContinuityOffer.Subtitle}"
+                        FallbackFontSize="15"
+                        FallbackFontWeight="SemiBold"
+                        FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding ContinuityOffer.Headline}" Classes="primary"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ContinuityOffer.Subtitle}" Classes="secondary" />
+                </StackPanel>
+                <Button Grid.Column="2" Content="Listen here" Classes="primary"
+                        Command="{Binding ContinueHereCommand}" />
+                <Button Grid.Column="3" Classes="ghost"
+                        Command="{Binding DismissContinuityOfferCommand}">
+                    <controls:TablerIcon Size="18" Data="{StaticResource IconX}"
+                                         Brush="{Binding $parent[Button].Foreground}" />
+                </Button>
+            </Grid>
+        </Border>
+
+
         <!-- Now playing -->
         <Border Grid.Row="1" Height="88"
                 Background="{DynamicResource BarBackground}"
