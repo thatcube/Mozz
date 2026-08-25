@@ -34,8 +34,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer? _seekDebounce;
     private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
-    private readonly List<Track> _queue = [];
-    private int _queueIndex = -1;
+    private readonly PlaybackQueue _queue = new();
     private bool _suppressSeek;
     private double _pendingSeek;
     private long _lastUserSeekTicks;
@@ -75,12 +74,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Album> Albums { get; } = [];
     public ObservableCollection<Artist> Artists { get; } = [];
     public ObservableCollection<Playlist> Playlists { get; } = [];
+    public ObservableCollection<GenreTile> Genres { get; } = [];
     public ObservableCollection<AlbumTrackRow> AlbumTrackRows { get; } = [];
     public ObservableCollection<Album> ArtistAlbums { get; } = [];
     public ObservableCollection<Track> ArtistTracks { get; } = [];
     public ObservableCollection<Track> PlaylistTracks { get; } = [];
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
     public ObservableCollection<HomeRow> HomeRows { get; } = [];
+    public ObservableCollection<SearchRow> SearchRows { get; } = [];
+    public ObservableCollection<QueueItemRow> QueueRows { get; } = [];
     public ObservableCollection<SettingsLibraryOption> SettingsLibraries { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedArtists { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedTracks { get; } = [];
@@ -106,6 +108,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public GridRows<HomeMixTile> HomeMixGrid { get; } = new();
     public GridRows<Album> AlbumGrid { get; } = new();
     public GridRows<Artist> ArtistGrid { get; } = new();
+    public GridRows<GenreTile> GenreGrid { get; } = new();
+    public GridRows<Album> GenreAlbumGrid { get; } = new();
     public GridRows<Album> ArtistAlbumGrid { get; } = new();
     public GridRows<Playlist> PlaylistGrid { get; } = new();
 
@@ -120,6 +124,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _contentWidth = value;
             AlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             ArtistGrid.SetColumns(ColumnsFor(DesktopLayout.ArtistTilePitch));
+            GenreGrid.SetColumns(ColumnsFor(DesktopLayout.GenreTilePitch));
+            GenreAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             ArtistAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             PlaylistGrid.SetColumns(ColumnsFor(DesktopLayout.PlaylistTilePitch));
             HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)));
@@ -137,6 +143,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Album> _detailArtistAppearsOn = [];
     private List<Track> _detailArtistTopTracks = [];
     private List<Track> _detailPlaylistTracks = [];
+    private List<Album> _detailGenreAlbums = [];
     private List<HomeMixTile> _homeMixTiles = [];
     private List<Track> _homeRecentlyPlayed = [];
     private List<Album> _homeRecentlyAddedAlbums = [];
@@ -153,6 +160,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsSongsSelected => Section == LibrarySection.Songs;
     public bool IsAlbumsSelected => Section == LibrarySection.Albums;
     public bool IsArtistsSelected => Section == LibrarySection.Artists;
+    public bool IsGenresSelected => Section == LibrarySection.Genres;
     public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
     public bool IsConnectSelected => Section == LibrarySection.Connect;
     public bool IsSettingsSelected => IsSettingsDialogOpen;
@@ -171,6 +179,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                                      _homePlaylists);
     public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Albums };
     public bool ShowArtists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Artists };
+    public bool ShowGenres => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Genres };
     public bool ShowPlaylists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Playlists };
     public bool ShowSearch => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Search };
     public bool ShowConnect => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Connect };
@@ -179,10 +188,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool ShowArtistDetail => _navigation.Current.Kind == LibraryPageKind.ArtistDetail;
     public bool ShowPlaylistDetail => _navigation.Current.Kind == LibraryPageKind.PlaylistDetail;
     public bool ShowMixDetail => _navigation.Current.Kind == LibraryPageKind.MixDetail;
-    public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail || ShowMixDetail;
-    public bool HasSearchAlbums => ShowSearch && Albums.Count > 0;
-    public bool HasSearchArtists => ShowSearch && Artists.Count > 0;
-    public bool HasSearchTracks => ShowSearch && Tracks.Count > 0;
+    public bool ShowGenreDetail => _navigation.Current.Kind == LibraryPageKind.GenreDetail;
+    public bool ShowNowPlaying => _navigation.Current.Kind == LibraryPageKind.NowPlaying;
+    public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail || ShowMixDetail || ShowGenreDetail;
+    public bool HasSearchRows => ShowSearch && SearchRows.Count > 0;
+    public bool HasQueue => QueueRows.Count > 0;
+    public string ShuffleStateText => _queue.Shuffle == ShuffleMode.On ? "Shuffle On" : "Shuffle";
+    public string RepeatStateText => _queue.Repeat switch
+    {
+        RepeatMode.All => "Repeat All",
+        RepeatMode.One => "Repeat One",
+        _ => "Repeat",
+    };
     public bool HasArtistAlbums => ArtistAlbums.Count > 0;
 
     /// <summary>
@@ -191,7 +208,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
     public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false && ShowSettings == false
-                                  && ShowDetailPage == false && ShowHomeRows == false;
+                                  && ShowDetailPage == false && ShowNowPlaying == false && ShowHomeRows == false;
 
     public string LibrarySummary =>
         TrackCount == 0
@@ -689,6 +706,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Albums.Clear();
         Artists.Clear();
         Playlists.Clear();
+        Genres.Clear();
+        SearchRows.Clear();
+        QueueRows.Clear();
         AlbumTrackRows.Clear();
         ArtistAlbums.Clear();
         ArtistTracks.Clear();
@@ -698,6 +718,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         HomeMixGrid.Reset([]);
         AlbumGrid.Reset([]);
         ArtistGrid.Reset([]);
+        GenreGrid.Reset([]);
+        GenreAlbumGrid.Reset([]);
         ArtistAlbumGrid.Reset([]);
         PlaylistGrid.Reset([]);
     }
@@ -830,6 +852,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             LibrarySection.Songs => "Songs",
             LibrarySection.Albums => "Albums",
             LibrarySection.Artists => "Artists",
+            LibrarySection.Genres => "Genres",
             LibrarySection.Playlists => "Playlists",
             LibrarySection.Search => "Search",
             LibrarySection.Connect => "Servers",
@@ -859,6 +882,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     break;
                 case LibrarySection.Artists:
                     await LoadArtistsAsync();
+                    break;
+                case LibrarySection.Genres:
+                    await LoadGenresAsync();
                     break;
                 case LibrarySection.Playlists:
                     await LoadPlaylistsAsync();
@@ -1002,6 +1028,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nextCursor = page.NextCursor;
     }
 
+    private async Task LoadGenresAsync()
+    {
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        var names = string.IsNullOrWhiteSpace(serverId)
+            ? new List<string>()
+            : await _core.CallAsync<List<string>>(new CoreRequest("genres") { ServerId = serverId }) ?? [];
+        var genres = GenrePresentation.Build(names);
+        Replace(Genres, genres);
+        GenreGrid.Reset(genres);
+        _nextCursor = null;
+    }
+
     private async Task LoadPlaylistsAsync()
     {
         var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
@@ -1111,6 +1149,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task OpenGenre(GenreTile? genre)
+    {
+        if (genre is null) return;
+        _navigation.Push(LibraryPage.ForGenre(genre.Name));
+        await ApplyPageAsync(_navigation.Current, reload: true);
+    }
+
+    [RelayCommand]
+    private async Task OpenNowPlaying()
+    {
+        _navigation.Push(LibraryPage.ForNowPlaying());
+        await ApplyPageAsync(_navigation.Current, reload: false);
+    }
+
+    [RelayCommand]
     private async Task OpenMix(HomeMixTile? mix)
     {
         if (mix is null) return;
@@ -1198,6 +1251,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 PageTitle = "Playlist";
                 if (reload && page.Playlist is not null) await LoadPlaylistDetailAsync(page.Playlist);
                 break;
+            case LibraryPageKind.GenreDetail:
+                Section = LibrarySection.Genres;
+                SelectedAlbum = null;
+                SelectedArtist = null;
+                SelectedPlaylist = null;
+                _selectedMix = null;
+                PageTitle = page.Genre ?? "Genre";
+                if (reload && page.Genre is not null) await LoadGenreDetailAsync(page.Genre);
+                break;
             case LibraryPageKind.MixDetail:
                 Section = LibrarySection.Home;
                 SelectedAlbum = null;
@@ -1205,6 +1267,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 SelectedPlaylist = null;
                 PageTitle = page.Title ?? "Mix";
                 if (reload && page.MixId is not null) await LoadMixDetailAsync(page.MixId, page.Title);
+                break;
+            case LibraryPageKind.NowPlaying:
+                Section = LibrarySection.Search;
+                SelectedAlbum = null;
+                SelectedArtist = null;
+                SelectedPlaylist = null;
+                _selectedMix = null;
+                PageTitle = "Now Playing";
+                RefreshQueueRows();
                 break;
         }
 
@@ -1496,6 +1567,42 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task LoadGenreDetailAsync(string genre)
+    {
+        _detailGenreAlbums = [];
+        GenreAlbumGrid.Reset([]);
+        DetailMeta = GenrePresentation.Metadata(genre, _detailGenreAlbums);
+        RebuildDetailRows();
+        RaiseDerived();
+
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsBusy = true;
+            var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+            if (string.IsNullOrWhiteSpace(serverId)) return;
+            var albums = await _core.CallAsync<List<Album>>(new CoreRequest("genreAlbums")
+            {
+                ServerId = serverId,
+                Genre = genre,
+            }) ?? [];
+            _detailGenreAlbums = albums;
+            GenreAlbumGrid.Reset(albums);
+            DetailMeta = GenrePresentation.Metadata(genre, albums);
+            RebuildDetailRows();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RaiseDerived();
+        }
+    }
+
     private async Task AppendPlaylistTracksAsync()
     {
         if (SelectedPlaylist is null || _nextCursor is null) return;
@@ -1593,6 +1700,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _detailArtistAppearsOn = [];
         _detailArtistTopTracks = [];
         _detailPlaylistTracks = [];
+        _detailGenreAlbums = [];
+        GenreAlbumGrid.Reset([]);
     }
 
     private void RebuildDetailRows()
@@ -1645,6 +1754,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     HomeMixPresentation.HeroSubtitle(_selectedMix, metadata)));
                 if (_detailPlaylistTracks.Count > 0) rows.Add(new PlaylistTrackHeaderRow());
                 rows.AddRange(_detailPlaylistTracks.Select(t => new PlaylistTrackItemRow(t)));
+                break;
+            case LibraryPageKind.GenreDetail:
+                rows.Add(new GenreHeroRow(_navigation.Current.Genre ?? "Genre", DetailMeta ?? string.Empty));
+                AddAlbumShelf(rows, "Albums", _detailGenreAlbums);
                 break;
         }
 
@@ -1717,10 +1830,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await Task.Delay(140, cts.Token);
+            await Task.Delay(SearchTiming.DebounceDelay, cts.Token);
             var results = await _core.CallAsync<SearchResults>(
                 new CoreRequest("search") { Query = query, Limit = 50 }, cts.Token);
             if (cts.Token.IsCancellationRequested || results is null) return;
+            var playlists = await SearchPlaylistsAsync(query, cts.Token);
 
             _navigation.Replace(LibraryPage.ForSection(LibrarySection.Search), clearBackStack: true);
             Section = LibrarySection.Search;
@@ -1730,8 +1844,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Replace(Tracks, results.Tracks);
             Replace(Albums, results.Albums);
             Replace(Artists, results.Artists);
-            AlbumGrid.Reset(results.Albums);
-            ArtistGrid.Reset(results.Artists);
+            Replace(SearchRows, SearchPresentation.Build(results, playlists, query));
             RaiseDerived();
         }
         catch (OperationCanceledException)
@@ -1741,6 +1854,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
+        }
+    }
+
+    private async Task<IReadOnlyList<Playlist>> SearchPlaylistsAsync(string query, CancellationToken token)
+    {
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        if (string.IsNullOrWhiteSpace(serverId)) return [];
+        try
+        {
+            var page = await _core.CallPageAsync<List<Playlist>>(
+                new CoreRequest("playlists") { ServerId = serverId, Limit = PageSize }, token);
+            return SearchPresentation.Build(new SearchResults([], [], []), page.Rows, query)
+                .OfType<SearchPlaylistRow>()
+                .Select(r => r.Playlist)
+                .ToList();
+        }
+        catch
+        {
+            return [];
         }
     }
 
@@ -1870,7 +2002,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 IsPlaying = true;
                 break;
             default:
-                _ = PlayIndexAsync(_queueIndex < 0 ? 0 : _queueIndex);
+                _ = PlayIndexAsync(_queue.CurrentIndex < 0 ? 0 : _queue.CurrentIndex);
                 break;
         }
         _nowPlaying_os?.UpdateState(_engine.State);
@@ -1882,19 +2014,72 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private Task Previous() => PreviousAsync();
 
+    [RelayCommand]
+    private void ToggleShuffle()
+    {
+        if (_queue.ToggleShuffle() == ShuffleMode.On) _queue.ShuffleUpcoming();
+        RefreshQueueRows();
+        OnPropertyChanged(nameof(ShuffleStateText));
+    }
+
+    [RelayCommand]
+    private void CycleRepeat()
+    {
+        _queue.CycleRepeat();
+        OnPropertyChanged(nameof(RepeatStateText));
+    }
+
+    [RelayCommand]
+    private async Task JumpToQueueItem(QueueItemRow? row)
+    {
+        if (row is null || !_queue.JumpTo(row.Track, out var index)) return;
+        await PlayIndexAsync(index);
+    }
+
+    [RelayCommand]
+    private void MoveQueueItemUp(QueueItemRow? row)
+    {
+        if (row is null || !_queue.Move(row.Track, -1)) return;
+        RefreshQueueRows();
+        _ = PreloadNeighborAsync();
+    }
+
+    [RelayCommand]
+    private void MoveQueueItemDown(QueueItemRow? row)
+    {
+        if (row is null || !_queue.Move(row.Track, 1)) return;
+        RefreshQueueRows();
+        _ = PreloadNeighborAsync();
+    }
+
+    [RelayCommand]
+    private void RemoveQueueItem(QueueItemRow? row)
+    {
+        if (row is null || !_queue.Remove(row.Track)) return;
+        RefreshQueueRows();
+        _ = PreloadNeighborAsync();
+    }
+
+    private void RefreshQueueRows()
+    {
+        QueueProjection.ReplaceRows(QueueRows, _queue);
+        OnPropertyChanged(nameof(HasQueue));
+    }
+
     private async Task StartQueueAsync(IReadOnlyList<Track> tracks, int index)
     {
         SkipHistoryForCurrent();
-        _queue.Clear();
-        _queue.AddRange(tracks);
+        _queue.Start(tracks, index);
+        RefreshQueueRows();
         await PlayIndexAsync(index);
     }
 
     private async Task PlayIndexAsync(int index)
     {
-        if (_engine is null || index < 0 || index >= _queue.Count) return;
-        _queueIndex = index;
-        var track = _queue[index];
+        if (_engine is null || index < 0 || index >= _queue.Tracks.Count) return;
+        var track = _queue.Tracks[index];
+        _queue.JumpTo(track, out _);
+        RefreshQueueRows();
 
         // Resolving a source can spawn ffprobe or call the core, so keep it off
         // the UI thread.
@@ -1924,9 +2109,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task PreloadNeighborAsync()
     {
         if (_engine is null) return;
-        int next = _queueIndex + 1;
-        if (next < 0 || next >= _queue.Count) return;
-        var track = _queue[next];
+        var next = _queue.NextIndex();
+        if (next is null || next.Value == _queue.CurrentIndex) return;
+        var track = _queue.Tracks[next.Value];
         var source = await Task.Run(() => ResolveSource(track));
         if (source is not null) _engine.PreloadNext(source, track);
     }
@@ -1934,8 +2119,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task NextAsync()
     {
         SkipHistoryForCurrent();
-        if (_queueIndex + 1 < _queue.Count)
-            await PlayIndexAsync(_queueIndex + 1);
+        if (_queue.NextIndex() is { } next)
+            await PlayIndexAsync(next);
         else
         {
             _engine?.Stop();
@@ -1947,7 +2132,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_engine is null) return;
         // Standard behaviour: restart the track unless we're near its start.
-        if (_engine.Position.TotalSeconds > 3 || _queueIndex <= 0)
+        if (_engine.Position.TotalSeconds > 3 || _queue.PreviousIndex() is null)
         {
             _engine.Seek(TimeSpan.Zero);
             SeekHistoryForCurrent(0);
@@ -1958,7 +2143,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         else
         {
             SkipHistoryForCurrent();
-            await PlayIndexAsync(_queueIndex - 1);
+            await PlayIndexAsync(_queue.PreviousIndex()!.Value);
         }
     }
 
@@ -2029,8 +2214,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             if (e.Token is not Track track) return;
             CompleteHistoryForCurrent();
             NowPlaying = track;
-            int idx = _queue.IndexOf(track);
-            if (idx >= 0) _queueIndex = idx;
+            _queue.JumpTo(track, out _);
+            RefreshQueueRows();
             DurationSeconds = _engine?.Duration.TotalSeconds is > 0 and var d ? d : track.DurationSeconds;
             _suppressSeek = true;
             PositionSeconds = 0;
@@ -2129,7 +2314,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 if (files.Count == 0) return null;
                 // Map each queue slot to a distinct file so a two-track queue
                 // exercises the gapless hand-off with real, different audio.
-                int i = _queue.IndexOf(track);
+                int i = _queue.Tracks.ToList().IndexOf(track);
                 if (i < 0) i = 0;
                 return files[i % files.Count];
             }
@@ -2197,6 +2382,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsSongsSelected));
         OnPropertyChanged(nameof(IsAlbumsSelected));
         OnPropertyChanged(nameof(IsArtistsSelected));
+        OnPropertyChanged(nameof(IsGenresSelected));
         OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(IsConnectSelected));
         OnPropertyChanged(nameof(IsSettingsSelected));
@@ -2205,6 +2391,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowHomeEmpty));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
+        OnPropertyChanged(nameof(ShowGenres));
         OnPropertyChanged(nameof(ShowPlaylists));
         OnPropertyChanged(nameof(ShowSearch));
         OnPropertyChanged(nameof(ShowConnect));
@@ -2213,10 +2400,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowArtistDetail));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
         OnPropertyChanged(nameof(ShowMixDetail));
+        OnPropertyChanged(nameof(ShowGenreDetail));
+        OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowDetailPage));
-        OnPropertyChanged(nameof(HasSearchAlbums));
-        OnPropertyChanged(nameof(HasSearchArtists));
-        OnPropertyChanged(nameof(HasSearchTracks));
+        OnPropertyChanged(nameof(HasSearchRows));
+        OnPropertyChanged(nameof(HasQueue));
+        OnPropertyChanged(nameof(ShuffleStateText));
+        OnPropertyChanged(nameof(RepeatStateText));
         OnPropertyChanged(nameof(HasArtistAlbums));
         OnPropertyChanged(nameof(IsLibraryEmpty));
         OnPropertyChanged(nameof(LibrarySummary));

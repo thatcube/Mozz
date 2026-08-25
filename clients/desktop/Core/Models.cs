@@ -94,7 +94,8 @@ public sealed record SuppressedRef(
 public sealed record SearchResults(
     IReadOnlyList<Artist> Artists,
     IReadOnlyList<Album> Albums,
-    IReadOnlyList<Track> Tracks);
+    IReadOnlyList<Track> Tracks,
+    IReadOnlyList<Playlist>? Playlists = null);
 
 public sealed record AlbumReleaseKind(
     string Kind,

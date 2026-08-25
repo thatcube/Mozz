@@ -9,6 +9,7 @@ public enum LibrarySection
     Songs,
     Albums,
     Artists,
+    Genres,
     Playlists,
     Search,
     Connect,
@@ -22,6 +23,8 @@ public enum LibraryPageKind
     ArtistDetail,
     PlaylistDetail,
     MixDetail,
+    GenreDetail,
+    NowPlaying,
 }
 
 public sealed record LibraryPage(
@@ -31,6 +34,7 @@ public sealed record LibraryPage(
     Artist? Artist = null,
     Playlist? Playlist = null,
     string? MixId = null,
+    string? Genre = null,
     string? Title = null)
 {
     public static LibraryPage ForSection(LibrarySection section) =>
@@ -47,6 +51,12 @@ public sealed record LibraryPage(
 
     public static LibraryPage ForMix(string id, string title) =>
         new(LibraryPageKind.MixDetail, MixId: id, Title: title);
+
+    public static LibraryPage ForGenre(string genre) =>
+        new(LibraryPageKind.GenreDetail, Genre: genre, Title: genre);
+
+    public static LibraryPage ForNowPlaying() =>
+        new(LibraryPageKind.NowPlaying, Title: "Now Playing");
 }
 
 public sealed class NavigationStack<T>(T initial)
