@@ -98,6 +98,8 @@ Platform/INowPlayingIntegration.cs  OS "now playing" seam (SMTC / MPNowPlayingIn
 
 ## Requirements coverage
 
+- **OS now-playing** — macOS card implemented and tested against the real
+  framework; Windows SMTC outstanding.
 - **Cross-platform** — miniaudio covers Windows/macOS/Linux from one codebase;
   ffmpeg is on every desktop. Verified running and *audible* on macOS (arm64).
 - **Formats** — anything ffmpeg decodes; WAV additionally has a managed reader.
@@ -116,12 +118,16 @@ Platform/INowPlayingIntegration.cs  OS "now playing" seam (SMTC / MPNowPlayingIn
 
 ## What is stubbed / not yet done (honest list)
 
-- **Windows SMTC and macOS `MPNowPlayingInfoCenter`.** The `INowPlayingIntegration`
-  seam is wired through the view model (play/pause/next/previous events and
-  metadata/state/position updates), but the concrete platform surfaces are
-  `NoopNowPlayingIntegration` today. SMTC needs WinRT interop and can only be
-  verified on Windows; the macOS side needs Objective-C runtime interop. Filling
-  either in is self-contained and touches no playback code.
+- **Windows SMTC.** Needs WinRT interop and can only be verified on a Windows
+  machine. The `INowPlayingIntegration` seam is wired through the view model, so
+  filling it in touches no playback code.
+- **Media keys, on any platform.** macOS now publishes to
+  `MPNowPlayingInfoCenter` (the Control Center card — see
+  `Platform/MacNowPlayingIntegration.cs`), but *commands* need
+  `MPRemoteCommandCenter`, whose API takes Objective-C blocks. Constructing a
+  block from C# means hand-building its layout — isa pointer, flags, invoke
+  function pointer — which is a materially riskier piece of interop than message
+  sending, so the transport events are declared and not yet raised.
 - **In-process libav decoder.** The subprocess decoder is deliberate (ABI-proof,
   clean license boundary). If the process-per-track overhead ever matters, a
   second `IPcmDecoder` can be dropped in behind `DecoderFactory` with no other
