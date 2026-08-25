@@ -336,6 +336,40 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertEqual(deluxeTracks.map(\.title), ["Xxplosive"])
     }
 
+    func testAppearsOnAlbumsFindsOnlyOtherArtistsAlbumsAndPagesByCursor() async throws {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        let repo = LibraryRepository(db)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        try await writer.upsertAlbums([
+            Album(id: "own", title: "Own Album", artistName: "Featured", artistID: "ar1", trackCount: 1),
+            Album(id: "appears-a", title: "A Host Album", artistName: "Host A", artistID: "ar2", trackCount: 2),
+            Album(id: "appears-b", title: "B Host Album", artistName: "Host B", artistID: "ar3", trackCount: 2),
+            Album(id: "other", title: "Other Album", artistName: "Host C", artistID: "ar4", trackCount: 1),
+        ], serverId: server.id)
+        try await writer.upsertTracks([
+            Track(id: "own-track", title: "Own", albumID: "own", artistName: "Featured", artistID: "ar1"),
+            Track(id: "feature-a", title: "Feature A", albumID: "appears-a", artistName: "Featured", artistID: "ar1"),
+            Track(id: "host-a", title: "Host A", albumID: "appears-a", artistName: "Host A", artistID: "ar2"),
+            Track(id: "feature-b", title: "Feature B", albumID: "appears-b", artistName: "Featured", artistID: "ar1"),
+            Track(id: "host-b", title: "Host B", albumID: "appears-b", artistName: "Host B", artistID: "ar3"),
+            Track(id: "unrelated", title: "Other", albumID: "other", artistName: "Host C", artistID: "ar4"),
+        ], serverId: server.id)
+
+        let first = try await repo.appearsOnAlbums(forArtistRemoteId: "ar1", serverId: server.id, after: nil, limit: 1)
+        XCTAssertEqual(first.rows.map(\.remoteId), ["appears-a"])
+        let cursor = try XCTUnwrap(first.next)
+        let second = try await repo.appearsOnAlbums(forArtistRemoteId: "ar1", serverId: server.id, after: cursor, limit: 10)
+        XCTAssertEqual(second.rows.map(\.remoteId), ["appears-b"])
+        XCTAssertNil(second.next)
+
+        let all = first.rows + second.rows
+        XCTAssertEqual(Set(all.map(\.remoteId)), ["appears-a", "appears-b"])
+        XCTAssertFalse(all.contains { $0.remoteId == "own" })
+        XCTAssertFalse(all.contains { $0.remoteId == "other" })
+    }
+
     func testAlbumGroupKeyPolicy() {
         // Case/diacritic/whitespace-insensitive; edition markers preserved.
         XCTAssertEqual(
