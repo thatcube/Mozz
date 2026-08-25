@@ -276,24 +276,57 @@ public struct SyntheticCatalog: Sendable {
         return index % 2 == 0 ? .cdFlac : .mp3
     }
 
-    // MARK: Name pools (small pools + index mixing = realistic variety + repeats)
+    // MARK: Name pools (nested cycles = broad variety from small pools)
 
-    private static func pick(_ pool: [String], _ seed: Int) -> String {
-        // Knuth multiplicative hash spreads sequential indices across the pool.
-        let mixed = (seed &* 2_654_435_761) & 0x7fff_ffff
-        return pool[mixed % pool.count]
-    }
-
+    /// Nested cycles, for the same reason as ``albumTitle`` — the old linear pair
+    /// repeated every lcm(16, 12) = 48 artists.
     private static func artistName(_ index: Int) -> String {
-        "\(pick(firstNames, index &* 3 + 1)) \(pick(lastNames, index &* 7 + 2))"
+        let first = firstNames[index % firstNames.count]
+        let last = lastNames[(index / firstNames.count) % lastNames.count]
+        return "\(first) \(last)"
     }
 
+    /// Album titles walk the adjective and noun lists on different cycles for the
+    /// same reason track titles do — see ``trackTitle``. Both indices used to be
+    /// linear in `index`, and because 5, 11 and 16 are all coprime the pair was a
+    /// pure function of `index % 16`: an entire 400-album library rendered as
+    /// sixteen titles repeated twenty-five times. Nesting the cycles gives
+    /// 16 × 16 = 256, and libraries past that get a sequel numeral rather than a
+    /// silent collision.
     private static func albumTitle(_ index: Int) -> String {
-        "\(pick(adjectives, index &* 5 + 3)) \(pick(nouns, index &* 11 + 4))"
+        let adjective = adjectives[index % adjectives.count]
+        let noun = nouns[(index / adjectives.count) % nouns.count]
+        let cycle = index / (adjectives.count * nouns.count)
+        guard cycle > 0 else { return "\(adjective) \(noun)" }
+        return "\(adjective) \(noun) \(romanNumeral(cycle + 1))"
     }
 
+    private static func romanNumeral(_ value: Int) -> String {
+        let table: [(Int, String)] = [(10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+        var remaining = value
+        var result = ""
+        for (amount, symbol) in table {
+            while remaining >= amount {
+                result += symbol
+                remaining -= amount
+            }
+        }
+        return result
+    }
+
+    /// Track titles walk the verb and noun lists on *different* cycles, so the
+    /// two indices don't advance in lockstep.
+    ///
+    /// Both used to be linear in `index`, which meant they wrapped together and
+    /// produced only lcm(12, 16) = 48 distinct titles across an entire library —
+    /// so a 3,000-track catalog sorted by title showed sixty identical rows in a
+    /// row, and the FTS index was far smaller and more repetitive than any real
+    /// library. Advancing the noun once per full pass of the verbs gives the
+    /// full 192, and a more honest search benchmark with it.
     private static func trackTitle(_ index: Int) -> String {
-        "\(pick(verbs, index &* 13 + 5)) the \(pick(nouns, index &* 17 + 6))"
+        let verb = verbs[index % verbs.count]
+        let noun = nouns[(index / verbs.count) % nouns.count]
+        return "\(verb) the \(noun)"
     }
 
     private static func genre(_ index: Int) -> String { genres[index % genres.count] }

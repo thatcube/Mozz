@@ -12,7 +12,7 @@ struct AlbumsView: View {
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 16)]
 
     init() {
-        _list = StateObject(wrappedValue: PagedList { _, _ in [] })
+        _list = StateObject(wrappedValue: PagedList { _, _ in .empty })
     }
 
     var body: some View {
@@ -75,8 +75,8 @@ struct AlbumsView: View {
         let repo = env.repository
         let serverId = env.active?.connection.id
         await MainActor.run {
-            list.rebind { offset, limit in
-                try await repo.albumsPage(serverId: serverId, offset: offset, limit: limit)
+            list.rebind { cursor, limit in
+                try await repo.albumsPage(serverId: serverId, after: cursor, limit: limit)
             }
         }
         await list.loadInitial()

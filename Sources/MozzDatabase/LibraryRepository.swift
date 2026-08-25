@@ -100,6 +100,108 @@ public struct LibraryRepository: Sendable {
     }
 
     // MARK: Paginated browse (alphabetical)
+    //
+    // Two shapes, deliberately. `…Page(offset:limit:)` is what the iOS views and
+    // CarPlay use; `…Page(after:limit:)` is the seek/keyset form, and is what a
+    // client scrolling a large library should use.
+    //
+    // OFFSET has two problems that only show up at real library sizes, and both
+    // were measured on a 100,000-track catalog rather than assumed.
+    //
+    // It is O(offset). SQLite must walk and discard every skipped index entry, so
+    // a page costs 10 ms at the top of the list and 197 ms near the bottom — a
+    // nineteen-fold slowdown precisely when someone is scrolling fast.
+    //
+    // Worse, it is wrong whenever the table changes underneath it, and Mozz syncs
+    // in the background *while you browse*, which is exactly that. Inserting 40
+    // rows during a full paged walk of 100,000 made 40 tracks appear twice and 40
+    // others never appear at all. Nothing warns you; the list simply lies.
+    //
+    // A cursor fixes both. It names the last row seen rather than counting rows
+    // skipped, so a page is an index seek regardless of depth, and rows arriving
+    // elsewhere in the order cannot shift it.
+
+    /// An opaque position in a paged listing. Clients echo it back; only this
+    /// file knows what is inside, which is what allows the sort keys to change
+    /// without a client change.
+    public struct PageCursor: Sendable, Hashable {
+        let keys: [String]
+        let id: Int64
+
+        public init(keys: [String], id: Int64) {
+            self.keys = keys
+            self.id = id
+        }
+
+        /// Round-trips through a string so the FFI can carry it as JSON.
+        public var token: String {
+            let joined = (keys + [String(id)]).joined(separator: "\u{1F}")
+            return Data(joined.utf8).base64EncodedString()
+        }
+
+        public init?(token: String) {
+            guard let data = Data(base64Encoded: token),
+                  let text = String(data: data, encoding: .utf8) else { return nil }
+            var parts = text.components(separatedBy: "\u{1F}")
+            guard parts.count >= 2, let id = Int64(parts.removeLast()) else { return nil }
+            self.keys = parts
+            self.id = id
+        }
+    }
+
+    /// `(k1, k2, …, id) > (v1, v2, …, id)` written out longhand, preceded by a
+    /// redundant bound on the first key.
+    ///
+    /// SQLite supports row-value comparison, but not with a per-column COLLATE,
+    /// and these sorts are all NOCASE — so the comparison has to be expanded into
+    /// alternatives.
+    ///
+    /// The leading `k1 >= ?` looks redundant and is not. A bare chain of ORs
+    /// gives SQLite no range constraint it can seek with, so the plan degrades to
+    /// `SEARCH track USING INDEX idx_track_sort (serverId=?)` — it enters the
+    /// index at the start of the server's rows and filters forward, which at the
+    /// bottom of a 100,000-track library means walking almost the whole index.
+    /// Measured: 7.82 ms without the bound, 0.47 ms with it, for the same page.
+    /// With it the plan becomes `(serverId=? AND sortTitle>?)` and the seek is
+    /// what it should have been all along.
+    private static func seekClause(_ columns: [String], _ cursor: PageCursor) -> String {
+        var alternatives: [String] = []
+        for (index, column) in columns.enumerated() {
+            var equalities = (0..<index).map { "\(columns[$0]) = ? COLLATE NOCASE" }
+            equalities.append("\(column) > ? COLLATE NOCASE")
+            alternatives.append("(" + equalities.joined(separator: " AND ") + ")")
+        }
+        // Every key equal — fall through to the unique tiebreaker.
+        let allEqual = columns.map { "\($0) = ? COLLATE NOCASE" }.joined(separator: " AND ")
+        alternatives.append("(\(allEqual) AND id > ?)")
+
+        let seekable = "\(columns[0]) >= ? COLLATE NOCASE"
+        return "\(seekable) AND (" + alternatives.joined(separator: " OR ") + ")"
+    }
+
+    /// Server filter, then the seek keys, then the limit — the order every
+    /// keyset query below binds them in.
+    private static func pagedArgs(
+        _ serverId: ServerID?, _ cursor: PageCursor?, _ limit: Int
+    ) -> StatementArguments {
+        var args = serverArgs(serverId)
+        if let cursor { args += seekArgs(cursor) }
+        args += [limit]
+        return args
+    }
+
+    /// Arguments for ``seekClause``, in the order the clause consumes them.
+    private static func seekArgs(_ cursor: PageCursor) -> StatementArguments {
+        // The leading seekable bound consumes the first key before the
+        // alternatives do; see `seekClause`.
+        var values: [any DatabaseValueConvertible] = [cursor.keys[0]]
+        for index in 0..<cursor.keys.count {
+            values.append(contentsOf: cursor.keys[0...index].map { $0 as any DatabaseValueConvertible })
+        }
+        values.append(contentsOf: cursor.keys.map { $0 as any DatabaseValueConvertible })
+        values.append(cursor.id)
+        return StatementArguments(values)
+    }
 
     public func artistsPage(serverId: ServerID? = nil, offset: Int, limit: Int) async throws -> [ArtistRecord] {
         try await database.read { db in
@@ -142,6 +244,82 @@ public struct LibraryRepository: Sendable {
                 LIMIT ? OFFSET ?
                 """, arguments: Self.serverArgs(serverId) + [limit, offset])
         }
+    }
+
+    // MARK: Keyset paging
+
+    /// One page of a listing, plus where to resume.
+    public struct Page<Row: Sendable>: Sendable {
+        public var rows: [Row]
+        /// `nil` when this was the last page. A client that stops on nil cannot
+        /// loop forever, which an offset-based caller has to reason about itself.
+        public var next: PageCursor?
+
+        public init(rows: [Row], next: PageCursor? = nil) {
+            self.rows = rows
+            self.next = next
+        }
+
+        /// An already-exhausted page, for a view's placeholder data source
+        /// before the real repository is injected.
+        public static var empty: Page<Row> { Page(rows: [], next: nil) }
+    }
+
+    public func artistsPage(
+        serverId: ServerID? = nil, after cursor: PageCursor?, limit: Int
+    ) async throws -> Page<ArtistRecord> {
+        let seek = cursor.map { " AND \(Self.seekClause(["sortName", "name"], $0))" } ?? ""
+        let rows = try await database.read { db in
+            try ArtistRecord.fetchAll(db, sql: """
+                SELECT * FROM artist
+                \(Self.serverClause(serverId, forceWhere: true))\(seek)
+                ORDER BY sortName COLLATE NOCASE, name COLLATE NOCASE, id
+                LIMIT ?
+                """, arguments: Self.pagedArgs(serverId, cursor, limit))
+        }
+        return Page(rows: rows, next: rows.count < limit ? nil : rows.last.map {
+            PageCursor(keys: [$0.sortName ?? $0.name, $0.name], id: $0.id ?? 0)
+        })
+    }
+
+    public func tracksPage(
+        serverId: ServerID? = nil, after cursor: PageCursor?, limit: Int
+    ) async throws -> Page<TrackRecord> {
+        let seek = cursor.map { " AND \(Self.seekClause(["sortTitle", "title"], $0))" } ?? ""
+        let rows = try await database.read { db in
+            try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track
+                \(Self.serverClause(serverId, forceWhere: true))\(seek)
+                ORDER BY sortTitle COLLATE NOCASE, title COLLATE NOCASE, id
+                LIMIT ?
+                """, arguments: Self.pagedArgs(serverId, cursor, limit))
+        }
+        return Page(rows: rows, next: rows.count < limit ? nil : rows.last.map {
+            PageCursor(keys: [$0.sortTitle ?? $0.title, $0.title], id: $0.id ?? 0)
+        })
+    }
+
+    /// Albums group by `albumGroupKey`, so the cursor rides that single key. The
+    /// grouping already collapses duplicates, and the key is unique per group,
+    /// so `id` is only a formality here — but it costs nothing and keeps every
+    /// listing's cursor the same shape.
+    public func albumsPage(
+        serverId: ServerID? = nil, after cursor: PageCursor?, limit: Int
+    ) async throws -> Page<AlbumRecord> {
+        let seek = cursor.map { " AND \(Self.seekClause(["albumGroupKey"], $0))" } ?? ""
+        let rows = try await database.read { db in
+            try AlbumRecord.fetchAll(db, sql: """
+                SELECT *, \(Self.albumRepresentative) FROM album
+                \(Self.serverClause(serverId, forceWhere: true))
+                AND \(Self.albumHasTracks)\(seek)
+                GROUP BY serverId, albumGroupKey
+                ORDER BY albumGroupKey, id
+                LIMIT ?
+                """, arguments: Self.pagedArgs(serverId, cursor, limit))
+        }
+        return Page(rows: rows, next: rows.count < limit ? nil : rows.last.map {
+            PageCursor(keys: [$0.albumGroupKey], id: $0.id ?? 0)
+        })
     }
 
     /// Domain tracks for a set of remote ids on a server, returned in the SAME
@@ -466,26 +644,63 @@ public struct LibraryRepository: Sendable {
         return try await database.read { db in
             let serverFilter = serverId != nil
             func order(_ table: String) -> String { ranked ? "ORDER BY bm25(\(table))" : "" }
+            // CROSS JOIN, with the FTS table first, is a deliberate optimizer
+            // instruction rather than a stylistic choice: SQLite documents that
+            // CROSS JOIN suppresses table reordering, which pins the FTS table
+            // as the outer loop.
+            //
+            // Written the natural way round, the planner is free to drive from
+            // the base table instead — scanning all 100k tracks and probing the
+            // index once per row. Apple's SQLite has STAT4 statistics and picks
+            // correctly; a stock build has no statistics for a virtual table and
+            // picked the catastrophic plan, turning a 16 ms search into 54
+            // seconds on Windows. Pinning the order makes the query fast on any
+            // SQLite, which is worth more than relying on a good planner.
             let artists = try ArtistRecord.fetchAll(db, sql: """
-                SELECT artist.* FROM artist
-                JOIN artist_fts ON artist_fts.rowid = artist.id
+                SELECT artist.* FROM artist_fts
+                CROSS JOIN artist ON artist.id = artist_fts.rowid
                 WHERE artist_fts MATCH ?\(serverFilter ? " AND artist.serverId = ?" : "")
                 \(order("artist_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             let albums = try AlbumRecord.fetchAll(db, sql: """
-                SELECT album.* FROM album
-                JOIN album_fts ON album_fts.rowid = album.id
+                SELECT album.* FROM album_fts
+                CROSS JOIN album ON album.id = album_fts.rowid
                 WHERE album_fts MATCH ?\(serverFilter ? " AND album.serverId = ?" : "")
                 \(order("album_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType * 5))
                 .dedupedByAlbumGroup(limit: limitPerType)
             let tracks = try TrackRecord.fetchAll(db, sql: """
-                SELECT track.* FROM track
-                JOIN track_fts ON track_fts.rowid = track.id
+                SELECT track.* FROM track_fts
+                CROSS JOIN track ON track.id = track_fts.rowid
                 WHERE track_fts MATCH ?\(serverFilter ? " AND track.serverId = ?" : "")
                 \(order("track_fts")) LIMIT ?
                 """, arguments: Self.matchArgs(pattern, serverId, limitPerType))
             return SearchResults(artists: artists, albums: albums, tracks: tracks)
+        }
+    }
+
+    /// The query plan SQLite chooses for the track search, as text.
+    ///
+    /// Exposed for the cross-platform spike: a search that is fast on one
+    /// platform and pathological on another is almost always a different join
+    /// order, and the plan says so immediately where a stopwatch only says
+    /// "slow". A healthy plan scans `track_fts` and looks `track` up by rowid;
+    /// an unhealthy one scans `track`.
+    public func searchQueryPlan(_ query: String, serverId: ServerID? = nil) async throws -> [String] {
+        guard let pattern = FTSQuery.pattern(for: query) else { return [] }
+        let serverFilter = serverId != nil
+        return try await database.read { db in
+            // EXPLAIN QUERY PLAN returns (id, parent, notused, detail); the
+            // human-readable part is `detail`, and fetching the first column
+            // silently yields row ids instead.
+            try Row.fetchAll(db, sql: """
+                EXPLAIN QUERY PLAN
+                SELECT track.* FROM track_fts
+                CROSS JOIN track ON track.id = track_fts.rowid
+                WHERE track_fts MATCH ?\(serverFilter ? " AND track.serverId = ?" : "")
+                ORDER BY bm25(track_fts) LIMIT ?
+                """, arguments: Self.matchArgs(pattern, serverId, 20))
+                .map { row in (row["detail"] as String?) ?? "" }
         }
     }
 
@@ -560,6 +775,13 @@ public struct LibraryRepository: Sendable {
 
     private static func serverClause(_ serverId: ServerID?) -> String {
         serverId != nil ? "WHERE serverId = ?" : ""
+    }
+
+    /// As above, but always emits a WHERE so callers can append `AND …` without
+    /// knowing whether a server filter was present.
+    private static func serverClause(_ serverId: ServerID?, forceWhere: Bool) -> String {
+        guard forceWhere else { return serverClause(serverId) }
+        return serverId != nil ? "WHERE serverId = ?" : "WHERE 1"
     }
 
     private static func serverArgs(_ serverId: ServerID?) -> StatementArguments {

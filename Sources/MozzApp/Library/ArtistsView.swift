@@ -12,7 +12,7 @@ struct ArtistsView: View {
 
     init() {
         // Placeholder; real fetch is injected in `.task` once env is available.
-        _list = StateObject(wrappedValue: PagedList { _, _ in [] })
+        _list = StateObject(wrappedValue: PagedList { _, _ in .empty })
     }
 
     var body: some View {
@@ -52,8 +52,8 @@ struct ArtistsView: View {
         let serverId = env.active?.connection.id
         // Rebind the paged fetch to the live repository/server.
         await MainActor.run {
-            list.rebind { offset, limit in
-                try await repo.artistsPage(serverId: serverId, offset: offset, limit: limit)
+            list.rebind { cursor, limit in
+                try await repo.artistsPage(serverId: serverId, after: cursor, limit: limit)
             }
         }
         await list.loadInitial()
