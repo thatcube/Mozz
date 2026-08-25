@@ -23,6 +23,7 @@ enum Schema {
         registerV15(&migrator)
         registerV16(&migrator)
         registerV17(&migrator)
+        registerV18(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -630,4 +631,199 @@ enum Schema {
         }
     }
 
+    /// v18 — Plex server identity repair. Plex resources are servers and their
+    /// `connections` are alternate addresses for the same machine. Earlier builds
+    /// keyed Plex servers by URL, so one resource could create rows for both a
+    /// Docker bridge URI and a LAN URI. Re-key every dependent row to the stable
+    /// machine id and remove duplicate server rows in one migration.
+    private static func registerV18(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v18.plexMachineServerIdentity") { db in
+            try repairPlexServerIdentities(db)
+        }
+    }
+
+    static func repairPlexServerIdentities(_ db: Database) throws {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT id, kind, name, baseURL, userID, clientIdentifier, musicSectionID
+            FROM server
+            WHERE kind = 'plex'
+            """)
+        let groups = Dictionary(grouping: rows) { row in
+            plexMachineIdentifier(serverId: row["id"], baseURL: row["baseURL"]) ?? ""
+        }.filter { !$0.key.isEmpty }
+
+        for (machine, servers) in groups {
+            let canonicalId = "plex-\(machine)"
+            guard servers.contains(where: { ($0["id"] as String) != canonicalId }) else { continue }
+
+            let chosen = servers.sorted { lhs, rhs in
+                let lhsId: String = lhs["id"]
+                let rhsId: String = rhs["id"]
+                let lhsURL: String = lhs["baseURL"]
+                let rhsURL: String = rhs["baseURL"]
+                let lhsRank = (plexAddressRank(lhsURL), lhsId == canonicalId ? 0 : 1)
+                let rhsRank = (plexAddressRank(rhsURL), rhsId == canonicalId ? 0 : 1)
+                return lhsRank < rhsRank
+            }.first!
+            let section: String? = chosen["musicSectionID"]
+                ?? servers.compactMap { $0["musicSectionID"] as String? }.first { !$0.isEmpty }
+
+            try db.execute(sql: """
+                INSERT INTO server (id, kind, name, baseURL, userID, clientIdentifier, musicSectionID)
+                VALUES (?, 'plex', ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    kind = excluded.kind,
+                    name = excluded.name,
+                    baseURL = excluded.baseURL,
+                    userID = excluded.userID,
+                    clientIdentifier = excluded.clientIdentifier,
+                    musicSectionID = COALESCE(server.musicSectionID, excluded.musicSectionID)
+                """, arguments: [
+                    canonicalId,
+                    chosen["name"] as String,
+                    chosen["baseURL"] as String,
+                    chosen["userID"] as String?,
+                    chosen["clientIdentifier"] as String,
+                    section,
+                ])
+
+            for oldId in servers.map({ $0["id"] as String }).filter({ $0 != canonicalId }) {
+                try mergeUniqueServerTable(db, table: "artist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "album", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "track", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "playlist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "favorite_outbox", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "suppressed_ref", columns: ["scope", "ref"], oldId: oldId, canonicalId: canonicalId)
+                try mergeSingleServerRow(db, table: "serverCapabilities", oldId: oldId, canonicalId: canonicalId)
+                try mergeSingleServerRow(db, table: "catalogSyncRun", oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "catalogSyncProgress", columns: ["phase"], oldId: oldId, canonicalId: canonicalId)
+                try rekeyTrackRefTable(db, table: "play_event", column: "track_ref", oldId: oldId, canonicalId: canonicalId)
+                try rekeyTrackRefTable(db, table: "track_features", column: "track_ref", oldId: oldId, canonicalId: canonicalId, primaryKey: true)
+                try rekeyRecommendationItems(db, oldId: oldId, canonicalId: canonicalId)
+            }
+
+            let stale = servers.map { $0["id"] as String }.filter { $0 != canonicalId }
+            if !stale.isEmpty {
+                try db.execute(
+                    sql: "DELETE FROM server WHERE id IN (\(stale.map { _ in "?" }.joined(separator: ",")))",
+                    arguments: StatementArguments(stale)
+                )
+            }
+        }
+    }
+
+    private static func mergeUniqueServerTable(
+        _ db: Database,
+        table: String,
+        columns: [String],
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        let equality = columns.map { "old.\($0) = \(table).\($0)" }.joined(separator: " AND ")
+        try db.execute(sql: """
+            DELETE FROM \(table)
+            WHERE serverId = ?
+              AND EXISTS (
+                SELECT 1 FROM \(table) old
+                WHERE old.serverId = ? AND \(equality)
+              )
+            """, arguments: [canonicalId, oldId])
+        try db.execute(sql: "UPDATE \(table) SET serverId = ? WHERE serverId = ?", arguments: [canonicalId, oldId])
+    }
+
+    private static func mergeSingleServerRow(
+        _ db: Database,
+        table: String,
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        try db.execute(
+            sql: "DELETE FROM \(table) WHERE serverId = ? AND EXISTS (SELECT 1 FROM \(table) WHERE serverId = ?)",
+            arguments: [canonicalId, oldId]
+        )
+        try db.execute(sql: "UPDATE \(table) SET serverId = ? WHERE serverId = ?", arguments: [canonicalId, oldId])
+    }
+
+    private static func rekeyTrackRefTable(
+        _ db: Database,
+        table: String,
+        column: String,
+        oldId: String,
+        canonicalId: String,
+        primaryKey: Bool = false
+    ) throws {
+        let prefix = "\(oldId):"
+        let prefixLength = prefix.count
+        let suffixStart = oldId.count + 1
+        if primaryKey {
+            try db.execute(sql: """
+                DELETE FROM \(table)
+                WHERE \(column) IN (
+                    SELECT ? || substr(old.\(column), ?)
+                    FROM \(table) old
+                    WHERE substr(old.\(column), 1, ?) = ?
+                )
+                """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+        }
+        try db.execute(sql: """
+            UPDATE \(table)
+            SET \(column) = ? || substr(\(column), ?)
+            WHERE substr(\(column), 1, ?) = ?
+            """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+    }
+
+    private static func rekeyRecommendationItems(_ db: Database, oldId: String, canonicalId: String) throws {
+        let prefix = "\(oldId):"
+        let prefixLength = prefix.count
+        let suffixStart = oldId.count + 1
+        try db.execute(sql: """
+            DELETE FROM recommendation_item
+            WHERE EXISTS (
+                SELECT 1 FROM recommendation_item old
+                WHERE substr(old.track_ref, 1, ?) = ?
+                  AND recommendation_item.set_id = old.set_id
+                  AND recommendation_item.track_ref = ? || substr(old.track_ref, ?)
+            )
+            """, arguments: [prefixLength, prefix, canonicalId, suffixStart])
+        try db.execute(sql: """
+            UPDATE recommendation_item
+            SET track_ref = ? || substr(track_ref, ?)
+            WHERE substr(track_ref, 1, ?) = ?
+            """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+    }
+
+    private static func plexMachineIdentifier(serverId: String, baseURL: String) -> String? {
+        if serverId.hasPrefix("plex-"),
+           !serverId.hasPrefix("plex-http://"),
+           !serverId.hasPrefix("plex-https://") {
+            return String(serverId.dropFirst("plex-".count)).nonEmpty
+        }
+        let urlString = serverId.hasPrefix("plex-http") ? String(serverId.dropFirst("plex-".count)) : baseURL
+        guard let host = URL(string: urlString)?.host?.lowercased() else { return nil }
+        let suffix = ".plex.direct"
+        guard host.hasSuffix(suffix) else { return nil }
+        let withoutSuffix = String(host.dropLast(suffix.count))
+        guard let dot = withoutSuffix.lastIndex(of: ".") else { return nil }
+        return String(withoutSuffix[withoutSuffix.index(after: dot)...]).nonEmpty
+    }
+
+    private static func plexAddressRank(_ baseURL: String) -> Int {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return 1 }
+        let suffix = ".plex.direct"
+        guard host.hasSuffix(suffix) else { return 0 }
+        let encodedAddress = host.dropLast(suffix.count).split(separator: ".").first.map { $0.replacingOccurrences(of: "-", with: ".") }
+        return isDockerBridgeAddress(encodedAddress) ? 2 : 0
+    }
+
+    private static func isDockerBridgeAddress(_ address: String?) -> Bool {
+        guard let address else { return false }
+        let parts = address.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        return parts[0] == 172 && (16...31).contains(parts[1])
+    }
+
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }
