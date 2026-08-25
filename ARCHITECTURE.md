@@ -32,12 +32,12 @@ That is not an aspiration. Measured, by `wc -l` on `Sources/`:
 
 | | Lines | Runs on |
 |---|---:|---|
-| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment` | **17,826** | every platform |
-| `MozzFFI` — the C ABI facade over it | 1,663 | every non-Apple platform |
-| `MozzPlayback` — AVFoundation engine | 2,688 | Apple only, **correctly** |
+| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment` | **17,831** | every platform |
+| `MozzFFI` — the C ABI facade over it | 1,669 | every non-Apple platform |
+| `MozzPlayback` — AVFoundation engine | 2,715 | Apple only, **correctly** |
 | `MozzDownloads` — background `URLSession` | 463 | Apple only, **correctly** |
 | `MozzApp` — SwiftUI | 21,836 | Apple only, **correctly** |
-| `clients/desktop` — C# / Avalonia UI + audio | 4,858 | Windows, macOS, Linux |
+| `clients/desktop` — C# / Avalonia UI, audio and artwork | 6,594 | Windows, macOS, Linux |
 
 So the database, all three server clients, sync, search, listening history, cross-device
 continuity, recommendations and artwork enrichment are written once.
@@ -108,6 +108,25 @@ the queue hash independently and compare it, so a drift between platforms would 
 months later as devices that refuse to pair. `SpecConformanceTests` reads those fixtures
 from the repo rather than a test bundle, precisely so Swift and the C# harness check
 against the same bytes.
+
+### What running the same tests on three operating systems actually catches
+
+The desktop job runs the identical C# suite on Windows, macOS and Linux rather than only on
+the machine the code was written on, and that is not ceremony. Three defects in this layer
+were invisible on a developer Mac and were caught only by CI: `Path.Combine` punctuating the
+*Unix* ffmpeg candidates with a backslash when the cross-platform test ran on Windows; a
+pipeline drain loop bounded by an iteration count instead of a clock, which on a busy runner
+exhausted its guard before the audio pump had filled the ring — and since it is the reader
+that raises `PlaybackEnded`, once the loop stopped rendering the event could never arrive at
+all; and an artwork test that slept twenty milliseconds and assumed a thread-pool
+continuation had run by then. All three passed locally, every time, for as long as anyone
+ran them locally.
+
+The common shape is worth naming: a test that synchronises on a fixed sleep or a spin count
+is measuring the machine rather than the behaviour, so it silently belongs to whichever
+machine it was written on. Wait on the condition, with a deadline. One of those tests was
+also passing for the wrong reason entirely — it asserted that no error was reported but never
+checked the track had played, so it would have held even if nothing decoded.
 
 ### The rule for new work
 
