@@ -130,10 +130,27 @@ checked the track had played, so it would have held even if nothing decoded.
 
 ### The rule for new work
 
-*Does it need a screen or a speaker?* If no, it belongs in `Sources/` and every platform
-gets it. If yes, it belongs in the platform layer and gets written per platform. When in
-doubt it goes in the core — the FFI facade is cheap to widen and a duplicated
-implementation never converges again.
+**Every feature ships on every platform.** Nothing is built for iOS alone, or for
+Windows alone, or for the desktop alone. If a capability exists on one client it
+must exist on all of them. That is the whole point of carrying a shared core: the
+moment a feature lands on one platform and not the others, the core has stopped
+paying for itself and the apps have started diverging.
+
+Concretely, a feature is finished when the logic lives once in `Sources/`, the
+C ABI in `Sources/MozzFFI` exposes it, and both UI shells — SwiftUI and Avalonia —
+present it. A feature that works on iOS because it calls a Swift API directly, and
+is invisible elsewhere because nobody widened the facade, is half-built. That is
+how the generated mixes came to exist in the core, ship on the phone, and be
+unreachable from the desktop.
+
+*Does it need a screen or a speaker?* If no, it belongs in `Sources/` and every
+platform gets it. If yes, it belongs in the platform layer and gets written per
+platform. When in doubt it goes in the core — the FFI facade is cheap to widen and
+a duplicated implementation never converges again.
+
+Note that "the desktop" is three operating systems, not one. Anything added to
+`clients/desktop` has to build and run on Windows, macOS and Linux, which is why
+CI runs all three rather than trusting the machine the code was written on.
 
 ---
 
