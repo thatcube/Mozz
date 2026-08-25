@@ -151,7 +151,7 @@ public sealed class ArtworkImage : Control
             if (ArtistHero && ArtworkPresentation.ShouldUseCircularArtistPortrait(bitmap.Size.Width, bitmap.Size.Height))
             {
                 DrawFallback(context, bounds, rounded);
-                var side = Math.Min(bounds.Width, bounds.Height) * 0.58;
+                var side = Math.Min(bounds.Width, bounds.Height) * 0.78;
                 side = Math.Clamp(side, 132, Math.Min(220, Math.Min(bounds.Width, bounds.Height)));
                 var target = new Rect((bounds.Width - side) / 2, (bounds.Height - side) / 2, side, side);
                 using (context.PushClip(new RoundedRect(target, side / 2)))

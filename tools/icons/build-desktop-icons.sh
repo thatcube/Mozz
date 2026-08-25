@@ -35,6 +35,7 @@ OUT="clients/desktop/Assets/Icons.axaml"
 # the whole folder, so the generated dictionary stays legible.
 ICONS="
 arrows-shuffle      Shuffle
+chevron-left        ChevronLeft
 player-skip-back    SkipBack
 player-play         Play
 player-pause        Pause
@@ -49,6 +50,7 @@ user-circle         Artist
 playlist            Playlist
 server              Server
 search              Search
+heart-filled        Heart
 "
 
 tmp="${OUT}.tmp"

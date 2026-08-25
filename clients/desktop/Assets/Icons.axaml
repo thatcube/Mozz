@@ -5,6 +5,7 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StreamGeometry x:Key="IconShuffle">M18 4l3 3l-3 3 M18 20l3 -3l-3 -3 M3 7h3a5 5 0 0 1 5 5a5 5 0 0 0 5 5h5 M21 7h-5a4.978 4.978 0 0 0 -3 1m-4 8a4.984 4.984 0 0 1 -3 1h-3</StreamGeometry>
+    <StreamGeometry x:Key="IconChevronLeft">M15 6l-6 6l6 6</StreamGeometry>
     <StreamGeometry x:Key="IconSkipBack">F1 M19.496 4.136l-12 7a1 1 0 0 0 0 1.728l12 7a1 1 0 0 0 1.504 -.864v-14a1 1 0 0 0 -1.504 -.864z M4 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z</StreamGeometry>
     <StreamGeometry x:Key="IconPlay">F1 M6 4v16a1 1 0 0 0 1.524 .852l13 -8a1 1 0 0 0 0 -1.704l-13 -8a1 1 0 0 0 -1.524 .852z</StreamGeometry>
     <StreamGeometry x:Key="IconPause">F1 M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z</StreamGeometry>
@@ -19,5 +20,5 @@
     <StreamGeometry x:Key="IconPlaylist">M11 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0 M17 17v-13h4 M13 5h-10 M3 9l10 0 M9 13h-6</StreamGeometry>
     <StreamGeometry x:Key="IconServer">M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3 M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2 M7 8l0 .01 M7 16l0 .01</StreamGeometry>
     <StreamGeometry x:Key="IconSearch">M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0 M21 21l-6 -6</StreamGeometry>
-    <StreamGeometry x:Key="IconHeart">F1 M6.979 3.074a6 6 0 0 1 4.988 1.425l.033 .033l.033 -.033a6 6 0 0 1 8.408 8.544l-.122 .128l-7.612 7.612a1 1 0 0 1 -1.414 0l-7.612 -7.612a6 6 0 0 1 3.298 -10.097z</StreamGeometry>
+    <StreamGeometry x:Key="IconHeart">F1 M6.979 3.074a6 6 0 0 1 4.988 1.425l.037 .033l.034 -.03a6 6 0 0 1 4.733 -1.44l.246 .036a6 6 0 0 1 3.364 10.008l-.18 .185l-.048 .041l-7.45 7.379a1 1 0 0 1 -1.313 .082l-.094 -.082l-7.493 -7.422a6 6 0 0 1 3.176 -10.215z</StreamGeometry>
 </ResourceDictionary>

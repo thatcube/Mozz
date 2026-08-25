@@ -2,6 +2,17 @@ using System.Collections.ObjectModel;
 
 namespace Mozz.Desktop.ViewModels;
 
+public static class DesktopLayout
+{
+    public const double AlbumTilePitch = 196;
+    public const double ArtistTilePitch = 178;
+    public const double PlaylistTilePitch = 236;
+    public const double TrackCardPitch = 320;
+    public const double HomeMixTilePitch = 430;
+
+    public static int ColumnsFor(double width, double pitch) => Math.Max(1, (int)(width / pitch));
+}
+
 /// <summary>
 /// A grid of items presented as a list of rows, so it can be virtualized.
 ///

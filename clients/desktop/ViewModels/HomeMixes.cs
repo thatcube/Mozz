@@ -28,6 +28,20 @@ public sealed record HomeMixTile(
     public string FallbackText => Title;
 }
 
+public abstract record HomeRow;
+
+public sealed record HomeMixGridRow(IReadOnlyList<HomeMixTile> Mixes) : HomeRow;
+
+public sealed record HomeSectionTitleRow(string Title) : HomeRow;
+
+public sealed record HomeTrackCard(Track Track, string Subtitle);
+
+public sealed record HomeTrackShelfRow(IReadOnlyList<HomeTrackCard> Tracks) : HomeRow;
+
+public sealed record HomeAlbumShelfRow(IReadOnlyList<Album> Albums) : HomeRow;
+
+public sealed record HomePlaylistShelfRow(IReadOnlyList<Playlist> Playlists) : HomeRow;
+
 public static class HomeMixPresentation
 {
     public static IReadOnlyList<HomeMixTile> BuildTiles(int likedCount, IEnumerable<HomeMix> mixes, string? artworkServerId = null)
@@ -71,6 +85,77 @@ public static class HomeMixPresentation
         var duration = MediaDetailFormatting.FormatLongDuration(tracks.Sum(t => t.DurationSeconds));
         if (!string.IsNullOrEmpty(duration)) parts.Add(duration);
         return string.Join(" · ", parts);
+    }
+
+    public static string? HeroSubtitle(HomeMixTile mix, string metadata)
+    {
+        if (string.IsNullOrWhiteSpace(mix.Subtitle)) return null;
+        if (mix.IsLiked && MetadataAlreadyStartsWith(metadata, mix.Subtitle)) return null;
+        return mix.Subtitle;
+    }
+
+    private static bool MetadataAlreadyStartsWith(string metadata, string subtitle) =>
+        metadata.Equals(subtitle, StringComparison.CurrentCultureIgnoreCase)
+        || metadata.StartsWith($"{subtitle} ·", StringComparison.CurrentCultureIgnoreCase);
+}
+
+public static class HomeComposition
+{
+    public static IReadOnlyList<HomeRow> BuildRows(
+        IReadOnlyList<HomeMixTile> mixes,
+        IReadOnlyList<Track> recentlyPlayed,
+        IReadOnlyList<Album> recentlyAddedAlbums,
+        IReadOnlyList<Playlist> playlists,
+        int mixColumns,
+        int trackColumns,
+        int albumColumns,
+        int playlistColumns)
+    {
+        var rows = new List<HomeRow>();
+        foreach (var row in MediaDetailFormatting.ChunkRows(mixes, mixColumns))
+            rows.Add(new HomeMixGridRow(row));
+
+        AddTrackShelf(rows, "Recently Played", recentlyPlayed, trackColumns);
+        AddAlbumShelf(rows, "Recently Added", recentlyAddedAlbums, albumColumns);
+        AddPlaylistShelf(rows, "Your Playlists", playlists, playlistColumns);
+        return rows;
+    }
+
+    public static bool IsEmpty(
+        IReadOnlyCollection<HomeMixTile> mixes,
+        IReadOnlyCollection<Track> recentlyPlayed,
+        IReadOnlyCollection<Album> recentlyAddedAlbums,
+        IReadOnlyCollection<Playlist> playlists) =>
+        mixes.Count == 0
+        && recentlyPlayed.Count == 0
+        && recentlyAddedAlbums.Count == 0
+        && playlists.Count == 0;
+
+    private static void AddTrackShelf(List<HomeRow> rows, string title, IReadOnlyList<Track> tracks, int columns)
+    {
+        if (tracks.Count == 0) return;
+        rows.Add(new HomeSectionTitleRow(title));
+        var cards = tracks
+            .Select(track => new HomeTrackCard(track, string.IsNullOrWhiteSpace(track.ArtistName) ? track.AlbumTitle ?? "" : track.ArtistName))
+            .ToList();
+        foreach (var row in MediaDetailFormatting.ChunkRows(cards, columns))
+            rows.Add(new HomeTrackShelfRow(row));
+    }
+
+    private static void AddAlbumShelf(List<HomeRow> rows, string title, IReadOnlyList<Album> albums, int columns)
+    {
+        if (albums.Count == 0) return;
+        rows.Add(new HomeSectionTitleRow(title));
+        foreach (var row in MediaDetailFormatting.ChunkRows(albums, columns))
+            rows.Add(new HomeAlbumShelfRow(row));
+    }
+
+    private static void AddPlaylistShelf(List<HomeRow> rows, string title, IReadOnlyList<Playlist> playlists, int columns)
+    {
+        if (playlists.Count == 0) return;
+        rows.Add(new HomeSectionTitleRow(title));
+        foreach (var row in MediaDetailFormatting.ChunkRows(playlists, columns))
+            rows.Add(new HomePlaylistShelfRow(row));
     }
 }
 
@@ -128,7 +213,7 @@ public static class HomeMixLoader
             liked,
             Generated: true,
             Message: mixes.Count == 0
-                ? "No generated mixes yet — sync more of your library and try again."
+                ? "No generated mixes yet — play more music and check back soon."
                 : null);
     }
 }

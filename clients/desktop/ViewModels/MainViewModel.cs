@@ -73,6 +73,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Track> ArtistTracks { get; } = [];
     public ObservableCollection<Track> PlaylistTracks { get; } = [];
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
+    public ObservableCollection<HomeRow> HomeRows { get; } = [];
 
     /// The Home mixes, album and artist walls, chunked into rows so a VirtualizingStackPanel
     /// can own them — see GridRows for why that indirection exists.
@@ -91,23 +92,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (Math.Abs(value - _contentWidth) < 1) return;
             _contentWidth = value;
-            AlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
-            ArtistGrid.SetColumns(ColumnsFor(ArtistTilePitch));
-            ArtistAlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
-            PlaylistGrid.SetColumns(ColumnsFor(PlaylistTilePitch));
-            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(HomeMixTilePitch)));
+            AlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
+            ArtistGrid.SetColumns(ColumnsFor(DesktopLayout.ArtistTilePitch));
+            ArtistAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
+            PlaylistGrid.SetColumns(ColumnsFor(DesktopLayout.PlaylistTilePitch));
+            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)));
+            RebuildHomeRows();
             RebuildDetailRows();
         }
     }
 
     private double _contentWidth;
-
-    // Tile width plus its right margin, matching the templates.
-    private const double AlbumTilePitch = 196;
-    private const double ArtistTilePitch = 178;
-    private const double PlaylistTilePitch = 236;
-    private const double TopSongPitch = 360;
-    private const double HomeMixTilePitch = 430;
 
     private List<AlbumTrackRow> _detailAlbumTracks = [];
     private List<Album> _detailMoreByAlbums = [];
@@ -116,10 +111,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Album> _detailArtistAppearsOn = [];
     private List<Track> _detailArtistTopTracks = [];
     private List<Track> _detailPlaylistTracks = [];
+    private List<HomeMixTile> _homeMixTiles = [];
+    private List<Track> _homeRecentlyPlayed = [];
+    private List<Album> _homeRecentlyAddedAlbums = [];
+    private List<Playlist> _homePlaylists = [];
     private HomeMixTile? _selectedMix;
     private AlbumReleaseKindLookup? _releaseKindLookup;
 
-    private int ColumnsFor(double pitch) => Math.Max(1, (int)(_contentWidth / pitch));
+    private int ColumnsFor(double pitch) => DesktopLayout.ColumnsFor(_contentWidth, pitch);
 
     public bool CanGoBack => _navigation.CanGoBack;
     public bool IsHomeSelected => Section == LibrarySection.Home;
@@ -130,10 +129,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsConnectSelected => Section == LibrarySection.Connect;
 
     public bool ShowTracks => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Songs };
-    public bool ShowHomeMixes => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
-                                 && HomeMixGrid.Count > 0;
+    public bool ShowHomeRows => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
+                                && HomeRows.Count > 0;
     public bool ShowHomeEmpty => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
-                                 && !IsBusy && HomeMixGrid.Count == 0 && TrackCount > 0;
+                                 && !IsBusy
+                                 && TrackCount > 0
+                                 && HomeComposition.IsEmpty(
+                                     _homeMixTiles,
+                                     _homeRecentlyPlayed,
+                                     _homeRecentlyAddedAlbums,
+                                     _homePlaylists);
     public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Albums };
     public bool ShowArtists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Artists };
     public bool ShowPlaylists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Playlists };
@@ -155,7 +160,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
     public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
-                                  && ShowDetailPage == false && ShowHomeMixes == false;
+                                  && ShowDetailPage == false && ShowHomeRows == false;
 
     public string LibrarySummary =>
         TrackCount == 0
@@ -391,8 +396,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         StatusMessage = null;
         HomeMixGrid.Reset([]);
+        _homeMixTiles = [];
+        _homeRecentlyPlayed = [];
+        _homeRecentlyAddedAlbums = [];
+        _homePlaylists = [];
+        HomeRows.Clear();
         RaiseDerived();
 
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
         var result = await HomeMixLoader.LoadAsync(
             ReadHomeMixesAsync,
             LoadLikedTracksAsync,
@@ -400,10 +411,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Connect.Accounts.Select(a => a.ServerId).ToList(),
             () => StatusMessage = "Generating mixes for Home…");
 
-        HomeMixGrid.Reset(HomeMixPresentation.BuildTiles(
+        _homeMixTiles = HomeMixPresentation.BuildTiles(
             result.LikedTracks.Count,
             result.Mixes,
-            Connect.Accounts.FirstOrDefault()?.ServerId));
+            serverId).ToList();
+        HomeMixGrid.Reset(_homeMixTiles);
+        if (!string.IsNullOrWhiteSpace(serverId))
+        {
+            var server = serverId!;
+            _homeRecentlyPlayed = (await _core.CallAsync<List<Track>>(
+                new CoreRequest("recentlyPlayedTracks") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
+                .ToList();
+            _homeRecentlyAddedAlbums = (await _core.CallAsync<List<Album>>(
+                new CoreRequest("recentlyAddedAlbums") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
+                .ToList();
+            _homePlaylists = (await _core.CallAsync<List<Playlist>>(
+                new CoreRequest("playlists") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
+                .Take(MediaDetailFormatting.ShelfPageSize)
+                .ToList();
+        }
+        RebuildHomeRows();
         StatusMessage = result.Message;
         RaiseDerived();
     }
@@ -437,8 +464,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task LoadPlaylistsAsync()
     {
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
         var page = await _core.CallPageAsync<List<Playlist>>(
-            new CoreRequest("playlists") { Limit = PageSize });
+            new CoreRequest("playlists") { ServerId = serverId, Limit = PageSize });
         Replace(Playlists, page.Rows);
         PlaylistGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
@@ -1070,7 +1098,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 break;
 
             case LibraryPageKind.MixDetail when _selectedMix is not null:
-                rows.Add(new MixHeroRow(_selectedMix, DetailMeta ?? string.Empty));
+                var metadata = DetailMeta ?? string.Empty;
+                rows.Add(new MixHeroRow(
+                    _selectedMix,
+                    metadata,
+                    HomeMixPresentation.HeroSubtitle(_selectedMix, metadata)));
                 if (_detailPlaylistTracks.Count > 0) rows.Add(new PlaylistTrackHeaderRow());
                 rows.AddRange(_detailPlaylistTracks.Select(t => new PlaylistTrackItemRow(t)));
                 break;
@@ -1079,11 +1111,30 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Replace(DetailRows, rows);
     }
 
+    private void RebuildHomeRows()
+    {
+        if (_navigation.Current is not { Kind: LibraryPageKind.Section, Section: LibrarySection.Home })
+        {
+            HomeRows.Clear();
+            return;
+        }
+
+        Replace(HomeRows, HomeComposition.BuildRows(
+            _homeMixTiles,
+            _homeRecentlyPlayed,
+            _homeRecentlyAddedAlbums,
+            _homePlaylists,
+            Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)),
+            ColumnsFor(DesktopLayout.TrackCardPitch),
+            ColumnsFor(DesktopLayout.AlbumTilePitch),
+            ColumnsFor(DesktopLayout.PlaylistTilePitch)));
+    }
+
     private void AddAlbumShelf(List<DetailRow> rows, string title, IReadOnlyList<Album> albums)
     {
         if (albums.Count == 0) return;
         rows.Add(new DetailSectionRow(title));
-        foreach (var row in MediaDetailFormatting.ChunkRows(albums, ColumnsFor(AlbumTilePitch)))
+        foreach (var row in MediaDetailFormatting.ChunkRows(albums, ColumnsFor(DesktopLayout.AlbumTilePitch)))
             rows.Add(new DetailAlbumShelfRow(row));
     }
 
@@ -1100,7 +1151,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             return new TrackCard(track, MediaDetailFormatting.TrackAlbumYear(track, album));
         }).ToList();
         rows.Add(new DetailSectionRow(title));
-        foreach (var row in MediaDetailFormatting.ChunkRows(cards, ColumnsFor(TopSongPitch)))
+        foreach (var row in MediaDetailFormatting.ChunkRows(cards, ColumnsFor(DesktopLayout.TrackCardPitch)))
             rows.Add(new DetailTrackGridRow(row));
     }
 
@@ -1161,6 +1212,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var context = Tracks.Contains(track) ? Tracks.ToList() : [track];
         int index = context.IndexOf(track);
         _ = StartQueueAsync(context, index < 0 ? 0 : index);
+    }
+
+    [RelayCommand]
+    private void PlayHomeTrack(HomeTrackCard? card)
+    {
+        if (card is null) return;
+        var context = _homeRecentlyPlayed;
+        var index = context.IndexOf(card.Track);
+        _ = StartQueueAsync(context.Count == 0 ? [card.Track] : context, index < 0 ? 0 : index);
     }
 
     [RelayCommand]
@@ -1589,7 +1649,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(IsConnectSelected));
         OnPropertyChanged(nameof(ShowTracks));
-        OnPropertyChanged(nameof(ShowHomeMixes));
+        OnPropertyChanged(nameof(ShowHomeRows));
         OnPropertyChanged(nameof(ShowHomeEmpty));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
