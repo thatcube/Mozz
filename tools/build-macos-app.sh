@@ -11,10 +11,13 @@
 # something with a bundle identifier.
 #
 # So this assembles the bundle macOS expects, gives it the app icon as an .icns,
-# and ad-hoc signs it. Ad-hoc rather than Developer ID: this is for running the
-# thing locally and on the maintainer's own machines. Distributing it to other
-# people needs a real signature and notarisation, which is a separate job with
-# its own credentials — see fastlane for how the iOS side does it.
+# and signs it with whatever codesigning certificate is on the machine, falling
+# back to ad-hoc when there is none. A real certificate matters for more than
+# tidiness: the Keychain identifies an app by its designated requirement, and an
+# ad-hoc one is a hash of the binary, so every rebuild looked like a brand new
+# program and re-prompted for the Keychain password. Distributing to other
+# people additionally needs notarisation, which is a separate job with its own
+# credentials — see fastlane for how the iOS side does it.
 #
 #   tools/build-macos-app.sh              → build/Mozz.app
 #   tools/build-macos-app.sh --run        → build it and launch it
@@ -115,13 +118,43 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature. Unsigned bundles containing a self-contained .NET runtime are
-# refused outright on Apple silicon — every Mach-O needs at least an ad-hoc
-# signature, so this signs the nested binaries before the bundle itself.
-echo "▸ Signing (ad-hoc)…"
+# Signing.
+#
+# This used to sign ad-hoc, and that is why the Keychain asked for a password on
+# every single launch. A Keychain ACL remembers the app it trusts by that app's
+# *designated requirement*, and an ad-hoc signature's requirement is
+# `cdhash H"..."` — a hash of the binary itself. Every rebuild produces a
+# different binary and therefore a different requirement, so macOS correctly
+# concluded it had never seen this program before and asked again. Clicking
+# "Always Allow" pinned exactly one build and was void the next time the app was
+# compiled.
+#
+# Signing with a real certificate instead gives a requirement written in terms
+# of the bundle identifier and the signing certificate, both of which survive a
+# rebuild — so the ACL keeps matching and the prompt happens once.
+#
+# The identity is discovered rather than hard-coded, and MOZZ_CODESIGN_IDENTITY
+# overrides it. Ad-hoc remains the fallback, because a bundle containing a
+# self-contained .NET runtime is refused outright on Apple silicon unless every
+# Mach-O carries at least an ad-hoc signature — which is also why the nested
+# binaries are signed before the bundle around them.
+IDENTITY="${MOZZ_CODESIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/^ *[0-9]*) [0-9A-F]* "\(.*\)"$/\1/p' | head -1)"
+fi
+
+if [ -n "$IDENTITY" ]; then
+  echo "▸ Signing as ${IDENTITY}…"
+  SIGN=(--force --sign "$IDENTITY" --timestamp=none)
+else
+  echo "▸ Signing (ad-hoc — no certificate found, so the Keychain will ask again after every rebuild)…"
+  SIGN=(--force --sign - --timestamp=none)
+fi
+
 find "$APP/Contents/MacOS" -type f \( -name "*.dylib" -o -name "*.so" \) \
-  -exec codesign --force --sign - --timestamp=none {} \; 2>/dev/null || true
-codesign --force --deep --sign - --timestamp=none "$APP" 2>/dev/null \
+  -exec codesign "${SIGN[@]}" {} \; 2>/dev/null || true
+codesign "${SIGN[@]}" --deep "$APP" 2>/dev/null \
   || echo "  (codesign reported an issue; the app may still run)"
 
 SIZE="$(du -sh "$APP" | cut -f1)"
