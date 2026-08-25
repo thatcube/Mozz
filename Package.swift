@@ -38,16 +38,33 @@ let package = Package(
         .library(name: "MozzSync", targets: ["MozzSync"]),
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzContinuity", targets: ["MozzContinuity"]),
+        .library(name: "MozzHistory", targets: ["MozzHistory"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
         .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
         .library(name: "MozzEnrichment", targets: ["MozzEnrichment"]),
         .library(name: "MozzApp", targets: ["MozzApp"]),
+
+        // Cross-platform FFI spike (see spike/windows-ffi/README.md). A DYNAMIC
+        // library so non-Apple hosts get a real .dll/.so to load. Additive: the
+        // iOS app links MozzApp/MozzCore and is unaffected by this product.
+        .library(name: "MozzFFI", type: .dynamic, targets: ["MozzFFI"]),
     ],
     dependencies: [
         // GRDB.swift — the SQLite toolkit backing our source-of-truth store and
         // FTS5 full-text search. The recommended choice for hitting the 100k-track
         // performance bar (DB-level pagination, indexed sorts, off-main writes).
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.0"),
+
+        // swift-crypto — Apple's own cross-platform implementation of the
+        // CryptoKit API. Needed because two pieces of *portable* logic hash:
+        // the continuity queue hash (which ADR-0010 requires a non-Apple peer to
+        // recompute identically) and Subsonic's MD5 token auth. `CryptoKit`
+        // itself is Apple-only, so those layers could not build off-Apple.
+        //
+        // On Apple platforms `import Crypto` re-exports CryptoKit, so the shipping
+        // iOS app keeps using the system implementation; the guarded imports below
+        // make that explicit rather than implicit.
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.8.0"),
     ],
     targets: [
         // MARK: Domain core (pure Swift, no third-party deps)
@@ -70,15 +87,22 @@ let package = Package(
         // used by the performance harness.
         .target(
             name: "MozzDatabase",
-            dependencies: ["MozzCore", .product(name: "GRDB", package: "GRDB.swift")]
+            dependencies: ["MozzCore", "MozzHistory", .product(name: "GRDB", package: "GRDB.swift")]
         ),
 
         // MARK: Backends (one `MusicBackend` conformer each)
         .target(name: "MozzPlex", dependencies: ["MozzCore", "MozzNetworking"]),
-        .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
+        .target(name: "MozzJellyfin", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity", "MozzHistory"]),
         // Generic Subsonic / OpenSubsonic backend (Navidrome-QA'd, others
-        // best-effort). CryptoKit (system framework) is used for MD5 token auth.
-        .target(name: "MozzSubsonic", dependencies: ["MozzCore", "MozzNetworking", "MozzContinuity"]),
+        // best-effort). Uses MD5 for classic token auth, via swift-crypto so the
+        // backend builds off-Apple too.
+        .target(
+            name: "MozzSubsonic",
+            dependencies: [
+                "MozzCore", "MozzNetworking", "MozzContinuity",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
 
         // MARK: Cross-device continuity (ADR-0010)
         //
@@ -87,7 +111,28 @@ let package = Package(
         // implement the store, and MozzApp maps engine types across, so
         // MozzPlayback never has to import this (which is why the queue carries
         // its own `ContinuityRepeatMode`).
-        .target(name: "MozzContinuity", dependencies: ["MozzCore"]),
+        //
+        // swift-crypto supplies SHA-256 for the queue hash. That hash is the one
+        // value ADR-0010 requires a *non-Apple* peer to recompute byte-identically,
+        // so it cannot depend on an Apple-only framework.
+        .target(
+            name: "MozzContinuity",
+            dependencies: ["MozzCore", .product(name: "Crypto", package: "swift-crypto")]
+        ),
+
+        // MARK: Portable listening history (cross-device taste sync)
+        //
+        // Continuity carries the queue; this carries the *log*. No server records
+        // skips or partial plays, so the local play_event log is the only copy of
+        // the signal `TasteProfile` scores against — without this, listening on a
+        // second device is permanently lost and the devices' recommendations
+        // diverge. Events are immutable and append-only, which makes the merge a
+        // G-Set union: no ordering, no locking, no compare-and-swap (which
+        // ADR-0010 established no backend offers).
+        .target(
+            name: "MozzHistory",
+            dependencies: ["MozzCore", .product(name: "Crypto", package: "swift-crypto")]
+        ),
 
         // MARK: Catalog sync engine (backend -> DB, off-main)
         .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
@@ -140,10 +185,43 @@ let package = Package(
             resources: [.process("Resources")]
         ),
 
+        // MARK: - Cross-platform FFI spike
+        //
+        // A thin `@_cdecl` C-ABI facade over the platform-free core, so a
+        // non-Swift host (C#/.NET on Windows, Kotlin on Android) can drive it.
+        // Exists to answer, on real target hardware: does the core build
+        // off-Apple, does the linked SQLite have FTS5, does the C ABI hold, and
+        // what does marshalling cost? See spike/windows-ffi/README.md.
+        .target(
+            name: "MozzFFI",
+            dependencies: [
+                "MozzCore", "MozzDatabase", "MozzContinuity",
+                // The session facade signs in, mirrors a catalog and resolves
+                // stream URLs, so it needs every backend and the sync engine.
+                // These are the same modules the iOS app links; nothing here is
+                // a desktop-only fork.
+                "MozzNetworking", "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
+                // Recommendations and artwork/metadata enrichment are portable,
+                // so linking them here is what makes them available to a Windows
+                // or Android client at all — and puts them under the portability
+                // CI that covers everything else in this graph.
+                //
+                // MozzDownloads is deliberately NOT here. It is built on a
+                // background `URLSession` — `background(withIdentifier:)`,
+                // `sessionSendsLaunchEvents` — which exists so transfers survive
+                // the app being suspended, an iOS lifecycle concern with no
+                // counterpart elsewhere, and it publishes progress with Combine.
+                // A desktop client wants a plain download queue, not a port of
+                // this. See ARCHITECTURE.md §0.
+                "MozzRecommend", "MozzEnrichment",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
+
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),
         .testTarget(name: "MozzNetworkingTests", dependencies: ["MozzNetworking"]),
-        .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", .product(name: "GRDB", package: "GRDB.swift")]),
+        .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", "MozzHistory", .product(name: "GRDB", package: "GRDB.swift")]),
         .testTarget(
             name: "MozzPlexTests",
             dependencies: ["MozzPlex", "MozzNetworking"],
@@ -151,7 +229,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MozzJellyfinTests",
-            dependencies: ["MozzJellyfin", "MozzNetworking"],
+            dependencies: ["MozzJellyfin", "MozzNetworking", "MozzHistory"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(
@@ -162,6 +240,8 @@ let package = Package(
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
+        .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
+        .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),

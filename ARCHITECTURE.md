@@ -1,8 +1,10 @@
 # Mozz — Architecture (Candidate B: offline-first, normalized local DB as the single source of truth)
 
-Mozz is a free/open-source (GPL-3.0), iOS-17, SwiftUI music client for **both Plex and
-Jellyfin** behind one abstraction. This document is the design record for **Candidate B**
-of the foundation bake-off.
+Mozz is a free/open-source (GPL-3.0) music client for **Plex, Jellyfin and Subsonic**
+behind one abstraction. It began as an iOS-17 SwiftUI app and now also ships desktop
+clients for **Windows, macOS and Linux**, with the same core proven to run on **Android**.
+This document is the design record for **Candidate B** of the foundation bake-off; §0
+covers what is shared across platforms and what deliberately is not.
 
 **Thesis.** A **GRDB/SQLite + FTS5 on-device database is the single source of truth.**
 Providers (Plex, Jellyfin) sync the library *catalog* — artists, albums, tracks, playlists,
@@ -18,46 +20,161 @@ never holds more than a page.
 
 ---
 
+## 0. What is shared across platforms, and what is not
+
+Mozz runs on iOS, Windows, macOS, Linux and (proven, not yet shipped) Android. It does so
+without reimplementing anything, because the split is drawn in one place and held there:
+
+> **Everything except the user interface and the audio output device is one Swift core,
+> compiled per platform and reached over a C ABI.**
+
+That is not an aspiration. Measured, by `wc -l` on `Sources/`:
+
+| | Lines | Runs on |
+|---|---:|---|
+| **Shared core** — `MozzCore`, `MozzNetworking`, `MozzDatabase`, `MozzPlex`, `MozzJellyfin`, `MozzSubsonic`, `MozzSync`, `MozzHistory`, `MozzContinuity`, `MozzRecommend`, `MozzEnrichment` | **17,826** | every platform |
+| `MozzFFI` — the C ABI facade over it | 1,663 | every non-Apple platform |
+| `MozzPlayback` — AVFoundation engine | 2,688 | Apple only, **correctly** |
+| `MozzDownloads` — background `URLSession` | 463 | Apple only, **correctly** |
+| `MozzApp` — SwiftUI | 21,836 | Apple only, **correctly** |
+| `clients/desktop` — C# / Avalonia UI + audio | 4,858 | Windows, macOS, Linux |
+
+So the database, all three server clients, sync, search, listening history, cross-device
+continuity, recommendations and artwork enrichment are written once.
+A new platform is a UI shell and an audio backend — not a port.
+
+### Why the line is drawn there
+
+**UI should not be shared.** A phone, a desktop window and a TV want genuinely different
+interactions, and the frameworks that do each of them well are not the same framework. The
+SwiftUI layer is the largest single body of code here and none of it travels; that is the
+correct outcome, not a failure to abstract. Attempting a portable UI would produce something
+that is nobody's idea of a good app on any of the five platforms.
+
+**Offline downloads turned out not to be shared either**, which was a surprise. The module
+looks portable — it imports nothing Apple-only — but it is built on a *background*
+`URLSession` (`background(withIdentifier:)`, `sessionSendsLaunchEvents`), which exists so
+transfers survive the app being suspended. That is an iOS lifecycle concern with no
+counterpart on a desktop, where a process simply keeps running. A desktop client wants a
+plain download queue, not a port of this one. Linking it into the shared graph compiled
+fine on Apple and failed on Windows and Linux immediately, which is the argument for
+having the portability CI rather than reasoning about it.
+
+**Audio output should not be shared either.** Apple has AVFoundation and gets gapless,
+route changes, interruptions and the now-playing centre for free. Everywhere else that is
+miniaudio over WASAPI / CoreAudio / ALSA-PulseAudio-PipeWire, with the gapless behaviour
+built by hand (`clients/desktop/Audio/`). Two engines, each idiomatic, is cheaper than one
+lowest-common-denominator engine.
+
+**Everything else should be shared, and is.** Protocol quirks are where the real work lives
+— Plex's PIN flow, Jellyfin's Quick Connect, Subsonic's MD5 token signing, three different
+pagination models, prune-safe enumeration, capability detection. Writing that twice would
+guarantee two subtly different apps.
+
+### The three things that are genuinely per-platform, and small
+
+1. **Secret storage.** DPAPI on Windows, Keychain on Apple, libsecret/mode-0600 on Linux,
+   Keystore on Android. The core returns an auth token from `connect` and forgets it; the
+   host persists it and hands it back via `attach`. See `clients/desktop/Core/SecretStore.cs`.
+2. **The OS "now playing" surface.** `MPNowPlayingInfoCenter`, SMTC, MPRIS — same idea,
+   three unrelated APIs. Behind `INowPlayingIntegration` on the desktop side.
+3. **Whether the Swift runtime ships in the package.** Apple provides it; Windows and Linux
+   do not, so those builds bundle it (resolved from the real import graph, not a guessed
+   list of names — see `.github/workflows/desktop-app.yml`).
+
+### How a change reaches every platform
+
+```
+   edit Sources/**                     edit clients/desktop/**
+          │                                     │
+          ▼                                     │
+   ┌──────────────────┐                         │
+   │  Core and iOS    │  swift test (500+)      │
+   │                  │  swift build -c release │
+   │                  │  iOS simulator build    │
+   └────────┬─────────┘                         │
+            │ (gate — a broken core fails here) │
+            ├───────────────┬──────────────┬────┘
+            ▼               ▼              ▼
+    Windows FFI spike  Android FFI    Desktop app
+    (x64, FTS5/HPKE/   (arm64 + x86,  (Windows, macOS,
+     continuity)        emulator run)  Linux artifacts)
+```
+
+The `spec/` directory holds **language-neutral golden fixtures** — the continuity queue
+hash and history event UIDs — that every platform must reproduce byte for byte. That is
+what makes "the same core" a checkable claim rather than a hopeful one: two devices compute
+the queue hash independently and compare it, so a drift between platforms would surface
+months later as devices that refuse to pair. `SpecConformanceTests` reads those fixtures
+from the repo rather than a test bundle, precisely so Swift and the C# harness check
+against the same bytes.
+
+### The rule for new work
+
+*Does it need a screen or a speaker?* If no, it belongs in `Sources/` and every platform
+gets it. If yes, it belongs in the platform layer and gets written per platform. When in
+doubt it goes in the core — the FFI facade is cheap to widen and a duplicated
+implementation never converges again.
+
+---
+
 ## 1. Module layout
 
-One SPM package (`MozzKit`) with one library per concern, plus an XcodeGen-generated app
-target (`Mozz`) that links only `MozzApp`. Dependencies point strictly downward — the domain
-core and the providers never import UI, and the providers never import the database.
+One SPM package (`MozzKit`) with one library per concern. Two consumers sit on top of it:
+an XcodeGen-generated iOS app target that links `MozzApp`, and `MozzFFI` — a dynamic library
+exposing a C ABI that the Windows/macOS/Linux desktop client and (in future) Android drive.
+
+Dependencies point strictly downward. The domain core and the providers never import UI, the
+providers never import the database, and nothing below the platform layer imports a
+platform framework.
 
 ```
-                         ┌───────────────────────────┐
-                         │          MozzApp           │  SwiftUI feature layer +
-                         │  (composition root: env)   │  AppEnvironment (DI root)
-                         └───────────────────────────┘
-             ┌───────────────┬───────────┴───────┬────────────────┐
-             ▼               ▼                   ▼                ▼
-      ┌────────────┐  ┌────────────┐      ┌────────────┐   ┌────────────┐
-      │ MozzPlayback│  │ MozzDownloads│    │  MozzSync  │   │MozzPlex /  │
-      │ AVQueuePlayer│ │ bg URLSession│    │ backend→DB │   │MozzJellyfin│
-      └─────┬──────┘  └──────┬──────┘      └─────┬──────┘   └─────┬──────┘
-            │                │  │                │                │
-            │                │  └────────┐       │        ┌───────┘
-            ▼                ▼           ▼       ▼        ▼
-      ┌──────────┐     ┌──────────────────────┐   ┌──────────────┐
-      │ MozzCore │◀────│     MozzDatabase      │   │MozzNetworking│
-      │ domain + │     │ GRDB + FTS5 (SoT)     │   │ HTTPClient   │
-      │ protocol │     └──────────────────────┘   └──────────────┘
-      └──────────┘              │                        │
-            ▲                   └────────► MozzCore ◄─────┘
-            └──────────────────────────────────────────────
+   APPLE PLATFORM LAYER              │        OTHER PLATFORM LAYER
+                                     │
+   ┌──────────────┐ ┌──────────────┐ │   ┌────────────────────────────┐
+   │  MozzApp     │ │ MozzPlayback │ │   │  clients/desktop  (C#)     │
+   │  SwiftUI     │ │ AVFoundation │ │   │  Avalonia UI + miniaudio   │
+   │              │ │MozzDownloads │ │   │                            │
+   └──────┬───────┘ └──────┬───────┘ │   └─────────────┬──────────────┘
+          │                │         │                 │ JSON over C ABI
+          │                │         │   ┌─────────────▼──────────────┐
+          │                │         │   │          MozzFFI            │
+          │                │         │   │ mozz_session_open/call/close│
+          │                │         │   └─────────────┬──────────────┘
+          └────────┬───────┘         │                 │
+                   │                 │                 │
+   ────────────────┼─────────────────┴─────────────────┼────────────────
+                   ▼      SHARED CORE — every platform ▼
+   ┌───────────────────────────────────────────────────────────────────┐
+   │  MozzSync   MozzRecommend   MozzEnrichment                        │
+   │  MozzHistory   MozzContinuity                                     │
+   │  MozzPlex    MozzJellyfin    MozzSubsonic   (MusicBackend impls)  │
+   │  ┌─────────────────────┐  ┌──────────────┐                        │
+   │  │    MozzDatabase     │  │MozzNetworking│                        │
+   │  │  GRDB + FTS5 (SoT)  │  │  HTTPClient  │                        │
+   │  └──────────┬──────────┘  └──────┬───────┘                        │
+   │             └────────► MozzCore ◄┘                                │
+   │                    domain + protocols                             │
+   └───────────────────────────────────────────────────────────────────┘
 ```
 
-| Module | Responsibility | Depends on | LOC |
-|---|---|---|---|
-| **MozzCore** | Pure domain models, the `MusicBackend` protocol, auth/capability/error types, `TrackURLResolver`, Keychain. No 3rd-party deps. | — | ~1000 |
-| **MozzNetworking** | `HTTPClient`, `Endpoint`, retry/backoff, secret-redacting logging. | MozzCore | ~350 |
-| **MozzDatabase** | GRDB stack: records, migrations, FTS5, read repository (UI), write API (sync), synthetic-catalog generator, performance harness. **The source of truth.** | GRDB, MozzCore | ~1470 |
-| **MozzPlex** | `PlexBackend: MusicBackend` + PIN/OAuth authenticator + DTOs/mapper + header signing. | MozzCore, MozzNetworking | ~610 |
-| **MozzJellyfin** | `JellyfinBackend: MusicBackend` + Quick Connect / password authenticator + DTOs/mapper. | MozzCore, MozzNetworking | ~570 |
-| **MozzSync** | `LibrarySyncEngine`: mirrors a backend's catalog into the DB, paged, off-main, id-stable, prunes. | MozzCore, MozzDatabase | ~190 |
-| **MozzPlayback** | `AVQueuePlayer` gapless engine, `PlayQueue` (shuffle/repeat), now-playing + remote commands, audio session, interruption/route handling. | MozzCore | ~810 |
-| **MozzDownloads** | Background `URLSession` downloads, disk store, DB download-state + storage accounting, offline URL resolver. | MozzCore, MozzNetworking, MozzDatabase | ~400 |
-| **MozzApp** | SwiftUI features (onboarding, browse, now playing, mini-player, downloads, settings, benchmarks) + `AppEnvironment` composition root. | all above | ~1840 |
+| Module | Responsibility | Depends on | Reach | LOC |
+|---|---|---|---|---:|
+| **MozzCore** | Pure domain models, the `MusicBackend` protocol, auth/capability/error types, `TrackURLResolver`, a portable `Logger` shim. No 3rd-party deps. | — | shared | ~2,669 |
+| **MozzNetworking** | `HTTPClient`, `Endpoint`, retry/backoff, secret-redacting logging. | MozzCore | shared | ~628 |
+| **MozzDatabase** | GRDB stack: records, migrations, FTS5, read repository (UI), write API (sync), keyset pagination, synthetic-catalog generator. **The source of truth.** | GRDB, MozzCore, MozzHistory | shared | ~5,152 |
+| **MozzPlex** | `PlexBackend` + PIN/OAuth authenticator + DTOs/mapper + header signing. | MozzCore, MozzNetworking | shared | ~875 |
+| **MozzJellyfin** | `JellyfinBackend` + Quick Connect / password auth + LAN discovery. | MozzCore, MozzNetworking | shared | ~1,912 |
+| **MozzSubsonic** | `SubsonicBackend` + MD5-token / OpenSubsonic API-key auth. | MozzCore, MozzNetworking | shared | ~1,586 |
+| **MozzSync** | `LibrarySyncEngine`: mirrors a catalog into the DB, paged, off-main, resumable, prunes. | MozzCore, MozzDatabase | shared | ~902 |
+| **MozzHistory** | Listening history as a G-Set CRDT; merge, windowing, yearly rollups (ADR-0011). | MozzCore | shared | ~614 |
+| **MozzContinuity** | Cross-device playback handoff; the queue hash two devices compare (ADR-0010). | MozzCore, Crypto | shared | ~555 |
+| **MozzRecommend** | Taste profile, genre TF-IDF similarity, radio, Mozz Weekly. | MozzCore, MozzDatabase | shared | ~1,071 |
+| **MozzEnrichment** | Artwork and metadata enrichment from external sources. | MozzCore, MozzNetworking, MozzDatabase | shared | ~1,855 |
+| **MozzDownloads** | Background `URLSession` downloads, disk store, offline URL resolution. | MozzCore, MozzNetworking, MozzDatabase | **Apple only** | ~463 |
+| **MozzFFI** | The C ABI facade: `mozz_session_open/call/close`, one JSON command dispatcher. What every non-Apple client drives. | all shared modules | non-Apple | ~1,663 |
+| **MozzPlayback** | `AVQueuePlayer` gapless engine, `PlayQueue`, now-playing + remote commands, audio session. | MozzCore | **Apple only** | ~2,688 |
+| **MozzApp** | SwiftUI features + `AppEnvironment` composition root. | all above | **Apple only** | ~21,836 |
 
 The seam between "read the catalog" (`LibraryRepository`, UI-facing) and "write the catalog"
 (`CatalogWriter`, sync-facing) is deliberate: the UI has no API that can mutate catalog rows,
@@ -367,7 +484,8 @@ offline downloads, stubbed queue, single-item player = no gapless, no music scro
 
 This keeps the design clean and *not* Plozz-coupled, which is exactly what makes it a good
 candidate to back-port *into* Plozz later (the brief's tvOS reuse goal): `MozzCore`,
-`MozzDatabase`, `MozzSync`, `MozzPlayback` and `MozzDownloads` are UI-free and platform-portable.
+`MozzDatabase` and `MozzSync` are UI-free and platform-portable; `MozzPlayback` and
+`MozzDownloads` are UI-free but Apple-bound (AVFoundation and background `URLSession`).
 
 ---
 

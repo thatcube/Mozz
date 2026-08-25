@@ -1,0 +1,105 @@
+name: Core and iOS
+
+# The gate that protects every platform.
+#
+# WHY THIS IS THE MOST IMPORTANT WORKFLOW HERE
+#
+# The other two workflows prove the core *builds and runs* somewhere other than
+# Apple — that is a portability question. This one asks whether the code is
+# CORRECT, and whether the app that is actually in production still compiles.
+#
+# Those were both unchecked until this existed. `swift test` — 500-plus tests
+# covering the database, the three server clients, sync, history, continuity and
+# the FFI boundary — ran only when someone remembered to run it locally. And
+# nothing built the iOS app at all, so the one platform with real users was the
+# only one CI never looked at.
+#
+# The order below is deliberate: tests first, because a failure there is a
+# failure everywhere, and a broken core makes every downstream build a waste of
+# a runner.
+
+on:
+  push:
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "App/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "project.yml"
+      - "spec/**"
+      - ".github/workflows/core-and-ios.yml"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: core-and-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Core tests
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # macos-26, not macos-15: the app uses the iOS 26 Liquid Glass APIs
+      # (`GlassEffectContainer`, `.glassEffect`) behind `#available` guards. Those
+      # guards are a RUNTIME check — the symbols still have to exist at compile
+      # time — so an older SDK cannot build MozzApp at all, and since `swift test`
+      # builds every target, it could not run the suite either. macos-15 ships
+      # Xcode 26.5 at newest; macos-26 defaults to 26.6.
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Debug, not release, and that is forced rather than chosen: the playback
+      # tests call helpers that live behind `#if DEBUG` — deliberately, so
+      # test-only API does not ship in a release binary — which means the suite
+      # cannot compile in release at all.
+      #
+      # This also covers the language-neutral golden fixtures in `spec/`.
+      # SpecConformanceTests reads them from the repo rather than a test bundle,
+      # precisely so the Swift side and the other platforms are checked against
+      # the same bytes. The continuity queue hash matters most: two devices
+      # compute it independently and compare, so a drift between the code and
+      # the fixture surfaces months later as devices that will not pair.
+      - name: Run the test suite
+        run: swift test --parallel
+
+      # Release separately, because debug and release disagree about what
+      # *compiles*. A six-element tuple of mixed optionals once type-checked
+      # fine in debug and defeated the release compiler outright; the Windows
+      # spike caught it days later purely because it is the only job that builds
+      # release. Now the same machine that runs the tests also proves the code
+      # optimises, and a release-only failure is found here rather than by
+      # whichever downstream platform happens to look next.
+      - name: Build release
+        run: swift build -c release
+
+  ios:
+    name: iOS build
+    runs-on: macos-26
+    timeout-minutes: 45
+    # Only worth a runner if the core is sound.
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The .xcodeproj is generated and gitignored, so CI needs the generator.
+      # build-ios.sh runs it, including the version/build-number bake — a bare
+      # `xcodegen generate` leaves the project.yml fallbacks and the About panel
+      # reads 0.1 build 1.
+      - name: Install XcodeGen
+        run: brew install xcodegen xcbeautify
+
+      # Reuses the repo's own build script rather than restating xcodebuild
+      # flags here, so CI and a developer's machine cannot drift apart about
+      # what "builds" means. It formats with xcbeautify when present and falls
+      # back to raw output when not.
+      - name: Build for the simulator
+        run: MOZZ_DEST="generic/platform=iOS Simulator" tools/build-ios.sh
