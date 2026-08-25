@@ -74,8 +74,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Track> PlaylistTracks { get; } = [];
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
 
-    /// The album and artist walls, chunked into rows so a VirtualizingStackPanel
+    /// The Home mixes, album and artist walls, chunked into rows so a VirtualizingStackPanel
     /// can own them — see GridRows for why that indirection exists.
+    public GridRows<HomeMixTile> HomeMixGrid { get; } = new();
     public GridRows<Album> AlbumGrid { get; } = new();
     public GridRows<Artist> ArtistGrid { get; } = new();
     public GridRows<Album> ArtistAlbumGrid { get; } = new();
@@ -94,6 +95,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             ArtistGrid.SetColumns(ColumnsFor(ArtistTilePitch));
             ArtistAlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
             PlaylistGrid.SetColumns(ColumnsFor(PlaylistTilePitch));
+            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(HomeMixTilePitch)));
             RebuildDetailRows();
         }
     }
@@ -105,6 +107,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private const double ArtistTilePitch = 178;
     private const double PlaylistTilePitch = 236;
     private const double TopSongPitch = 360;
+    private const double HomeMixTilePitch = 430;
 
     private List<AlbumTrackRow> _detailAlbumTracks = [];
     private List<Album> _detailMoreByAlbums = [];
@@ -113,6 +116,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Album> _detailArtistAppearsOn = [];
     private List<Track> _detailArtistTopTracks = [];
     private List<Track> _detailPlaylistTracks = [];
+    private HomeMixTile? _selectedMix;
     private AlbumReleaseKindLookup? _releaseKindLookup;
 
     private int ColumnsFor(double pitch) => Math.Max(1, (int)(_contentWidth / pitch));
@@ -126,7 +130,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsConnectSelected => Section == LibrarySection.Connect;
 
     public bool ShowTracks => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Songs };
-    public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home or LibrarySection.Albums };
+    public bool ShowHomeMixes => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
+                                 && HomeMixGrid.Count > 0;
+    public bool ShowHomeEmpty => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
+                                 && !IsBusy && HomeMixGrid.Count == 0 && TrackCount > 0;
+    public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Albums };
     public bool ShowArtists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Artists };
     public bool ShowPlaylists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Playlists };
     public bool ShowSearch => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Search };
@@ -134,7 +142,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool ShowAlbumDetail => _navigation.Current.Kind == LibraryPageKind.AlbumDetail;
     public bool ShowArtistDetail => _navigation.Current.Kind == LibraryPageKind.ArtistDetail;
     public bool ShowPlaylistDetail => _navigation.Current.Kind == LibraryPageKind.PlaylistDetail;
-    public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail;
+    public bool ShowMixDetail => _navigation.Current.Kind == LibraryPageKind.MixDetail;
+    public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail || ShowMixDetail;
     public bool HasSearchAlbums => ShowSearch && Albums.Count > 0;
     public bool HasSearchArtists => ShowSearch && Artists.Count > 0;
     public bool HasSearchTracks => ShowSearch && Tracks.Count > 0;
@@ -146,7 +155,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
     public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
-                                  && ShowDetailPage == false;
+                                  && ShowDetailPage == false && ShowHomeMixes == false;
 
     public string LibrarySummary =>
         TrackCount == 0
@@ -293,6 +302,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         SelectedAlbum = null;
         SelectedArtist = null;
         SelectedPlaylist = null;
+        _selectedMix = null;
         DetailMeta = null;
         ClearDetailState();
         PageTitle = section switch
@@ -316,10 +326,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             switch (section)
             {
                 case LibrarySection.Home:
-                    // Home leads with album art, the way Apple Music and Spotify
-                    // both open. A wall of covers reads as a library; a list of
-                    // song titles reads as a spreadsheet.
-                    await LoadAlbumsAsync();
+                    // Home is the same "Made For You" surface as the phone:
+                    // quick, generated mixes first, with Liked Songs leading
+                    // when the library has any.
+                    await LoadHomeMixesAsync();
                     break;
                 case LibrarySection.Songs:
                     await LoadTracksAsync();
@@ -377,6 +387,36 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nextCursor = page.NextCursor;
     }
 
+    private async Task LoadHomeMixesAsync()
+    {
+        StatusMessage = null;
+        HomeMixGrid.Reset([]);
+        RaiseDerived();
+
+        var result = await HomeMixLoader.LoadAsync(
+            ReadHomeMixesAsync,
+            LoadLikedTracksAsync,
+            GenerateHomeMixesAsync,
+            Connect.Accounts.Select(a => a.ServerId).ToList(),
+            () => StatusMessage = "Generating mixes for Home…");
+
+        HomeMixGrid.Reset(HomeMixPresentation.BuildTiles(
+            result.LikedTracks.Count,
+            result.Mixes,
+            Connect.Accounts.FirstOrDefault()?.ServerId));
+        StatusMessage = result.Message;
+        RaiseDerived();
+    }
+
+    private async Task<IReadOnlyList<HomeMix>> ReadHomeMixesAsync() =>
+        await _core.CallAsync<List<HomeMix>>(new CoreRequest("homeMixes")) ?? [];
+
+    private async Task<IReadOnlyList<Track>> LoadLikedTracksAsync() =>
+        await _core.CallAsync<List<Track>>(new CoreRequest("likedTracks")) ?? [];
+
+    private async Task GenerateHomeMixesAsync(string serverId) =>
+        await _core.CallAsync<object>(new CoreRequest("generateHomeMixes") { ServerId = serverId });
+
     private async Task LoadAlbumsAsync()
     {
         var page = await _core.CallPageAsync<List<Album>>(
@@ -423,7 +463,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 case LibrarySection.Songs when _navigation.Current.Kind == LibraryPageKind.Section:
                     await AppendAsync(Tracks, "tracks");
                     break;
-                case LibrarySection.Home or LibrarySection.Albums when _navigation.Current.Kind == LibraryPageKind.Section:
+                case LibrarySection.Albums when _navigation.Current.Kind == LibraryPageKind.Section:
                     await AppendAsync(Albums, "albums");
                     break;
                 case LibrarySection.Artists when _navigation.Current.Kind == LibraryPageKind.Section:
@@ -503,6 +543,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task OpenMix(HomeMixTile? mix)
+    {
+        if (mix is null) return;
+        _selectedMix = mix;
+        _navigation.Push(LibraryPage.ForMix(mix.Id, mix.Title));
+        await ApplyPageAsync(_navigation.Current, reload: true);
+    }
+
+    [RelayCommand]
     private Task OpenTrackAlbum(Track? track)
     {
         if (track is null || string.IsNullOrWhiteSpace(track.AlbumRemoteId)) return Task.CompletedTask;
@@ -559,6 +608,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 SelectedAlbum = page.Album;
                 SelectedArtist = null;
                 SelectedPlaylist = null;
+                _selectedMix = null;
                 PageTitle = "Album";
                 if (reload && page.Album is not null) await LoadAlbumDetailAsync(page.Album);
                 break;
@@ -567,6 +617,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 SelectedArtist = page.Artist;
                 SelectedAlbum = null;
                 SelectedPlaylist = null;
+                _selectedMix = null;
                 PageTitle = "Artist";
                 if (reload && page.Artist is not null) await LoadArtistDetailAsync(page.Artist);
                 break;
@@ -575,11 +626,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 SelectedPlaylist = page.Playlist;
                 SelectedAlbum = null;
                 SelectedArtist = null;
+                _selectedMix = null;
                 PageTitle = "Playlist";
                 if (reload && page.Playlist is not null) await LoadPlaylistDetailAsync(page.Playlist);
                 break;
             case LibraryPageKind.MixDetail:
+                Section = LibrarySection.Home;
+                SelectedAlbum = null;
+                SelectedArtist = null;
+                SelectedPlaylist = null;
                 PageTitle = page.Title ?? "Mix";
+                if (reload && page.MixId is not null) await LoadMixDetailAsync(page.MixId, page.Title);
                 break;
         }
 
@@ -810,6 +867,67 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task LoadMixDetailAsync(string mixId, string? title)
+    {
+        _detailPlaylistTracks = [];
+        PlaylistTracks.Clear();
+        var mix = _selectedMix ?? new HomeMixTile(
+            mixId,
+            string.IsNullOrWhiteSpace(title) ? "Mix" : title!,
+            null,
+            mixId == HomeMixIds.LikedSongs ? "liked" : "mix",
+            null,
+            null,
+            IsLiked: mixId == HomeMixIds.LikedSongs,
+            TrackCount: null);
+        _selectedMix = mix;
+        DetailMeta = string.Empty;
+        RebuildDetailRows();
+        RaiseDerived();
+
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsBusy = true;
+            if (mixId != HomeMixIds.LikedSongs)
+            {
+                var payload = await _core.CallAsync<MixPayload>(new CoreRequest("mix") { SetId = mixId });
+                if (payload is not null)
+                {
+                    mix = mix with { Title = payload.Title, Kind = payload.Kind };
+                    _selectedMix = mix;
+                    PageTitle = payload.Title;
+                }
+            }
+
+            var tracks = mixId == HomeMixIds.LikedSongs
+                ? await LoadLikedTracksAsync()
+                : await _core.CallAsync<List<Track>>(new CoreRequest("mixTracks") { SetId = mixId }) ?? [];
+            _detailPlaylistTracks = tracks.ToList();
+            Replace(PlaylistTracks, _detailPlaylistTracks);
+            DetailMeta = HomeMixPresentation.TrackCollectionMeta(_detailPlaylistTracks);
+            if (_selectedMix is not null && _selectedMix.IsLiked)
+            {
+                _selectedMix = _selectedMix with
+                {
+                    Subtitle = HomeMixPresentation.FormatSongCount(_detailPlaylistTracks.Count),
+                    TrackCount = _detailPlaylistTracks.Count,
+                };
+            }
+            RebuildDetailRows();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RaiseDerived();
+        }
+    }
+
     private async Task AppendPlaylistTracksAsync()
     {
         if (SelectedPlaylist is null || _nextCursor is null) return;
@@ -947,6 +1065,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             case LibraryPageKind.PlaylistDetail when SelectedPlaylist is not null:
                 rows.Add(new PlaylistHeroRow(SelectedPlaylist, DetailMeta ?? string.Empty));
+                if (_detailPlaylistTracks.Count > 0) rows.Add(new PlaylistTrackHeaderRow());
+                rows.AddRange(_detailPlaylistTracks.Select(t => new PlaylistTrackItemRow(t)));
+                break;
+
+            case LibraryPageKind.MixDetail when _selectedMix is not null:
+                rows.Add(new MixHeroRow(_selectedMix, DetailMeta ?? string.Empty));
                 if (_detailPlaylistTracks.Count > 0) rows.Add(new PlaylistTrackHeaderRow());
                 rows.AddRange(_detailPlaylistTracks.Select(t => new PlaylistTrackItemRow(t)));
                 break;
@@ -1105,6 +1229,29 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         var context = PlaylistTracks.OrderBy(_ => Random.Shared.Next()).ToList();
         if (context.Count > 0) _ = StartQueueAsync(context, 0);
+    }
+
+    [RelayCommand]
+    private void PlaySelectedMix()
+    {
+        var context = PlaylistTracks.ToList();
+        if (context.Count > 0) _ = StartQueueAsync(context, 0);
+    }
+
+    [RelayCommand]
+    private void ShuffleSelectedMix()
+    {
+        var context = PlaylistTracks.OrderBy(_ => Random.Shared.Next()).ToList();
+        if (context.Count > 0) _ = StartQueueAsync(context, 0);
+    }
+
+    [RelayCommand]
+    private void PlayPlaylistTrack(Track? track)
+    {
+        if (track is null) return;
+        var context = PlaylistTracks.ToList();
+        int index = context.IndexOf(track);
+        _ = StartQueueAsync(context.Count == 0 ? [track] : context, index < 0 ? 0 : index);
     }
 
     [RelayCommand]
@@ -1442,6 +1589,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(IsConnectSelected));
         OnPropertyChanged(nameof(ShowTracks));
+        OnPropertyChanged(nameof(ShowHomeMixes));
+        OnPropertyChanged(nameof(ShowHomeEmpty));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
         OnPropertyChanged(nameof(ShowPlaylists));
@@ -1450,6 +1599,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowAlbumDetail));
         OnPropertyChanged(nameof(ShowArtistDetail));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
+        OnPropertyChanged(nameof(ShowMixDetail));
         OnPropertyChanged(nameof(ShowDetailPage));
         OnPropertyChanged(nameof(HasSearchAlbums));
         OnPropertyChanged(nameof(HasSearchArtists));

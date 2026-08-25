@@ -169,6 +169,92 @@
                                 CommandParameter="{x:Static vm:LibrarySection.Connect}" />
                     </StackPanel>
 
+                    <StackPanel IsVisible="{Binding ShowHomeEmpty}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Spacing="11" MaxWidth="430">
+                        <TextBlock Text="No mixes yet" Classes="sectionTitle"
+                                  HorizontalAlignment="Center" />
+                        <TextBlock Classes="secondary" TextAlignment="Center" TextWrapping="Wrap"
+                                  Text="Sync more of your library and Mozz will build Home from generated mixes." />
+                    </StackPanel>
+
+                    <!-- Home mixes.
+                         Same virtualization trick as the album wall: a ListBox of
+                         rows, with each row drawing two wide shortcut cards. -->
+                    <ListBox IsVisible="{Binding ShowHomeMixes}"
+                             ItemsSource="{Binding HomeMixGrid.Rows}"
+                             Background="Transparent" BorderThickness="0"
+                             SelectionMode="Single" Padding="0,0,8,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.Styles>
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Focusable" Value="False" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <ItemsControl ItemsSource="{Binding}">
+                                   <ItemsControl.ItemsPanel>
+                                       <ItemsPanelTemplate>
+                                           <StackPanel Orientation="Horizontal" />
+                                       </ItemsPanelTemplate>
+                                   </ItemsControl.ItemsPanel>
+                                   <ItemsControl.ItemTemplate>
+                                       <DataTemplate>
+                                           <Button Classes="tile" Width="410" Margin="0,0,20,16"
+                                                   Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
+                                                   CommandParameter="{Binding}">
+                                               <Border Background="{DynamicResource SurfaceRaised}"
+                                                       CornerRadius="12" ClipToBounds="True">
+                                                   <Grid ColumnDefinitions="88,*" Height="88">
+                                                       <Border Grid.Column="0" Background="{DynamicResource Accent}"
+                                                               IsVisible="{Binding IsLiked}">
+                                                           <controls:TablerIcon Size="30" Filled="True"
+                                                                                Data="{StaticResource IconHeart}"
+                                                                                Brush="White"
+                                                                                HorizontalAlignment="Center"
+                                                                                VerticalAlignment="Center" />
+                                                       </Border>
+                                                       <controls:ArtworkImage Grid.Column="0"
+                                                               Width="88" Height="88" DisplaySize="88"
+                                                               CornerRadius="0"
+                                                               IsVisible="{Binding !IsLiked}"
+                                                               ServerId="{Binding ServerId}"
+                                                               ArtworkKey="{Binding ArtworkKey}"
+                                                               FallbackText="{Binding FallbackText}"
+                                                               FallbackFontSize="24"
+                                                               FallbackFontWeight="SemiBold"
+                                                               FallbackForeground="#66FFFFFF" />
+                                                       <StackPanel Grid.Column="1" Spacing="4"
+                                                                   VerticalAlignment="Center" Margin="18,0,16,0">
+                                                           <TextBlock Text="{Binding Title}" Classes="primary"
+                                                                      FontSize="22" FontWeight="SemiBold" />
+                                                           <TextBlock Text="{Binding Subtitle}" Classes="secondary"
+                                                                      FontSize="15"
+                                                                      IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                       </StackPanel>
+                                                   </Grid>
+                                               </Border>
+                                           </Button>
+                                       </DataTemplate>
+                                   </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
                     <!-- Songs / search results.
                          ListBox rather than ItemsControl: it virtualizes, which is
                          what keeps a hundred thousand rows scrolling smoothly. -->
@@ -636,6 +722,43 @@
                                                 </StackPanel>
                                             </Button>
                                             <Button Command="{Binding $parent[Window].DataContext.ShuffleSelectedPlaylistCommand}">
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
+                                                    <TextBlock Text="Shuffle" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+
+                            <DataTemplate DataType="vm:MixHeroRow">
+                                <Grid ColumnDefinitions="236,*" Margin="0,0,0,28">
+                                    <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource Accent}"
+                                            CornerRadius="13" IsVisible="{Binding Mix.IsLiked}">
+                                        <controls:TablerIcon Size="74" Filled="True" Data="{StaticResource IconHeart}"
+                                                             Brush="White"
+                                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <controls:ArtworkImage Grid.Column="0" Width="220" Height="220" DisplaySize="220"
+                                            CornerRadius="13" IsVisible="{Binding !Mix.IsLiked}"
+                                            ServerId="{Binding Mix.ServerId}" ArtworkKey="{Binding Mix.ArtworkKey}"
+                                            FallbackText="{Binding Mix.Title}" FallbackFontSize="62"
+                                            FallbackForeground="#55FFFFFF" />
+                                    <StackPanel Grid.Column="1" Spacing="11" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Mix.Title}" FontSize="36" FontWeight="Bold"
+                                                   Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Mix.Subtitle}" Classes="secondary" FontSize="17"
+                                                   IsVisible="{Binding Mix.Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                        <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
+                                            <Button Classes="accent" Command="{Binding $parent[Window].DataContext.PlaySelectedMixCommand}">
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
+                                                    <TextBlock Text="Play" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Command="{Binding $parent[Window].DataContext.ShuffleSelectedMixCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />

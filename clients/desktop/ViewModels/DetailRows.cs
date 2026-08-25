@@ -10,6 +10,8 @@ public sealed record ArtistHeroRow(Artist Artist) : DetailRow;
 
 public sealed record PlaylistHeroRow(Playlist Playlist, string Metadata) : DetailRow;
 
+public sealed record MixHeroRow(HomeMixTile Mix, string Metadata) : DetailRow;
+
 public sealed record DetailSectionRow(string Title) : DetailRow;
 
 public sealed record DetailAlbumShelfRow(IReadOnlyList<Album> Albums) : DetailRow;

@@ -99,6 +99,12 @@ public sealed record RadioBatch(
     IReadOnlyList<string> RemoteIds,
     IReadOnlyList<Track> Tracks);
 
+public sealed record MixPayload(
+    string Id,
+    string Title,
+    string Kind,
+    double? GeneratedAt);
+
 public sealed record AlbumPagePayload(
     IReadOnlyList<Album> Items,
     string? NextCursor);
@@ -126,6 +132,8 @@ public sealed record CoreRequest(
     [JsonPropertyName("seedArtistIds")] public IReadOnlyList<string>? SeedArtistIds { get; init; }
     [JsonPropertyName("seedTrackRef")] public string? SeedTrackRef { get; init; }
     [JsonPropertyName("excluding")] public IReadOnlyList<string>? Excluding { get; init; }
+    [JsonPropertyName("setId")] public string? SetId { get; init; }
+    [JsonPropertyName("seed")] public int? Seed { get; init; }
     /// <summary>Opaque resume position from a previous page's <c>nextCursor</c>.</summary>
     [JsonPropertyName("cursor")] public string? Cursor { get; init; }
 }
