@@ -178,12 +178,17 @@ public class FfmpegDiagnosticsTests
 
         pipe.LoadCurrent(new FailingDecoder(rate, ch, reason), new AudioSource("mem://bad"), "bad");
 
+        // Render to drive the pump, then WAIT — the two are different things.
+        //
+        // `Error` is delivered on the pipeline's notifier thread, not from
+        // `Render`. A spin loop counts iterations rather than time, and with a
+        // decoder that fails immediately there is no audio to render, so 100,000
+        // iterations burn through in microseconds — quite possibly before the
+        // notifier thread is scheduled at all. That passes on an idle machine
+        // and fails on a loaded CI runner, which is exactly what it did.
         var buf = new float[512 * ch];
-        int guard = 0;
-        while (!errored.IsSet && guard++ < 100_000)
-            pipe.Render(buf);
-
-        Assert.True(errored.IsSet, "a decoder that failed should raise Error, not end silently");
+        PipelinePump.RenderUntilOrFail(pipe, buf, errored,
+            "a decoder that failed should raise Error, not end silently");
         Assert.Equal(reason, reported);
     }
 
@@ -203,11 +208,9 @@ public class FfmpegDiagnosticsTests
         pipe.LoadCurrent(dec, new AudioSource("mem://ok"), "ok");
 
         var buf = new float[512 * ch];
-        int guard = 0;
-        while (!ended.IsSet && guard++ < 100_000)
-            pipe.Render(buf);
+        PipelinePump.RenderUntilOrFail(pipe, buf, ended, "the track should have played to its end");
 
-        Thread.Sleep(50); // let any stray notification drain
+        Thread.Sleep(50); // now let any stray notification drain
         Assert.Equal(0, errors);
     }
 
