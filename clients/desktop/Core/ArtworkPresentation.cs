@@ -8,7 +8,7 @@ public static class ArtworkPresentation
     {
         if (width <= 0 || height <= 0) return false;
         var ratio = width / height;
-        return ratio is >= 0.72 and <= 1.38;
+        return ratio < 0.72;
     }
 
     public static Crop CoverCrop(double sourceWidth, double sourceHeight, double destinationWidth, double destinationHeight)

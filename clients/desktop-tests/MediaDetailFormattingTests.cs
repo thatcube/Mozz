@@ -96,11 +96,20 @@ public class MediaDetailFormattingTests
 
     [Theory]
     [InlineData(1600, 900, false)]
-    [InlineData(1000, 1000, true)]
-    [InlineData(900, 1200, true)]
-    public void ArtistHeroUsesCircularPortraitForSquareishArtwork(double width, double height, bool expected)
+    [InlineData(1000, 1000, false)]
+    [InlineData(900, 1200, false)]
+    [InlineData(700, 1200, true)]
+    public void ArtistHeroOnlyUsesCircularPortraitForTallPortraitArtwork(double width, double height, bool expected)
     {
         Assert.Equal(expected, ArtworkPresentation.ShouldUseCircularArtistPortrait(width, height));
+    }
+
+    [Fact]
+    public void NormalWidthFitsThreeTopSongColumns()
+    {
+        Assert.Equal(3, DesktopLayout.ColumnsFor(1000, DesktopLayout.TrackCardPitch));
+        Assert.Equal([3, 3, 3, 1],
+            MediaDetailFormatting.ChunkRows(Enumerable.Range(1, 10).ToList(), 3).Select(r => r.Count));
     }
 
     [Fact]
