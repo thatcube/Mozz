@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Mozz.Desktop.ViewModels"
         xmlns:core="using:Mozz.Desktop.Core"
+        xmlns:controls="using:Mozz.Desktop.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="1360" d:DesignHeight="880"
@@ -18,8 +19,6 @@
     </Design.DataContext>
 
     <Window.Resources>
-        <core:ArtworkPlaceholderConverter x:Key="Artwork" />
-        <core:InitialConverter x:Key="Initial" />
         <core:EnumMatchConverter x:Key="EnumMatch" />
     </Window.Resources>
 
@@ -137,14 +136,15 @@
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid ColumnDefinitions="44,*,200,64" Height="50">
-                                    <Border Grid.Column="0" Width="38" Height="38"
-                                            CornerRadius="6" ClipToBounds="True"
-                                            Background="{Binding AlbumTitle, Converter={StaticResource Artwork}}">
-                                        <TextBlock Text="{Binding AlbumTitle, Converter={StaticResource Initial}}"
-                                                   FontSize="15" FontWeight="SemiBold"
-                                                   Foreground="#88FFFFFF"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                    </Border>
+                                    <controls:ArtworkImage Grid.Column="0"
+                                            Width="38" Height="38" DisplaySize="38"
+                                            CornerRadius="6"
+                                            ServerId="{Binding ServerId}"
+                                            ArtworkKey="{Binding ArtworkKey}"
+                                            FallbackText="{Binding AlbumTitle}"
+                                            FallbackFontSize="15"
+                                            FallbackFontWeight="SemiBold"
+                                            FallbackForeground="#88FFFFFF" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center"
                                                 Margin="13,0" Spacing="2">
                                         <TextBlock Text="{Binding Title}" Classes="primary" />
@@ -203,14 +203,14 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <StackPanel Width="176" Margin="0,0,20,24" Spacing="9">
-                                                <Border Width="176" Height="176" CornerRadius="8"
-                                                        ClipToBounds="True"
-                                                        Background="{Binding Title, Converter={StaticResource Artwork}}">
-                                                    <TextBlock Text="{Binding Title, Converter={StaticResource Initial}}"
-                                                               FontSize="52" FontWeight="Bold"
-                                                               Foreground="#55FFFFFF"
-                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
+                                                <controls:ArtworkImage
+                                                        Width="176" Height="176" DisplaySize="176"
+                                                        CornerRadius="8"
+                                                        ServerId="{Binding ServerId}"
+                                                        ArtworkKey="{Binding ArtworkKey}"
+                                                        FallbackText="{Binding Title}"
+                                                        FallbackFontSize="52"
+                                                        FallbackForeground="#55FFFFFF" />
                                                 <StackPanel Spacing="2">
                                                     <TextBlock Text="{Binding Title}" Classes="primary" />
                                                     <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
@@ -262,15 +262,15 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <StackPanel Width="158" Margin="0,0,20,24" Spacing="10">
-                                                <Border Width="138" Height="138" CornerRadius="69"
-                                                        ClipToBounds="True"
+                                                <controls:ArtworkImage
+                                                        Width="138" Height="138" DisplaySize="138"
+                                                        CornerRadius="69"
                                                         HorizontalAlignment="Center"
-                                                        Background="{Binding Name, Converter={StaticResource Artwork}}">
-                                                    <TextBlock Text="{Binding Name, Converter={StaticResource Initial}}"
-                                                               FontSize="44" FontWeight="Bold"
-                                                               Foreground="#55FFFFFF"
-                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
+                                                        ServerId="{Binding ServerId}"
+                                                        ArtworkKey="{Binding ArtworkKey}"
+                                                        FallbackText="{Binding Name}"
+                                                        FallbackFontSize="44"
+                                                        FallbackForeground="#55FFFFFF" />
                                                 <TextBlock Text="{Binding Name}" Classes="primary"
                                                            TextAlignment="Center" />
                                             </StackPanel>
@@ -399,12 +399,14 @@
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="13"
                             VerticalAlignment="Center">
-                    <Border Width="56" Height="56" CornerRadius="7" ClipToBounds="True"
-                            Background="{Binding NowPlaying.AlbumTitle, Converter={StaticResource Artwork}}">
-                        <TextBlock Text="{Binding NowPlaying.AlbumTitle, Converter={StaticResource Initial}}"
-                                   FontSize="20" FontWeight="SemiBold" Foreground="#66FFFFFF"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
+                    <controls:ArtworkImage Width="56" Height="56" DisplaySize="56"
+                            CornerRadius="7"
+                            ServerId="{Binding NowPlaying.ServerId}"
+                            ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+                            FallbackText="{Binding NowPlaying.AlbumTitle}"
+                            FallbackFontSize="20"
+                            FallbackFontWeight="SemiBold"
+                            FallbackForeground="#66FFFFFF" />
                     <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
                         <TextBlock Classes="primary" FontWeight="Medium"
                                    Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
