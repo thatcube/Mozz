@@ -107,6 +107,24 @@ jobs:
           Pop-Location
           "SQLITE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # `swift build` is the whole cost of this job: about nine of its thirteen
+      # minutes, and it starts from nothing every time — including for a push
+      # that changed only C#, an icon or a shell script, which is most of them.
+      #
+      # An exact key hit means no Swift source moved, so the build below finds
+      # its product already there and returns almost at once. A prefix hit (the
+      # restore-keys line) is the interesting case: the compiler gets the last
+      # run's object files and rebuilds only what actually changed. The Swift
+      # version is in the key because a toolchain bump invalidates everything it
+      # previously emitted.
+      - name: Cache the Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftbuild-win-x64-6.3.3-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: |
+            swiftbuild-win-x64-6.3.3-
+
       - name: Build MozzFFI.dll
         shell: pwsh
         run: |
@@ -138,7 +156,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           $out = "publish\win-x64"
 
-          $ffi = Get-ChildItem -Recurse -Filter MozzFFI.dll .build | Select-Object -First 1
+          # Newest wins: .build is restored from a cache now, so it can hold an
+          # earlier run's copy as well as this one's.
+          $ffi = Get-ChildItem -Recurse -Filter MozzFFI.dll .build |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $ffi) { Write-Error "MozzFFI.dll was not produced"; exit 1 }
           Copy-Item $ffi.FullName $out -Force
 
@@ -323,6 +344,16 @@ jobs:
       - name: Test the credential store and audio pipeline
         run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
 
+      # Same reasoning as the Windows job, and worth having even though this one
+      # is already the fastest: the build is still the largest part of it.
+      - name: Cache the Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftbuild-macos-arm64-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: |
+            swiftbuild-macos-arm64-
+
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI
 
@@ -437,6 +468,16 @@ jobs:
             "$src/sqlite3.c" -o "$root/sqlite3.o"
           ar rcs "$root/lib/libsqlite3.a" "$root/sqlite3.o"
           echo "SQLITE_ROOT=$root" >> "$GITHUB_ENV"
+
+      # Keyed per architecture: x64 and arm64 object files are not interchangeable,
+      # and the two runners install the toolchain through different actions.
+      - name: Cache the Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftbuild-linux-${{ matrix.arch }}-6.1.2-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: |
+            swiftbuild-linux-${{ matrix.arch }}-6.1.2-
 
       - name: Build libMozzFFI.so
         run: |
