@@ -54,33 +54,75 @@
                              FontSize="13"
                              Background="{DynamicResource SurfaceRaised}"
                              BorderThickness="0"
-                             Padding="11,9" />
+                             Padding="4,9,11,9">
+                        <TextBox.InnerLeftContent>
+                            <controls:TablerIcon Size="16" Data="{StaticResource IconSearch}"
+                                                 Brush="{DynamicResource TextTertiary}"
+                                                 Margin="10,0,4,0" VerticalAlignment="Center" />
+                        </TextBox.InnerLeftContent>
+                    </TextBox>
 
                     <StackPanel Grid.Row="2" Spacing="3">
                         <Button Classes="nav" Classes.selected="{Binding IsHomeSelected}"
-                                Content="Home"
                                 Command="{Binding SelectSectionCommand}"
-                                CommandParameter="{x:Static vm:LibrarySection.Home}" />
+                                CommandParameter="{x:Static vm:LibrarySection.Home}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconHome}"
+                                                     Brush="{Binding #LblHome.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblHome" Text="Home" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="nav" Classes.selected="{Binding IsSongsSelected}"
-                                Content="Songs"
                                 Command="{Binding SelectSectionCommand}"
-                                CommandParameter="{x:Static vm:LibrarySection.Songs}" />
+                                CommandParameter="{x:Static vm:LibrarySection.Songs}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconMusic}"
+                                                     Brush="{Binding #LblSongs.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblSongs" Text="Songs" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="nav" Classes.selected="{Binding IsAlbumsSelected}"
-                                Content="Albums"
                                 Command="{Binding SelectSectionCommand}"
-                                CommandParameter="{x:Static vm:LibrarySection.Albums}" />
+                                CommandParameter="{x:Static vm:LibrarySection.Albums}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconDisc}"
+                                                     Brush="{Binding #LblAlbums.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblAlbums" Text="Albums" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="nav" Classes.selected="{Binding IsArtistsSelected}"
-                                Content="Artists"
                                 Command="{Binding SelectSectionCommand}"
-                                CommandParameter="{x:Static vm:LibrarySection.Artists}" />
+                                CommandParameter="{x:Static vm:LibrarySection.Artists}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconArtist}"
+                                                     Brush="{Binding #LblArtists.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblArtists" Text="Artists" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="nav" Classes.selected="{Binding IsPlaylistsSelected}"
-                                Content="Playlists"
                                 Command="{Binding SelectSectionCommand}"
-                                CommandParameter="{x:Static vm:LibrarySection.Playlists}" />
+                                CommandParameter="{x:Static vm:LibrarySection.Playlists}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconPlaylist}"
+                                                     Brush="{Binding #LblPlaylists.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblPlaylists" Text="Playlists" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="nav" Classes.selected="{Binding IsConnectSelected}"
-                                Content="Servers"
                                 Command="{Binding SelectSectionCommand}"
-                                CommandParameter="{x:Static vm:LibrarySection.Connect}" />
+                                CommandParameter="{x:Static vm:LibrarySection.Connect}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconServer}"
+                                                     Brush="{Binding #LblServers.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblServers" Text="Servers" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
 
                     <TextBlock Grid.Row="3"
@@ -417,14 +459,32 @@
 
                 <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
-                        <Button Classes="transport" Content="⤨" FontSize="15" />
-                        <Button Classes="transport" Content="⏮" FontSize="15"
-                                Command="{Binding PreviousCommand}" />
-                        <Button Classes="play" Content="{Binding PlayPauseGlyph}" FontSize="17"
-                                Command="{Binding TogglePlayPauseCommand}" />
-                        <Button Classes="transport" Content="⏭" FontSize="15"
-                                Command="{Binding NextCommand}" />
-                        <Button Classes="transport" Content="⟳" FontSize="15" />
+                        <Button Classes="transport">
+                            <controls:TablerIcon Size="19" Data="{StaticResource IconShuffle}"
+                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="transport lead" Command="{Binding PreviousCommand}">
+                            <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipBack}"
+                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="play" Command="{Binding TogglePlayPauseCommand}">
+                            <Panel>
+                                <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}"
+                                                     Brush="{Binding $parent[Button].Foreground}"
+                                                     IsVisible="{Binding !IsPlaying}" />
+                                <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPause}"
+                                                     Brush="{Binding $parent[Button].Foreground}"
+                                                     IsVisible="{Binding IsPlaying}" />
+                            </Panel>
+                        </Button>
+                        <Button Classes="transport lead" Command="{Binding NextCommand}">
+                            <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}"
+                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="transport">
+                            <controls:TablerIcon Size="19" Data="{StaticResource IconRepeat}"
+                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                         <TextBlock Text="{Binding PositionText, FallbackValue='0:00'}" Classes="secondary" FontSize="11"
@@ -440,8 +500,14 @@
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Classes="transport" Content="☰" FontSize="14" />
-                    <Button Classes="transport" Content="🔉" FontSize="13" />
+                    <Button Classes="transport">
+                        <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
+                                             Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
+                    <Button Classes="transport">
+                        <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
+                                             Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
                     <Slider Classes="scrub" Width="96" Minimum="0" Maximum="1"
                             Value="{Binding Volume, Mode=TwoWay}"
                             VerticalAlignment="Center" />
