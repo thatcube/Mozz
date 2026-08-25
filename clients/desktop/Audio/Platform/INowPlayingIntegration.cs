@@ -27,19 +27,30 @@ public interface INowPlayingIntegration : IDisposable
 }
 
 /// <summary>
-/// Chooses the platform integration. Today every platform gets the no-op: the
-/// Windows SMTC and macOS MPNowPlayingInfoCenter surfaces are the one deliberately
-/// unfinished piece (they need WinRT and Objective-C runtime interop respectively,
-/// and SMTC in particular can only be verified on Windows). The seam is here and
-/// wired through the view model, so filling it in is a self-contained change that
-/// touches no playback code. See <c>Audio/README.md</c>.
+/// Chooses the platform integration, and falls back to the no-op whenever the
+/// platform one cannot establish itself.
+///
+/// macOS is implemented (MPNowPlayingInfoCenter, for the Control Center card).
+/// Windows SMTC is not: it needs WinRT interop and can only be verified on a
+/// Windows machine. The seam is wired through the view model either way, so
+/// filling SMTC in touches this file and nothing else.
+///
+/// Note the fallback is on <c>IsAvailable</c> rather than on a try/catch here.
+/// The macOS surface looks classes and selectors up by name at runtime, so
+/// "MediaPlayer.framework did not answer" is an ordinary outcome rather than an
+/// exception, and a music player must not care.
 /// </summary>
 public static class NowPlayingIntegration
 {
     public static INowPlayingIntegration Create()
     {
         // if (OperatingSystem.IsWindows()) return new WindowsSmtcIntegration();
-        // if (OperatingSystem.IsMacOS())   return new MacNowPlayingIntegration();
+        if (OperatingSystem.IsMacOS())
+        {
+            var mac = new MacNowPlayingIntegration();
+            if (mac.IsAvailable) return mac;
+            mac.Dispose();
+        }
         return new NoopNowPlayingIntegration();
     }
 }
