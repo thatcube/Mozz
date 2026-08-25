@@ -54,6 +54,51 @@ public static class MediaDetailFormatting
         return rows;
     }
 
+    /// <summary>
+    /// The artist's newest record, ordered the way the shared core orders it.
+    /// </summary>
+    /// <remarks>
+    /// This mirrors <c>LatestRelease</c> in <c>Sources/MozzCore</c> exactly, and
+    /// the mirroring is the point: the phone draws the same section, and an
+    /// artist whose "Latest Release" differed between the two apps would be a bug
+    /// nobody could explain from either side, because each would look correct on
+    /// its own.
+    ///
+    /// Newest first by year, then by when the library first saw it, then by
+    /// title. The tie-breakers matter more than they look — self-hosted servers
+    /// are erratic about metadata and a whole discography can arrive with no year
+    /// at all, at which point year alone leaves the answer down to whatever order
+    /// the rows came back in. A release with no year sorts below every release
+    /// that has one, because absent a year we do not know it is new and promoting
+    /// it would be a confident lie.
+    ///
+    /// <see cref="Tests.LatestReleaseTests"/> pins this against the core's cases.
+    /// </remarks>
+    public static Album? LatestRelease(IEnumerable<Album> albums)
+    {
+        Album? best = null;
+        foreach (var candidate in albums)
+        {
+            if (best is null || IsNewer(candidate, best)) best = candidate;
+        }
+        return best;
+    }
+
+    internal static bool IsNewer(Album a, Album b)
+    {
+        if (a.Year != b.Year)
+        {
+            if (a.Year is int ay && b.Year is int by) return ay > by;
+            return a.Year is not null;
+        }
+        if (a.AddedAt != b.AddedAt)
+        {
+            if (a.AddedAt is double aa && b.AddedAt is double ba) return aa > ba;
+            return a.AddedAt is not null;
+        }
+        return string.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase) < 0;
+    }
+
     public static IEnumerable<Track> OrderAlbumTracks(IEnumerable<Track> tracks) =>
         tracks.OrderBy(t => t.DiscNumber ?? 1)
               .ThenBy(t => t.TrackNumber ?? int.MaxValue)
