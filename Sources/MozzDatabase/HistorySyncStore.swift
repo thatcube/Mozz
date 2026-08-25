@@ -87,8 +87,16 @@ public struct HistorySyncStore: Sendable {
             var filled = 0
             for (id, uid) in assignments {
                 try db.execute(
-                    sql: "UPDATE OR IGNORE play_event SET event_uid = ? WHERE id = ?",
-                    arguments: [uid, id]
+                    sql: """
+                        UPDATE OR IGNORE play_event
+                        SET event_uid = ?,
+                            device = CASE
+                                WHEN device IS NULL OR device IN ('iphone', 'mac') THEN ?
+                                ELSE device
+                            END
+                        WHERE id = ?
+                        """,
+                    arguments: [uid, localDeviceID, id]
                 )
                 filled += db.changesCount
             }
