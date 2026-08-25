@@ -13,8 +13,8 @@ public sealed class AppPreferences
     public const string EqualizerSettingsKey = "mozz.equalizerSettings";
     public const string LyricsOnlineLookupKey = "mozz.lyricsOnlineLookup";
     public const string LyricsOfflineCaptureKey = "mozz.lyricsOfflineCapture";
-    public const string AppearanceKey = "mozz.appearance";
-    public const string DarkStyleKey = "mozz.darkStyle";
+    public const string AppearanceKey = MozzTheme.AppearanceStorageKey;
+    public const string DarkStyleKey = MozzTheme.DarkStyleStorageKey;
     public const string DeviceIdKey = "mozz.deviceID";
 
     private readonly string _path;

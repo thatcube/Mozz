@@ -32,6 +32,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly INowPlayingIntegration? _nowPlaying_os;
     private readonly DispatcherTimer? _positionTimer;
     private readonly DispatcherTimer? _seekDebounce;
+    private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
     private readonly List<Track> _queue = [];
     private int _queueIndex = -1;
@@ -348,27 +349,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private void ApplyAppearance()
     {
         if (Avalonia.Application.Current is not { } app) return;
-        app.RequestedThemeVariant = Appearance switch
+        if (!_themeObserverAttached)
         {
-            "light" => ThemeVariant.Light,
-            "dark" => ThemeVariant.Dark,
-            _ => ThemeVariant.Default,
-        };
+            app.ActualThemeVariantChanged += OnActualThemeVariantChanged;
+            _themeObserverAttached = true;
+        }
 
-        var oled = DarkStyle == "black";
-        SetBrush(app, "AppBackground", oled ? "#000000" : "#0B0B0D");
-        SetBrush(app, "SidebarBackground", oled ? "#070708" : "#121214");
-        SetBrush(app, "BarBackground", oled ? "#08080A" : "#141416");
-        SetBrush(app, "SurfaceRaised", oled ? "#121216" : "#1C1C20");
-        SetBrush(app, "SurfaceHover", oled ? "#1A1A1F" : "#232328");
-        SetBrush(app, "SurfaceSelected", oled ? "#202027" : "#2A2A30");
-        SetBrush(app, "Divider", oled ? "#17171B" : "#232327");
+        MozzThemeApplicator.Apply(app, Appearance, DarkStyle);
     }
 
-    private static void SetBrush(Avalonia.Application app, string key, string color)
-    {
-        app.Resources[key] = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(color));
-    }
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => ApplyAppearance();
 
     /// Called when a sync finishes: the counts and whatever page is showing are
     /// both stale, and the empty-library message may no longer be true.
@@ -2078,6 +2068,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        if (_themeObserverAttached && Avalonia.Application.Current is { } app)
+            app.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         _positionTimer?.Stop();
         _seekDebounce?.Stop();
         _engine?.Dispose();

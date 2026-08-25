@@ -27,6 +27,7 @@
     <Compile Include="..\desktop\Core\MozzServer.cs" />
     <Compile Include="..\desktop\Core\Models.cs" />
     <Compile Include="..\desktop\Core\AppPreferences.cs" />
+    <Compile Include="..\desktop\Core\MozzTheme.cs" />
     <Compile Include="..\desktop\Core\AppVersion.cs" />
     <Compile Include="..\desktop\Core\DesktopEqualizer.cs" />
     <Compile Include="..\desktop\Core\LibrarySelectionState.cs" />
