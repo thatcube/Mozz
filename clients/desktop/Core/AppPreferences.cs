@@ -15,6 +15,7 @@ public sealed class AppPreferences
     public const string LyricsOfflineCaptureKey = "mozz.lyricsOfflineCapture";
     public const string AppearanceKey = "mozz.appearance";
     public const string DarkStyleKey = "mozz.darkStyle";
+    public const string DeviceIdKey = "mozz.deviceID";
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -52,6 +53,23 @@ public sealed class AppPreferences
 
     public void SetString(string key, string value) => Set(key, value);
 
+    public string GetOrCreateDeviceId()
+    {
+        lock (_gate)
+        {
+            if (_values.TryGetValue(DeviceIdKey, out var value) && value.ValueKind == JsonValueKind.String)
+            {
+                var existing = value.GetString();
+                if (!string.IsNullOrWhiteSpace(existing)) return existing;
+            }
+
+            var created = $"desktop-{Guid.NewGuid():N}";
+            _values[DeviceIdKey] = JsonSerializer.SerializeToElement(created);
+            SaveLocked();
+            return created;
+        }
+    }
+
     public DesktopEqualizerProfile GetEqualizerProfile()
     {
         lock (_gate)
@@ -76,10 +94,15 @@ public sealed class AppPreferences
         lock (_gate)
         {
             _values[key] = JsonSerializer.SerializeToElement(value);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            File.WriteAllText(_path, JsonSerializer.Serialize(_values, options));
+            SaveLocked();
         }
+    }
+
+    private void SaveLocked()
+    {
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        File.WriteAllText(_path, JsonSerializer.Serialize(_values, options));
     }
 
     private static Dictionary<string, JsonElement> Load(string path)

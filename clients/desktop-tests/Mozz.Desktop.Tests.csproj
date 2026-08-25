@@ -29,6 +29,7 @@
     <Compile Include="..\desktop\Core\AppPreferences.cs" />
     <Compile Include="..\desktop\Core\DesktopEqualizer.cs" />
     <Compile Include="..\desktop\Core\LibrarySelectionState.cs" />
+    <Compile Include="..\desktop\Core\PlayHistoryRecorder.cs" />
     <Compile Include="..\desktop\Core\ArtworkPresentation.cs" />
     <Compile Include="..\desktop\ViewModels\GridRows.cs" />
     <Compile Include="..\desktop\ViewModels\HomeMixes.cs" />

@@ -51,6 +51,17 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void DeviceIdIsStablePerPreferencesFile()
+    {
+        var path = Path.Combine(_root, "preferences.json");
+        var first = new AppPreferences(path).GetOrCreateDeviceId();
+        var second = new AppPreferences(path).GetOrCreateDeviceId();
+
+        Assert.StartsWith("desktop-", first);
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
     public void EqualizerPresetsMatchSwiftCurves()
     {
         Assert.Equal([6.0, 5.0, 4.0, 2.0, 0.5, 0, 0, 0, 0, 0],

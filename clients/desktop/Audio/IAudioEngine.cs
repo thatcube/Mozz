@@ -95,7 +95,7 @@ public interface IAudioEngine : IDisposable
 
     /// <summary>Load <paramref name="source"/> and begin playing it immediately, replacing whatever was playing.</summary>
     /// <param name="token">An opaque caller tag echoed back by <see cref="TrackChanged"/>; the view model passes the track id.</param>
-    void Play(AudioSource source, object? token = null);
+    bool Play(AudioSource source, object? token = null);
 
     /// <summary>
     /// Open <paramref name="source"/> now so it is buffered and ready. When the

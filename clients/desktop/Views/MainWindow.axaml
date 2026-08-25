@@ -1176,6 +1176,7 @@
                            </StackPanel>
                            <TextBlock Text="{Binding SecretStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
                            <TextBlock Text="{Binding SettingsStorageDescription}" Classes="secondary" TextWrapping="Wrap" />
+                           <TextBlock Text="{Binding DeviceIdentityDescription}" Classes="secondary" TextWrapping="Wrap" />
                            <TextBlock Text="{Binding Connect.SyncDetail}" Classes="secondary" TextWrapping="Wrap" />
                          </StackPanel>
                        </Border>

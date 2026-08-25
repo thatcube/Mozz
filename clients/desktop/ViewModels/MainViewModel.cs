@@ -16,6 +16,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly AppPreferences _preferences = new();
     private readonly ISecretStore _secrets;
     private readonly MozzServer _server;
+    private readonly string _deviceId;
+    private readonly PlayHistoryRecorder _playHistory;
     private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
     private readonly NavigationStack<LibraryPage> _navigation =
@@ -196,6 +198,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
     public string SettingsStorageDescription => $"Preferences: {_preferences.Path}";
     public string SecretStorageDescription => $"Secrets: {_secrets.Description}";
+    public string DeviceIdentityDescription => $"History device: {_deviceId}";
 
     [ObservableProperty] private bool _normalizationEnabled;
     [ObservableProperty] private bool _enrichmentEnabled;
@@ -210,6 +213,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         // Constructed before the design-mode bail-out because the previewer binds
         // to it. Nothing here touches the disk or the network until a command runs.
+        _deviceId = _preferences.GetOrCreateDeviceId();
+        _playHistory = new PlayHistoryRecorder(evt => _ = RecordPlayEventAsync(evt));
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
@@ -604,6 +609,61 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ArtistAlbumGrid.Reset([]);
         PlaylistGrid.Reset([]);
     }
+
+    private async Task RecordPlayEventAsync(DesktopPlayEvent playEvent)
+    {
+        if (!_core.IsOpen) return;
+        try
+        {
+            await _core.CallAsync<object>(new CoreRequest("recordPlayEvent")
+            {
+                ServerId = playEvent.ServerId,
+                RemoteId = playEvent.RemoteId,
+                Kind = playEvent.Kind,
+                DeviceID = _deviceId,
+                CreatedAtMS = playEvent.CreatedAt.ToUnixTimeMilliseconds(),
+                PositionMS = Milliseconds(playEvent.PositionSeconds),
+                DurationMS = Milliseconds(playEvent.DurationSeconds),
+            });
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.UIThread.Post(() => StatusMessage = $"Could not record play history: {ex.Message}");
+        }
+    }
+
+    private void StartHistoryFor(Track track) => _playHistory.Start(track);
+
+    private void CompleteHistoryForCurrent()
+    {
+        var pending = _playHistory.Pending;
+        _playHistory.CompleteCurrent(pending?.DurationSeconds, pending?.DurationSeconds);
+    }
+
+    private void SkipHistoryForCurrent() =>
+        _playHistory.SkipCurrent(CurrentPositionSeconds(), CurrentDurationSeconds());
+
+    private void SeekHistoryForCurrent(double positionSeconds) =>
+        _playHistory.SeekCurrent(positionSeconds, CurrentDurationSeconds());
+
+    private double? CurrentPositionSeconds()
+    {
+        var value = _engine?.Position.TotalSeconds ?? PositionSeconds;
+        return double.IsFinite(value) && value >= 0 ? value : null;
+    }
+
+    private double? CurrentDurationSeconds()
+    {
+        var value = _engine?.Duration.TotalSeconds is > 0 and var engineDuration
+            ? engineDuration
+            : DurationSeconds;
+        return double.IsFinite(value) && value > 0 ? value : null;
+    }
+
+    private static long? Milliseconds(double? seconds) =>
+        seconds is { } value && double.IsFinite(value)
+            ? (long)Math.Round(value * 1000.0, MidpointRounding.AwayFromZero)
+            : null;
 
     /// <summary>
     /// Verification-only convenience. When <c>MOZZ_DEMO_AUTOPLAY</c> is set, jump to
@@ -1669,6 +1729,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task StartQueueAsync(IReadOnlyList<Track> tracks, int index)
     {
+        SkipHistoryForCurrent();
         _queue.Clear();
         _queue.AddRange(tracks);
         await PlayIndexAsync(index);
@@ -1692,7 +1753,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         PositionSeconds = 0;
         _suppressSeek = false;
 
-        _engine.Play(source, track);
+        if (!_engine.Play(source, track)) return;
+        StartHistoryFor(track);
         IsPlaying = true;
 
         _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
@@ -1716,6 +1778,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task NextAsync()
     {
+        SkipHistoryForCurrent();
         if (_queueIndex + 1 < _queue.Count)
             await PlayIndexAsync(_queueIndex + 1);
         else
@@ -1732,18 +1795,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (_engine.Position.TotalSeconds > 3 || _queueIndex <= 0)
         {
             _engine.Seek(TimeSpan.Zero);
+            SeekHistoryForCurrent(0);
             _suppressSeek = true;
             PositionSeconds = 0;
             _suppressSeek = false;
         }
         else
         {
+            SkipHistoryForCurrent();
             await PlayIndexAsync(_queueIndex - 1);
         }
     }
 
     private void StopPlayback()
     {
+        SkipHistoryForCurrent();
         _engine?.Stop();
         IsPlaying = false;
         _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
@@ -1784,6 +1850,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         _seekDebounce?.Stop();
         _engine?.Seek(TimeSpan.FromSeconds(_pendingSeek));
+        SeekHistoryForCurrent(_pendingSeek);
     }
 
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
@@ -1805,6 +1872,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             if (e.Token is not Track track) return;
+            CompleteHistoryForCurrent();
             NowPlaying = track;
             int idx = _queue.IndexOf(track);
             if (idx >= 0) _queueIndex = idx;
@@ -1813,6 +1881,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             PositionSeconds = 0;
             _suppressSeek = false;
             IsPlaying = true;
+            StartHistoryFor(track);
             _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
                 track.Title, track.ArtistName, track.AlbumTitle,
                 _engine?.Duration ?? TimeSpan.FromSeconds(track.DurationSeconds)));
@@ -1824,6 +1893,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         Dispatcher.UIThread.Post(() =>
         {
+            CompleteHistoryForCurrent();
             IsPlaying = false;
             _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
         });
