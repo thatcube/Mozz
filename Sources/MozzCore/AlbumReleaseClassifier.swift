@@ -1,32 +1,22 @@
 import Foundation
 
 public enum AlbumReleaseKind: String, Codable, Sendable, Hashable {
-    case single
-    case ep
+    case singleOrEP
     case album
 
     public var isSingleOrEP: Bool { self != .album }
 }
 
 public enum AlbumReleaseClassifier {
-    /// The common digital-store boundary is three tracks or less for a single,
-    /// with 30 minutes as the guardrail that keeps long-form two/three-track
-    /// releases from being mislabeled. EPs cover short releases up to six tracks;
-    /// anything larger is treated as an album so clients agree on shelf splits.
-    public static func kind(
-        trackCount: Int?,
-        totalDurationSeconds: TimeInterval?
-    ) -> AlbumReleaseKind {
-        guard let trackCount, trackCount > 0 else { return .album }
-        let duration = totalDurationSeconds ?? 0
-        let isLongForm = duration > 30 * 60
+    /// Mozz has historically grouped releases with three tracks or fewer under
+    /// "Singles & EPs"; larger releases are "Albums". Unknown counts deliberately
+    /// default to 99 so incomplete server metadata stays in Albums rather than
+    /// hiding a full record among singles.
+    public static func isSingleOrEP(trackCount: Int?) -> Bool {
+        (trackCount ?? 99) <= 3
+    }
 
-        if trackCount <= 3 {
-            return isLongForm ? .album : .single
-        }
-        if trackCount <= 6 {
-            return isLongForm ? .album : .ep
-        }
-        return .album
+    public static func kind(trackCount: Int?) -> AlbumReleaseKind {
+        isSingleOrEP(trackCount: trackCount) ? .singleOrEP : .album
     }
 }

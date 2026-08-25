@@ -48,7 +48,6 @@ struct SessionRequest: Decodable {
     /// Spec-name alias for cursor-paged detail shelves.
     var after: String?
     var trackCount: Int?
-    var durationSeconds: Double?
 
     // Server connection / sync / streaming. See `MozzSessionServer.swift`.
     var kind: String?
@@ -135,12 +134,13 @@ private struct WireArtistHeader: Encodable {
     var name: String
     var sortName: String?
     var artworkKey: String?
+    var heroArtworkKey: String?
     var albumCount: Int?
     var genres: [String]
     var isFavorite: Bool
 
     enum CodingKeys: String, CodingKey {
-        case remoteId, serverId, name, sortName, artworkKey, albumCount, genres, isFavorite
+        case remoteId, serverId, name, sortName, artworkKey, heroArtworkKey, albumCount, genres, isFavorite
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -150,6 +150,7 @@ private struct WireArtistHeader: Encodable {
         try container.encode(name, forKey: .name)
         try container.encode(sortName, forKey: .sortName)
         try container.encode(artworkKey, forKey: .artworkKey)
+        try container.encode(heroArtworkKey, forKey: .heroArtworkKey)
         try container.encode(albumCount, forKey: .albumCount)
         try container.encode(genres, forKey: .genres)
         try container.encode(isFavorite, forKey: .isFavorite)
@@ -310,11 +311,12 @@ private func wire(_ r: AlbumRecord) -> WireAlbum {
     )
 }
 
-private func wireHeader(_ r: ArtistRecord) -> WireArtistHeader {
+private func wireHeader(_ r: ArtistRecord, heroArtworkKey: String? = nil) -> WireArtistHeader {
     WireArtistHeader(
         remoteId: r.remoteId, serverId: r.serverId, name: r.name,
-        sortName: r.sortName, artworkKey: r.artworkKey, albumCount: r.albumCount,
-        genres: r.genres, isFavorite: r.isFavorite
+        sortName: r.sortName, artworkKey: r.artworkKey,
+        heroArtworkKey: heroArtworkKey ?? r.artworkKey,
+        albumCount: r.albumCount, genres: r.genres, isFavorite: r.isFavorite
     )
 }
 
@@ -535,7 +537,9 @@ private func dispatch(
         guard let artist = try await repo.artist(serverId: serverId, remoteId: remoteId) else {
             return sessionFailure(request.id, request.cmd, "artist not found: \(remoteId)")
         }
-        return sessionSuccess(request, wireHeader(artist))
+        let albums = try await repo.albums(forArtistRemoteId: remoteId, serverId: serverId)
+        let heroArtworkKey = ArtistDetailPresentation.heroArtworkKey(artist: artist, albums: albums)
+        return sessionSuccess(request, wireHeader(artist, heroArtworkKey: heroArtworkKey))
 
     case "album":
         guard let remoteId = request.remoteId, let serverId else {
@@ -606,13 +610,7 @@ private func dispatch(
         return sessionSuccess(request, rows.map(wire))
 
     case "albumReleaseKind":
-        guard let trackCount = request.trackCount else {
-            return sessionFailure(request.id, request.cmd, "albumReleaseKind needs trackCount")
-        }
-        let kind = AlbumReleaseClassifier.kind(
-            trackCount: trackCount,
-            totalDurationSeconds: request.durationSeconds
-        )
+        let kind = AlbumReleaseClassifier.kind(trackCount: request.trackCount)
         return sessionSuccess(
             request,
             WireAlbumReleaseKind(kind: kind.rawValue, isSingleOrEP: kind.isSingleOrEP)

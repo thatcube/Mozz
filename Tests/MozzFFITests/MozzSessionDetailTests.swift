@@ -53,6 +53,7 @@ final class MozzSessionDetailTests: XCTestCase {
                 isFavorite: true
             ),
             Artist(id: "ar2", name: "Host Artist", sortName: "Host, Artist"),
+            Artist(id: "ar3", name: "No Art Artist", sortName: "No Art"),
         ], serverId: server.id)
         try await writer.upsertAlbums([
             Album(
@@ -81,6 +82,14 @@ final class MozzSessionDetailTests: XCTestCase {
                 isFavorite: false,
                 addedAt: Date(timeIntervalSince1970: 456)
             ),
+            Album(
+                id: "fallback",
+                title: "Fallback Cover",
+                artistName: "No Art Artist",
+                artistID: "ar3",
+                artwork: ArtworkRef(key: "fallback-art"),
+                trackCount: 4
+            ),
         ], serverId: server.id)
         try await writer.upsertTracks([
             Track(id: "own1", title: "Own One", albumTitle: "Own Album", albumID: "own",
@@ -92,6 +101,8 @@ final class MozzSessionDetailTests: XCTestCase {
                   trackNumber: 1, duration: 182),
             Track(id: "host", title: "Host Song", albumTitle: "Host Album", albumID: "appears",
                   artistName: "Host Artist", artistID: "ar2", trackNumber: 2, duration: 183),
+            Track(id: "fallback-track", title: "Fallback Song", albumTitle: "Fallback Cover", albumID: "fallback",
+                  artistName: "No Art Artist", artistID: "ar3", trackNumber: 1, duration: 184),
         ], serverId: server.id)
 
         try await plays.append(PlayEvent(trackID: "own2", kind: .completed), serverId: server.id)
@@ -115,15 +126,21 @@ final class MozzSessionDetailTests: XCTestCase {
         let artistResponse = try call(handle, ["cmd": "artist", "serverId": server.id, "remoteId": "ar1"])
         XCTAssertEqual(artistResponse["ok"] as? Bool, true, "\(artistResponse)")
         let artist = try XCTUnwrap(artistResponse["payload"] as? [String: Any])
-        XCTAssertEqual(Set(artist.keys), ["remoteId", "serverId", "name", "sortName", "artworkKey", "albumCount", "genres", "isFavorite"])
+        XCTAssertEqual(Set(artist.keys), ["remoteId", "serverId", "name", "sortName", "artworkKey", "heroArtworkKey", "albumCount", "genres", "isFavorite"])
         XCTAssertEqual(artist["remoteId"] as? String, "ar1")
         XCTAssertEqual(artist["serverId"] as? String, server.id)
         XCTAssertEqual(artist["name"] as? String, "Featured Artist")
         XCTAssertEqual(artist["sortName"] as? String, "Featured, Artist")
         XCTAssertEqual(artist["artworkKey"] as? String, "artist-art")
+        XCTAssertEqual(artist["heroArtworkKey"] as? String, "artist-art")
         XCTAssertEqual(artist["albumCount"] as? Int, 1)
         XCTAssertEqual(artist["genres"] as? [String], ["Pop"])
         XCTAssertEqual(artist["isFavorite"] as? Bool, true)
+
+        let fallbackResponse = try call(handle, ["cmd": "artist", "serverId": server.id, "remoteId": "ar3"])
+        let fallbackArtist = try XCTUnwrap(fallbackResponse["payload"] as? [String: Any])
+        XCTAssertTrue(fallbackArtist["artworkKey"] is NSNull)
+        XCTAssertEqual(fallbackArtist["heroArtworkKey"] as? String, "fallback-art")
 
         let albumResponse = try call(handle, ["cmd": "album", "serverId": server.id, "remoteId": "own"])
         XCTAssertEqual(albumResponse["ok"] as? Bool, true, "\(albumResponse)")
@@ -175,11 +192,16 @@ final class MozzSessionDetailTests: XCTestCase {
         defer { _ = mozz_session_close(handle) }
 
         let response = try call(handle, [
-            "cmd": "albumReleaseKind", "trackCount": 4, "durationSeconds": 1_200.0,
+            "cmd": "albumReleaseKind", "trackCount": 3,
         ])
         XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
         let payload = try XCTUnwrap(response["payload"] as? [String: Any])
-        XCTAssertEqual(payload["kind"] as? String, "ep")
+        XCTAssertEqual(payload["kind"] as? String, "singleOrEP")
         XCTAssertEqual(payload["isSingleOrEP"] as? Bool, true)
+
+        let unknown = try call(handle, ["cmd": "albumReleaseKind"])
+        let unknownPayload = try XCTUnwrap(unknown["payload"] as? [String: Any])
+        XCTAssertEqual(unknownPayload["kind"] as? String, "album")
+        XCTAssertEqual(unknownPayload["isSingleOrEP"] as? Bool, false)
     }
 }
