@@ -149,6 +149,24 @@ public class FfmpegDiagnosticsTests
     }
 
     [Fact]
+    public void Candidates_DoNotDependOnTheHostSeparator()
+    {
+        // The regression this pins: the candidates were built with Path.Combine,
+        // so the Unix list came back punctuated with backslashes when the suite
+        // ran on Windows — "/opt/homebrew/bin\\ffmpeg" — and the macOS ordering
+        // tests failed on a Windows runner while passing on a Mac. The whole
+        // point of passing `isWindows` in is that both platforms' behaviour can
+        // be checked from either, so the output must not vary with the host.
+        var unix = FfmpegLocator.Candidates("/Applications/Mozz.app/Contents/MacOS", false).ToArray();
+        Assert.All(unix, p => Assert.DoesNotContain('\\', p));
+        Assert.All(unix, p => Assert.StartsWith("/", p));
+
+        var win = FfmpegLocator.Candidates(@"C:\Program Files\Mozz", true).ToArray();
+        Assert.All(win, p => Assert.DoesNotContain('/', p));
+        Assert.All(win, p => Assert.EndsWith("ffmpeg.exe", p));
+    }
+
+    [Fact]
     public void Resolve_FallsBackToTheBareName_WhenNothingConcreteExists()
     {
         Assert.Equal("ffmpeg", FfmpegLocator.Resolve("/app", false, null, _ => false));
