@@ -236,6 +236,14 @@ internal sealed class PcmPipeline : IDisposable
 
     private void OnCurrentEnded()
     {
+        // Before the finished decoder is disposed, ask whether it actually
+        // failed — a bad certificate, a 404, an expired token — rather than
+        // reaching a clean end of stream. The pipeline can't tell the two apart
+        // from the outside: both look like "stopped producing frames". Dispose
+        // kills the process and erases the evidence, so this has to come first.
+        if (_current?.Decoder is IDecoderDiagnostics diag && diag.TryGetFailure(out var reason))
+            ReportError(reason);
+
         long producedFrames = _ring.TotalWritten / Channels;
         var next = _next;
         if (next is not null)
