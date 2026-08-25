@@ -23,7 +23,10 @@
   -->
   <ItemGroup>
     <Compile Include="..\desktop\Core\SecretStore.cs" />
+    <Compile Include="..\desktop\Core\Models.cs" />
     <Compile Include="..\desktop\ViewModels\GridRows.cs" />
+    <Compile Include="..\desktop\ViewModels\LibraryNavigation.cs" />
+    <Compile Include="..\desktop\ViewModels\MediaDetailFormatting.cs" />
     <Compile Include="..\desktop\Core\ArtworkCache.cs" />
     <Compile Include="..\desktop\Core\ArtworkBinder.cs" />
   </ItemGroup>

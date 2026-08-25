@@ -9,23 +9,13 @@ using Mozz.Desktop.Core;
 
 namespace Mozz.Desktop.ViewModels;
 
-/// <summary>Which pane the sidebar is showing.</summary>
-public enum LibrarySection
-{
-    Home,
-    Songs,
-    Albums,
-    Artists,
-    Playlists,
-    Search,
-    Connect,
-}
-
 public sealed partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly MozzCore _core = new();
     private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
+    private readonly NavigationStack<LibraryPage> _navigation =
+        new(LibraryPage.ForSection(LibrarySection.Home));
 
     /// Sign-in and sync. Its own view model because it is its own job — see the
     /// note on the type.
@@ -48,6 +38,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string? _statusMessage;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _searchText = string.Empty;
+    [ObservableProperty] private Album? _selectedAlbum;
+    [ObservableProperty] private Artist? _selectedArtist;
+    [ObservableProperty] private string? _detailMeta;
 
     [ObservableProperty] private int _artistCount;
     [ObservableProperty] private int _albumCount;
@@ -74,11 +67,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<Album> Albums { get; } = [];
     public ObservableCollection<Artist> Artists { get; } = [];
     public ObservableCollection<Playlist> Playlists { get; } = [];
+    public ObservableCollection<AlbumTrackRow> AlbumTrackRows { get; } = [];
+    public ObservableCollection<Album> ArtistAlbums { get; } = [];
+    public ObservableCollection<Track> ArtistTracks { get; } = [];
 
     /// The album and artist walls, chunked into rows so a VirtualizingStackPanel
     /// can own them — see GridRows for why that indirection exists.
     public GridRows<Album> AlbumGrid { get; } = new();
     public GridRows<Artist> ArtistGrid { get; } = new();
+    public GridRows<Album> ArtistAlbumGrid { get; } = new();
 
     /// Width available to the content pane, set by the view on layout. Drives
     /// how many tiles fit across.
@@ -91,6 +88,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _contentWidth = value;
             AlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
             ArtistGrid.SetColumns(ColumnsFor(ArtistTilePitch));
+            ArtistAlbumGrid.SetColumns(ColumnsFor(AlbumTilePitch));
         }
     }
 
@@ -102,6 +100,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private int ColumnsFor(double pitch) => Math.Max(1, (int)(_contentWidth / pitch));
 
+    public bool CanGoBack => _navigation.CanGoBack;
     public bool IsHomeSelected => Section == LibrarySection.Home;
     public bool IsSongsSelected => Section == LibrarySection.Songs;
     public bool IsAlbumsSelected => Section == LibrarySection.Albums;
@@ -109,17 +108,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
     public bool IsConnectSelected => Section == LibrarySection.Connect;
 
-    public bool ShowTracks => Section is LibrarySection.Songs or LibrarySection.Search;
-    public bool ShowAlbums => Section is LibrarySection.Home or LibrarySection.Albums;
-    public bool ShowArtists => Section is LibrarySection.Artists;
-    public bool ShowConnect => Section is LibrarySection.Connect;
+    public bool ShowTracks => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Songs };
+    public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home or LibrarySection.Albums };
+    public bool ShowArtists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Artists };
+    public bool ShowSearch => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Search };
+    public bool ShowConnect => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Connect };
+    public bool ShowAlbumDetail => _navigation.Current.Kind == LibraryPageKind.AlbumDetail;
+    public bool ShowArtistDetail => _navigation.Current.Kind == LibraryPageKind.ArtistDetail;
+    public bool HasSearchAlbums => ShowSearch && Albums.Count > 0;
+    public bool HasSearchArtists => ShowSearch && Artists.Count > 0;
+    public bool HasSearchTracks => ShowSearch && Tracks.Count > 0;
+    public bool HasArtistAlbums => ArtistAlbums.Count > 0;
 
     /// <summary>
     /// Nothing loaded, so the pane shows its empty state — but never on the
     /// Servers pane, which is where someone goes precisely because the library
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
-    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && Section != LibrarySection.Connect;
+    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
+                                  && ShowAlbumDetail == false && ShowArtistDetail == false;
 
     public string LibrarySummary =>
         TrackCount == 0
@@ -180,7 +187,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task ReloadAfterSyncAsync()
     {
         await RefreshCountsAsync();
-        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Home : Section);
+        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Home : Section, clearBackStack: true);
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
     }
 
@@ -200,7 +207,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             await Connect.AttachSavedAccountsAsync();
 
             await RefreshCountsAsync();
-            await LoadSectionAsync(LibrarySection.Home);
+            await LoadSectionAsync(LibrarySection.Home, clearBackStack: true);
 
             StatusMessage = TrackCount > 0
                 ? null
@@ -250,18 +257,22 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task MaybeDemoAutoplayAsync()
     {
         if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MOZZ_DEMO_AUTOPLAY"))) return;
-        await LoadSectionAsync(LibrarySection.Songs);
+        await LoadSectionAsync(LibrarySection.Songs, clearBackStack: true);
         if (Tracks.Count > 0) PlayTrack(Tracks[0]);
     }
 
     [RelayCommand]
-    private Task SelectSection(LibrarySection section) => LoadSectionAsync(section);
+    private Task SelectSection(LibrarySection section) => LoadSectionAsync(section, clearBackStack: true);
 
-    private async Task LoadSectionAsync(LibrarySection section)
+    private async Task LoadSectionAsync(LibrarySection section, bool clearBackStack)
     {
+        _navigation.Replace(LibraryPage.ForSection(section), clearBackStack);
         Section = section;
         _pagingGeneration++;
         _nextCursor = null;
+        SelectedAlbum = null;
+        SelectedArtist = null;
+        DetailMeta = null;
         PageTitle = section switch
         {
             LibrarySection.Home => "Home",
@@ -423,6 +434,215 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         RaiseDerived();
     }
 
+    [RelayCommand]
+    private async Task GoBack()
+    {
+        if (!_navigation.TryPop(out var page)) return;
+        await ApplyPageAsync(page, reload: page.Kind != LibraryPageKind.Section);
+    }
+
+    [RelayCommand]
+    private async Task OpenAlbum(Album? album)
+    {
+        if (album is null) return;
+        _navigation.Push(LibraryPage.ForAlbum(album));
+        await ApplyPageAsync(_navigation.Current, reload: true);
+    }
+
+    [RelayCommand]
+    private async Task OpenArtist(Artist? artist)
+    {
+        if (artist is null) return;
+        _navigation.Push(LibraryPage.ForArtist(artist));
+        await ApplyPageAsync(_navigation.Current, reload: true);
+    }
+
+    [RelayCommand]
+    private Task OpenTrackAlbum(Track? track)
+    {
+        if (track is null || string.IsNullOrWhiteSpace(track.AlbumRemoteId)) return Task.CompletedTask;
+        var album = new Album(
+            Id: 0,
+            RemoteId: track.AlbumRemoteId,
+            ServerId: track.ServerId,
+            Title: string.IsNullOrWhiteSpace(track.AlbumTitle) ? "Album" : track.AlbumTitle,
+            ArtistName: track.ArtistName,
+            ArtistRemoteId: null,
+            Year: null,
+            TrackCount: null,
+            ArtworkKey: track.ArtworkKey,
+            GroupKey: string.Empty);
+        return OpenAlbum(album);
+    }
+
+    [RelayCommand]
+    private Task OpenTrackArtist(Track? track)
+    {
+        if (track is null || string.IsNullOrWhiteSpace(track.ArtistName)) return Task.CompletedTask;
+        var artist = new Artist(0, string.Empty, track.ServerId, track.ArtistName, null);
+        return OpenArtist(artist);
+    }
+
+    [RelayCommand]
+    private Task OpenSelectedAlbumArtist()
+    {
+        if (SelectedAlbum is null || string.IsNullOrWhiteSpace(SelectedAlbum.ArtistRemoteId))
+            return Task.CompletedTask;
+
+        var artist = new Artist(
+            0,
+            SelectedAlbum.ArtistRemoteId,
+            SelectedAlbum.ServerId,
+            SelectedAlbum.ArtistName,
+            null);
+        return OpenArtist(artist);
+    }
+
+    private async Task ApplyPageAsync(LibraryPage page, bool reload)
+    {
+        _pagingGeneration++;
+        _nextCursor = null;
+        StatusMessage = null;
+
+        switch (page.Kind)
+        {
+            case LibraryPageKind.Section:
+                await LoadSectionAsync(page.Section ?? LibrarySection.Home, clearBackStack: false);
+                return;
+            case LibraryPageKind.AlbumDetail:
+                Section = LibrarySection.Albums;
+                SelectedAlbum = page.Album;
+                SelectedArtist = null;
+                PageTitle = "Album";
+                if (reload && page.Album is not null) await LoadAlbumDetailAsync(page.Album);
+                break;
+            case LibraryPageKind.ArtistDetail:
+                Section = LibrarySection.Artists;
+                SelectedArtist = page.Artist;
+                SelectedAlbum = null;
+                PageTitle = "Artist";
+                if (reload && page.Artist is not null) await LoadArtistDetailAsync(page.Artist);
+                break;
+            case LibraryPageKind.MixDetail:
+                PageTitle = page.Title ?? "Mix";
+                break;
+        }
+
+        RaiseDerived();
+    }
+
+    private async Task LoadAlbumDetailAsync(Album album)
+    {
+        AlbumTrackRows.Clear();
+        DetailMeta = MediaDetailFormatting.AlbumMeta(album, []);
+        RaiseDerived();
+
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsBusy = true;
+            var request = new CoreRequest("albumTracks")
+            {
+                ServerId = album.ServerId,
+                RemoteId = string.IsNullOrWhiteSpace(album.RemoteId) ? null : album.RemoteId,
+                GroupKey = string.IsNullOrWhiteSpace(album.GroupKey) ? null : album.GroupKey,
+            };
+            var tracks = await _core.CallAsync<List<Track>>(request) ?? [];
+            Replace(AlbumTrackRows, MediaDetailFormatting.AlbumTrackRows(tracks));
+            DetailMeta = MediaDetailFormatting.AlbumMeta(album, AlbumTrackRows.Select(r => r.Track).ToList());
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RaiseDerived();
+        }
+    }
+
+    private async Task LoadArtistDetailAsync(Artist artist)
+    {
+        ArtistAlbums.Clear();
+        ArtistAlbumGrid.Reset([]);
+        ArtistTracks.Clear();
+        DetailMeta = null;
+        RaiseDerived();
+
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsBusy = true;
+            artist = await ResolveArtistAsync(artist);
+            SelectedArtist = artist;
+
+            var albums = await LoadAlbumsForArtistAsync(artist);
+            Replace(ArtistAlbums, albums);
+            ArtistAlbumGrid.Reset(albums);
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var tracks = new List<Track>();
+            foreach (var album in albums)
+            {
+                var rows = await _core.CallAsync<List<Track>>(new CoreRequest("albumTracks")
+                {
+                    ServerId = album.ServerId,
+                    RemoteId = string.IsNullOrWhiteSpace(album.RemoteId) ? null : album.RemoteId,
+                    GroupKey = string.IsNullOrWhiteSpace(album.GroupKey) ? null : album.GroupKey,
+                }) ?? [];
+
+                foreach (var track in rows)
+                {
+                    if (seen.Add($"{track.ServerId}\n{track.RemoteId}")) tracks.Add(track);
+                }
+            }
+
+            Replace(ArtistTracks, MediaDetailFormatting.OrderArtistTracks(tracks).ToList());
+            DetailMeta = MediaDetailFormatting.ArtistMeta(ArtistAlbums, ArtistTracks);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RaiseDerived();
+        }
+    }
+
+    private async Task<Artist> ResolveArtistAsync(Artist artist)
+    {
+        if (!string.IsNullOrWhiteSpace(artist.RemoteId)) return artist;
+
+        var results = await _core.CallAsync<SearchResults>(
+            new CoreRequest("search") { Query = artist.Name, Limit = 50 });
+        return results?.Artists.FirstOrDefault(a =>
+            string.Equals(a.Name, artist.Name, StringComparison.CurrentCultureIgnoreCase)
+            && a.ServerId == artist.ServerId) ?? artist;
+    }
+
+    private async Task<List<Album>> LoadAlbumsForArtistAsync(Artist artist)
+    {
+        if (!string.IsNullOrWhiteSpace(artist.RemoteId))
+        {
+            return await _core.CallAsync<List<Album>>(new CoreRequest("artistAlbums")
+            {
+                ServerId = artist.ServerId,
+                RemoteId = artist.RemoteId,
+            }) ?? [];
+        }
+
+        var results = await _core.CallAsync<SearchResults>(
+            new CoreRequest("search") { Query = artist.Name, Limit = 50 });
+        return results?.Albums
+            .Where(a => string.Equals(a.ArtistName, artist.Name, StringComparison.CurrentCultureIgnoreCase))
+            .ToList() ?? [];
+    }
+
     partial void OnSearchTextChanged(string value) => _ = RunSearchAsync(value);
 
     /// <summary>
@@ -438,7 +658,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         if (string.IsNullOrWhiteSpace(query))
         {
-            if (Section == LibrarySection.Search) await LoadSectionAsync(LibrarySection.Songs);
+            if (Section == LibrarySection.Search) await LoadSectionAsync(LibrarySection.Songs, clearBackStack: true);
             return;
         }
 
@@ -449,11 +669,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 new CoreRequest("search") { Query = query, Limit = 50 }, cts.Token);
             if (cts.Token.IsCancellationRequested || results is null) return;
 
+            _navigation.Replace(LibraryPage.ForSection(LibrarySection.Search), clearBackStack: true);
             Section = LibrarySection.Search;
+            _pagingGeneration++;
+            _nextCursor = null;
             PageTitle = "Search";
             Replace(Tracks, results.Tracks);
             Replace(Albums, results.Albums);
             Replace(Artists, results.Artists);
+            AlbumGrid.Reset(results.Albums);
+            ArtistGrid.Reset(results.Artists);
             RaiseDerived();
         }
         catch (OperationCanceledException)
@@ -475,6 +700,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var context = Tracks.Contains(track) ? Tracks.ToList() : [track];
         int index = context.IndexOf(track);
         _ = StartQueueAsync(context, index < 0 ? 0 : index);
+    }
+
+    [RelayCommand]
+    private void PlayAlbumTrack(AlbumTrackRow? row)
+    {
+        if (row is null) return;
+        var context = AlbumTrackRows.Select(r => r.Track).ToList();
+        int index = context.IndexOf(row.Track);
+        _ = StartQueueAsync(context, index < 0 ? 0 : index);
+    }
+
+    [RelayCommand]
+    private void PlayArtistTrack(Track? track)
+    {
+        if (track is null) return;
+        var context = ArtistTracks.ToList();
+        int index = context.IndexOf(track);
+        _ = StartQueueAsync(context.Count == 0 ? [track] : context, index < 0 ? 0 : index);
     }
 
     [RelayCommand]
@@ -804,6 +1047,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private void RaiseDerived()
     {
+        OnPropertyChanged(nameof(CanGoBack));
         OnPropertyChanged(nameof(IsHomeSelected));
         OnPropertyChanged(nameof(IsSongsSelected));
         OnPropertyChanged(nameof(IsAlbumsSelected));
@@ -813,7 +1057,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowTracks));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
+        OnPropertyChanged(nameof(ShowSearch));
         OnPropertyChanged(nameof(ShowConnect));
+        OnPropertyChanged(nameof(ShowAlbumDetail));
+        OnPropertyChanged(nameof(ShowArtistDetail));
+        OnPropertyChanged(nameof(HasSearchAlbums));
+        OnPropertyChanged(nameof(HasSearchArtists));
+        OnPropertyChanged(nameof(HasSearchTracks));
+        OnPropertyChanged(nameof(HasArtistAlbums));
         OnPropertyChanged(nameof(IsLibraryEmpty));
         OnPropertyChanged(nameof(LibrarySummary));
     }
