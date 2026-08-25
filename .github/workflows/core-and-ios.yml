@@ -28,6 +28,13 @@ on:
       - "Package.resolved"
       - "project.yml"
       - "spec/**"
+      # The scripts that *produce* the Xcode project and stamp its version. A
+      # change here can break the iOS build while touching nothing under
+      # Sources/, and this job would not have run to notice — which is exactly
+      # what happened when the version scheme moved to a shared derivation.
+      - "tools/generate-project.sh"
+      - "tools/build-ios.sh"
+      - "tools/version-info.py"
       - ".github/workflows/core-and-ios.yml"
   pull_request:
   workflow_dispatch:
