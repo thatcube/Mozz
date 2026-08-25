@@ -66,6 +66,115 @@ final class SchemaAndWriteTests: XCTestCase {
         ]))
     }
 
+    func testV18MigrationRekeysDuplicatePlexServerRowsWithoutDroppingData() throws {
+        let queue = try DatabaseQueue()
+        let migrator = Schema.makeMigrator()
+        try migrator.migrate(queue, upTo: "v17.playEventUID")
+
+        let machine = "50acfe994de74f8998deb9fc43e6262e"
+        let legacy = "plex-https://192-168-68-71.\(machine).plex.direct:32400"
+        let canonical = "plex-\(machine)"
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO server (id, kind, name, baseURL, userID, clientIdentifier, musicSectionID)
+                VALUES
+                  (?, 'plex', 'Brandoland', ?, NULL, 'client', '1'),
+                  (?, 'plex', 'Brandoland', ?, NULL, 'client', NULL)
+                """, arguments: [
+                    legacy, "https://192-168-68-71.\(machine).plex.direct:32400",
+                    canonical, "https://192-168-68-71.\(machine).plex.direct:32400",
+                ])
+            try db.execute(sql: """
+                INSERT INTO serverCapabilities (
+                    serverId, backend, supportsTranscoding, supportsOriginalFileDownload,
+                    supportsFavorites, supportsLyrics, supportsSyncedLyrics,
+                    supportsNormalizationGain, supportsProgressReporting, hasPlexPass,
+                    detectedAt, supportsRatings, serverProduct, isOpenSubsonic
+                ) VALUES (?, 'plex', 1, 1, 0, 1, 1, 0, 1, NULL, 1, 1, NULL, 0)
+                """, arguments: [legacy])
+            try db.execute(sql: """
+                INSERT INTO artist (serverId, remoteId, name, sortName, albumCount, isFavorite, genres)
+                VALUES (?, 'artist-1', 'Artist 1', 'Artist 1', 1, 0, '[]'),
+                       (?, 'artist-2', 'Artist 2', 'Artist 2', 1, 0, '[]')
+                """, arguments: [legacy, legacy])
+            try db.execute(sql: """
+                INSERT INTO album (serverId, remoteId, title, sortTitle, artistName, artistRemoteId, trackCount, isFavorite, genres, albumGroupKey)
+                VALUES (?, 'album-1', 'Album 1', 'Album 1', 'Artist 1', 'artist-1', 2, 0, '[]', 'album-1'),
+                       (?, 'album-2', 'Album 2', 'Album 2', 'Artist 2', 'artist-2', 1, 0, '[]', 'album-2')
+                """, arguments: [legacy, legacy])
+            try db.execute(sql: """
+                INSERT INTO track (serverId, remoteId, title, sortTitle, albumTitle, albumRemoteId, artistName, artistRemoteId, duration, isFavorite, genres)
+                VALUES (?, 'track-1', 'Track 1', 'Track 1', 'Album 1', 'album-1', 'Artist 1', 'artist-1', 1, 0, '[]'),
+                       (?, 'track-2', 'Track 2', 'Track 2', 'Album 1', 'album-1', 'Artist 1', 'artist-1', 1, 0, '[]'),
+                       (?, 'track-3', 'Track 3', 'Track 3', 'Album 2', 'album-2', 'Artist 2', 'artist-2', 1, 0, '[]')
+                """, arguments: [legacy, legacy, legacy])
+            let trackId = try Int64.fetchOne(db, sql: "SELECT id FROM track WHERE remoteId = 'track-1'")!
+            try db.execute(sql: """
+                INSERT INTO playlist (serverId, remoteId, title, trackCount, isSmart)
+                VALUES (?, 'playlist-1', 'Playlist', 1, 0)
+                """, arguments: [legacy])
+            let playlistId = try Int64.fetchOne(db, sql: "SELECT id FROM playlist WHERE remoteId = 'playlist-1'")!
+            try db.execute(sql: "INSERT INTO playlistItem (playlistId, trackRemoteId, position) VALUES (?, 'track-1', 1)", arguments: [playlistId])
+            try db.execute(sql: "INSERT INTO download (trackId, state, sizeBytes, requestedAt) VALUES (?, 'complete', 10, 1)", arguments: [trackId])
+            try db.execute(sql: """
+                INSERT INTO play_event (track_ref, kind, created_at, event_uid)
+                VALUES (?, 'completed', 1, 'event-1'), (?, 'started', 2, 'event-2')
+                """, arguments: ["\(legacy):track-1", "\(legacy):track-2"])
+            try db.execute(sql: """
+                INSERT INTO track_features (track_ref, genres, tags, updated_at)
+                VALUES (?, '[]', '[]', 1), (?, '[]', '[]', 1)
+                """, arguments: ["\(legacy):track-1", "\(legacy):track-2"])
+            try db.execute(sql: "INSERT INTO recommendation_set (id, title, kind, generated_at) VALUES ('set-1', 'Set', 'daily_mix', 1)")
+            try db.execute(sql: """
+                INSERT INTO recommendation_item (set_id, track_ref, rank, score, in_library)
+                VALUES ('set-1', ?, 1, 1, 1), ('set-1', ?, 2, 1, 1)
+                """, arguments: ["\(legacy):track-1", "\(legacy):track-2"])
+            try db.execute(sql: """
+                INSERT INTO favorite_outbox (serverId, remoteId, itemType, kind, value, createdAt)
+                VALUES (?, 'track-1', 'track', 'rating', 5, 1)
+                """, arguments: [legacy])
+            try db.execute(sql: "INSERT INTO suppressed_ref (serverId, scope, ref, createdAt) VALUES (?, 'artist', 'artist-2', 1)", arguments: [legacy])
+            try db.execute(sql: "INSERT INTO catalogSyncRun (serverId, sourceFingerprint, inProgress, updatedAt) VALUES (?, 'fp', 1, 1)", arguments: [legacy])
+            try db.execute(sql: """
+                INSERT INTO catalogSyncProgress (serverId, phase, committedOffset, reportedTotal, completed, updatedAt)
+                VALUES (?, 'tracks', 3, 3, 1, 1)
+                """, arguments: [legacy])
+        }
+
+        let countTables = [
+            "artist", "album", "track", "playlist", "playlistItem", "download",
+            "serverCapabilities", "play_event", "track_features",
+            "recommendation_item", "favorite_outbox", "suppressed_ref",
+            "catalogSyncRun", "catalogSyncProgress",
+        ]
+        let before = try tableCounts(queue, countTables)
+
+        try migrator.migrate(queue)
+
+        let after = try tableCounts(queue, countTables)
+        XCTAssertEqual(after, before)
+        try queue.read { db in
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT id FROM server ORDER BY id"), [canonical])
+            for table in ["artist", "album", "track", "playlist", "favorite_outbox", "suppressed_ref", "serverCapabilities", "catalogSyncRun", "catalogSyncProgress"] {
+                XCTAssertEqual(try String.fetchAll(db, sql: "SELECT DISTINCT serverId FROM \(table)"), [canonical], table)
+            }
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?", arguments: [canonical]), 3)
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM play_event WHERE track_ref LIKE ?", arguments: ["\(canonical):%"]), 2)
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track_features WHERE track_ref LIKE ?", arguments: ["\(canonical):%"]), 2)
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM recommendation_item WHERE track_ref LIKE ?", arguments: ["\(canonical):%"]), 2)
+        }
+    }
+
+    private func tableCounts(_ queue: DatabaseQueue, _ tables: [String]) throws -> [String: Int] {
+        try queue.read { db in
+            var counts: [String: Int] = [:]
+            for table in tables {
+                counts[table] = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table)") ?? 0
+            }
+            return counts
+        }
+    }
+
     func testCatalogSyncStoreRejectsStaleChangedAndDeliberatelyRestartedRuns() async throws {
         let database = try MusicDatabase.inMemory()
         let writer = CatalogWriter(database)

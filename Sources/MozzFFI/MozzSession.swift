@@ -61,6 +61,7 @@ struct SessionRequest: Decodable {
     var userID: String?
     var serverName: String?
     var clientIdentifier: String?
+    var serverMachineIdentifier: String?
     var musicSectionID: String?
     var pinId: Int?
     var code: String?

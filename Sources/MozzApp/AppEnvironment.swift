@@ -395,7 +395,9 @@ public final class AppEnvironment: ObservableObject {
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
-            clientIdentifier: session.clientIdentifier, musicSectionID: nil,
+            clientIdentifier: session.clientIdentifier,
+            serverMachineIdentifier: session.serverMachineIdentifier,
+            musicSectionID: nil,
             accountToken: session.accountToken, selectedMusicSectionIDs: nil
         )
         // Persist before activation so buildBackend's Plex section resolution can
@@ -1653,7 +1655,11 @@ public final class AppEnvironment: ObservableObject {
             return (connection, backend)
         case .plex:
             var connection = ServerConnection(
-                id: Self.serverId(kind: .plex, baseURL: stored.baseURL),
+                id: Self.serverId(
+                    kind: .plex,
+                    baseURL: stored.baseURL,
+                    serverMachineIdentifier: stored.serverMachineIdentifier
+                ),
                 kind: .plex, name: stored.serverName, baseURL: stored.baseURL,
                 userID: stored.userID, clientIdentifier: clientIdentifier,
                 musicSectionID: stored.musicSectionID
@@ -2335,14 +2341,20 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Helpers
 
-    /// A stable per-server identity. For Subsonic we fold in the normalized
-    /// username so two accounts on the *same* server don't collide (spec item 9);
-    /// Plex/Jellyfin keep the historical `kind-baseURL` form.
-    public static func serverId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
-        if kind == .subsonic, let username, !username.isEmpty {
-            return "\(kind.rawValue)-\(username.lowercased())-\(baseURL.absoluteString)"
-        }
-        return "\(kind.rawValue)-\(baseURL.absoluteString)"
+    /// A stable per-server identity, delegated to the shared core so every
+    /// platform scopes rows the same way.
+    public static func serverId(
+        kind: BackendKind,
+        baseURL: URL,
+        username: String? = nil,
+        serverMachineIdentifier: String? = nil
+    ) -> String {
+        ServerIdentity.id(
+            kind: kind,
+            baseURL: baseURL,
+            username: username,
+            serverMachineIdentifier: serverMachineIdentifier
+        )
     }
 
     static func demoClipURL() throws -> URL {

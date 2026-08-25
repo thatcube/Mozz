@@ -92,7 +92,9 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// </summary>
     public async Task AttachAsync(ServerAccount account, CancellationToken token = default)
     {
-        var secret = await Task.Run(() => secrets.Get(SecretKey(account.ServerId)), token).ConfigureAwait(false)
+        var originalAccount = account;
+        account = NormalizeSavedAccount(account);
+        var secret = await Task.Run(() => SecretFor(account, originalAccount), token).ConfigureAwait(false)
             ?? throw new MozzCoreException(
                 $"No stored credential for {account.ServerName}. Sign in again.");
 
@@ -106,6 +108,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             username = account.Username,
             serverName = account.ServerName,
             clientIdentifier = account.ClientIdentifier,
+            serverMachineIdentifier = account.ServerMachineIdentifier,
             musicSectionID = account.MusicSectionId,
         }, token).ConfigureAwait(false);
     }
@@ -246,7 +249,8 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         if (!File.Exists(path)) return [];
         try
         {
-            return JsonSerializer.Deserialize<List<ServerAccount>>(File.ReadAllText(path)) ?? [];
+            var decoded = JsonSerializer.Deserialize<List<ServerAccount>>(File.ReadAllText(path)) ?? [];
+            return NormalizeSavedAccounts(decoded, writeIfChanged: true);
         }
         catch (JsonException)
         {
@@ -258,18 +262,24 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
 
     public void ForgetAccount(string serverId)
     {
-        var remaining = SavedAccounts().Where(a => a.ServerId != serverId).ToList();
+        var accounts = SavedAccounts();
+        var canonical = CanonicalServerId(accounts.FirstOrDefault(a => a.ServerId == serverId)) ?? serverId;
+        var removed = accounts.Where(a => a.ServerId == serverId || CanonicalServerId(a) == canonical).ToList();
+        var remaining = accounts.Except(removed).ToList();
         WriteAccounts(remaining);
-        secrets.Set(SecretKey(serverId), null);
-        secrets.Set($"plex.account.{serverId}", null);
+        foreach (var account in removed)
+        {
+            DeleteCredentialKeys(account);
+        }
+        secrets.Set(SecretKey(canonical), null);
+        secrets.Set($"plex.account.{canonical}", null);
     }
 
     public void ForgetAllAccounts()
     {
         foreach (var account in SavedAccounts())
         {
-            secrets.Set(SecretKey(account.ServerId), null);
-            secrets.Set($"plex.account.{account.ServerId}", null);
+            DeleteCredentialKeys(account);
         }
         WriteAccounts([]);
     }
@@ -287,8 +297,10 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             ClientIdentifier = string.IsNullOrEmpty(session.ClientIdentifier)
                 ? identifier
                 : session.ClientIdentifier,
+            ServerMachineIdentifier = session.ServerMachineIdentifier,
             MusicSectionId = null,
         };
+        account = NormalizeSavedAccount(account);
 
         secrets.Set(SecretKey(account.ServerId), session.Token);
         if (session.AccountToken is { Length: > 0 } accountToken)
@@ -305,13 +317,17 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// <summary>Insert or replace one account, leaving the others alone.</summary>
     internal void SaveAccount(ServerAccount account)
     {
-        var accounts = SavedAccounts().Where(a => a.ServerId != account.ServerId).ToList();
+        account = NormalizeSavedAccount(account);
+        var accounts = SavedAccounts()
+            .Where(a => a.ServerId != account.ServerId && CanonicalServerId(a) != account.ServerId)
+            .ToList();
         accounts.Add(account);
         WriteAccounts(accounts);
     }
 
     internal void SaveAccount(ServerAccount account, string secret, string? accountToken = null)
     {
+        account = NormalizeSavedAccount(account);
         secrets.Set(SecretKey(account.ServerId), secret);
         if (accountToken is not null) secrets.Set($"plex.account.{account.ServerId}", accountToken);
         SaveAccount(account);
@@ -325,6 +341,171 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     }
 
     private static string SecretKey(string serverId) => $"token.{serverId}";
+
+    private string? SecretFor(ServerAccount account, ServerAccount? originalAccount = null)
+    {
+        var canonical = NormalizeSavedAccount(account);
+        var key = SecretKey(canonical.ServerId);
+        if (secrets.Get(key) is { } current) return current;
+
+        var legacyIds = LegacyServerIds(account)
+            .Concat(originalAccount is null ? Enumerable.Empty<string>() : LegacyServerIds(originalAccount));
+        foreach (var legacyKey in legacyIds.Select(SecretKey))
+        {
+            if (legacyKey == key) continue;
+            if (secrets.Get(legacyKey) is { } legacy)
+            {
+                secrets.Set(key, legacy);
+                return legacy;
+            }
+        }
+        return null;
+    }
+
+    private IReadOnlyList<ServerAccount> NormalizeSavedAccounts(
+        IReadOnlyList<ServerAccount> accounts,
+        bool writeIfChanged)
+    {
+        var normalized = new List<ServerAccount>();
+        var changed = false;
+
+        foreach (var account in accounts.Where(a => a.Kind != BackendKind.Plex || PlexMachineIdentifier(a) is null))
+        {
+            var fixedAccount = NormalizeSavedAccount(account);
+            changed |= fixedAccount != account;
+            normalized.Add(fixedAccount);
+        }
+
+        foreach (var group in accounts
+                     .Where(a => a.Kind == BackendKind.Plex && PlexMachineIdentifier(a) is not null)
+                     .GroupBy(a => PlexMachineIdentifier(a)!))
+        {
+            var chosen = group
+                .OrderBy(a => PlexAddressRank(a.BaseUrl))
+                .ThenByDescending(a => HasCredential(a))
+                .First();
+            var machine = group.Key;
+            var canonical = chosen with
+            {
+                ServerId = $"plex-{machine}",
+                ServerMachineIdentifier = machine,
+                MusicSectionId = chosen.MusicSectionId ?? group.Select(a => a.MusicSectionId).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+            };
+            normalized.Add(canonical);
+
+            if (canonical != chosen || group.Count() > 1) changed = true;
+            MigrateCredential(group, canonical.ServerId, SecretKey);
+            MigrateCredential(group, canonical.ServerId, id => $"plex.account.{id}");
+        }
+
+        if (writeIfChanged && changed) WriteAccounts(normalized);
+        return normalized;
+    }
+
+    private void MigrateCredential(
+        IEnumerable<ServerAccount> accounts,
+        string canonicalServerId,
+        Func<string, string> keyFor)
+    {
+        var canonicalKey = keyFor(canonicalServerId);
+        if (secrets.Get(canonicalKey) is not null) return;
+
+        foreach (var legacyId in accounts.SelectMany(LegacyServerIds))
+        {
+            var legacyKey = keyFor(legacyId);
+            if (legacyKey == canonicalKey) continue;
+            if (secrets.Get(legacyKey) is { } value)
+            {
+                secrets.Set(canonicalKey, value);
+                return;
+            }
+        }
+    }
+
+    private ServerAccount NormalizeSavedAccount(ServerAccount account)
+    {
+        var machine = PlexMachineIdentifier(account);
+        if (account.Kind != BackendKind.Plex || string.IsNullOrWhiteSpace(machine)) return account;
+        return account with
+        {
+            ServerId = $"plex-{machine}",
+            ServerMachineIdentifier = machine,
+        };
+    }
+
+    private static string? CanonicalServerId(ServerAccount? account)
+        => account is null ? null : NormalizeServerId(account);
+
+    private static string NormalizeServerId(ServerAccount account)
+    {
+        var machine = PlexMachineIdentifier(account);
+        return account.Kind == BackendKind.Plex && !string.IsNullOrWhiteSpace(machine)
+            ? $"plex-{machine}"
+            : account.ServerId;
+    }
+
+    private static IEnumerable<string> LegacyServerIds(ServerAccount account)
+    {
+        yield return account.ServerId;
+        if (PlexMachineIdentifier(account) is { Length: > 0 } machine)
+        {
+            yield return $"plex-{machine}";
+        }
+    }
+
+    private bool HasCredential(ServerAccount account)
+        => LegacyServerIds(account).Any(id => secrets.Get(SecretKey(id)) is not null);
+
+    private void DeleteCredentialKeys(ServerAccount account)
+    {
+        foreach (var id in LegacyServerIds(account).Distinct())
+        {
+            secrets.Set(SecretKey(id), null);
+            secrets.Set($"plex.account.{id}", null);
+        }
+    }
+
+    private static string? PlexMachineIdentifier(ServerAccount account)
+    {
+        if (account.Kind != BackendKind.Plex) return null;
+        if (!string.IsNullOrWhiteSpace(account.ServerMachineIdentifier)) return account.ServerMachineIdentifier;
+        if (account.ServerId.StartsWith("plex-", StringComparison.Ordinal)
+            && !account.ServerId.StartsWith("plex-http://", StringComparison.Ordinal)
+            && !account.ServerId.StartsWith("plex-https://", StringComparison.Ordinal))
+        {
+            return account.ServerId["plex-".Length..];
+        }
+
+        if (!Uri.TryCreate(account.BaseUrl, UriKind.Absolute, out var uri)) return null;
+        var host = uri.Host;
+        const string suffix = ".plex.direct";
+        if (!host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return null;
+        var withoutSuffix = host[..^suffix.Length];
+        var dot = withoutSuffix.LastIndexOf('.');
+        return dot < 0 || dot == withoutSuffix.Length - 1 ? null : withoutSuffix[(dot + 1)..];
+    }
+
+    private static int PlexAddressRank(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) return 1;
+        var host = uri.Host;
+        const string suffix = ".plex.direct";
+        if (host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            var encodedIp = host[..^suffix.Length].Split('.').FirstOrDefault()?.Replace('-', '.');
+            if (IsDockerBridgeAddress(encodedIp)) return 2;
+        }
+        return 0;
+    }
+
+    private static bool IsDockerBridgeAddress(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address)) return false;
+        var parts = address.Split('.');
+        if (parts.Length != 4) return false;
+        if (!int.TryParse(parts[0], out var a) || !int.TryParse(parts[1], out var b)) return false;
+        return a == 172 && b is >= 16 and <= 31;
+    }
 
     /// <summary>
     /// A stable per-installation id. Servers show it in their device list, so it
@@ -386,6 +567,7 @@ public sealed record ServerAccount
     public string? UserId { get; init; }
     public string? Username { get; init; }
     public required string ClientIdentifier { get; init; }
+    public string? ServerMachineIdentifier { get; init; }
     public string? MusicSectionId { get; init; }
 }
 
@@ -450,6 +632,7 @@ internal sealed record SessionPayload(
     [property: JsonPropertyName("userID")] string? UserId,
     [property: JsonPropertyName("serverName")] string ServerName,
     [property: JsonPropertyName("clientIdentifier")] string ClientIdentifier,
+    [property: JsonPropertyName("serverMachineIdentifier")] string? ServerMachineIdentifier,
     [property: JsonPropertyName("accountToken")] string? AccountToken);
 
 internal sealed record PlexPinPayload(
