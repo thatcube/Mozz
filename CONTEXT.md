@@ -55,6 +55,15 @@ components: a button's size and feel belong to its platform, but its colour and
 the rhythm around it do not. This is the only part of a shell that is shared.
 _Avoid_: design system, component library, theme
 
+**Parity**:
+Every platform can do everything every other platform can do. Presentation is
+free to differ — a desktop window and a phone are different instruments — so
+long as each clears the same bar. The exception is sound: two platforms playing
+the same file should produce the same samples, and a difference there is a
+defect rather than a variation. A platform that lacks a capability is behind,
+never exempt.
+_Avoid_: feature parity, consistency, cross-platform support
+
 **Platform integration**:
 A feature whose entire purpose is to meet a surface a platform provides —
 CarPlay, Siri, a home-screen widget, Windows SMTC. These are the only features
