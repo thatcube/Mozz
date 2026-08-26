@@ -11,6 +11,7 @@
 pub mod decode;
 pub mod engine;
 pub mod ring;
+pub mod sink;
 
 use std::f64::consts::PI;
 
