@@ -45,13 +45,20 @@ let audioEngineLinkage: [LinkerSetting] = [
     .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS, .tvOS])),
     // Off Apple there is no XCFramework to supply the library, so name it. The
     // search path comes from the build command, exactly as SQLite's does — see
-    // the MozzAudioFFI target below.
+    // the MozzAudioFFI target below. That directory holds the static archive
+    // only: cargo emits a .so/.dll beside it for the C# shell to P/Invoke, and
+    // a search path containing both lets the linker pick the shared one, which
+    // builds cleanly and then fails to load for want of an rpath.
     .linkedLibrary("mozz_audio_ffi", .when(platforms: [.windows, .linux])),
     // cpal reaches Linux audio through ALSA. On MSVC a staticlib carries its
-    // own `/DEFAULTLIB:` directives and the WASAPI imports resolve themselves,
-    // but ELF has no such mechanism: the symbols are simply undefined until
-    // whoever links last names the library.
+    // own `/DEFAULTLIB:` directives, but ELF has no such mechanism: the symbols
+    // are simply undefined until whoever links last names the library.
     .linkedLibrary("asound", .when(platforms: [.linux])),
+    // Rust's standard library calls straight into the native API for file and
+    // pipe work — NtCreateFile, NtReadFile and friends. Those live in ntdll,
+    // which the MSVC toolchain does not link by default, so a staticlib built
+    // from Rust leaves them undefined.
+    .linkedLibrary("ntdll", .when(platforms: [.windows])),
 ]
 
 // How the engine's C ABI reaches Swift, which is not the same on every host.

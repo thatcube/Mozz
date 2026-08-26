@@ -160,8 +160,15 @@ jobs:
           Pop-Location
           $lib = "audio\target\release\mozz_audio_ffi.lib"
           if (-not (Test-Path $lib)) { Write-Error "$lib was not produced"; exit 1 }
-          "MOZZ_AUDIO_LIB=$(Resolve-Path 'audio\target\release')" |
-            Out-File -FilePath $env:GITHUB_ENV -Append
+          # Hand the linker a directory holding the static archive and nothing
+          # else. cargo emits the DLL and its import library beside this one for
+          # the C# shell to P/Invoke, and pointing -LIBPATH at all three invites
+          # the linker to bind the import library instead — which links without
+          # complaint and then cannot be loaded.
+          $link = Join-Path $env:RUNNER_TEMP "audiolink"
+          New-Item -ItemType Directory -Force -Path $link | Out-Null
+          Copy-Item $lib $link -Force
+          "MOZZ_AUDIO_LIB=$link" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build MozzFFI.dll
         shell: pwsh
@@ -429,9 +436,18 @@ jobs:
       # cbindgen. Pinned to the version audio-engine.yml uses, because the
       # header it emits is compared against the committed copy — two versions
       # formatting the same declarations differently would read as drift.
-      # `--locked` and a fixed version make this a no-op once cached.
+      # Installed only when missing or wrong: ~/.cargo/bin is cached above, and
+      # `cargo install` over an existing binary is an error rather than a no-op.
       - name: Install cbindgen
-        run: cargo install cbindgen --version 0.29.4 --locked
+        run: |
+          set -euo pipefail
+          want=0.29.4
+          have=$(cbindgen --version 2>/dev/null | awk '{print $2}' || true)
+          if [ "$have" != "$want" ]; then
+            cargo install cbindgen --version "$want" --locked --force
+          else
+            echo "cbindgen $want already present"
+          fi
 
       - name: Build the audio engine
         run: tools/build-audio-xcframework.sh
@@ -600,7 +616,13 @@ jobs:
           (cd audio && cargo build --release -p mozz_audio_ffi)
           lib="audio/target/release/libmozz_audio_ffi.a"
           [ -f "$lib" ] || { echo "$lib was not produced" >&2; exit 1; }
-          echo "MOZZ_AUDIO_LIB=$(cd audio/target/release && pwd)" >> "$GITHUB_ENV"
+          # Give the linker a directory holding the static archive alone. cargo
+          # also emits libmozz_audio_ffi.so there for the C# shell to P/Invoke,
+          # and `-l` prefers a shared object over an archive: that links, and
+          # then libMozzFFI.so will not load for want of an rpath to find it.
+          mkdir -p "$RUNNER_TEMP/audiolink"
+          cp "$lib" "$RUNNER_TEMP/audiolink/"
+          echo "MOZZ_AUDIO_LIB=$RUNNER_TEMP/audiolink" >> "$GITHUB_ENV"
 
       - name: Build libMozzFFI.so
         run: |
