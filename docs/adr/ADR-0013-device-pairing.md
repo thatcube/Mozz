@@ -1,6 +1,13 @@
 # ADR-0013 — Device pairing: the channel everything else is waiting on
 
-Status: **Proposed**
+Status: **Accepted** — the open risk was settled by evidence, not argument.
+
+swift-crypto's HPKE was the one thing this rested on, and its availability
+off Apple was unconfirmed. The Windows FFI spike answered it (CI run
+32934126070, 2026-08-26): `Curve25519_SHA256_ChachaPoly`, seal/open round
+trip true, **and a wrong key rejected** — so it cannot have passed against a
+stub that returns its input. The macOS control job agrees. One pairing
+implementation serves every platform.
 
 Required by ADR-0010 §8, ADR-0011 and ADR-0012, none of which can ship without
 it. Also the mechanism by which a new Windows or Android install obtains the
