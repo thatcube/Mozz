@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// Off Apple the URL loading system is its own module, and this service builds
+// a URLRequest to hand the engine an HTTP stream.
+import FoundationNetworking
+#endif
 import MozzAudioEngine
 import MozzCore
 
