@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// Off Apple the URL loading system is its own module. The artwork fetch below
+// uses URLSession directly, and this facade is what the Windows and Linux
+// shells link, so it has to import it where it actually lives.
+import FoundationNetworking
+#endif
 import MozzCommands
 import MozzContinuity
 import MozzCore
