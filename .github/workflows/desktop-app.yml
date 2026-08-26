@@ -40,6 +40,13 @@ on:
       - "clients/desktop-tests/**"
       - "Sources/**"
       - "Package.swift"
+      # The decoders, the DSP and the output device are all in here now, and
+      # both halves of this build link it: the Swift core takes the staticlib
+      # and the C# shell P/Invokes the cdylib. Leaving it out meant a change to
+      # how Mozz actually sounds produced no new desktop build at all - the fix
+      # for "picking a song does not change what is playing" sat in a green
+      # audio run while every desktop artifact still carried the bug.
+      - "audio/**"
       - ".github/workflows/desktop-app.yml"
 
 concurrency:
