@@ -66,16 +66,16 @@ jobs:
           restore-keys: audio-${{ runner.os }}-
 
       - name: Test
-        run: cargo test --all-features
+        run: cargo test --workspace --all-features
 
       # Warnings are errors here rather than advisory. The crate exists to remove
       # a class of silent divergence, and a warning nobody reads is how the next
       # one arrives.
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       # The engine has to reach every platform Mozz targets, and a crate that
       # only ever builds on the machine that wrote it proves nothing about that.
@@ -85,5 +85,5 @@ jobs:
       - name: Cross-compile check
         run: |
           rustup target add x86_64-pc-windows-msvc aarch64-linux-android
-          cargo check --target x86_64-pc-windows-msvc
-          cargo check --target aarch64-linux-android
+          cargo check --workspace --target x86_64-pc-windows-msvc
+          cargo check --workspace --target aarch64-linux-android
