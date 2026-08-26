@@ -10,6 +10,7 @@
 
 pub mod decode;
 pub mod engine;
+pub mod player;
 pub mod ring;
 pub mod sink;
 

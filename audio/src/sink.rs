@@ -27,7 +27,19 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig, SupportedStreamConfigRange};
 
-use crate::ring::Consumer;
+use crate::ring::{Consumer, ReadOutcome};
+
+/// Told what each read actually produced.
+///
+/// The audio callback is the only place that knows what has been heard, so it
+/// is the only honest source for position and for which track is playing. A
+/// trait rather than a closure so the same implementation serves the device and
+/// the silent path, and so nothing arbitrary is invoked from the callback
+/// beyond one method that must only touch atomics.
+pub trait PlaybackObserver: Send + Sync {
+    /// Record one read. Must not allocate, lock, or block.
+    fn observe(&self, outcome: ReadOutcome);
+}
 
 /// Why a device could not be opened.
 #[derive(Debug)]
@@ -123,8 +135,48 @@ pub struct Sink {
 }
 
 impl Sink {
+    /// Open a device, handing the consumer back when it cannot be done.
+    ///
+    /// Returning the consumer rather than dropping it matters. Without a device
+    /// nothing reads the ring, so the decoder fills it, stalls, and the track
+    /// never ends - a player with no usable device would hang rather than
+    /// degrade. A caller that gets the consumer back can consume it itself and
+    /// keep position and end-of-track honest while making no noise.
+    ///
+    /// This is not a rare path. A device refusing the source's sample rate is
+    /// ordinary, because most output devices offer 44.1 and 48 kHz and nothing
+    /// else, and the sink refuses to fake a rate rather than shift the pitch.
+    pub fn open_or_return(
+        consumer: Consumer,
+        sample_rate: u32,
+        channels: u16,
+        observer: Arc<dyn PlaybackObserver>,
+    ) -> Result<Self, Consumer> {
+        // The consumer lives behind an Arc so that a failure after it has been
+        // moved into the callback can still take it back out.
+        let shared = Arc::new(Mutex::new(consumer));
+        match Self::open_shared(Arc::clone(&shared), sample_rate, channels, Some(observer)) {
+            Ok(sink) => Ok(sink),
+            Err(_) => match Arc::try_unwrap(shared) {
+                Ok(mutex) => Err(mutex.into_inner().unwrap_or_else(|e| e.into_inner())),
+                // Unreachable: the only other reference was the callback, which
+                // is dropped when the stream fails to build.
+                Err(_) => unreachable!("the failed stream still holds the consumer"),
+            },
+        }
+    }
+
     /// Open the default output device and start playing from `consumer`.
     pub fn open(consumer: Consumer, sample_rate: u32, channels: u16) -> Result<Self, SinkError> {
+        Self::open_shared(Arc::new(Mutex::new(consumer)), sample_rate, channels, None)
+    }
+
+    fn open_shared(
+        consumer: Arc<Mutex<Consumer>>,
+        sample_rate: u32,
+        channels: u16,
+        observer: Option<Arc<dyn PlaybackObserver>>,
+    ) -> Result<Self, SinkError> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or(SinkError::NoDevice)?;
 
@@ -139,12 +191,6 @@ impl Sink {
         let starvations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = Arc::clone(&starvations);
 
-        // cpal wants the callback to be Send, and the consumer is only touched
-        // from inside it. The mutex is never contended - nothing else holds it -
-        // so it costs an uncontended atomic per callback and buys the borrow
-        // checker's agreement without any unsafe.
-        let consumer = Mutex::new(consumer);
-
         let stream = device
             .build_output_stream(
                 config,
@@ -157,6 +203,9 @@ impl Sink {
                         return;
                     };
                     let outcome = consumer.read(out);
+                    if let Some(observer) = observer.as_ref() {
+                        observer.observe(outcome);
+                    }
                     if outcome.starved {
                         counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }

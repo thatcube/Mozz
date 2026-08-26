@@ -159,6 +159,14 @@ impl Engine {
         Ok(landed)
     }
 
+    /// Frames decoded but not yet heard.
+    ///
+    /// A decoder that has reached the end of a track is not a track that has
+    /// finished playing; those are separated by however much buffer was filled.
+    pub fn queued_frames(&self) -> usize {
+        self.ring.queued_frames() + self.carry.len() / self.channels.max(1)
+    }
+
     /// Do one packet's worth of work.
     pub fn pump(&mut self) -> Result<Pumped, DecodeError> {
         // Anything left from last time goes first, or the stream would come out

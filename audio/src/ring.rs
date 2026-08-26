@@ -78,6 +78,13 @@ pub struct ReadOutcome {
     /// a track shorter than one buffer period, a few milliseconds. Reporting
     /// the last is the honest answer to "what is playing now" even then.
     pub boundary: Option<Boundary>,
+    /// Absolute frame index just past the last real frame of this read.
+    ///
+    /// Absolute so a consumer can say how far into a track it is by
+    /// subtracting the track's boundary frame, which is exact. Deriving it by
+    /// counting reads instead drifts, because a starved read advances the
+    /// clock without advancing the audio.
+    pub end_frame: u64,
     /// True when the ring ran dry and silence was substituted.
     ///
     /// Distinct from `frames < requested` so that the ordinary end of a queue
@@ -185,6 +192,17 @@ impl Producer {
         let written = self.shared.written.load(Ordering::Relaxed);
         let read = self.shared.read.load(Ordering::Acquire);
         self.shared.capacity_frames() - (written - read)
+    }
+
+    /// Frames written but not yet read, i.e. still waiting to be heard.
+    ///
+    /// The difference between this and zero is the difference between "the
+    /// decoder has finished" and "the music has finished", which are separated
+    /// by the whole buffer.
+    pub fn queued_frames(&self) -> usize {
+        let written = self.shared.written.load(Ordering::Relaxed);
+        let read = self.shared.read.load(Ordering::Acquire);
+        written - read
     }
 
     /// Absolute index of the next frame to be written.
@@ -318,6 +336,7 @@ impl Consumer {
 
         ReadOutcome {
             frames: take,
+            end_frame: (read + take) as u64,
             boundary,
             starved: take < requested,
         }
