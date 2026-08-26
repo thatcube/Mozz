@@ -206,7 +206,31 @@ for entry in ${TARGETS[@]+"${TARGETS[@]}"}; do
 done
 
 BUILD_DESTINATION="generic/platform=iOS"
-[[ ${#TARGETS[@]} -gt 0 ]] && BUILD_DESTINATION="platform=iOS,id=${TARGETS[0]#*:}"
+# Only name the concrete device if xcodebuild can actually see it.
+#
+# xcodebuild and devicectl discover devices independently, and they disagree
+# often enough to matter: a network-paired phone routinely answers devicectl
+# while being absent from xcodebuild's destination list entirely. Naming it
+# then fails with "Unable to find a destination matching the provided
+# specifier", which reads like the device is gone when it is one command away
+# from installing.
+#
+# So ask first. When xcodebuild can see it, name it — that is what gets the
+# provisioning profile scoped to this device, and skipping it produces the
+# famously unhelpful 0xe8008012 at install time. When it cannot, build generic
+# and let devicectl do the install, which works.
+if [[ ${#TARGETS[@]} -gt 0 ]]; then
+  FIRST_ID="${TARGETS[0]#*:}"
+  if xcodebuild -project Mozz.xcodeproj -scheme Mozz -showdestinations 2>/dev/null \
+      | grep -q "$FIRST_ID"; then
+    BUILD_DESTINATION="platform=iOS,id=$FIRST_ID"
+  else
+    echo "⚠️  xcodebuild cannot see the device, though devicectl can." >&2
+    echo "   Building for a generic iOS destination and installing directly." >&2
+    echo "   If the install fails with 0xe8008012, the profile does not cover" >&2
+    echo "   this device — connect it by cable so Xcode can provision for it." >&2
+  fi
+fi
 
 if [[ "$NO_BUILD" != "1" ]]; then
   echo "▸ Building universal iPhone/iPad app ($APP_LABEL)..."
