@@ -884,10 +884,7 @@ mod tests {
         // bar snapped back to roughly where it had been.
         std::thread::sleep(Duration::from_millis(150));
         let after = player.position_seconds();
-        assert!(
-            after >= 2.0,
-            "position fell back to {after} after the seek"
-        );
+        assert!(after >= 2.0, "position fell back to {after} after the seek");
     }
 
     /// Dropping must not hang. The decode thread is joined rather than
