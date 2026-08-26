@@ -633,4 +633,24 @@ public static class AppPaths
         Environment.GetEnvironmentVariable("MOZZ_LIBRARY") is { Length: > 0 } custom
             ? custom
             : Path.Combine(SupportDirectory, "library.sqlite");
+
+    /// <summary>
+    /// The downloads root — <c>MozzDownloads</c> under the support directory,
+    /// matching the core's <c>DownloadFileStore.defaultRoot()</c> so both sides
+    /// name the same folder. <c>MOZZ_DOWNLOADS_DIR</c> overrides it for tests and
+    /// development, exactly as <c>MOZZ_SUPPORT_DIR</c> / <c>MOZZ_LIBRARY</c> do.
+    /// The directory is created on demand.
+    /// </summary>
+    public static string DownloadsDirectory
+    {
+        get
+        {
+            var overridePath = Environment.GetEnvironmentVariable("MOZZ_DOWNLOADS_DIR");
+            var path = !string.IsNullOrWhiteSpace(overridePath)
+                ? overridePath
+                : Path.Combine(SupportDirectory, "MozzDownloads");
+            Directory.CreateDirectory(path);
+            return path;
+        }
+    }
 }

@@ -17,6 +17,7 @@ namespace Mozz.Desktop.Core;
 /// hands it back on the next launch through <c>Attach</c>.
 /// </summary>
 public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? accountsPath = null)
+    : Downloads.IDownloadSourceResolver
 {
     private const string AccountsKey = "accounts.json";
     private readonly string _accountsPath = accountsPath ?? Path.Combine(AppPaths.SupportDirectory, AccountsKey);
@@ -216,6 +217,31 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             remoteId,
             maxBitrateKbps,
         }, token);
+
+    /// <summary>
+    /// Resolve a track to the URL and auth headers its bytes are fetched from,
+    /// for the download service. This is the same <c>streamURL</c> command the
+    /// player resolves through — so a download carries exactly the credentials a
+    /// stream does — but it keeps the <c>headers</c> the playback
+    /// <see cref="StreamSource"/> record throws away. Null when the core has no
+    /// URL for the track.
+    /// </summary>
+    public async Task<Downloads.DownloadSource?> ResolveAsync(
+        string serverId, string remoteId, CancellationToken token = default)
+    {
+        var payload = await core.CallAsync<DownloadStreamPayload>(new
+        {
+            cmd = "streamURL",
+            serverId,
+            remoteId,
+        }, token).ConfigureAwait(false);
+
+        if (payload is null || string.IsNullOrWhiteSpace(payload.Url)) return null;
+
+        IReadOnlyDictionary<string, string> headers =
+            payload.Headers ?? new Dictionary<string, string>();
+        return new Downloads.DownloadSource(payload.Url, headers);
+    }
 
     public async Task<string?> ArtworkUrlAsync(
         string serverId, string artworkKey, int size = 512, CancellationToken token = default)
@@ -725,6 +751,10 @@ public sealed record StreamSource(
     [property: JsonPropertyName("url")] string Url,
     [property: JsonPropertyName("isTranscoded")] bool IsTranscoded,
     [property: JsonPropertyName("sessionID")] string? SessionId);
+
+internal sealed record DownloadStreamPayload(
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("headers")] Dictionary<string, string>? Headers);
 
 internal sealed record SessionPayload(
     [property: JsonPropertyName("serverId")] string ServerId,

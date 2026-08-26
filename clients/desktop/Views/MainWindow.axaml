@@ -184,6 +184,16 @@
                                 <TextBlock x:Name="LblPlaylists" Text="Playlists" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
+                        <Button x:Name="NavDownloads" Classes="nav" Classes.selected="{Binding IsDownloadsSelected}"
+                                Command="{Binding SelectSectionCommand}"
+                                CommandParameter="{x:Static vm:LibrarySection.Downloads}">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconDownload}"
+                                                     Brush="{Binding #LblDownloads.Foreground}"
+                                                     VerticalAlignment="Center" />
+                                <TextBlock x:Name="LblDownloads" Text="Downloads" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
 
                     <Border x:Name="SidebarLibraryCard" Grid.Row="3" Background="{DynamicResource SurfaceRaised}"
@@ -798,6 +808,63 @@
                         </ListBox.DataTemplates>
                     </ListBox>
 
+                    <!-- Downloads: what is queued, transferring or held offline.
+                         Progress is polled from the core (a timer in the view
+                         model), so these rows refresh in place rather than through
+                         a push channel. A ListBox (not a WrapPanel) so the list
+                         virtualizes. -->
+                    <Grid IsVisible="{Binding ShowDownloads}" RowDefinitions="Auto,*" Margin="0,0,8,0">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,18,0,10">
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock Text="Downloads" Classes="sectionTitle" />
+                                <TextBlock Text="{Binding DownloadStorageSummary}" Classes="secondary" FontSize="12.5" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="ghost" VerticalAlignment="Center"
+                                    Command="{Binding RefreshDownloadsCommand}" ToolTip.Tip="Refresh">
+                                <controls:TablerIcon Size="18" Data="{StaticResource IconRefresh}"
+                                                     Brush="{Binding $parent[Button].Foreground}" />
+                            </Button>
+                        </Grid>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding DownloadRows}"
+                                 Background="Transparent" BorderThickness="0"
+                                 Padding="0,0,0,24">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="vm:DownloadRow">
+                                    <Grid ColumnDefinitions="*,Auto,Auto" Height="58" Classes="libraryTrackRow">
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="4,0,13,0" Spacing="3">
+                                            <TextBlock Text="{Binding Title}" Classes="primary" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Detail}" Classes="secondary" FontSize="12" />
+                                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding ProgressFraction}"
+                                                         Height="3" IsVisible="{Binding ShowProgress}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding StateLabel}" Classes="secondary"
+                                                   VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" />
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                            <Button Classes="ghost" Width="34" Height="34"
+                                                    IsVisible="{Binding !IsDownloaded}"
+                                                    Command="{Binding $parent[Window].DataContext.CancelDownloadCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="Cancel">
+                                                <controls:TablerIcon Size="17" Data="{StaticResource IconX}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                            <Button Classes="ghost" Width="34" Height="34"
+                                                    Command="{Binding $parent[Window].DataContext.DeleteDownloadCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="Remove">
+                                                <controls:TablerIcon Size="17" Data="{StaticResource IconTrash}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
                     <!-- Playlists -->
                     <ListBox IsVisible="{Binding ShowPlaylists}"
                              ItemsSource="{Binding PlaylistGrid.Rows}"
@@ -902,6 +969,13 @@
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Classes="secondary" Command="{Binding $parent[Window].DataContext.DownloadAlbumCommand}"
+                                                    ToolTip.Tip="Download this album">
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <controls:TablerIcon Size="15" Data="{StaticResource IconDownload}" Brush="{Binding $parent[Button].Foreground}" />
+                                                    <TextBlock Text="Download" />
                                                 </StackPanel>
                                             </Button>
                                         </StackPanel>
@@ -1100,7 +1174,7 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:AlbumTrackItemRow">
-                                <Grid ColumnDefinitions="36,*,46,70" Height="44">
+                                <Grid ColumnDefinitions="36,*,46,46,70" Height="44">
                                     <TextBlock Grid.Column="0" Text="{Binding Row.TrackNumberText}" Classes="secondary"
                                                VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -1118,7 +1192,14 @@
                                                                  Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Row.Track.IsFavorite}" />
                                         </Panel>
                                     </Button>
-                                    <TextBlock Grid.Column="3" Text="{Binding Row.Track.Duration}" Classes="secondary"
+                                    <Button Grid.Column="3" Classes="ghost" Width="34" Height="34"
+                                            Command="{Binding $parent[Window].DataContext.DownloadTrackCommand}"
+                                            CommandParameter="{Binding Row.Track}"
+                                            ToolTip.Tip="Download">
+                                        <controls:TablerIcon Size="17" Data="{StaticResource IconDownload}"
+                                                             Brush="{Binding $parent[Button].Foreground}" />
+                                    </Button>
+                                    <TextBlock Grid.Column="4" Text="{Binding Row.Track.Duration}" Classes="secondary"
                                                VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                 </Grid>
                             </DataTemplate>

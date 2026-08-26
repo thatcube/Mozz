@@ -34,15 +34,35 @@ commands() {
   grep -oE "^[[:space:]]+[A-Za-z]+Request [a-z_]+ = [0-9]+;" "$PROTO" | awk '{print $2}' | sort
 }
 
-# A shell "reaches" a command when its own code names the command's message.
+# A shell "reaches" a command when its own code names the command's REQUEST
+# message.
+#
+# The request type, case-sensitively, and not the bare command name. The first
+# version matched the name case-insensitively, so `downloads` matched the word
+# "Downloads" in any pre-existing label or property and the desktop was credited
+# with a capability it did not have. A parity tool that over-reports is worse
+# than none, because it retires the very question it exists to keep open.
 reaches() {
-  local shell="$1" name="$2"
+  local shell="$1" snake="$2" pascal="${3}Request"
+  # camelCase is how the older untyped path spells a command name.
+  local camel
+  camel="$(python3 -c "
+import sys
+parts = sys.argv[1].split('_')
+print(parts[0] + ''.join(p.capitalize() for p in parts[1:]))" "$snake")"
+
   case "$shell" in
     apple)
-      grep -rqi "$name" "$ROOT/Sources/MozzApp" --include=*.swift 2>/dev/null
+      grep -rqE "$pascal|cmd: \"$camel\"" "$ROOT/Sources/MozzApp" --include=*.swift 2>/dev/null
       ;;
     desktop)
-      grep -rqi "$name" "$ROOT/clients/desktop" --include=*.cs --exclude-dir=Generated 2>/dev/null
+      # Three call styles reach the core from the desktop, and a count that
+      # knows about only one is worse than no count: the typed schema path
+      # (XRequest), an anonymous object carrying `cmd = "x"`, and a
+      # `CoreRequest("x")` helper. Missing the third reported that the desktop
+      # could not list albums, which it plainly can.
+      grep -rqE "$pascal|cmd = \"$camel\"|CoreRequest\(\"$camel\"" "$ROOT/clients/desktop" \
+        --include=*.cs --exclude-dir=Generated 2>/dev/null
       ;;
   esac
 }
@@ -53,7 +73,7 @@ surface() {
     local reached=0 total=0
     for command in $(commands); do
       total=$((total + 1))
-      if reaches "$shell" "$(pascal "$command")"; then
+      if reaches "$shell" "$command" "$(pascal "$command")"; then
         reached=$((reached + 1))
       fi
     done
@@ -64,7 +84,7 @@ surface() {
 missing_for() {
   local shell="$1"
   for command in $(commands); do
-    reaches "$shell" "$(pascal "$command")" || echo "$command"
+    reaches "$shell" "$command" "$(pascal "$command")" || echo "$command"
   done
 }
 
