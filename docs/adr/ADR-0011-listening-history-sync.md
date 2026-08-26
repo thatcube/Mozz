@@ -1,6 +1,15 @@
 # ADR-0011 — Listening history syncs device to device, not through the server
 
-Status: **Proposed**
+Status: **Accepted** — the open risk was settled by evidence, not argument.
+
+swift-crypto's HPKE was the one thing this rested on, and its availability
+off Apple was unconfirmed. The Windows FFI spike answered it (CI run
+32934126070, 2026-08-26): `Curve25519_SHA256_ChachaPoly`, seal/open round
+trip true, **and a wrong key rejected** — so it cannot have passed against a
+stub that returns its input. The macOS control job agrees. One pairing
+implementation serves every platform.
+Unblocked by ADR-0013 above, which was history's only stated blocker.
+
 
 Supersedes the transport half of the history work landed in `MozzHistory` /
 `JellyfinHistoryStore`; the data model, merge semantics and `spec/history`
