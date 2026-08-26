@@ -80,6 +80,31 @@ storage tier is real.
 It merges like any other state object: newest write per server id wins, and a
 device that has not seen a server simply learns about it.
 
+### Removal has to be written down
+
+Adding merges for free. Removing does not, and the layout above is the reason:
+every device writes only under its own prefix, and reading is the union of all
+of them. Drop a server from the phone's object and the PC's object still lists
+it, so the union puts it back. **A server the user deleted reappears**, which is
+worse than not supporting deletion at all, because it looks like the app
+ignoring them.
+
+So removal is a write rather than an absence. A deleted server stays in the
+object carrying `removedAt`, and the merge compares every entry for a given
+server id — tombstone and live alike — taking the newest. A device that has
+been asleep learns the removal the same way it learns anything else.
+
+Tombstones for servers are kept forever. There are a handful of them per user,
+so the storage argument for expiring them does not exist, and an expiring
+tombstone is exactly how a deletion comes back months later.
+
+The honest edge: this comparison uses wall clock, which everywhere else in this
+document is called a hint rather than an authority. Removing a server on one
+device and re-adding it on another within a few seconds is genuinely ambiguous.
+It is also not a thing people do, and the alternative — a tombstone that always
+beats a live entry — would make re-adding a server impossible, which people
+*do* do.
+
 ### On Plex, a token is a person as well as a server
 
 Plex Home lets one account hold several users, and **managed users have no
