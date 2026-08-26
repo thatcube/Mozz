@@ -57,8 +57,14 @@ tool_versions() {
 generate_into() {
   local swift_dir="$1" csharp_dir="$2"
   mkdir -p "$swift_dir" "$csharp_dir"
+  # Visibility=Public because the generated types live in their own module and
+  # are used from another. protoc-gen-swift defaults to internal, which compiles
+  # fine inside the module and fails the moment anything imports it — and the
+  # error names the type rather than the visibility, so it reads like the
+  # generation failed rather than like a flag is missing.
   protoc --proto_path="$SCHEMA_DIR" \
          --swift_out="$swift_dir" \
+         --swift_opt=Visibility=Public \
          --csharp_out="$csharp_dir" \
          "${protos[@]}"
 }

@@ -96,6 +96,23 @@ let package = Package(
             path: "Sources/MozzSchema"
         ),
 
+        // MARK: The one command surface
+        //
+        // `CommandService` is what every shell reaches the core through — Swift
+        // shells in process, everything else via `CommandDispatcher` over the
+        // wire format in `schema/`. The dispatcher's switch is exhaustive over
+        // the generated command enum, so a command in the schema that nothing
+        // implements stops the build. See ADR-0016.
+        .target(
+            name: "MozzCommands",
+            dependencies: [
+                "MozzCore",
+                "MozzDatabase",
+                "MozzSchema",
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ]
+        ),
+
         // MARK: Networking
         //
         // Async HTTPClient, Endpoint builder, URL normalization, retry/backoff,
@@ -267,6 +284,13 @@ let package = Package(
         .testTarget(
             name: "MozzSchemaTests",
             dependencies: ["MozzSchema", .product(name: "SwiftProtobuf", package: "swift-protobuf")]
+        ),
+        .testTarget(
+            name: "MozzCommandsTests",
+            dependencies: [
+                "MozzCommands", "MozzDatabase", "MozzCore", "MozzSchema",
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ]
         ),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),

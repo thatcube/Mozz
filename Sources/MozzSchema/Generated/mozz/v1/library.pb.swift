@@ -33,314 +33,314 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
 
 /// An opaque resume position for a paged listing. Clients must not parse it;
 /// they hand back whatever the previous page returned.
-nonisolated struct Mozz_V1_PageCursor: Sendable {
+public nonisolated struct Mozz_V1_PageCursor: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var token: String = String()
+  public var token: String = String()
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_Page: Sendable {
+public nonisolated struct Mozz_V1_Page: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Absent when this is the last page.
-  var next: Mozz_V1_PageCursor {
+  public var next: Mozz_V1_PageCursor {
     get {_next ?? Mozz_V1_PageCursor()}
     set {_next = newValue}
   }
   /// Returns true if `next` has been explicitly set.
-  var hasNext: Bool {self._next != nil}
+  public var hasNext: Bool {self._next != nil}
   /// Clears the value of `next`. Subsequent reads from it will return its default value.
-  mutating func clearNext() {self._next = nil}
+  public mutating func clearNext() {self._next = nil}
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _next: Mozz_V1_PageCursor? = nil
 }
 
-nonisolated struct Mozz_V1_AlbumSummary: Sendable {
+public nonisolated struct Mozz_V1_AlbumSummary: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var remoteID: String = String()
+  public var remoteID: String = String()
 
-  var title: String = String()
+  public var title: String = String()
 
-  var artistName: String = String()
+  public var artistName: String = String()
 
-  var year: Int32 {
+  public var year: Int32 {
     get {_year ?? 0}
     set {_year = newValue}
   }
   /// Returns true if `year` has been explicitly set.
-  var hasYear: Bool {self._year != nil}
+  public var hasYear: Bool {self._year != nil}
   /// Clears the value of `year`. Subsequent reads from it will return its default value.
-  mutating func clearYear() {self._year = nil}
+  public mutating func clearYear() {self._year = nil}
 
-  var artworkKey: String {
+  public var artworkKey: String {
     get {_artworkKey ?? String()}
     set {_artworkKey = newValue}
   }
   /// Returns true if `artworkKey` has been explicitly set.
-  var hasArtworkKey: Bool {self._artworkKey != nil}
+  public var hasArtworkKey: Bool {self._artworkKey != nil}
   /// Clears the value of `artworkKey`. Subsequent reads from it will return its default value.
-  mutating func clearArtworkKey() {self._artworkKey = nil}
+  public mutating func clearArtworkKey() {self._artworkKey = nil}
 
-  var trackCount: Int32 = 0
+  public var trackCount: Int32 = 0
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _year: Int32? = nil
   fileprivate var _artworkKey: String? = nil
 }
 
-nonisolated struct Mozz_V1_Artist: Sendable {
+public nonisolated struct Mozz_V1_Artist: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var remoteID: String = String()
+  public var remoteID: String = String()
 
-  var name: String = String()
+  public var name: String = String()
 
-  var artworkKey: String {
+  public var artworkKey: String {
     get {_artworkKey ?? String()}
     set {_artworkKey = newValue}
   }
   /// Returns true if `artworkKey` has been explicitly set.
-  var hasArtworkKey: Bool {self._artworkKey != nil}
+  public var hasArtworkKey: Bool {self._artworkKey != nil}
   /// Clears the value of `artworkKey`. Subsequent reads from it will return its default value.
-  mutating func clearArtworkKey() {self._artworkKey = nil}
+  public mutating func clearArtworkKey() {self._artworkKey = nil}
 
-  var albumCount: Int32 = 0
+  public var albumCount: Int32 = 0
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _artworkKey: String? = nil
 }
 
-nonisolated struct Mozz_V1_Library: Sendable {
+public nonisolated struct Mozz_V1_Library: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var id: String = String()
+  public var id: String = String()
 
-  var name: String = String()
+  public var name: String = String()
 
-  var serverID: String = String()
+  public var serverID: String = String()
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
 /// Takes no arguments. The empty message is deliberate: it gives the command a
 /// place to grow an argument later without changing its shape at every call site.
-nonisolated struct Mozz_V1_LibrariesRequest: Sendable {
+public nonisolated struct Mozz_V1_LibrariesRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_LibrariesResponse: Sendable {
+public nonisolated struct Mozz_V1_LibrariesResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var libraries: [Mozz_V1_Library] = []
+  public var libraries: [Mozz_V1_Library] = []
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_AlbumsRequest: Sendable {
+public nonisolated struct Mozz_V1_AlbumsRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var serverID: String = String()
+  public var serverID: String = String()
 
   /// Absent means "from the beginning".
-  var after: Mozz_V1_PageCursor {
+  public var after: Mozz_V1_PageCursor {
     get {_after ?? Mozz_V1_PageCursor()}
     set {_after = newValue}
   }
   /// Returns true if `after` has been explicitly set.
-  var hasAfter: Bool {self._after != nil}
+  public var hasAfter: Bool {self._after != nil}
   /// Clears the value of `after`. Subsequent reads from it will return its default value.
-  mutating func clearAfter() {self._after = nil}
+  public mutating func clearAfter() {self._after = nil}
 
-  var limit: Int32 = 0
+  public var limit: Int32 = 0
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _after: Mozz_V1_PageCursor? = nil
 }
 
-nonisolated struct Mozz_V1_AlbumsResponse: Sendable {
+public nonisolated struct Mozz_V1_AlbumsResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var albums: [Mozz_V1_AlbumSummary] = []
+  public var albums: [Mozz_V1_AlbumSummary] = []
 
-  var page: Mozz_V1_Page {
+  public var page: Mozz_V1_Page {
     get {_page ?? Mozz_V1_Page()}
     set {_page = newValue}
   }
   /// Returns true if `page` has been explicitly set.
-  var hasPage: Bool {self._page != nil}
+  public var hasPage: Bool {self._page != nil}
   /// Clears the value of `page`. Subsequent reads from it will return its default value.
-  mutating func clearPage() {self._page = nil}
+  public mutating func clearPage() {self._page = nil}
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _page: Mozz_V1_Page? = nil
 }
 
 /// Both fields are required. Today this is a runtime guard in the facade; here
 /// it is the shape of the message, and every generated client enforces it.
-nonisolated struct Mozz_V1_ArtistRequest: Sendable {
+public nonisolated struct Mozz_V1_ArtistRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var serverID: String = String()
+  public var serverID: String = String()
 
-  var remoteID: String = String()
+  public var remoteID: String = String()
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_ArtistResponse: Sendable {
+public nonisolated struct Mozz_V1_ArtistResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var artist: Mozz_V1_Artist {
+  public var artist: Mozz_V1_Artist {
     get {_artist ?? Mozz_V1_Artist()}
     set {_artist = newValue}
   }
   /// Returns true if `artist` has been explicitly set.
-  var hasArtist: Bool {self._artist != nil}
+  public var hasArtist: Bool {self._artist != nil}
   /// Clears the value of `artist`. Subsequent reads from it will return its default value.
-  mutating func clearArtist() {self._artist = nil}
+  public mutating func clearArtist() {self._artist = nil}
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _artist: Mozz_V1_Artist? = nil
 }
 
-nonisolated struct Mozz_V1_SubscriptionToken: Sendable {
+public nonisolated struct Mozz_V1_SubscriptionToken: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var id: UInt64 = 0
+  public var id: UInt64 = 0
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_CancelRequest: Sendable {
+public nonisolated struct Mozz_V1_CancelRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var token: Mozz_V1_SubscriptionToken {
+  public var token: Mozz_V1_SubscriptionToken {
     get {_token ?? Mozz_V1_SubscriptionToken()}
     set {_token = newValue}
   }
   /// Returns true if `token` has been explicitly set.
-  var hasToken: Bool {self._token != nil}
+  public var hasToken: Bool {self._token != nil}
   /// Clears the value of `token`. Subsequent reads from it will return its default value.
-  mutating func clearToken() {self._token = nil}
+  public mutating func clearToken() {self._token = nil}
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 
   fileprivate var _token: Mozz_V1_SubscriptionToken? = nil
 }
 
-nonisolated struct Mozz_V1_CancelResponse: Sendable {
+public nonisolated struct Mozz_V1_CancelResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
 /// Fires whenever the locally-stored library changes for this server —
 /// a sync landing, a favourite toggling, a download completing.
-nonisolated struct Mozz_V1_WatchLibraryRequest: Sendable {
+public nonisolated struct Mozz_V1_WatchLibraryRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var serverID: String = String()
+  public var serverID: String = String()
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_LibraryChanged: Sendable {
+public nonisolated struct Mozz_V1_LibraryChanged: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Which kinds of rows changed, so a client can refresh narrowly rather than
   /// reloading everything.
-  var changedEntities: [String] = []
+  public var changedEntities: [String] = []
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_Request: Sendable {
+public nonisolated struct Mozz_V1_Request: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Echoed back on the matching Response so a client can pair them.
-  var id: UInt64 = 0
+  public var id: UInt64 = 0
 
-  var command: Mozz_V1_Request.OneOf_Command? = nil
+  public var command: Mozz_V1_Request.OneOf_Command? = nil
 
-  var libraries: Mozz_V1_LibrariesRequest {
+  public var libraries: Mozz_V1_LibrariesRequest {
     get {
       if case .libraries(let v)? = command {return v}
       return Mozz_V1_LibrariesRequest()
@@ -348,7 +348,7 @@ nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .libraries(newValue)}
   }
 
-  var albums: Mozz_V1_AlbumsRequest {
+  public var albums: Mozz_V1_AlbumsRequest {
     get {
       if case .albums(let v)? = command {return v}
       return Mozz_V1_AlbumsRequest()
@@ -356,7 +356,7 @@ nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .albums(newValue)}
   }
 
-  var artist: Mozz_V1_ArtistRequest {
+  public var artist: Mozz_V1_ArtistRequest {
     get {
       if case .artist(let v)? = command {return v}
       return Mozz_V1_ArtistRequest()
@@ -364,7 +364,7 @@ nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .artist(newValue)}
   }
 
-  var watchLibrary: Mozz_V1_WatchLibraryRequest {
+  public var watchLibrary: Mozz_V1_WatchLibraryRequest {
     get {
       if case .watchLibrary(let v)? = command {return v}
       return Mozz_V1_WatchLibraryRequest()
@@ -372,7 +372,7 @@ nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .watchLibrary(newValue)}
   }
 
-  var cancel: Mozz_V1_CancelRequest {
+  public var cancel: Mozz_V1_CancelRequest {
     get {
       if case .cancel(let v)? = command {return v}
       return Mozz_V1_CancelRequest()
@@ -380,9 +380,9 @@ nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .cancel(newValue)}
   }
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  nonisolated enum OneOf_Command: Equatable, Sendable {
+  public nonisolated enum OneOf_Command: Equatable, Sendable {
     case libraries(Mozz_V1_LibrariesRequest)
     case albums(Mozz_V1_AlbumsRequest)
     case artist(Mozz_V1_ArtistRequest)
@@ -391,31 +391,31 @@ nonisolated struct Mozz_V1_Request: Sendable {
 
   }
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_Failure: Sendable {
+public nonisolated struct Mozz_V1_Failure: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var message: String = String()
+  public var message: String = String()
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  init() {}
+  public init() {}
 }
 
-nonisolated struct Mozz_V1_Response: Sendable {
+public nonisolated struct Mozz_V1_Response: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var id: UInt64 = 0
+  public var id: UInt64 = 0
 
-  var result: Mozz_V1_Response.OneOf_Result? = nil
+  public var result: Mozz_V1_Response.OneOf_Result? = nil
 
-  var failure: Mozz_V1_Failure {
+  public var failure: Mozz_V1_Failure {
     get {
       if case .failure(let v)? = result {return v}
       return Mozz_V1_Failure()
@@ -423,7 +423,7 @@ nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .failure(newValue)}
   }
 
-  var libraries: Mozz_V1_LibrariesResponse {
+  public var libraries: Mozz_V1_LibrariesResponse {
     get {
       if case .libraries(let v)? = result {return v}
       return Mozz_V1_LibrariesResponse()
@@ -431,7 +431,7 @@ nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .libraries(newValue)}
   }
 
-  var albums: Mozz_V1_AlbumsResponse {
+  public var albums: Mozz_V1_AlbumsResponse {
     get {
       if case .albums(let v)? = result {return v}
       return Mozz_V1_AlbumsResponse()
@@ -439,7 +439,7 @@ nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .albums(newValue)}
   }
 
-  var artist: Mozz_V1_ArtistResponse {
+  public var artist: Mozz_V1_ArtistResponse {
     get {
       if case .artist(let v)? = result {return v}
       return Mozz_V1_ArtistResponse()
@@ -447,7 +447,7 @@ nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .artist(newValue)}
   }
 
-  var watchLibrary: Mozz_V1_SubscriptionToken {
+  public var watchLibrary: Mozz_V1_SubscriptionToken {
     get {
       if case .watchLibrary(let v)? = result {return v}
       return Mozz_V1_SubscriptionToken()
@@ -455,7 +455,7 @@ nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .watchLibrary(newValue)}
   }
 
-  var cancel: Mozz_V1_CancelResponse {
+  public var cancel: Mozz_V1_CancelResponse {
     get {
       if case .cancel(let v)? = result {return v}
       return Mozz_V1_CancelResponse()
@@ -463,9 +463,9 @@ nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .cancel(newValue)}
   }
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  nonisolated enum OneOf_Result: Equatable, Sendable {
+  public nonisolated enum OneOf_Result: Equatable, Sendable {
     case failure(Mozz_V1_Failure)
     case libraries(Mozz_V1_LibrariesResponse)
     case albums(Mozz_V1_AlbumsResponse)
@@ -475,27 +475,27 @@ nonisolated struct Mozz_V1_Response: Sendable {
 
   }
 
-  init() {}
+  public init() {}
 }
 
 /// Pushed from the core to the shell, unprompted, for an active subscription.
-nonisolated struct Mozz_V1_Event: Sendable {
+public nonisolated struct Mozz_V1_Event: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var token: Mozz_V1_SubscriptionToken {
+  public var token: Mozz_V1_SubscriptionToken {
     get {_token ?? Mozz_V1_SubscriptionToken()}
     set {_token = newValue}
   }
   /// Returns true if `token` has been explicitly set.
-  var hasToken: Bool {self._token != nil}
+  public var hasToken: Bool {self._token != nil}
   /// Clears the value of `token`. Subsequent reads from it will return its default value.
-  mutating func clearToken() {self._token = nil}
+  public mutating func clearToken() {self._token = nil}
 
-  var payload: Mozz_V1_Event.OneOf_Payload? = nil
+  public var payload: Mozz_V1_Event.OneOf_Payload? = nil
 
-  var libraryChanged: Mozz_V1_LibraryChanged {
+  public var libraryChanged: Mozz_V1_LibraryChanged {
     get {
       if case .libraryChanged(let v)? = payload {return v}
       return Mozz_V1_LibraryChanged()
@@ -503,14 +503,14 @@ nonisolated struct Mozz_V1_Event: Sendable {
     set {payload = .libraryChanged(newValue)}
   }
 
-  var unknownFields = SwiftProtobuf.UnknownStorage()
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  nonisolated enum OneOf_Payload: Equatable, Sendable {
+  public nonisolated enum OneOf_Payload: Equatable, Sendable {
     case libraryChanged(Mozz_V1_LibraryChanged)
 
   }
 
-  init() {}
+  public init() {}
 
   fileprivate var _token: Mozz_V1_SubscriptionToken? = nil
 }
@@ -520,10 +520,10 @@ nonisolated struct Mozz_V1_Event: Sendable {
 fileprivate nonisolated let _protobuf_package = "mozz.v1"
 
 nonisolated extension Mozz_V1_PageCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".PageCursor"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0")
+  public static let protoMessageName: String = _protobuf_package + ".PageCursor"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -535,14 +535,14 @@ nonisolated extension Mozz_V1_PageCursor: SwiftProtobuf.Message, SwiftProtobuf._
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.token.isEmpty {
       try visitor.visitSingularStringField(value: self.token, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_PageCursor, rhs: Mozz_V1_PageCursor) -> Bool {
+  public static func ==(lhs: Mozz_V1_PageCursor, rhs: Mozz_V1_PageCursor) -> Bool {
     if lhs.token != rhs.token {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -550,10 +550,10 @@ nonisolated extension Mozz_V1_PageCursor: SwiftProtobuf.Message, SwiftProtobuf._
 }
 
 nonisolated extension Mozz_V1_Page: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Page"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}next\0")
+  public static let protoMessageName: String = _protobuf_package + ".Page"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}next\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -565,7 +565,7 @@ nonisolated extension Mozz_V1_Page: SwiftProtobuf.Message, SwiftProtobuf._Messag
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -576,7 +576,7 @@ nonisolated extension Mozz_V1_Page: SwiftProtobuf.Message, SwiftProtobuf._Messag
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Page, rhs: Mozz_V1_Page) -> Bool {
+  public static func ==(lhs: Mozz_V1_Page, rhs: Mozz_V1_Page) -> Bool {
     if lhs._next != rhs._next {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -584,10 +584,10 @@ nonisolated extension Mozz_V1_Page: SwiftProtobuf.Message, SwiftProtobuf._Messag
 }
 
 nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".AlbumSummary"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}title\0\u{3}artist_name\0\u{1}year\0\u{3}artwork_key\0\u{3}track_count\0")
+  public static let protoMessageName: String = _protobuf_package + ".AlbumSummary"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}title\0\u{3}artist_name\0\u{1}year\0\u{3}artwork_key\0\u{3}track_count\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -604,7 +604,7 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -630,7 +630,7 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_AlbumSummary, rhs: Mozz_V1_AlbumSummary) -> Bool {
+  public static func ==(lhs: Mozz_V1_AlbumSummary, rhs: Mozz_V1_AlbumSummary) -> Bool {
     if lhs.remoteID != rhs.remoteID {return false}
     if lhs.title != rhs.title {return false}
     if lhs.artistName != rhs.artistName {return false}
@@ -643,10 +643,10 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
 }
 
 nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Artist"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}name\0\u{3}artwork_key\0\u{3}album_count\0")
+  public static let protoMessageName: String = _protobuf_package + ".Artist"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}name\0\u{3}artwork_key\0\u{3}album_count\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -661,7 +661,7 @@ nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._Mess
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -681,7 +681,7 @@ nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Artist, rhs: Mozz_V1_Artist) -> Bool {
+  public static func ==(lhs: Mozz_V1_Artist, rhs: Mozz_V1_Artist) -> Bool {
     if lhs.remoteID != rhs.remoteID {return false}
     if lhs.name != rhs.name {return false}
     if lhs._artworkKey != rhs._artworkKey {return false}
@@ -692,10 +692,10 @@ nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._Mess
 }
 
 nonisolated extension Mozz_V1_Library: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Library"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}name\0\u{3}server_id\0")
+  public static let protoMessageName: String = _protobuf_package + ".Library"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}name\0\u{3}server_id\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -709,7 +709,7 @@ nonisolated extension Mozz_V1_Library: SwiftProtobuf.Message, SwiftProtobuf._Mes
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.id.isEmpty {
       try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
     }
@@ -722,7 +722,7 @@ nonisolated extension Mozz_V1_Library: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Library, rhs: Mozz_V1_Library) -> Bool {
+  public static func ==(lhs: Mozz_V1_Library, rhs: Mozz_V1_Library) -> Bool {
     if lhs.id != rhs.id {return false}
     if lhs.name != rhs.name {return false}
     if lhs.serverID != rhs.serverID {return false}
@@ -732,29 +732,29 @@ nonisolated extension Mozz_V1_Library: SwiftProtobuf.Message, SwiftProtobuf._Mes
 }
 
 nonisolated extension Mozz_V1_LibrariesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".LibrariesRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let protoMessageName: String = _protobuf_package + ".LibrariesRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     // Load everything into unknown fields
     while try decoder.nextFieldNumber() != nil {}
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_LibrariesRequest, rhs: Mozz_V1_LibrariesRequest) -> Bool {
+  public static func ==(lhs: Mozz_V1_LibrariesRequest, rhs: Mozz_V1_LibrariesRequest) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
 nonisolated extension Mozz_V1_LibrariesResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".LibrariesResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}libraries\0")
+  public static let protoMessageName: String = _protobuf_package + ".LibrariesResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}libraries\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -766,14 +766,14 @@ nonisolated extension Mozz_V1_LibrariesResponse: SwiftProtobuf.Message, SwiftPro
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.libraries.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.libraries, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_LibrariesResponse, rhs: Mozz_V1_LibrariesResponse) -> Bool {
+  public static func ==(lhs: Mozz_V1_LibrariesResponse, rhs: Mozz_V1_LibrariesResponse) -> Bool {
     if lhs.libraries != rhs.libraries {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -781,10 +781,10 @@ nonisolated extension Mozz_V1_LibrariesResponse: SwiftProtobuf.Message, SwiftPro
 }
 
 nonisolated extension Mozz_V1_AlbumsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".AlbumsRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{1}after\0\u{1}limit\0")
+  public static let protoMessageName: String = _protobuf_package + ".AlbumsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{1}after\0\u{1}limit\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -798,7 +798,7 @@ nonisolated extension Mozz_V1_AlbumsRequest: SwiftProtobuf.Message, SwiftProtobu
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -815,7 +815,7 @@ nonisolated extension Mozz_V1_AlbumsRequest: SwiftProtobuf.Message, SwiftProtobu
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_AlbumsRequest, rhs: Mozz_V1_AlbumsRequest) -> Bool {
+  public static func ==(lhs: Mozz_V1_AlbumsRequest, rhs: Mozz_V1_AlbumsRequest) -> Bool {
     if lhs.serverID != rhs.serverID {return false}
     if lhs._after != rhs._after {return false}
     if lhs.limit != rhs.limit {return false}
@@ -825,10 +825,10 @@ nonisolated extension Mozz_V1_AlbumsRequest: SwiftProtobuf.Message, SwiftProtobu
 }
 
 nonisolated extension Mozz_V1_AlbumsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".AlbumsResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}albums\0\u{1}page\0")
+  public static let protoMessageName: String = _protobuf_package + ".AlbumsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}albums\0\u{1}page\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -841,7 +841,7 @@ nonisolated extension Mozz_V1_AlbumsResponse: SwiftProtobuf.Message, SwiftProtob
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -855,7 +855,7 @@ nonisolated extension Mozz_V1_AlbumsResponse: SwiftProtobuf.Message, SwiftProtob
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_AlbumsResponse, rhs: Mozz_V1_AlbumsResponse) -> Bool {
+  public static func ==(lhs: Mozz_V1_AlbumsResponse, rhs: Mozz_V1_AlbumsResponse) -> Bool {
     if lhs.albums != rhs.albums {return false}
     if lhs._page != rhs._page {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
@@ -864,10 +864,10 @@ nonisolated extension Mozz_V1_AlbumsResponse: SwiftProtobuf.Message, SwiftProtob
 }
 
 nonisolated extension Mozz_V1_ArtistRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".ArtistRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+  public static let protoMessageName: String = _protobuf_package + ".ArtistRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -880,7 +880,7 @@ nonisolated extension Mozz_V1_ArtistRequest: SwiftProtobuf.Message, SwiftProtobu
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.serverID.isEmpty {
       try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
     }
@@ -890,7 +890,7 @@ nonisolated extension Mozz_V1_ArtistRequest: SwiftProtobuf.Message, SwiftProtobu
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_ArtistRequest, rhs: Mozz_V1_ArtistRequest) -> Bool {
+  public static func ==(lhs: Mozz_V1_ArtistRequest, rhs: Mozz_V1_ArtistRequest) -> Bool {
     if lhs.serverID != rhs.serverID {return false}
     if lhs.remoteID != rhs.remoteID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
@@ -899,10 +899,10 @@ nonisolated extension Mozz_V1_ArtistRequest: SwiftProtobuf.Message, SwiftProtobu
 }
 
 nonisolated extension Mozz_V1_ArtistResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".ArtistResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}artist\0")
+  public static let protoMessageName: String = _protobuf_package + ".ArtistResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}artist\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -914,7 +914,7 @@ nonisolated extension Mozz_V1_ArtistResponse: SwiftProtobuf.Message, SwiftProtob
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -925,7 +925,7 @@ nonisolated extension Mozz_V1_ArtistResponse: SwiftProtobuf.Message, SwiftProtob
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_ArtistResponse, rhs: Mozz_V1_ArtistResponse) -> Bool {
+  public static func ==(lhs: Mozz_V1_ArtistResponse, rhs: Mozz_V1_ArtistResponse) -> Bool {
     if lhs._artist != rhs._artist {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -933,10 +933,10 @@ nonisolated extension Mozz_V1_ArtistResponse: SwiftProtobuf.Message, SwiftProtob
 }
 
 nonisolated extension Mozz_V1_SubscriptionToken: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".SubscriptionToken"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0")
+  public static let protoMessageName: String = _protobuf_package + ".SubscriptionToken"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -948,14 +948,14 @@ nonisolated extension Mozz_V1_SubscriptionToken: SwiftProtobuf.Message, SwiftPro
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if self.id != 0 {
       try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_SubscriptionToken, rhs: Mozz_V1_SubscriptionToken) -> Bool {
+  public static func ==(lhs: Mozz_V1_SubscriptionToken, rhs: Mozz_V1_SubscriptionToken) -> Bool {
     if lhs.id != rhs.id {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -963,10 +963,10 @@ nonisolated extension Mozz_V1_SubscriptionToken: SwiftProtobuf.Message, SwiftPro
 }
 
 nonisolated extension Mozz_V1_CancelRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".CancelRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0")
+  public static let protoMessageName: String = _protobuf_package + ".CancelRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -978,7 +978,7 @@ nonisolated extension Mozz_V1_CancelRequest: SwiftProtobuf.Message, SwiftProtobu
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -989,7 +989,7 @@ nonisolated extension Mozz_V1_CancelRequest: SwiftProtobuf.Message, SwiftProtobu
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_CancelRequest, rhs: Mozz_V1_CancelRequest) -> Bool {
+  public static func ==(lhs: Mozz_V1_CancelRequest, rhs: Mozz_V1_CancelRequest) -> Bool {
     if lhs._token != rhs._token {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -997,29 +997,29 @@ nonisolated extension Mozz_V1_CancelRequest: SwiftProtobuf.Message, SwiftProtobu
 }
 
 nonisolated extension Mozz_V1_CancelResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".CancelResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let protoMessageName: String = _protobuf_package + ".CancelResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     // Load everything into unknown fields
     while try decoder.nextFieldNumber() != nil {}
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_CancelResponse, rhs: Mozz_V1_CancelResponse) -> Bool {
+  public static func ==(lhs: Mozz_V1_CancelResponse, rhs: Mozz_V1_CancelResponse) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
 nonisolated extension Mozz_V1_WatchLibraryRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".WatchLibraryRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0")
+  public static let protoMessageName: String = _protobuf_package + ".WatchLibraryRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -1031,14 +1031,14 @@ nonisolated extension Mozz_V1_WatchLibraryRequest: SwiftProtobuf.Message, SwiftP
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.serverID.isEmpty {
       try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_WatchLibraryRequest, rhs: Mozz_V1_WatchLibraryRequest) -> Bool {
+  public static func ==(lhs: Mozz_V1_WatchLibraryRequest, rhs: Mozz_V1_WatchLibraryRequest) -> Bool {
     if lhs.serverID != rhs.serverID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1046,10 +1046,10 @@ nonisolated extension Mozz_V1_WatchLibraryRequest: SwiftProtobuf.Message, SwiftP
 }
 
 nonisolated extension Mozz_V1_LibraryChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".LibraryChanged"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}changed_entities\0")
+  public static let protoMessageName: String = _protobuf_package + ".LibraryChanged"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}changed_entities\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -1061,14 +1061,14 @@ nonisolated extension Mozz_V1_LibraryChanged: SwiftProtobuf.Message, SwiftProtob
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.changedEntities.isEmpty {
       try visitor.visitRepeatedStringField(value: self.changedEntities, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_LibraryChanged, rhs: Mozz_V1_LibraryChanged) -> Bool {
+  public static func ==(lhs: Mozz_V1_LibraryChanged, rhs: Mozz_V1_LibraryChanged) -> Bool {
     if lhs.changedEntities != rhs.changedEntities {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1076,10 +1076,10 @@ nonisolated extension Mozz_V1_LibraryChanged: SwiftProtobuf.Message, SwiftProtob
 }
 
 nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Request"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0")
+  public static let protoMessageName: String = _protobuf_package + ".Request"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -1156,7 +1156,7 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -1190,7 +1190,7 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Request, rhs: Mozz_V1_Request) -> Bool {
+  public static func ==(lhs: Mozz_V1_Request, rhs: Mozz_V1_Request) -> Bool {
     if lhs.id != rhs.id {return false}
     if lhs.command != rhs.command {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
@@ -1199,10 +1199,10 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
 }
 
 nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Failure"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0")
+  public static let protoMessageName: String = _protobuf_package + ".Failure"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -1214,14 +1214,14 @@ nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._Mes
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.message.isEmpty {
       try visitor.visitSingularStringField(value: self.message, fieldNumber: 1)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Failure, rhs: Mozz_V1_Failure) -> Bool {
+  public static func ==(lhs: Mozz_V1_Failure, rhs: Mozz_V1_Failure) -> Bool {
     if lhs.message != rhs.message {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1229,10 +1229,10 @@ nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._Mes
 }
 
 nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Response"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0")
+  public static let protoMessageName: String = _protobuf_package + ".Response"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -1322,7 +1322,7 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -1360,7 +1360,7 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Response, rhs: Mozz_V1_Response) -> Bool {
+  public static func ==(lhs: Mozz_V1_Response, rhs: Mozz_V1_Response) -> Bool {
     if lhs.id != rhs.id {return false}
     if lhs.result != rhs.result {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
@@ -1369,10 +1369,10 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
 }
 
 nonisolated extension Mozz_V1_Event: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  static let protoMessageName: String = _protobuf_package + ".Event"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{4}\u{9}library_changed\0")
+  public static let protoMessageName: String = _protobuf_package + ".Event"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{4}\u{9}library_changed\0")
 
-  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
       // The use of inline closures is to circumvent an issue where the compiler
       // allocates stack space for every case branch when no optimizations are
@@ -1397,7 +1397,7 @@ nonisolated extension Mozz_V1_Event: SwiftProtobuf.Message, SwiftProtobuf._Messa
     }
   }
 
-  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -1411,7 +1411,7 @@ nonisolated extension Mozz_V1_Event: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Mozz_V1_Event, rhs: Mozz_V1_Event) -> Bool {
+  public static func ==(lhs: Mozz_V1_Event, rhs: Mozz_V1_Event) -> Bool {
     if lhs._token != rhs._token {return false}
     if lhs.payload != rhs.payload {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}

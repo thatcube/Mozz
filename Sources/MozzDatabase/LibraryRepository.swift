@@ -133,16 +133,35 @@ public struct LibraryRepository: Sendable {
             self.id = id
         }
 
-        /// Round-trips through a string so the FFI can carry it as JSON.
+        /// Round-trips through a string so the FFI can carry it.
+        ///
+        /// Each part is base64-encoded *before* being joined, rather than being
+        /// joined raw. That looks redundant and is not: a key may contain any
+        /// character, including the separator. `albumGroupKey` is itself a
+        /// composite that `AlbumGrouping` joins with U+001F — the same
+        /// character this once used — so an album cursor split into two keys on
+        /// the way back, the seek clause was built for one key while the
+        /// arguments were bound for two, and SQLite rejected the statement.
+        /// Paging albums over the FFI failed on the second page.
+        ///
+        /// Base64's alphabet cannot contain the separator, so the split is
+        /// unambiguous no matter what the keys hold.
         public var token: String {
-            let joined = (keys + [String(id)]).joined(separator: "\u{1F}")
-            return Data(joined.utf8).base64EncodedString()
+            let parts = (keys + [String(id)])
+                .map { Data($0.utf8).base64EncodedString() }
+                .joined(separator: "\u{1F}")
+            return Data(parts.utf8).base64EncodedString()
         }
 
         public init?(token: String) {
-            guard let data = Data(base64Encoded: token),
-                  let text = String(data: data, encoding: .utf8) else { return nil }
-            var parts = text.components(separatedBy: "\u{1F}")
+            guard let outer = Data(base64Encoded: token),
+                  let text = String(data: outer, encoding: .utf8) else { return nil }
+            var parts: [String] = []
+            for encoded in text.components(separatedBy: "\u{1F}") {
+                guard let data = Data(base64Encoded: encoded),
+                      let part = String(data: data, encoding: .utf8) else { return nil }
+                parts.append(part)
+            }
             guard parts.count >= 2, let id = Int64(parts.removeLast()) else { return nil }
             self.keys = parts
             self.id = id
