@@ -93,6 +93,7 @@ let package = Package(
     ],
     products: [
         .library(name: "MozzCore", targets: ["MozzCore"]),
+        .library(name: "MozzPairing", targets: ["MozzPairing"]),
         .library(name: "MozzNetworking", targets: ["MozzNetworking"]),
         .library(name: "MozzDatabase", targets: ["MozzDatabase"]),
         .library(name: "MozzPlex", targets: ["MozzPlex"]),
@@ -145,6 +146,20 @@ let package = Package(
         // error types + the iOS Keychain credential store. Foundation-only so it
         // stays trivially testable off-device.
         .target(name: "MozzCore"),
+
+        // MARK: Pairing
+        //
+        // The ceremony that lets a device join a circle. Written against
+        // spec/pairing rather than the other way round, because pairing is the
+        // only moment secrets move between devices and every later feature
+        // inherits whatever trust it establishes.
+        //
+        // In the shared core rather than per-platform because the FFI spike
+        // proved swift-crypto's HPKE works off Apple (CI 32934126070) — one
+        // implementation instead of three.
+        .target(
+            name: "MozzPairing",
+            dependencies: [.product(name: "Crypto", package: "swift-crypto")]),
 
         // MARK: Generated command schema
         //
@@ -363,6 +378,7 @@ let package = Package(
 
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),
+        .testTarget(name: "MozzPairingTests", dependencies: ["MozzPairing"]),
         .testTarget(name: "MozzNetworkingTests", dependencies: ["MozzNetworking"]),
         .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", "MozzHistory", .product(name: "GRDB", package: "GRDB.swift")]),
         .testTarget(
