@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Threading;
@@ -2093,7 +2094,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task RateNowPlayingAsync(string? value)
     {
         if (NowPlaying is not { } track || !_core.IsOpen) return;
-        var rating = int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, 5) : (int?)null;
+        // Half-stars are real values in a library, so parse as a double and clamp
+        // to the half-step range rather than rounding to whole stars on the way in.
+        var rating = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Clamp(parsed, 0.5, 5.0)
+            : (double?)null;
         ApplyTrackUpdate(track, t => t with { Rating = rating, RatingPending = true });
         try
         {

@@ -1,3 +1,6 @@
+using System.Linq;
+using Avalonia;
+using Avalonia.VisualTree;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -112,11 +115,22 @@ public partial class MainWindow : Window
     ///
     /// Safe to fire often — <see cref="MainViewModel.LoadMoreAsync"/> ignores a
     /// call while one is in flight or once the end has been reached.
+    ///
+    /// The handler is attached in XAML as <c>ScrollViewer.ScrollChanged</c> on
+    /// the ListBox, and ScrollChanged is a bubbling routed event, so `sender` is
+    /// the ListBox the handler was registered on — never the ScrollViewer that
+    /// raised it. Testing `sender is ScrollViewer` therefore returned early on
+    /// every scroll, and no list ever loaded a second page: the library simply
+    /// stopped at 200 rows with nothing to indicate why. The ScrollViewer comes
+    /// from the event's source instead.
     /// </summary>
     private void OnListScrolled(object? sender, ScrollChangedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        if (sender is not ScrollViewer viewer) return;
+
+        var viewer = e.Source as ScrollViewer
+                     ?? (sender as Visual)?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (viewer is null) return;
 
         var remaining = viewer.Extent.Height - viewer.Offset.Y - viewer.Viewport.Height;
         if (remaining <= viewer.Viewport.Height) _ = vm.LoadMoreAsync();

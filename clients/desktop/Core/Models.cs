@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace Mozz.Desktop.Core;
@@ -57,7 +58,12 @@ public sealed record Track(
     string? ArtworkKey,
     bool IsFavorite,
     double? NormalizationGainDB = null,
-    int? Rating = null,
+    // The core carries a rating as a Double because half-stars are real: a
+    // library can hold 0.5 through 5.0 in half steps. Declaring this int? made
+    // System.Text.Json refuse the whole response — not just the field, and not
+    // just for halves, since it will not read 4.0 into an int either. One rated
+    // track in a page was enough to blank the screen.
+    double? Rating = null,
     bool FavoritePending = false,
     bool RatingPending = false)
 {
@@ -78,7 +84,12 @@ public sealed record Track(
         ? (FavoritePending ? "Liked, waiting to sync" : "Liked")
         : (FavoritePending ? "Unliked, waiting to sync" : "Like");
 
-    public string RatingText => Rating is > 0 ? $"{Rating}/5" : "Not rated";
+    /// <summary>
+    /// "4/5" or "4.5/5" — a whole rating should not read as "4.0/5".
+    /// </summary>
+    public string RatingText => Rating is > 0
+        ? $"{Rating.Value.ToString("0.#", CultureInfo.InvariantCulture)}/5"
+        : "Not rated";
 }
 
 public sealed record FavoriteMutationResult(
@@ -86,7 +97,7 @@ public sealed record FavoriteMutationResult(
     string RemoteId,
     string ItemType,
     string Kind,
-    int? Value,
+    double? Value,
     bool Liked,
     bool Queued,
     bool Synced);
@@ -96,7 +107,7 @@ public sealed record RatingMutationResult(
     string RemoteId,
     string ItemType,
     string Kind,
-    int? Value,
+    double? Value,
     bool? Liked,
     bool Queued,
     bool Synced);
@@ -215,7 +226,7 @@ public sealed record CoreRequest(
     [JsonPropertyName("year")] public int? Year { get; init; }
     [JsonPropertyName("liked")] public bool? Liked { get; init; }
     [JsonPropertyName("flush")] public bool? Flush { get; init; }
-    [JsonPropertyName("rating")] public int? Rating { get; init; }
+    [JsonPropertyName("rating")] public double? Rating { get; init; }
     [JsonPropertyName("state")] public string? State { get; init; }
     [JsonPropertyName("positionSeconds")] public double? PositionSeconds { get; init; }
     [JsonPropertyName("useLRCLIB")] public bool? UseLRCLIB { get; init; }

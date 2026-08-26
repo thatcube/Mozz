@@ -136,8 +136,22 @@ public sealed class RatingAtLeastConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (parameter is not string text || !int.TryParse(text, out var threshold)) return false;
-        return value is int rating && rating >= threshold;
+        if (parameter is not string text
+            || !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold))
+        {
+            return false;
+        }
+
+        // Ratings are half-stars, so this arrives as a double. It used to be
+        // matched as `value is int`, which silently returned false for every
+        // rating once the type was corrected — the stars would simply never
+        // fill, with nothing to indicate why.
+        return value switch
+        {
+            double rating => rating >= threshold,
+            int rating => rating >= threshold,
+            _ => false,
+        };
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
