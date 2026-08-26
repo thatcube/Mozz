@@ -65,6 +65,15 @@ let package = Package(
         // iOS app keeps using the system implementation; the guarded imports below
         // make that explicit rather than implicit.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.8.0"),
+
+        // swift-protobuf — the runtime behind the generated command clients.
+        // The command surface is described once in `schema/` and the Swift, C#,
+        // Kotlin and TypeScript clients are generated from it, so a capability
+        // that is not declared cannot be reached from any platform. Generated
+        // sources are committed rather than built, so `protoc` is not a
+        // prerequisite on any CI target — see `tools/generate-schema.sh` and
+        // ADR-0016.
+        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0"),
     ],
     targets: [
         // MARK: Domain core (pure Swift, no third-party deps)
@@ -73,6 +82,19 @@ let package = Package(
         // error types + the iOS Keychain credential store. Foundation-only so it
         // stays trivially testable off-device.
         .target(name: "MozzCore"),
+
+        // MARK: Generated command schema
+        //
+        // The types generated from `schema/`. This target holds generated code
+        // only — nothing here is hand-edited, and `tools/generate-schema.sh
+        // --check` fails the build if it drifts from the schema. The idiomatic
+        // Swift facade over these types lives elsewhere; callers should not be
+        // handling `Mozz_V1_*` values directly.
+        .target(
+            name: "MozzSchema",
+            dependencies: [.product(name: "SwiftProtobuf", package: "swift-protobuf")],
+            path: "Sources/MozzSchema"
+        ),
 
         // MARK: Networking
         //
@@ -242,6 +264,10 @@ let package = Package(
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
         .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
         .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
+        .testTarget(
+            name: "MozzSchemaTests",
+            dependencies: ["MozzSchema", .product(name: "SwiftProtobuf", package: "swift-protobuf")]
+        ),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),

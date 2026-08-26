@@ -28,6 +28,11 @@ on:
       - "Package.resolved"
       - "project.yml"
       - "spec/**"
+      # The command schema and the clients generated from it. A schema change
+      # that was not regenerated leaves the two disagreeing, and the check that
+      # catches it lives in this workflow.
+      - "schema/**"
+      - "tools/generate-schema.sh"
       # The scripts that *produce* the Xcode project and stamp its version. A
       # change here can break the iOS build while touching nothing under
       # Sources/, and this job would not have run to notice — which is exactly
@@ -76,6 +81,20 @@ jobs:
       # the fixture surfaces months later as devices that will not pair.
       - name: Run the test suite
         run: swift test --parallel
+
+      # The generated command clients are committed rather than built, so that
+      # protoc is not a prerequisite on any of the four desktop targets. That
+      # trade means the committed output can silently fall behind the schema —
+      # which would be the same class of failure the schema exists to remove,
+      # just moved. Regenerate here and fail if anything differs.
+      #
+      # This job already has the Swift toolchain; protoc and protoc-gen-swift
+      # are the only additions, and they are only needed on this one runner.
+      - name: Schema tools
+        run: brew install protobuf swift-protobuf
+
+      - name: Generated clients match the schema
+        run: tools/generate-schema.sh --check
 
       # Release separately, because debug and release disagree about what
       # *compiles*. A six-element tuple of mixed optionals once type-checked

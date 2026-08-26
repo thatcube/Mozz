@@ -56,6 +56,13 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- The runtime behind the generated command client. The command surface is
+         described once in schema/ and the Swift and C# clients are generated
+         from it, so a capability the schema does not declare cannot be reached
+         from either. Generated sources are committed rather than built, so
+         protoc is not a prerequisite on any of the four desktop CI targets —
+         see tools/generate-schema.sh and ADR-0016. -->
+    <PackageReference Include="Google.Protobuf" Version="3.33.1" />
     <!-- miniaudio (MIT / public-domain) as the cross-platform output device.
          Ships prebuilt natives for win-x64/arm64/x86, osx-x64/arm64 and
          linux-x64/arm64, so the audio device works on every target with no

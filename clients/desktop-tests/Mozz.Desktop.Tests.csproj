@@ -23,6 +23,10 @@
   -->
   <ItemGroup>
     <Compile Include="..\desktop\Core\SecretStore.cs" />
+    <!-- The generated command client. Included here for the same reason as
+         everything else in this list: the wire-fixture conformance test has to
+         check the SAME generated code the app ships, not a copy. -->
+    <Compile Include="..\desktop\Generated\**\*.cs" />
     <Compile Include="..\desktop\Core\MozzCore.cs" />
     <Compile Include="..\desktop\Core\MozzServer.cs" />
     <Compile Include="..\desktop\Core\Models.cs" />
@@ -65,6 +69,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Google.Protobuf" Version="3.33.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
