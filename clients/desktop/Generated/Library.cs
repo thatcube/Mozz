@@ -155,94 +155,147 @@ namespace Mozz.V1 {
             "MS5UcmFja1N1bW1hcnkSDQoFc2NvcmUYAiABKAEiSwoUU2ltaWxhclRyYWNr",
             "c1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhEKCXJlbW90ZV9pZBgCIAEo",
             "CRINCgVsaW1pdBgDIAEoBSI+ChVTaW1pbGFyVHJhY2tzUmVzcG9uc2USJQoG",
-            "dHJhY2tzGAEgAygLMhUubW96ei52MS5TaW1pbGFyVHJhY2si5AoKB1JlcXVl",
-            "c3QSCgoCaWQYASABKAQSLgoJbGlicmFyaWVzGAogASgLMhkubW96ei52MS5M",
-            "aWJyYXJpZXNSZXF1ZXN0SAASKAoGYWxidW1zGAsgASgLMhYubW96ei52MS5B",
-            "bGJ1bXNSZXF1ZXN0SAASKAoGYXJ0aXN0GAwgASgLMhYubW96ei52MS5BcnRp",
-            "c3RSZXF1ZXN0SAASNQoNd2F0Y2hfbGlicmFyeRgNIAEoCzIcLm1venoudjEu",
-            "V2F0Y2hMaWJyYXJ5UmVxdWVzdEgAEigKBmNhbmNlbBgOIAEoCzIWLm1venou",
-            "djEuQ2FuY2VsUmVxdWVzdEgAEioKB2FydGlzdHMYDyABKAsyFy5tb3p6LnYx",
-            "LkFydGlzdHNSZXF1ZXN0SAASKAoGdHJhY2tzGBAgASgLMhYubW96ei52MS5U",
-            "cmFja3NSZXF1ZXN0SAASMwoMYWxidW1fdHJhY2tzGBEgASgLMhsubW96ei52",
-            "MS5BbGJ1bVRyYWNrc1JlcXVlc3RIABI1Cg1hcnRpc3RfYWxidW1zGBIgASgL",
-            "MhwubW96ei52MS5BcnRpc3RBbGJ1bXNSZXF1ZXN0SAASKAoGY291bnRzGBMg",
-            "ASgLMhYubW96ei52MS5Db3VudHNSZXF1ZXN0SAASRAoVZ2V0X3BsYXliYWNr",
-            "X3NldHRpbmdzGBQgASgLMiMubW96ei52MS5HZXRQbGF5YmFja1NldHRpbmdz",
-            "UmVxdWVzdEgAEkQKFXNldF9wbGF5YmFja19zZXR0aW5ncxgVIAEoCzIjLm1v",
-            "enoudjEuU2V0UGxheWJhY2tTZXR0aW5nc1JlcXVlc3RIABIqCgdhcnR3b3Jr",
-            "GBYgASgLMhcubW96ei52MS5BcnR3b3JrUmVxdWVzdEgAEjsKEGVucXVldWVf",
-            "ZG93bmxvYWQYFyABKAsyHy5tb3p6LnYxLkVucXVldWVEb3dubG9hZFJlcXVl",
-            "c3RIABJKChhyZXBvcnRfZG93bmxvYWRfcHJvZ3Jlc3MYGCABKAsyJi5tb3p6",
-            "LnYxLlJlcG9ydERvd25sb2FkUHJvZ3Jlc3NSZXF1ZXN0SAASPQoRY29tcGxl",
-            "dGVfZG93bmxvYWQYGSABKAsyIC5tb3p6LnYxLkNvbXBsZXRlRG93bmxvYWRS",
-            "ZXF1ZXN0SAASNQoNZmFpbF9kb3dubG9hZBgaIAEoCzIcLm1venoudjEuRmFp",
-            "bERvd25sb2FkUmVxdWVzdEgAEjkKD2NhbmNlbF9kb3dubG9hZBgbIAEoCzIe",
-            "Lm1venoudjEuQ2FuY2VsRG93bmxvYWRSZXF1ZXN0SAASOQoPZGVsZXRlX2Rv",
-            "d25sb2FkGBwgASgLMh4ubW96ei52MS5EZWxldGVEb3dubG9hZFJlcXVlc3RI",
-            "ABI5Cg9kb3dubG9hZF9zdGF0dXMYHSABKAsyHi5tb3p6LnYxLkRvd25sb2Fk",
-            "U3RhdHVzUmVxdWVzdEgAEi4KCWRvd25sb2FkcxgeIAEoCzIZLm1venoudjEu",
-            "RG93bmxvYWRzUmVxdWVzdEgAEjUKDXN0b3JhZ2VfdXNhZ2UYHyABKAsyHC5t",
-            "b3p6LnYxLlN0b3JhZ2VVc2FnZVJlcXVlc3RIABIoCgZseXJpY3MYICABKAsy",
-            "Fi5tb3p6LnYxLkx5cmljc1JlcXVlc3RIABI/ChJyZWNvcmRpbmdfaWRlbnRp",
-            "dHkYISABKAsyIS5tb3p6LnYxLlJlY29yZGluZ0lkZW50aXR5UmVxdWVzdEgA",
-            "EjcKDnNpbWlsYXJfdHJhY2tzGCIgASgLMh0ubW96ei52MS5TaW1pbGFyVHJh",
-            "Y2tzUmVxdWVzdEgAQgkKB2NvbW1hbmQiGgoHRmFpbHVyZRIPCgdtZXNzYWdl",
-            "GAEgASgJIp8LCghSZXNwb25zZRIKCgJpZBgBIAEoBBIjCgdmYWlsdXJlGAIg",
-            "ASgLMhAubW96ei52MS5GYWlsdXJlSAASLwoJbGlicmFyaWVzGAogASgLMhou",
-            "bW96ei52MS5MaWJyYXJpZXNSZXNwb25zZUgAEikKBmFsYnVtcxgLIAEoCzIX",
-            "Lm1venoudjEuQWxidW1zUmVzcG9uc2VIABIpCgZhcnRpc3QYDCABKAsyFy5t",
-            "b3p6LnYxLkFydGlzdFJlc3BvbnNlSAASMwoNd2F0Y2hfbGlicmFyeRgNIAEo",
-            "CzIaLm1venoudjEuU3Vic2NyaXB0aW9uVG9rZW5IABIpCgZjYW5jZWwYDiAB",
-            "KAsyFy5tb3p6LnYxLkNhbmNlbFJlc3BvbnNlSAASKwoHYXJ0aXN0cxgPIAEo",
-            "CzIYLm1venoudjEuQXJ0aXN0c1Jlc3BvbnNlSAASKQoGdHJhY2tzGBAgASgL",
-            "MhcubW96ei52MS5UcmFja3NSZXNwb25zZUgAEjQKDGFsYnVtX3RyYWNrcxgR",
-            "IAEoCzIcLm1venoudjEuQWxidW1UcmFja3NSZXNwb25zZUgAEjYKDWFydGlz",
-            "dF9hbGJ1bXMYEiABKAsyHS5tb3p6LnYxLkFydGlzdEFsYnVtc1Jlc3BvbnNl",
-            "SAASKQoGY291bnRzGBMgASgLMhcubW96ei52MS5Db3VudHNSZXNwb25zZUgA",
-            "EkUKFWdldF9wbGF5YmFja19zZXR0aW5ncxgUIAEoCzIkLm1venoudjEuR2V0",
-            "UGxheWJhY2tTZXR0aW5nc1Jlc3BvbnNlSAASRQoVc2V0X3BsYXliYWNrX3Nl",
-            "dHRpbmdzGBUgASgLMiQubW96ei52MS5TZXRQbGF5YmFja1NldHRpbmdzUmVz",
-            "cG9uc2VIABIrCgdhcnR3b3JrGBYgASgLMhgubW96ei52MS5BcnR3b3JrUmVz",
-            "cG9uc2VIABI8ChBlbnF1ZXVlX2Rvd25sb2FkGBcgASgLMiAubW96ei52MS5F",
-            "bnF1ZXVlRG93bmxvYWRSZXNwb25zZUgAEksKGHJlcG9ydF9kb3dubG9hZF9w",
-            "cm9ncmVzcxgYIAEoCzInLm1venoudjEuUmVwb3J0RG93bmxvYWRQcm9ncmVz",
-            "c1Jlc3BvbnNlSAASPgoRY29tcGxldGVfZG93bmxvYWQYGSABKAsyIS5tb3p6",
-            "LnYxLkNvbXBsZXRlRG93bmxvYWRSZXNwb25zZUgAEjYKDWZhaWxfZG93bmxv",
-            "YWQYGiABKAsyHS5tb3p6LnYxLkZhaWxEb3dubG9hZFJlc3BvbnNlSAASOgoP",
-            "Y2FuY2VsX2Rvd25sb2FkGBsgASgLMh8ubW96ei52MS5DYW5jZWxEb3dubG9h",
-            "ZFJlc3BvbnNlSAASOgoPZGVsZXRlX2Rvd25sb2FkGBwgASgLMh8ubW96ei52",
-            "MS5EZWxldGVEb3dubG9hZFJlc3BvbnNlSAASOgoPZG93bmxvYWRfc3RhdHVz",
-            "GB0gASgLMh8ubW96ei52MS5Eb3dubG9hZFN0YXR1c1Jlc3BvbnNlSAASLwoJ",
-            "ZG93bmxvYWRzGB4gASgLMhoubW96ei52MS5Eb3dubG9hZHNSZXNwb25zZUgA",
-            "EjYKDXN0b3JhZ2VfdXNhZ2UYHyABKAsyHS5tb3p6LnYxLlN0b3JhZ2VVc2Fn",
-            "ZVJlc3BvbnNlSAASKQoGbHlyaWNzGCAgASgLMhcubW96ei52MS5MeXJpY3NS",
-            "ZXNwb25zZUgAEkAKEnJlY29yZGluZ19pZGVudGl0eRghIAEoCzIiLm1venou",
-            "djEuUmVjb3JkaW5nSWRlbnRpdHlSZXNwb25zZUgAEjgKDnNpbWlsYXJfdHJh",
-            "Y2tzGCIgASgLMh4ubW96ei52MS5TaW1pbGFyVHJhY2tzUmVzcG9uc2VIAEII",
-            "CgZyZXN1bHQicQoFRXZlbnQSKQoFdG9rZW4YASABKAsyGi5tb3p6LnYxLlN1",
-            "YnNjcmlwdGlvblRva2VuEjIKD2xpYnJhcnlfY2hhbmdlZBgKIAEoCzIXLm1v",
-            "enoudjEuTGlicmFyeUNoYW5nZWRIAEIJCgdwYXlsb2FkKoQBCg5SZXBsYXlH",
-            "YWluTW9kZRIgChxSRVBMQVlfR0FJTl9NT0RFX1VOU1BFQ0lGSUVEEAASGAoU",
-            "UkVQTEFZX0dBSU5fTU9ERV9PRkYQARIaChZSRVBMQVlfR0FJTl9NT0RFX1RS",
-            "QUNLEAISGgoWUkVQTEFZX0dBSU5fTU9ERV9BTEJVTRADKoYBCg1BcnR3b3Jr",
-            "U3RhdHVzEh4KGkFSVFdPUktfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWQVJU",
-            "V09SS19TVEFUVVNfUFJFU0VOVBABEhkKFUFSVFdPUktfU1RBVFVTX0FCU0VO",
-            "VBACEh4KGkFSVFdPUktfU1RBVFVTX1VOQVZBSUxBQkxFEAMqpAEKDURvd25s",
-            "b2FkU3RhdGUSHgoaRE9XTkxPQURfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVE",
-            "T1dOTE9BRF9TVEFURV9RVUVVRUQQARIeChpET1dOTE9BRF9TVEFURV9ET1dO",
-            "TE9BRElORxACEh0KGURPV05MT0FEX1NUQVRFX0RPV05MT0FERUQQAxIZChVE",
-            "T1dOTE9BRF9TVEFURV9GQUlMRUQQBCqbAQoMTHlyaWNzU3RhdHVzEh0KGUxZ",
-            "UklDU19TVEFUVVNfVU5TUEVDSUZJRUQQABIZChVMWVJJQ1NfU1RBVFVTX1BS",
-            "RVNFTlQQARIYChRMWVJJQ1NfU1RBVFVTX0FCU0VOVBACEh0KGUxZUklDU19T",
-            "VEFUVVNfTk9UX0ZFVENIRUQQAxIYChRMWVJJQ1NfU1RBVFVTX0ZBSUxFRBAE",
-            "KsEBChdSZWNvcmRpbmdJZGVudGl0eVN0YXR1cxIpCiVSRUNPUkRJTkdfSURF",
-            "TlRJVFlfU1RBVFVTX1VOU1BFQ0lGSUVEEAASJgoiUkVDT1JESU5HX0lERU5U",
-            "SVRZX1NUQVRVU19SRVNPTFZFRBABEicKI1JFQ09SRElOR19JREVOVElUWV9T",
-            "VEFUVVNfVU5NQVRDSEVEEAISKgomUkVDT1JESU5HX0lERU5USVRZX1NUQVRV",
-            "U19OT1RfUkVTT0xWRUQQA2IGcHJvdG8z"));
+            "dHJhY2tzGAEgAygLMhUubW96ei52MS5TaW1pbGFyVHJhY2si3QEKDVBsYXli",
+            "YWNrU3RhdGUSMgoMZW5naW5lX3N0YXRlGAEgASgOMhwubW96ei52MS5QbGF5",
+            "YmFja0VuZ2luZVN0YXRlEhgKEHBvc2l0aW9uX3NlY29uZHMYAiABKAESGAoQ",
+            "Y3VycmVudF90cmFja19pZBgDIAEoBBISCgpoYXNfZmFpbGVkGAQgASgIEjIK",
+            "DGZhaWx1cmVfa2luZBgFIAEoDjIcLm1venoudjEuUGxheWJhY2tGYWlsdXJl",
+            "S2luZBIcChRmYWlsdXJlX2lzX3JldHJ5YWJsZRgGIAEoCCI7ChNQbGF5YmFj",
+            "a1BsYXlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIRCglyZW1vdGVfaWQY",
+            "AiABKAkiQAoYUGxheWJhY2tRdWV1ZU5leHRSZXF1ZXN0EhEKCXNlcnZlcl9p",
+            "ZBgBIAEoCRIRCglyZW1vdGVfaWQYAiABKAkiFgoUUGxheWJhY2tQYXVzZVJl",
+            "cXVlc3QiFwoVUGxheWJhY2tSZXN1bWVSZXF1ZXN0IhUKE1BsYXliYWNrU3Rv",
+            "cFJlcXVlc3QiLwoTUGxheWJhY2tTZWVrUmVxdWVzdBIYChBwb3NpdGlvbl9z",
+            "ZWNvbmRzGAEgASgBIioKGFBsYXliYWNrU2V0Vm9sdW1lUmVxdWVzdBIOCgZ2",
+            "b2x1bWUYASABKAEiWAobUGxheWJhY2tTZXRFcXVhbGl6ZXJSZXF1ZXN0EhUK",
+            "DWJhbmRfZ2FpbnNfZGIYASADKAESEQoJcHJlYW1wX2RiGAIgASgBEg8KB2Vu",
+            "YWJsZWQYAyABKAgiWAocUGxheWJhY2tTZXRSZXBsYXlHYWluUmVxdWVzdBIl",
+            "CgRtb2RlGAEgASgOMhcubW96ei52MS5SZXBsYXlHYWluTW9kZRIRCglwcmVh",
+            "bXBfZGIYAiABKAEiFgoUUGxheWJhY2tTdGF0ZVJlcXVlc3QiPgoVUGxheWJh",
+            "Y2tTdGF0ZVJlc3BvbnNlEiUKBXN0YXRlGAEgASgLMhYubW96ei52MS5QbGF5",
+            "YmFja1N0YXRlIs0PCgdSZXF1ZXN0EgoKAmlkGAEgASgEEi4KCWxpYnJhcmll",
+            "cxgKIAEoCzIZLm1venoudjEuTGlicmFyaWVzUmVxdWVzdEgAEigKBmFsYnVt",
+            "cxgLIAEoCzIWLm1venoudjEuQWxidW1zUmVxdWVzdEgAEigKBmFydGlzdBgM",
+            "IAEoCzIWLm1venoudjEuQXJ0aXN0UmVxdWVzdEgAEjUKDXdhdGNoX2xpYnJh",
+            "cnkYDSABKAsyHC5tb3p6LnYxLldhdGNoTGlicmFyeVJlcXVlc3RIABIoCgZj",
+            "YW5jZWwYDiABKAsyFi5tb3p6LnYxLkNhbmNlbFJlcXVlc3RIABIqCgdhcnRp",
+            "c3RzGA8gASgLMhcubW96ei52MS5BcnRpc3RzUmVxdWVzdEgAEigKBnRyYWNr",
+            "cxgQIAEoCzIWLm1venoudjEuVHJhY2tzUmVxdWVzdEgAEjMKDGFsYnVtX3Ry",
+            "YWNrcxgRIAEoCzIbLm1venoudjEuQWxidW1UcmFja3NSZXF1ZXN0SAASNQoN",
+            "YXJ0aXN0X2FsYnVtcxgSIAEoCzIcLm1venoudjEuQXJ0aXN0QWxidW1zUmVx",
+            "dWVzdEgAEigKBmNvdW50cxgTIAEoCzIWLm1venoudjEuQ291bnRzUmVxdWVz",
+            "dEgAEkQKFWdldF9wbGF5YmFja19zZXR0aW5ncxgUIAEoCzIjLm1venoudjEu",
+            "R2V0UGxheWJhY2tTZXR0aW5nc1JlcXVlc3RIABJEChVzZXRfcGxheWJhY2tf",
+            "c2V0dGluZ3MYFSABKAsyIy5tb3p6LnYxLlNldFBsYXliYWNrU2V0dGluZ3NS",
+            "ZXF1ZXN0SAASKgoHYXJ0d29yaxgWIAEoCzIXLm1venoudjEuQXJ0d29ya1Jl",
+            "cXVlc3RIABI7ChBlbnF1ZXVlX2Rvd25sb2FkGBcgASgLMh8ubW96ei52MS5F",
+            "bnF1ZXVlRG93bmxvYWRSZXF1ZXN0SAASSgoYcmVwb3J0X2Rvd25sb2FkX3By",
+            "b2dyZXNzGBggASgLMiYubW96ei52MS5SZXBvcnREb3dubG9hZFByb2dyZXNz",
+            "UmVxdWVzdEgAEj0KEWNvbXBsZXRlX2Rvd25sb2FkGBkgASgLMiAubW96ei52",
+            "MS5Db21wbGV0ZURvd25sb2FkUmVxdWVzdEgAEjUKDWZhaWxfZG93bmxvYWQY",
+            "GiABKAsyHC5tb3p6LnYxLkZhaWxEb3dubG9hZFJlcXVlc3RIABI5Cg9jYW5j",
+            "ZWxfZG93bmxvYWQYGyABKAsyHi5tb3p6LnYxLkNhbmNlbERvd25sb2FkUmVx",
+            "dWVzdEgAEjkKD2RlbGV0ZV9kb3dubG9hZBgcIAEoCzIeLm1venoudjEuRGVs",
+            "ZXRlRG93bmxvYWRSZXF1ZXN0SAASOQoPZG93bmxvYWRfc3RhdHVzGB0gASgL",
+            "Mh4ubW96ei52MS5Eb3dubG9hZFN0YXR1c1JlcXVlc3RIABIuCglkb3dubG9h",
+            "ZHMYHiABKAsyGS5tb3p6LnYxLkRvd25sb2Fkc1JlcXVlc3RIABI1Cg1zdG9y",
+            "YWdlX3VzYWdlGB8gASgLMhwubW96ei52MS5TdG9yYWdlVXNhZ2VSZXF1ZXN0",
+            "SAASKAoGbHlyaWNzGCAgASgLMhYubW96ei52MS5MeXJpY3NSZXF1ZXN0SAAS",
+            "PwoScmVjb3JkaW5nX2lkZW50aXR5GCEgASgLMiEubW96ei52MS5SZWNvcmRp",
+            "bmdJZGVudGl0eVJlcXVlc3RIABI3Cg5zaW1pbGFyX3RyYWNrcxgiIAEoCzId",
+            "Lm1venoudjEuU2ltaWxhclRyYWNrc1JlcXVlc3RIABI1Cg1wbGF5YmFja19w",
+            "bGF5GCMgASgLMhwubW96ei52MS5QbGF5YmFja1BsYXlSZXF1ZXN0SAASQAoT",
+            "cGxheWJhY2tfcXVldWVfbmV4dBgkIAEoCzIhLm1venoudjEuUGxheWJhY2tR",
+            "dWV1ZU5leHRSZXF1ZXN0SAASNwoOcGxheWJhY2tfcGF1c2UYJSABKAsyHS5t",
+            "b3p6LnYxLlBsYXliYWNrUGF1c2VSZXF1ZXN0SAASOQoPcGxheWJhY2tfcmVz",
+            "dW1lGCYgASgLMh4ubW96ei52MS5QbGF5YmFja1Jlc3VtZVJlcXVlc3RIABI1",
+            "Cg1wbGF5YmFja19zdG9wGCcgASgLMhwubW96ei52MS5QbGF5YmFja1N0b3BS",
+            "ZXF1ZXN0SAASNQoNcGxheWJhY2tfc2VlaxgoIAEoCzIcLm1venoudjEuUGxh",
+            "eWJhY2tTZWVrUmVxdWVzdEgAEkAKE3BsYXliYWNrX3NldF92b2x1bWUYKSAB",
+            "KAsyIS5tb3p6LnYxLlBsYXliYWNrU2V0Vm9sdW1lUmVxdWVzdEgAEkYKFnBs",
+            "YXliYWNrX3NldF9lcXVhbGl6ZXIYKiABKAsyJC5tb3p6LnYxLlBsYXliYWNr",
+            "U2V0RXF1YWxpemVyUmVxdWVzdEgAEkkKGHBsYXliYWNrX3NldF9yZXBsYXlf",
+            "Z2FpbhgrIAEoCzIlLm1venoudjEuUGxheWJhY2tTZXRSZXBsYXlHYWluUmVx",
+            "dWVzdEgAEjcKDnBsYXliYWNrX3N0YXRlGCwgASgLMh0ubW96ei52MS5QbGF5",
+            "YmFja1N0YXRlUmVxdWVzdEgAQgkKB2NvbW1hbmQiGgoHRmFpbHVyZRIPCgdt",
+            "ZXNzYWdlGAEgASgJIv0PCghSZXNwb25zZRIKCgJpZBgBIAEoBBIjCgdmYWls",
+            "dXJlGAIgASgLMhAubW96ei52MS5GYWlsdXJlSAASLwoJbGlicmFyaWVzGAog",
+            "ASgLMhoubW96ei52MS5MaWJyYXJpZXNSZXNwb25zZUgAEikKBmFsYnVtcxgL",
+            "IAEoCzIXLm1venoudjEuQWxidW1zUmVzcG9uc2VIABIpCgZhcnRpc3QYDCAB",
+            "KAsyFy5tb3p6LnYxLkFydGlzdFJlc3BvbnNlSAASMwoNd2F0Y2hfbGlicmFy",
+            "eRgNIAEoCzIaLm1venoudjEuU3Vic2NyaXB0aW9uVG9rZW5IABIpCgZjYW5j",
+            "ZWwYDiABKAsyFy5tb3p6LnYxLkNhbmNlbFJlc3BvbnNlSAASKwoHYXJ0aXN0",
+            "cxgPIAEoCzIYLm1venoudjEuQXJ0aXN0c1Jlc3BvbnNlSAASKQoGdHJhY2tz",
+            "GBAgASgLMhcubW96ei52MS5UcmFja3NSZXNwb25zZUgAEjQKDGFsYnVtX3Ry",
+            "YWNrcxgRIAEoCzIcLm1venoudjEuQWxidW1UcmFja3NSZXNwb25zZUgAEjYK",
+            "DWFydGlzdF9hbGJ1bXMYEiABKAsyHS5tb3p6LnYxLkFydGlzdEFsYnVtc1Jl",
+            "c3BvbnNlSAASKQoGY291bnRzGBMgASgLMhcubW96ei52MS5Db3VudHNSZXNw",
+            "b25zZUgAEkUKFWdldF9wbGF5YmFja19zZXR0aW5ncxgUIAEoCzIkLm1venou",
+            "djEuR2V0UGxheWJhY2tTZXR0aW5nc1Jlc3BvbnNlSAASRQoVc2V0X3BsYXli",
+            "YWNrX3NldHRpbmdzGBUgASgLMiQubW96ei52MS5TZXRQbGF5YmFja1NldHRp",
+            "bmdzUmVzcG9uc2VIABIrCgdhcnR3b3JrGBYgASgLMhgubW96ei52MS5BcnR3",
+            "b3JrUmVzcG9uc2VIABI8ChBlbnF1ZXVlX2Rvd25sb2FkGBcgASgLMiAubW96",
+            "ei52MS5FbnF1ZXVlRG93bmxvYWRSZXNwb25zZUgAEksKGHJlcG9ydF9kb3du",
+            "bG9hZF9wcm9ncmVzcxgYIAEoCzInLm1venoudjEuUmVwb3J0RG93bmxvYWRQ",
+            "cm9ncmVzc1Jlc3BvbnNlSAASPgoRY29tcGxldGVfZG93bmxvYWQYGSABKAsy",
+            "IS5tb3p6LnYxLkNvbXBsZXRlRG93bmxvYWRSZXNwb25zZUgAEjYKDWZhaWxf",
+            "ZG93bmxvYWQYGiABKAsyHS5tb3p6LnYxLkZhaWxEb3dubG9hZFJlc3BvbnNl",
+            "SAASOgoPY2FuY2VsX2Rvd25sb2FkGBsgASgLMh8ubW96ei52MS5DYW5jZWxE",
+            "b3dubG9hZFJlc3BvbnNlSAASOgoPZGVsZXRlX2Rvd25sb2FkGBwgASgLMh8u",
+            "bW96ei52MS5EZWxldGVEb3dubG9hZFJlc3BvbnNlSAASOgoPZG93bmxvYWRf",
+            "c3RhdHVzGB0gASgLMh8ubW96ei52MS5Eb3dubG9hZFN0YXR1c1Jlc3BvbnNl",
+            "SAASLwoJZG93bmxvYWRzGB4gASgLMhoubW96ei52MS5Eb3dubG9hZHNSZXNw",
+            "b25zZUgAEjYKDXN0b3JhZ2VfdXNhZ2UYHyABKAsyHS5tb3p6LnYxLlN0b3Jh",
+            "Z2VVc2FnZVJlc3BvbnNlSAASKQoGbHlyaWNzGCAgASgLMhcubW96ei52MS5M",
+            "eXJpY3NSZXNwb25zZUgAEkAKEnJlY29yZGluZ19pZGVudGl0eRghIAEoCzIi",
+            "Lm1venoudjEuUmVjb3JkaW5nSWRlbnRpdHlSZXNwb25zZUgAEjgKDnNpbWls",
+            "YXJfdHJhY2tzGCIgASgLMh4ubW96ei52MS5TaW1pbGFyVHJhY2tzUmVzcG9u",
+            "c2VIABI3Cg1wbGF5YmFja19wbGF5GCMgASgLMh4ubW96ei52MS5QbGF5YmFj",
+            "a1N0YXRlUmVzcG9uc2VIABI9ChNwbGF5YmFja19xdWV1ZV9uZXh0GCQgASgL",
+            "Mh4ubW96ei52MS5QbGF5YmFja1N0YXRlUmVzcG9uc2VIABI4Cg5wbGF5YmFj",
+            "a19wYXVzZRglIAEoCzIeLm1venoudjEuUGxheWJhY2tTdGF0ZVJlc3BvbnNl",
+            "SAASOQoPcGxheWJhY2tfcmVzdW1lGCYgASgLMh4ubW96ei52MS5QbGF5YmFj",
+            "a1N0YXRlUmVzcG9uc2VIABI3Cg1wbGF5YmFja19zdG9wGCcgASgLMh4ubW96",
+            "ei52MS5QbGF5YmFja1N0YXRlUmVzcG9uc2VIABI3Cg1wbGF5YmFja19zZWVr",
+            "GCggASgLMh4ubW96ei52MS5QbGF5YmFja1N0YXRlUmVzcG9uc2VIABI9ChNw",
+            "bGF5YmFja19zZXRfdm9sdW1lGCkgASgLMh4ubW96ei52MS5QbGF5YmFja1N0",
+            "YXRlUmVzcG9uc2VIABJAChZwbGF5YmFja19zZXRfZXF1YWxpemVyGCogASgL",
+            "Mh4ubW96ei52MS5QbGF5YmFja1N0YXRlUmVzcG9uc2VIABJCChhwbGF5YmFj",
+            "a19zZXRfcmVwbGF5X2dhaW4YKyABKAsyHi5tb3p6LnYxLlBsYXliYWNrU3Rh",
+            "dGVSZXNwb25zZUgAEjgKDnBsYXliYWNrX3N0YXRlGCwgASgLMh4ubW96ei52",
+            "MS5QbGF5YmFja1N0YXRlUmVzcG9uc2VIAEIICgZyZXN1bHQicQoFRXZlbnQS",
+            "KQoFdG9rZW4YASABKAsyGi5tb3p6LnYxLlN1YnNjcmlwdGlvblRva2VuEjIK",
+            "D2xpYnJhcnlfY2hhbmdlZBgKIAEoCzIXLm1venoudjEuTGlicmFyeUNoYW5n",
+            "ZWRIAEIJCgdwYXlsb2FkKoQBCg5SZXBsYXlHYWluTW9kZRIgChxSRVBMQVlf",
+            "R0FJTl9NT0RFX1VOU1BFQ0lGSUVEEAASGAoUUkVQTEFZX0dBSU5fTU9ERV9P",
+            "RkYQARIaChZSRVBMQVlfR0FJTl9NT0RFX1RSQUNLEAISGgoWUkVQTEFZX0dB",
+            "SU5fTU9ERV9BTEJVTRADKoYBCg1BcnR3b3JrU3RhdHVzEh4KGkFSVFdPUktf",
+            "U1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWQVJUV09SS19TVEFUVVNfUFJFU0VO",
+            "VBABEhkKFUFSVFdPUktfU1RBVFVTX0FCU0VOVBACEh4KGkFSVFdPUktfU1RB",
+            "VFVTX1VOQVZBSUxBQkxFEAMqpAEKDURvd25sb2FkU3RhdGUSHgoaRE9XTkxP",
+            "QURfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVET1dOTE9BRF9TVEFURV9RVUVV",
+            "RUQQARIeChpET1dOTE9BRF9TVEFURV9ET1dOTE9BRElORxACEh0KGURPV05M",
+            "T0FEX1NUQVRFX0RPV05MT0FERUQQAxIZChVET1dOTE9BRF9TVEFURV9GQUlM",
+            "RUQQBCqbAQoMTHlyaWNzU3RhdHVzEh0KGUxZUklDU19TVEFUVVNfVU5TUEVD",
+            "SUZJRUQQABIZChVMWVJJQ1NfU1RBVFVTX1BSRVNFTlQQARIYChRMWVJJQ1Nf",
+            "U1RBVFVTX0FCU0VOVBACEh0KGUxZUklDU19TVEFUVVNfTk9UX0ZFVENIRUQQ",
+            "AxIYChRMWVJJQ1NfU1RBVFVTX0ZBSUxFRBAEKsEBChdSZWNvcmRpbmdJZGVu",
+            "dGl0eVN0YXR1cxIpCiVSRUNPUkRJTkdfSURFTlRJVFlfU1RBVFVTX1VOU1BF",
+            "Q0lGSUVEEAASJgoiUkVDT1JESU5HX0lERU5USVRZX1NUQVRVU19SRVNPTFZF",
+            "RBABEicKI1JFQ09SRElOR19JREVOVElUWV9TVEFUVVNfVU5NQVRDSEVEEAIS",
+            "KgomUkVDT1JESU5HX0lERU5USVRZX1NUQVRVU19OT1RfUkVTT0xWRUQQAyrC",
+            "AQoTUGxheWJhY2tFbmdpbmVTdGF0ZRIlCiFQTEFZQkFDS19FTkdJTkVfU1RB",
+            "VEVfVU5TUEVDSUZJRUQQABIeChpQTEFZQkFDS19FTkdJTkVfU1RBVEVfSURM",
+            "RRABEiEKHVBMQVlCQUNLX0VOR0lORV9TVEFURV9QTEFZSU5HEAISIAocUExB",
+            "WUJBQ0tfRU5HSU5FX1NUQVRFX1BBVVNFRBADEh8KG1BMQVlCQUNLX0VOR0lO",
+            "RV9TVEFURV9FTkRFRBAEKqYBChNQbGF5YmFja0ZhaWx1cmVLaW5kEh4KGlBM",
+            "QVlCQUNLX0ZBSUxVUkVfS0lORF9OT05FEAASJQohUExBWUJBQ0tfRkFJTFVS",
+            "RV9LSU5EX1VOU1VQUE9SVEVEEAESJQohUExBWUJBQ0tfRkFJTFVSRV9LSU5E",
+            "X0lOVEVSUlVQVEVEEAISIQodUExBWUJBQ0tfRkFJTFVSRV9LSU5EX0NPUlJV",
+            "UFQQA2IGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
-          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Mozz.V1.ReplayGainMode), typeof(global::Mozz.V1.ArtworkStatus), typeof(global::Mozz.V1.DownloadState), typeof(global::Mozz.V1.LyricsStatus), typeof(global::Mozz.V1.RecordingIdentityStatus), }, null, new pbr::GeneratedClrTypeInfo[] {
+          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Mozz.V1.ReplayGainMode), typeof(global::Mozz.V1.ArtworkStatus), typeof(global::Mozz.V1.DownloadState), typeof(global::Mozz.V1.LyricsStatus), typeof(global::Mozz.V1.RecordingIdentityStatus), typeof(global::Mozz.V1.PlaybackEngineState), typeof(global::Mozz.V1.PlaybackFailureKind), }, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PageCursor), global::Mozz.V1.PageCursor.Parser, new[]{ "Token" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Page), global::Mozz.V1.Page.Parser, new[]{ "Next" }, new[]{ "Next" }, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.AlbumSummary), global::Mozz.V1.AlbumSummary.Parser, new[]{ "RemoteId", "Title", "ArtistName", "Year", "ArtworkKey", "TrackCount", "Id", "ServerId", "ArtistRemoteId", "GroupKey", "SortTitle", "Genres", "IsFavorite", "AddedAt", "ReleaseKind", "IsSingleOrEp" }, new[]{ "Year", "ArtworkKey", "ArtistRemoteId", "SortTitle", "AddedAt", "ReleaseKind", "IsSingleOrEp" }, null, null, null),
@@ -305,9 +358,21 @@ namespace Mozz.V1 {
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.SimilarTrack), global::Mozz.V1.SimilarTrack.Parser, new[]{ "Track", "Score" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.SimilarTracksRequest), global::Mozz.V1.SimilarTracksRequest.Parser, new[]{ "ServerId", "RemoteId", "Limit" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.SimilarTracksResponse), global::Mozz.V1.SimilarTracksResponse.Parser, new[]{ "Tracks" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Request), global::Mozz.V1.Request.Parser, new[]{ "Id", "Libraries", "Albums", "Artist", "WatchLibrary", "Cancel", "Artists", "Tracks", "AlbumTracks", "ArtistAlbums", "Counts", "GetPlaybackSettings", "SetPlaybackSettings", "Artwork", "EnqueueDownload", "ReportDownloadProgress", "CompleteDownload", "FailDownload", "CancelDownload", "DeleteDownload", "DownloadStatus", "Downloads", "StorageUsage", "Lyrics", "RecordingIdentity", "SimilarTracks" }, new[]{ "Command" }, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackState), global::Mozz.V1.PlaybackState.Parser, new[]{ "EngineState", "PositionSeconds", "CurrentTrackId", "HasFailed", "FailureKind", "FailureIsRetryable" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackPlayRequest), global::Mozz.V1.PlaybackPlayRequest.Parser, new[]{ "ServerId", "RemoteId" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackQueueNextRequest), global::Mozz.V1.PlaybackQueueNextRequest.Parser, new[]{ "ServerId", "RemoteId" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackPauseRequest), global::Mozz.V1.PlaybackPauseRequest.Parser, null, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackResumeRequest), global::Mozz.V1.PlaybackResumeRequest.Parser, null, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackStopRequest), global::Mozz.V1.PlaybackStopRequest.Parser, null, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackSeekRequest), global::Mozz.V1.PlaybackSeekRequest.Parser, new[]{ "PositionSeconds" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackSetVolumeRequest), global::Mozz.V1.PlaybackSetVolumeRequest.Parser, new[]{ "Volume" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackSetEqualizerRequest), global::Mozz.V1.PlaybackSetEqualizerRequest.Parser, new[]{ "BandGainsDb", "PreampDb", "Enabled" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackSetReplayGainRequest), global::Mozz.V1.PlaybackSetReplayGainRequest.Parser, new[]{ "Mode", "PreampDb" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackStateRequest), global::Mozz.V1.PlaybackStateRequest.Parser, null, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.PlaybackStateResponse), global::Mozz.V1.PlaybackStateResponse.Parser, new[]{ "State" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Request), global::Mozz.V1.Request.Parser, new[]{ "Id", "Libraries", "Albums", "Artist", "WatchLibrary", "Cancel", "Artists", "Tracks", "AlbumTracks", "ArtistAlbums", "Counts", "GetPlaybackSettings", "SetPlaybackSettings", "Artwork", "EnqueueDownload", "ReportDownloadProgress", "CompleteDownload", "FailDownload", "CancelDownload", "DeleteDownload", "DownloadStatus", "Downloads", "StorageUsage", "Lyrics", "RecordingIdentity", "SimilarTracks", "PlaybackPlay", "PlaybackQueueNext", "PlaybackPause", "PlaybackResume", "PlaybackStop", "PlaybackSeek", "PlaybackSetVolume", "PlaybackSetEqualizer", "PlaybackSetReplayGain", "PlaybackState" }, new[]{ "Command" }, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Failure), global::Mozz.V1.Failure.Parser, new[]{ "Message" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Response), global::Mozz.V1.Response.Parser, new[]{ "Id", "Failure", "Libraries", "Albums", "Artist", "WatchLibrary", "Cancel", "Artists", "Tracks", "AlbumTracks", "ArtistAlbums", "Counts", "GetPlaybackSettings", "SetPlaybackSettings", "Artwork", "EnqueueDownload", "ReportDownloadProgress", "CompleteDownload", "FailDownload", "CancelDownload", "DeleteDownload", "DownloadStatus", "Downloads", "StorageUsage", "Lyrics", "RecordingIdentity", "SimilarTracks" }, new[]{ "Result" }, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Response), global::Mozz.V1.Response.Parser, new[]{ "Id", "Failure", "Libraries", "Albums", "Artist", "WatchLibrary", "Cancel", "Artists", "Tracks", "AlbumTracks", "ArtistAlbums", "Counts", "GetPlaybackSettings", "SetPlaybackSettings", "Artwork", "EnqueueDownload", "ReportDownloadProgress", "CompleteDownload", "FailDownload", "CancelDownload", "DeleteDownload", "DownloadStatus", "Downloads", "StorageUsage", "Lyrics", "RecordingIdentity", "SimilarTracks", "PlaybackPlay", "PlaybackQueueNext", "PlaybackPause", "PlaybackResume", "PlaybackStop", "PlaybackSeek", "PlaybackSetVolume", "PlaybackSetEqualizer", "PlaybackSetReplayGain", "PlaybackState" }, new[]{ "Result" }, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Mozz.V1.Event), global::Mozz.V1.Event.Parser, new[]{ "Token", "LibraryChanged" }, new[]{ "Payload" }, null, null, null)
           }));
     }
@@ -434,6 +499,33 @@ namespace Mozz.V1 {
     /// Not looked up yet, or a transient failure the store does not record.
     /// </summary>
     [pbr::OriginalName("RECORDING_IDENTITY_STATUS_NOT_RESOLVED")] NotResolved = 3,
+  }
+
+  /// <summary>
+  /// What the engine is doing. Mirrors the Rust engine's own state enum. UNSPECIFIED
+  /// (0) exists only so a client that reads a zero value does not mistake it for a
+  /// real state; the engine never reports it.
+  /// </summary>
+  public enum PlaybackEngineState {
+    [pbr::OriginalName("PLAYBACK_ENGINE_STATE_UNSPECIFIED")] Unspecified = 0,
+    [pbr::OriginalName("PLAYBACK_ENGINE_STATE_IDLE")] Idle = 1,
+    [pbr::OriginalName("PLAYBACK_ENGINE_STATE_PLAYING")] Playing = 2,
+    [pbr::OriginalName("PLAYBACK_ENGINE_STATE_PAUSED")] Paused = 3,
+    [pbr::OriginalName("PLAYBACK_ENGINE_STATE_ENDED")] Ended = 4,
+  }
+
+  /// <summary>
+  /// Why the last decode failed. The transient/permanent split is load-bearing and
+  /// must never be collapsed: INTERRUPTED must be retried, UNSUPPORTED and CORRUPT
+  /// must never be. The engine — not a shell — decides which is which, so the
+  /// snapshot also carries failure_is_retryable directly rather than making each
+  /// client re-map these cases and drift.
+  /// </summary>
+  public enum PlaybackFailureKind {
+    [pbr::OriginalName("PLAYBACK_FAILURE_KIND_NONE")] None = 0,
+    [pbr::OriginalName("PLAYBACK_FAILURE_KIND_UNSUPPORTED")] Unsupported = 1,
+    [pbr::OriginalName("PLAYBACK_FAILURE_KIND_INTERRUPTED")] Interrupted = 2,
+    [pbr::OriginalName("PLAYBACK_FAILURE_KIND_CORRUPT")] Corrupt = 3,
   }
 
   #endregion
@@ -17012,6 +17104,2665 @@ namespace Mozz.V1 {
 
   }
 
+  /// <summary>
+  /// The one observable answer a request/response surface can give about a
+  /// continuous thing. Every transport command returns it, so a client sees the
+  /// result of what it just did without a second round-trip, and the query command
+  /// returns exactly the same shape.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackState : pb::IMessage<PlaybackState>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackState> _parser = new pb::MessageParser<PlaybackState>(() => new PlaybackState());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackState> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[62]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackState() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackState(PlaybackState other) : this() {
+      engineState_ = other.engineState_;
+      positionSeconds_ = other.positionSeconds_;
+      currentTrackId_ = other.currentTrackId_;
+      hasFailed_ = other.hasFailed_;
+      failureKind_ = other.failureKind_;
+      failureIsRetryable_ = other.failureIsRetryable_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackState Clone() {
+      return new PlaybackState(this);
+    }
+
+    /// <summary>Field number for the "engine_state" field.</summary>
+    public const int EngineStateFieldNumber = 1;
+    private global::Mozz.V1.PlaybackEngineState engineState_ = global::Mozz.V1.PlaybackEngineState.Unspecified;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackEngineState EngineState {
+      get { return engineState_; }
+      set {
+        engineState_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "position_seconds" field.</summary>
+    public const int PositionSecondsFieldNumber = 2;
+    private double positionSeconds_;
+    /// <summary>
+    /// Seconds of the current track ACTUALLY HEARD — read from the engine's output,
+    /// never from a clock. The two differ by the whole buffer, most visibly on a
+    /// slow network, so a clock-derived position runs ahead of its own sound.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double PositionSeconds {
+      get { return positionSeconds_; }
+      set {
+        positionSeconds_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "current_track_id" field.</summary>
+    public const int CurrentTrackIdFieldNumber = 3;
+    private ulong currentTrackId_;
+    /// <summary>
+    /// The internal track id (TrackSummary.id) the audio is currently in — not
+    /// necessarily the last one queued. 0 when nothing is loaded.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public ulong CurrentTrackId {
+      get { return currentTrackId_; }
+      set {
+        currentTrackId_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "has_failed" field.</summary>
+    public const int HasFailedFieldNumber = 4;
+    private bool hasFailed_;
+    /// <summary>
+    /// True when a decode has failed since the last command.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool HasFailed {
+      get { return hasFailed_; }
+      set {
+        hasFailed_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "failure_kind" field.</summary>
+    public const int FailureKindFieldNumber = 5;
+    private global::Mozz.V1.PlaybackFailureKind failureKind_ = global::Mozz.V1.PlaybackFailureKind.None;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackFailureKind FailureKind {
+      get { return failureKind_; }
+      set {
+        failureKind_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "failure_is_retryable" field.</summary>
+    public const int FailureIsRetryableFieldNumber = 6;
+    private bool failureIsRetryable_;
+    /// <summary>
+    /// The engine's own verdict on whether the failure is worth retrying. A client
+    /// reads THIS, not failure_kind, to decide — collapsing the kinds itself is the
+    /// bug this field exists to prevent.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool FailureIsRetryable {
+      get { return failureIsRetryable_; }
+      set {
+        failureIsRetryable_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackState);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackState other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (EngineState != other.EngineState) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(PositionSeconds, other.PositionSeconds)) return false;
+      if (CurrentTrackId != other.CurrentTrackId) return false;
+      if (HasFailed != other.HasFailed) return false;
+      if (FailureKind != other.FailureKind) return false;
+      if (FailureIsRetryable != other.FailureIsRetryable) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (EngineState != global::Mozz.V1.PlaybackEngineState.Unspecified) hash ^= EngineState.GetHashCode();
+      if (PositionSeconds != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(PositionSeconds);
+      if (CurrentTrackId != 0UL) hash ^= CurrentTrackId.GetHashCode();
+      if (HasFailed != false) hash ^= HasFailed.GetHashCode();
+      if (FailureKind != global::Mozz.V1.PlaybackFailureKind.None) hash ^= FailureKind.GetHashCode();
+      if (FailureIsRetryable != false) hash ^= FailureIsRetryable.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (EngineState != global::Mozz.V1.PlaybackEngineState.Unspecified) {
+        output.WriteRawTag(8);
+        output.WriteEnum((int) EngineState);
+      }
+      if (PositionSeconds != 0D) {
+        output.WriteRawTag(17);
+        output.WriteDouble(PositionSeconds);
+      }
+      if (CurrentTrackId != 0UL) {
+        output.WriteRawTag(24);
+        output.WriteUInt64(CurrentTrackId);
+      }
+      if (HasFailed != false) {
+        output.WriteRawTag(32);
+        output.WriteBool(HasFailed);
+      }
+      if (FailureKind != global::Mozz.V1.PlaybackFailureKind.None) {
+        output.WriteRawTag(40);
+        output.WriteEnum((int) FailureKind);
+      }
+      if (FailureIsRetryable != false) {
+        output.WriteRawTag(48);
+        output.WriteBool(FailureIsRetryable);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (EngineState != global::Mozz.V1.PlaybackEngineState.Unspecified) {
+        output.WriteRawTag(8);
+        output.WriteEnum((int) EngineState);
+      }
+      if (PositionSeconds != 0D) {
+        output.WriteRawTag(17);
+        output.WriteDouble(PositionSeconds);
+      }
+      if (CurrentTrackId != 0UL) {
+        output.WriteRawTag(24);
+        output.WriteUInt64(CurrentTrackId);
+      }
+      if (HasFailed != false) {
+        output.WriteRawTag(32);
+        output.WriteBool(HasFailed);
+      }
+      if (FailureKind != global::Mozz.V1.PlaybackFailureKind.None) {
+        output.WriteRawTag(40);
+        output.WriteEnum((int) FailureKind);
+      }
+      if (FailureIsRetryable != false) {
+        output.WriteRawTag(48);
+        output.WriteBool(FailureIsRetryable);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (EngineState != global::Mozz.V1.PlaybackEngineState.Unspecified) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) EngineState);
+      }
+      if (PositionSeconds != 0D) {
+        size += 1 + 8;
+      }
+      if (CurrentTrackId != 0UL) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt64Size(CurrentTrackId);
+      }
+      if (HasFailed != false) {
+        size += 1 + 1;
+      }
+      if (FailureKind != global::Mozz.V1.PlaybackFailureKind.None) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) FailureKind);
+      }
+      if (FailureIsRetryable != false) {
+        size += 1 + 1;
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackState other) {
+      if (other == null) {
+        return;
+      }
+      if (other.EngineState != global::Mozz.V1.PlaybackEngineState.Unspecified) {
+        EngineState = other.EngineState;
+      }
+      if (other.PositionSeconds != 0D) {
+        PositionSeconds = other.PositionSeconds;
+      }
+      if (other.CurrentTrackId != 0UL) {
+        CurrentTrackId = other.CurrentTrackId;
+      }
+      if (other.HasFailed != false) {
+        HasFailed = other.HasFailed;
+      }
+      if (other.FailureKind != global::Mozz.V1.PlaybackFailureKind.None) {
+        FailureKind = other.FailureKind;
+      }
+      if (other.FailureIsRetryable != false) {
+        FailureIsRetryable = other.FailureIsRetryable;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            EngineState = (global::Mozz.V1.PlaybackEngineState) input.ReadEnum();
+            break;
+          }
+          case 17: {
+            PositionSeconds = input.ReadDouble();
+            break;
+          }
+          case 24: {
+            CurrentTrackId = input.ReadUInt64();
+            break;
+          }
+          case 32: {
+            HasFailed = input.ReadBool();
+            break;
+          }
+          case 40: {
+            FailureKind = (global::Mozz.V1.PlaybackFailureKind) input.ReadEnum();
+            break;
+          }
+          case 48: {
+            FailureIsRetryable = input.ReadBool();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 8: {
+            EngineState = (global::Mozz.V1.PlaybackEngineState) input.ReadEnum();
+            break;
+          }
+          case 17: {
+            PositionSeconds = input.ReadDouble();
+            break;
+          }
+          case 24: {
+            CurrentTrackId = input.ReadUInt64();
+            break;
+          }
+          case 32: {
+            HasFailed = input.ReadBool();
+            break;
+          }
+          case 40: {
+            FailureKind = (global::Mozz.V1.PlaybackFailureKind) input.ReadEnum();
+            break;
+          }
+          case 48: {
+            FailureIsRetryable = input.ReadBool();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Play a track now, discarding anything queued. The core resolves (server_id,
+  /// remote_id) to a URL and builds the byte stream itself.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackPlayRequest : pb::IMessage<PlaybackPlayRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackPlayRequest> _parser = new pb::MessageParser<PlaybackPlayRequest>(() => new PlaybackPlayRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackPlayRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[63]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackPlayRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackPlayRequest(PlaybackPlayRequest other) : this() {
+      serverId_ = other.serverId_;
+      remoteId_ = other.remoteId_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackPlayRequest Clone() {
+      return new PlaybackPlayRequest(this);
+    }
+
+    /// <summary>Field number for the "server_id" field.</summary>
+    public const int ServerIdFieldNumber = 1;
+    private string serverId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string ServerId {
+      get { return serverId_; }
+      set {
+        serverId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "remote_id" field.</summary>
+    public const int RemoteIdFieldNumber = 2;
+    private string remoteId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string RemoteId {
+      get { return remoteId_; }
+      set {
+        remoteId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackPlayRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackPlayRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (ServerId != other.ServerId) return false;
+      if (RemoteId != other.RemoteId) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (ServerId.Length != 0) hash ^= ServerId.GetHashCode();
+      if (RemoteId.Length != 0) hash ^= RemoteId.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (ServerId.Length != 0) {
+        output.WriteRawTag(10);
+        output.WriteString(ServerId);
+      }
+      if (RemoteId.Length != 0) {
+        output.WriteRawTag(18);
+        output.WriteString(RemoteId);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (ServerId.Length != 0) {
+        output.WriteRawTag(10);
+        output.WriteString(ServerId);
+      }
+      if (RemoteId.Length != 0) {
+        output.WriteRawTag(18);
+        output.WriteString(RemoteId);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (ServerId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(ServerId);
+      }
+      if (RemoteId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(RemoteId);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackPlayRequest other) {
+      if (other == null) {
+        return;
+      }
+      if (other.ServerId.Length != 0) {
+        ServerId = other.ServerId;
+      }
+      if (other.RemoteId.Length != 0) {
+        RemoteId = other.RemoteId;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 10: {
+            ServerId = input.ReadString();
+            break;
+          }
+          case 18: {
+            RemoteId = input.ReadString();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 10: {
+            ServerId = input.ReadString();
+            break;
+          }
+          case 18: {
+            RemoteId = input.ReadString();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Queue a track behind the current one so the two meet with no gap. This is a
+  /// genuine gapless join, not a timing heuristic: the engine holds the queued
+  /// stream and starts it the instant the current track's last sample is consumed,
+  /// so queueing early is correct — there is nothing to wait for.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackQueueNextRequest : pb::IMessage<PlaybackQueueNextRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackQueueNextRequest> _parser = new pb::MessageParser<PlaybackQueueNextRequest>(() => new PlaybackQueueNextRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackQueueNextRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[64]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackQueueNextRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackQueueNextRequest(PlaybackQueueNextRequest other) : this() {
+      serverId_ = other.serverId_;
+      remoteId_ = other.remoteId_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackQueueNextRequest Clone() {
+      return new PlaybackQueueNextRequest(this);
+    }
+
+    /// <summary>Field number for the "server_id" field.</summary>
+    public const int ServerIdFieldNumber = 1;
+    private string serverId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string ServerId {
+      get { return serverId_; }
+      set {
+        serverId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "remote_id" field.</summary>
+    public const int RemoteIdFieldNumber = 2;
+    private string remoteId_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string RemoteId {
+      get { return remoteId_; }
+      set {
+        remoteId_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackQueueNextRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackQueueNextRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (ServerId != other.ServerId) return false;
+      if (RemoteId != other.RemoteId) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (ServerId.Length != 0) hash ^= ServerId.GetHashCode();
+      if (RemoteId.Length != 0) hash ^= RemoteId.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (ServerId.Length != 0) {
+        output.WriteRawTag(10);
+        output.WriteString(ServerId);
+      }
+      if (RemoteId.Length != 0) {
+        output.WriteRawTag(18);
+        output.WriteString(RemoteId);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (ServerId.Length != 0) {
+        output.WriteRawTag(10);
+        output.WriteString(ServerId);
+      }
+      if (RemoteId.Length != 0) {
+        output.WriteRawTag(18);
+        output.WriteString(RemoteId);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (ServerId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(ServerId);
+      }
+      if (RemoteId.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(RemoteId);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackQueueNextRequest other) {
+      if (other == null) {
+        return;
+      }
+      if (other.ServerId.Length != 0) {
+        ServerId = other.ServerId;
+      }
+      if (other.RemoteId.Length != 0) {
+        RemoteId = other.RemoteId;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 10: {
+            ServerId = input.ReadString();
+            break;
+          }
+          case 18: {
+            RemoteId = input.ReadString();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 10: {
+            ServerId = input.ReadString();
+            break;
+          }
+          case 18: {
+            RemoteId = input.ReadString();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackPauseRequest : pb::IMessage<PlaybackPauseRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackPauseRequest> _parser = new pb::MessageParser<PlaybackPauseRequest>(() => new PlaybackPauseRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackPauseRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[65]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackPauseRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackPauseRequest(PlaybackPauseRequest other) : this() {
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackPauseRequest Clone() {
+      return new PlaybackPauseRequest(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackPauseRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackPauseRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackPauseRequest other) {
+      if (other == null) {
+        return;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+        }
+      }
+    }
+    #endif
+
+  }
+
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackResumeRequest : pb::IMessage<PlaybackResumeRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackResumeRequest> _parser = new pb::MessageParser<PlaybackResumeRequest>(() => new PlaybackResumeRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackResumeRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[66]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackResumeRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackResumeRequest(PlaybackResumeRequest other) : this() {
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackResumeRequest Clone() {
+      return new PlaybackResumeRequest(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackResumeRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackResumeRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackResumeRequest other) {
+      if (other == null) {
+        return;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+        }
+      }
+    }
+    #endif
+
+  }
+
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackStopRequest : pb::IMessage<PlaybackStopRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackStopRequest> _parser = new pb::MessageParser<PlaybackStopRequest>(() => new PlaybackStopRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackStopRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[67]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStopRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStopRequest(PlaybackStopRequest other) : this() {
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStopRequest Clone() {
+      return new PlaybackStopRequest(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackStopRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackStopRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackStopRequest other) {
+      if (other == null) {
+        return;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Move within the current track. The response reports where the engine actually
+  /// landed via PlaybackState.position_seconds.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackSeekRequest : pb::IMessage<PlaybackSeekRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackSeekRequest> _parser = new pb::MessageParser<PlaybackSeekRequest>(() => new PlaybackSeekRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackSeekRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[68]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSeekRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSeekRequest(PlaybackSeekRequest other) : this() {
+      positionSeconds_ = other.positionSeconds_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSeekRequest Clone() {
+      return new PlaybackSeekRequest(this);
+    }
+
+    /// <summary>Field number for the "position_seconds" field.</summary>
+    public const int PositionSecondsFieldNumber = 1;
+    private double positionSeconds_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double PositionSeconds {
+      get { return positionSeconds_; }
+      set {
+        positionSeconds_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackSeekRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackSeekRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(PositionSeconds, other.PositionSeconds)) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (PositionSeconds != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(PositionSeconds);
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (PositionSeconds != 0D) {
+        output.WriteRawTag(9);
+        output.WriteDouble(PositionSeconds);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (PositionSeconds != 0D) {
+        output.WriteRawTag(9);
+        output.WriteDouble(PositionSeconds);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (PositionSeconds != 0D) {
+        size += 1 + 8;
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackSeekRequest other) {
+      if (other == null) {
+        return;
+      }
+      if (other.PositionSeconds != 0D) {
+        PositionSeconds = other.PositionSeconds;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 9: {
+            PositionSeconds = input.ReadDouble();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 9: {
+            PositionSeconds = input.ReadDouble();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// The listener's own level, 0.0 silent to 1.0 unity. Applied after ReplayGain
+  /// and the equaliser. The engine clamps and ramps, so an out-of-range value is
+  /// normalized rather than rejected.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackSetVolumeRequest : pb::IMessage<PlaybackSetVolumeRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackSetVolumeRequest> _parser = new pb::MessageParser<PlaybackSetVolumeRequest>(() => new PlaybackSetVolumeRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackSetVolumeRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[69]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetVolumeRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetVolumeRequest(PlaybackSetVolumeRequest other) : this() {
+      volume_ = other.volume_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetVolumeRequest Clone() {
+      return new PlaybackSetVolumeRequest(this);
+    }
+
+    /// <summary>Field number for the "volume" field.</summary>
+    public const int VolumeFieldNumber = 1;
+    private double volume_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double Volume {
+      get { return volume_; }
+      set {
+        volume_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackSetVolumeRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackSetVolumeRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(Volume, other.Volume)) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (Volume != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(Volume);
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (Volume != 0D) {
+        output.WriteRawTag(9);
+        output.WriteDouble(Volume);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (Volume != 0D) {
+        output.WriteRawTag(9);
+        output.WriteDouble(Volume);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (Volume != 0D) {
+        size += 1 + 8;
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackSetVolumeRequest other) {
+      if (other == null) {
+        return;
+      }
+      if (other.Volume != 0D) {
+        Volume = other.Volume;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 9: {
+            Volume = input.ReadDouble();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 9: {
+            Volume = input.ReadDouble();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Set the live ten-band equaliser on the engine. Fewer than ten gains are padded
+  /// with zero and extras are ignored. This drives the running engine; persisting
+  /// the choice for sync is SetPlaybackSettings' separate job.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackSetEqualizerRequest : pb::IMessage<PlaybackSetEqualizerRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackSetEqualizerRequest> _parser = new pb::MessageParser<PlaybackSetEqualizerRequest>(() => new PlaybackSetEqualizerRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackSetEqualizerRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[70]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetEqualizerRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetEqualizerRequest(PlaybackSetEqualizerRequest other) : this() {
+      bandGainsDb_ = other.bandGainsDb_.Clone();
+      preampDb_ = other.preampDb_;
+      enabled_ = other.enabled_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetEqualizerRequest Clone() {
+      return new PlaybackSetEqualizerRequest(this);
+    }
+
+    /// <summary>Field number for the "band_gains_db" field.</summary>
+    public const int BandGainsDbFieldNumber = 1;
+    private static readonly pb::FieldCodec<double> _repeated_bandGainsDb_codec
+        = pb::FieldCodec.ForDouble(10);
+    private readonly pbc::RepeatedField<double> bandGainsDb_ = new pbc::RepeatedField<double>();
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pbc::RepeatedField<double> BandGainsDb {
+      get { return bandGainsDb_; }
+    }
+
+    /// <summary>Field number for the "preamp_db" field.</summary>
+    public const int PreampDbFieldNumber = 2;
+    private double preampDb_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double PreampDb {
+      get { return preampDb_; }
+      set {
+        preampDb_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "enabled" field.</summary>
+    public const int EnabledFieldNumber = 3;
+    private bool enabled_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Enabled {
+      get { return enabled_; }
+      set {
+        enabled_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackSetEqualizerRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackSetEqualizerRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if(!bandGainsDb_.Equals(other.bandGainsDb_)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(PreampDb, other.PreampDb)) return false;
+      if (Enabled != other.Enabled) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      hash ^= bandGainsDb_.GetHashCode();
+      if (PreampDb != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(PreampDb);
+      if (Enabled != false) hash ^= Enabled.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      bandGainsDb_.WriteTo(output, _repeated_bandGainsDb_codec);
+      if (PreampDb != 0D) {
+        output.WriteRawTag(17);
+        output.WriteDouble(PreampDb);
+      }
+      if (Enabled != false) {
+        output.WriteRawTag(24);
+        output.WriteBool(Enabled);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      bandGainsDb_.WriteTo(ref output, _repeated_bandGainsDb_codec);
+      if (PreampDb != 0D) {
+        output.WriteRawTag(17);
+        output.WriteDouble(PreampDb);
+      }
+      if (Enabled != false) {
+        output.WriteRawTag(24);
+        output.WriteBool(Enabled);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      size += bandGainsDb_.CalculateSize(_repeated_bandGainsDb_codec);
+      if (PreampDb != 0D) {
+        size += 1 + 8;
+      }
+      if (Enabled != false) {
+        size += 1 + 1;
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackSetEqualizerRequest other) {
+      if (other == null) {
+        return;
+      }
+      bandGainsDb_.Add(other.bandGainsDb_);
+      if (other.PreampDb != 0D) {
+        PreampDb = other.PreampDb;
+      }
+      if (other.Enabled != false) {
+        Enabled = other.Enabled;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 10:
+          case 9: {
+            bandGainsDb_.AddEntriesFrom(input, _repeated_bandGainsDb_codec);
+            break;
+          }
+          case 17: {
+            PreampDb = input.ReadDouble();
+            break;
+          }
+          case 24: {
+            Enabled = input.ReadBool();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 10:
+          case 9: {
+            bandGainsDb_.AddEntriesFrom(ref input, _repeated_bandGainsDb_codec);
+            break;
+          }
+          case 17: {
+            PreampDb = input.ReadDouble();
+            break;
+          }
+          case 24: {
+            Enabled = input.ReadBool();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Set live loudness normalization on the engine. UNSPECIFIED takes the core
+  /// default (Track). Like the equaliser command, this drives the running engine
+  /// rather than persisting the setting.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackSetReplayGainRequest : pb::IMessage<PlaybackSetReplayGainRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackSetReplayGainRequest> _parser = new pb::MessageParser<PlaybackSetReplayGainRequest>(() => new PlaybackSetReplayGainRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackSetReplayGainRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[71]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetReplayGainRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetReplayGainRequest(PlaybackSetReplayGainRequest other) : this() {
+      mode_ = other.mode_;
+      preampDb_ = other.preampDb_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackSetReplayGainRequest Clone() {
+      return new PlaybackSetReplayGainRequest(this);
+    }
+
+    /// <summary>Field number for the "mode" field.</summary>
+    public const int ModeFieldNumber = 1;
+    private global::Mozz.V1.ReplayGainMode mode_ = global::Mozz.V1.ReplayGainMode.Unspecified;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.ReplayGainMode Mode {
+      get { return mode_; }
+      set {
+        mode_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "preamp_db" field.</summary>
+    public const int PreampDbFieldNumber = 2;
+    private double preampDb_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public double PreampDb {
+      get { return preampDb_; }
+      set {
+        preampDb_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackSetReplayGainRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackSetReplayGainRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (Mode != other.Mode) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.Equals(PreampDb, other.PreampDb)) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (Mode != global::Mozz.V1.ReplayGainMode.Unspecified) hash ^= Mode.GetHashCode();
+      if (PreampDb != 0D) hash ^= pbc::ProtobufEqualityComparers.BitwiseDoubleEqualityComparer.GetHashCode(PreampDb);
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (Mode != global::Mozz.V1.ReplayGainMode.Unspecified) {
+        output.WriteRawTag(8);
+        output.WriteEnum((int) Mode);
+      }
+      if (PreampDb != 0D) {
+        output.WriteRawTag(17);
+        output.WriteDouble(PreampDb);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (Mode != global::Mozz.V1.ReplayGainMode.Unspecified) {
+        output.WriteRawTag(8);
+        output.WriteEnum((int) Mode);
+      }
+      if (PreampDb != 0D) {
+        output.WriteRawTag(17);
+        output.WriteDouble(PreampDb);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (Mode != global::Mozz.V1.ReplayGainMode.Unspecified) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) Mode);
+      }
+      if (PreampDb != 0D) {
+        size += 1 + 8;
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackSetReplayGainRequest other) {
+      if (other == null) {
+        return;
+      }
+      if (other.Mode != global::Mozz.V1.ReplayGainMode.Unspecified) {
+        Mode = other.Mode;
+      }
+      if (other.PreampDb != 0D) {
+        PreampDb = other.PreampDb;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            Mode = (global::Mozz.V1.ReplayGainMode) input.ReadEnum();
+            break;
+          }
+          case 17: {
+            PreampDb = input.ReadDouble();
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 8: {
+            Mode = (global::Mozz.V1.ReplayGainMode) input.ReadEnum();
+            break;
+          }
+          case 17: {
+            PreampDb = input.ReadDouble();
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Query current playback state. The interesting command: playback is continuous
+  /// but the surface is request/response, so a client polls this for position and
+  /// for whether a failure occurred (and, crucially, whether to retry it).
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackStateRequest : pb::IMessage<PlaybackStateRequest>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackStateRequest> _parser = new pb::MessageParser<PlaybackStateRequest>(() => new PlaybackStateRequest());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackStateRequest> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[72]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStateRequest() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStateRequest(PlaybackStateRequest other) : this() {
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStateRequest Clone() {
+      return new PlaybackStateRequest(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackStateRequest);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackStateRequest other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackStateRequest other) {
+      if (other == null) {
+        return;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+        }
+      }
+    }
+    #endif
+
+  }
+
+  /// <summary>
+  /// Every transport command answers with the post-command state, so the return
+  /// type is uniform and a client always learns the result of what it did.
+  /// </summary>
+  [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
+  public sealed partial class PlaybackStateResponse : pb::IMessage<PlaybackStateResponse>
+  #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      , pb::IBufferMessage
+  #endif
+  {
+    private static readonly pb::MessageParser<PlaybackStateResponse> _parser = new pb::MessageParser<PlaybackStateResponse>(() => new PlaybackStateResponse());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pb::MessageParser<PlaybackStateResponse> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[73]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStateResponse() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStateResponse(PlaybackStateResponse other) : this() {
+      state_ = other.state_ != null ? other.state_.Clone() : null;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public PlaybackStateResponse Clone() {
+      return new PlaybackStateResponse(this);
+    }
+
+    /// <summary>Field number for the "state" field.</summary>
+    public const int StateFieldNumber = 1;
+    private global::Mozz.V1.PlaybackState state_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackState State {
+      get { return state_; }
+      set {
+        state_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override bool Equals(object other) {
+      return Equals(other as PlaybackStateResponse);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool Equals(PlaybackStateResponse other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (!object.Equals(State, other.State)) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (state_ != null) hash ^= State.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void WriteTo(pb::CodedOutputStream output) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      output.WriteRawMessage(this);
+    #else
+      if (state_ != null) {
+        output.WriteRawTag(10);
+        output.WriteMessage(State);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (state_ != null) {
+        output.WriteRawTag(10);
+        output.WriteMessage(State);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(ref output);
+      }
+    }
+    #endif
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int CalculateSize() {
+      int size = 0;
+      if (state_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(State);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(PlaybackStateResponse other) {
+      if (other == null) {
+        return;
+      }
+      if (other.state_ != null) {
+        if (state_ == null) {
+          State = new global::Mozz.V1.PlaybackState();
+        }
+        State.MergeFrom(other.State);
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public void MergeFrom(pb::CodedInputStream input) {
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+      input.ReadRawMessage(this);
+    #else
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 10: {
+            if (state_ == null) {
+              State = new global::Mozz.V1.PlaybackState();
+            }
+            input.ReadMessage(State);
+            break;
+          }
+        }
+      }
+    #endif
+    }
+
+    #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    void pb::IBufferMessage.InternalMergeFrom(ref pb::ParseContext input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+      if ((tag & 7) == 4) {
+        // Abort on any end group tag.
+        return;
+      }
+      switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
+            break;
+          case 10: {
+            if (state_ == null) {
+              State = new global::Mozz.V1.PlaybackState();
+            }
+            input.ReadMessage(State);
+            break;
+          }
+        }
+      }
+    }
+    #endif
+
+  }
+
   [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Request : pb::IMessage<Request>
   #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
@@ -17027,7 +19778,7 @@ namespace Mozz.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[62]; }
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[74]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -17123,6 +19874,36 @@ namespace Mozz.V1 {
           break;
         case CommandOneofCase.SimilarTracks:
           SimilarTracks = other.SimilarTracks.Clone();
+          break;
+        case CommandOneofCase.PlaybackPlay:
+          PlaybackPlay = other.PlaybackPlay.Clone();
+          break;
+        case CommandOneofCase.PlaybackQueueNext:
+          PlaybackQueueNext = other.PlaybackQueueNext.Clone();
+          break;
+        case CommandOneofCase.PlaybackPause:
+          PlaybackPause = other.PlaybackPause.Clone();
+          break;
+        case CommandOneofCase.PlaybackResume:
+          PlaybackResume = other.PlaybackResume.Clone();
+          break;
+        case CommandOneofCase.PlaybackStop:
+          PlaybackStop = other.PlaybackStop.Clone();
+          break;
+        case CommandOneofCase.PlaybackSeek:
+          PlaybackSeek = other.PlaybackSeek.Clone();
+          break;
+        case CommandOneofCase.PlaybackSetVolume:
+          PlaybackSetVolume = other.PlaybackSetVolume.Clone();
+          break;
+        case CommandOneofCase.PlaybackSetEqualizer:
+          PlaybackSetEqualizer = other.PlaybackSetEqualizer.Clone();
+          break;
+        case CommandOneofCase.PlaybackSetReplayGain:
+          PlaybackSetReplayGain = other.PlaybackSetReplayGain.Clone();
+          break;
+        case CommandOneofCase.PlaybackState:
+          PlaybackState = other.PlaybackState.Clone();
           break;
       }
 
@@ -17450,6 +20231,126 @@ namespace Mozz.V1 {
       }
     }
 
+    /// <summary>Field number for the "playback_play" field.</summary>
+    public const int PlaybackPlayFieldNumber = 35;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackPlayRequest PlaybackPlay {
+      get { return commandCase_ == CommandOneofCase.PlaybackPlay ? (global::Mozz.V1.PlaybackPlayRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackPlay;
+      }
+    }
+
+    /// <summary>Field number for the "playback_queue_next" field.</summary>
+    public const int PlaybackQueueNextFieldNumber = 36;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackQueueNextRequest PlaybackQueueNext {
+      get { return commandCase_ == CommandOneofCase.PlaybackQueueNext ? (global::Mozz.V1.PlaybackQueueNextRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackQueueNext;
+      }
+    }
+
+    /// <summary>Field number for the "playback_pause" field.</summary>
+    public const int PlaybackPauseFieldNumber = 37;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackPauseRequest PlaybackPause {
+      get { return commandCase_ == CommandOneofCase.PlaybackPause ? (global::Mozz.V1.PlaybackPauseRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackPause;
+      }
+    }
+
+    /// <summary>Field number for the "playback_resume" field.</summary>
+    public const int PlaybackResumeFieldNumber = 38;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackResumeRequest PlaybackResume {
+      get { return commandCase_ == CommandOneofCase.PlaybackResume ? (global::Mozz.V1.PlaybackResumeRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackResume;
+      }
+    }
+
+    /// <summary>Field number for the "playback_stop" field.</summary>
+    public const int PlaybackStopFieldNumber = 39;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStopRequest PlaybackStop {
+      get { return commandCase_ == CommandOneofCase.PlaybackStop ? (global::Mozz.V1.PlaybackStopRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackStop;
+      }
+    }
+
+    /// <summary>Field number for the "playback_seek" field.</summary>
+    public const int PlaybackSeekFieldNumber = 40;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackSeekRequest PlaybackSeek {
+      get { return commandCase_ == CommandOneofCase.PlaybackSeek ? (global::Mozz.V1.PlaybackSeekRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackSeek;
+      }
+    }
+
+    /// <summary>Field number for the "playback_set_volume" field.</summary>
+    public const int PlaybackSetVolumeFieldNumber = 41;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackSetVolumeRequest PlaybackSetVolume {
+      get { return commandCase_ == CommandOneofCase.PlaybackSetVolume ? (global::Mozz.V1.PlaybackSetVolumeRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackSetVolume;
+      }
+    }
+
+    /// <summary>Field number for the "playback_set_equalizer" field.</summary>
+    public const int PlaybackSetEqualizerFieldNumber = 42;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackSetEqualizerRequest PlaybackSetEqualizer {
+      get { return commandCase_ == CommandOneofCase.PlaybackSetEqualizer ? (global::Mozz.V1.PlaybackSetEqualizerRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackSetEqualizer;
+      }
+    }
+
+    /// <summary>Field number for the "playback_set_replay_gain" field.</summary>
+    public const int PlaybackSetReplayGainFieldNumber = 43;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackSetReplayGainRequest PlaybackSetReplayGain {
+      get { return commandCase_ == CommandOneofCase.PlaybackSetReplayGain ? (global::Mozz.V1.PlaybackSetReplayGainRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackSetReplayGain;
+      }
+    }
+
+    /// <summary>Field number for the "playback_state" field.</summary>
+    public const int PlaybackStateFieldNumber = 44;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateRequest PlaybackState {
+      get { return commandCase_ == CommandOneofCase.PlaybackState ? (global::Mozz.V1.PlaybackStateRequest) command_ : null; }
+      set {
+        command_ = value;
+        commandCase_ = value == null ? CommandOneofCase.None : CommandOneofCase.PlaybackState;
+      }
+    }
+
     private object command_;
     /// <summary>Enum of possible cases for the "command" oneof.</summary>
     public enum CommandOneofCase {
@@ -17479,6 +20380,16 @@ namespace Mozz.V1 {
       Lyrics = 32,
       RecordingIdentity = 33,
       SimilarTracks = 34,
+      PlaybackPlay = 35,
+      PlaybackQueueNext = 36,
+      PlaybackPause = 37,
+      PlaybackResume = 38,
+      PlaybackStop = 39,
+      PlaybackSeek = 40,
+      PlaybackSetVolume = 41,
+      PlaybackSetEqualizer = 42,
+      PlaybackSetReplayGain = 43,
+      PlaybackState = 44,
     }
     private CommandOneofCase commandCase_ = CommandOneofCase.None;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -17535,6 +20446,16 @@ namespace Mozz.V1 {
       if (!object.Equals(Lyrics, other.Lyrics)) return false;
       if (!object.Equals(RecordingIdentity, other.RecordingIdentity)) return false;
       if (!object.Equals(SimilarTracks, other.SimilarTracks)) return false;
+      if (!object.Equals(PlaybackPlay, other.PlaybackPlay)) return false;
+      if (!object.Equals(PlaybackQueueNext, other.PlaybackQueueNext)) return false;
+      if (!object.Equals(PlaybackPause, other.PlaybackPause)) return false;
+      if (!object.Equals(PlaybackResume, other.PlaybackResume)) return false;
+      if (!object.Equals(PlaybackStop, other.PlaybackStop)) return false;
+      if (!object.Equals(PlaybackSeek, other.PlaybackSeek)) return false;
+      if (!object.Equals(PlaybackSetVolume, other.PlaybackSetVolume)) return false;
+      if (!object.Equals(PlaybackSetEqualizer, other.PlaybackSetEqualizer)) return false;
+      if (!object.Equals(PlaybackSetReplayGain, other.PlaybackSetReplayGain)) return false;
+      if (!object.Equals(PlaybackState, other.PlaybackState)) return false;
       if (CommandCase != other.CommandCase) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
@@ -17569,6 +20490,16 @@ namespace Mozz.V1 {
       if (commandCase_ == CommandOneofCase.Lyrics) hash ^= Lyrics.GetHashCode();
       if (commandCase_ == CommandOneofCase.RecordingIdentity) hash ^= RecordingIdentity.GetHashCode();
       if (commandCase_ == CommandOneofCase.SimilarTracks) hash ^= SimilarTracks.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackPlay) hash ^= PlaybackPlay.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackQueueNext) hash ^= PlaybackQueueNext.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackPause) hash ^= PlaybackPause.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackResume) hash ^= PlaybackResume.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackStop) hash ^= PlaybackStop.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackSeek) hash ^= PlaybackSeek.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackSetVolume) hash ^= PlaybackSetVolume.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackSetEqualizer) hash ^= PlaybackSetEqualizer.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackSetReplayGain) hash ^= PlaybackSetReplayGain.GetHashCode();
+      if (commandCase_ == CommandOneofCase.PlaybackState) hash ^= PlaybackState.GetHashCode();
       hash ^= (int) commandCase_;
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
@@ -17692,6 +20623,46 @@ namespace Mozz.V1 {
         output.WriteRawTag(146, 2);
         output.WriteMessage(SimilarTracks);
       }
+      if (commandCase_ == CommandOneofCase.PlaybackPlay) {
+        output.WriteRawTag(154, 2);
+        output.WriteMessage(PlaybackPlay);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackQueueNext) {
+        output.WriteRawTag(162, 2);
+        output.WriteMessage(PlaybackQueueNext);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackPause) {
+        output.WriteRawTag(170, 2);
+        output.WriteMessage(PlaybackPause);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackResume) {
+        output.WriteRawTag(178, 2);
+        output.WriteMessage(PlaybackResume);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackStop) {
+        output.WriteRawTag(186, 2);
+        output.WriteMessage(PlaybackStop);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSeek) {
+        output.WriteRawTag(194, 2);
+        output.WriteMessage(PlaybackSeek);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetVolume) {
+        output.WriteRawTag(202, 2);
+        output.WriteMessage(PlaybackSetVolume);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetEqualizer) {
+        output.WriteRawTag(210, 2);
+        output.WriteMessage(PlaybackSetEqualizer);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetReplayGain) {
+        output.WriteRawTag(218, 2);
+        output.WriteMessage(PlaybackSetReplayGain);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackState) {
+        output.WriteRawTag(226, 2);
+        output.WriteMessage(PlaybackState);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -17806,6 +20777,46 @@ namespace Mozz.V1 {
         output.WriteRawTag(146, 2);
         output.WriteMessage(SimilarTracks);
       }
+      if (commandCase_ == CommandOneofCase.PlaybackPlay) {
+        output.WriteRawTag(154, 2);
+        output.WriteMessage(PlaybackPlay);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackQueueNext) {
+        output.WriteRawTag(162, 2);
+        output.WriteMessage(PlaybackQueueNext);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackPause) {
+        output.WriteRawTag(170, 2);
+        output.WriteMessage(PlaybackPause);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackResume) {
+        output.WriteRawTag(178, 2);
+        output.WriteMessage(PlaybackResume);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackStop) {
+        output.WriteRawTag(186, 2);
+        output.WriteMessage(PlaybackStop);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSeek) {
+        output.WriteRawTag(194, 2);
+        output.WriteMessage(PlaybackSeek);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetVolume) {
+        output.WriteRawTag(202, 2);
+        output.WriteMessage(PlaybackSetVolume);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetEqualizer) {
+        output.WriteRawTag(210, 2);
+        output.WriteMessage(PlaybackSetEqualizer);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetReplayGain) {
+        output.WriteRawTag(218, 2);
+        output.WriteMessage(PlaybackSetReplayGain);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackState) {
+        output.WriteRawTag(226, 2);
+        output.WriteMessage(PlaybackState);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -17893,6 +20904,36 @@ namespace Mozz.V1 {
       }
       if (commandCase_ == CommandOneofCase.SimilarTracks) {
         size += 2 + pb::CodedOutputStream.ComputeMessageSize(SimilarTracks);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackPlay) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackPlay);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackQueueNext) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackQueueNext);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackPause) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackPause);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackResume) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackResume);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackStop) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackStop);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSeek) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSeek);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetVolume) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSetVolume);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetEqualizer) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSetEqualizer);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackSetReplayGain) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSetReplayGain);
+      }
+      if (commandCase_ == CommandOneofCase.PlaybackState) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackState);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -18059,6 +21100,66 @@ namespace Mozz.V1 {
             SimilarTracks = new global::Mozz.V1.SimilarTracksRequest();
           }
           SimilarTracks.MergeFrom(other.SimilarTracks);
+          break;
+        case CommandOneofCase.PlaybackPlay:
+          if (PlaybackPlay == null) {
+            PlaybackPlay = new global::Mozz.V1.PlaybackPlayRequest();
+          }
+          PlaybackPlay.MergeFrom(other.PlaybackPlay);
+          break;
+        case CommandOneofCase.PlaybackQueueNext:
+          if (PlaybackQueueNext == null) {
+            PlaybackQueueNext = new global::Mozz.V1.PlaybackQueueNextRequest();
+          }
+          PlaybackQueueNext.MergeFrom(other.PlaybackQueueNext);
+          break;
+        case CommandOneofCase.PlaybackPause:
+          if (PlaybackPause == null) {
+            PlaybackPause = new global::Mozz.V1.PlaybackPauseRequest();
+          }
+          PlaybackPause.MergeFrom(other.PlaybackPause);
+          break;
+        case CommandOneofCase.PlaybackResume:
+          if (PlaybackResume == null) {
+            PlaybackResume = new global::Mozz.V1.PlaybackResumeRequest();
+          }
+          PlaybackResume.MergeFrom(other.PlaybackResume);
+          break;
+        case CommandOneofCase.PlaybackStop:
+          if (PlaybackStop == null) {
+            PlaybackStop = new global::Mozz.V1.PlaybackStopRequest();
+          }
+          PlaybackStop.MergeFrom(other.PlaybackStop);
+          break;
+        case CommandOneofCase.PlaybackSeek:
+          if (PlaybackSeek == null) {
+            PlaybackSeek = new global::Mozz.V1.PlaybackSeekRequest();
+          }
+          PlaybackSeek.MergeFrom(other.PlaybackSeek);
+          break;
+        case CommandOneofCase.PlaybackSetVolume:
+          if (PlaybackSetVolume == null) {
+            PlaybackSetVolume = new global::Mozz.V1.PlaybackSetVolumeRequest();
+          }
+          PlaybackSetVolume.MergeFrom(other.PlaybackSetVolume);
+          break;
+        case CommandOneofCase.PlaybackSetEqualizer:
+          if (PlaybackSetEqualizer == null) {
+            PlaybackSetEqualizer = new global::Mozz.V1.PlaybackSetEqualizerRequest();
+          }
+          PlaybackSetEqualizer.MergeFrom(other.PlaybackSetEqualizer);
+          break;
+        case CommandOneofCase.PlaybackSetReplayGain:
+          if (PlaybackSetReplayGain == null) {
+            PlaybackSetReplayGain = new global::Mozz.V1.PlaybackSetReplayGainRequest();
+          }
+          PlaybackSetReplayGain.MergeFrom(other.PlaybackSetReplayGain);
+          break;
+        case CommandOneofCase.PlaybackState:
+          if (PlaybackState == null) {
+            PlaybackState = new global::Mozz.V1.PlaybackStateRequest();
+          }
+          PlaybackState.MergeFrom(other.PlaybackState);
           break;
       }
 
@@ -18310,6 +21411,96 @@ namespace Mozz.V1 {
             SimilarTracks = subBuilder;
             break;
           }
+          case 282: {
+            global::Mozz.V1.PlaybackPlayRequest subBuilder = new global::Mozz.V1.PlaybackPlayRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackPlay) {
+              subBuilder.MergeFrom(PlaybackPlay);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPlay = subBuilder;
+            break;
+          }
+          case 290: {
+            global::Mozz.V1.PlaybackQueueNextRequest subBuilder = new global::Mozz.V1.PlaybackQueueNextRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackQueueNext) {
+              subBuilder.MergeFrom(PlaybackQueueNext);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackQueueNext = subBuilder;
+            break;
+          }
+          case 298: {
+            global::Mozz.V1.PlaybackPauseRequest subBuilder = new global::Mozz.V1.PlaybackPauseRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackPause) {
+              subBuilder.MergeFrom(PlaybackPause);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPause = subBuilder;
+            break;
+          }
+          case 306: {
+            global::Mozz.V1.PlaybackResumeRequest subBuilder = new global::Mozz.V1.PlaybackResumeRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackResume) {
+              subBuilder.MergeFrom(PlaybackResume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackResume = subBuilder;
+            break;
+          }
+          case 314: {
+            global::Mozz.V1.PlaybackStopRequest subBuilder = new global::Mozz.V1.PlaybackStopRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackStop) {
+              subBuilder.MergeFrom(PlaybackStop);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackStop = subBuilder;
+            break;
+          }
+          case 322: {
+            global::Mozz.V1.PlaybackSeekRequest subBuilder = new global::Mozz.V1.PlaybackSeekRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSeek) {
+              subBuilder.MergeFrom(PlaybackSeek);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSeek = subBuilder;
+            break;
+          }
+          case 330: {
+            global::Mozz.V1.PlaybackSetVolumeRequest subBuilder = new global::Mozz.V1.PlaybackSetVolumeRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSetVolume) {
+              subBuilder.MergeFrom(PlaybackSetVolume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetVolume = subBuilder;
+            break;
+          }
+          case 338: {
+            global::Mozz.V1.PlaybackSetEqualizerRequest subBuilder = new global::Mozz.V1.PlaybackSetEqualizerRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSetEqualizer) {
+              subBuilder.MergeFrom(PlaybackSetEqualizer);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetEqualizer = subBuilder;
+            break;
+          }
+          case 346: {
+            global::Mozz.V1.PlaybackSetReplayGainRequest subBuilder = new global::Mozz.V1.PlaybackSetReplayGainRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSetReplayGain) {
+              subBuilder.MergeFrom(PlaybackSetReplayGain);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetReplayGain = subBuilder;
+            break;
+          }
+          case 354: {
+            global::Mozz.V1.PlaybackStateRequest subBuilder = new global::Mozz.V1.PlaybackStateRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackState) {
+              subBuilder.MergeFrom(PlaybackState);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackState = subBuilder;
+            break;
+          }
         }
       }
     #endif
@@ -18558,6 +21749,96 @@ namespace Mozz.V1 {
             SimilarTracks = subBuilder;
             break;
           }
+          case 282: {
+            global::Mozz.V1.PlaybackPlayRequest subBuilder = new global::Mozz.V1.PlaybackPlayRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackPlay) {
+              subBuilder.MergeFrom(PlaybackPlay);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPlay = subBuilder;
+            break;
+          }
+          case 290: {
+            global::Mozz.V1.PlaybackQueueNextRequest subBuilder = new global::Mozz.V1.PlaybackQueueNextRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackQueueNext) {
+              subBuilder.MergeFrom(PlaybackQueueNext);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackQueueNext = subBuilder;
+            break;
+          }
+          case 298: {
+            global::Mozz.V1.PlaybackPauseRequest subBuilder = new global::Mozz.V1.PlaybackPauseRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackPause) {
+              subBuilder.MergeFrom(PlaybackPause);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPause = subBuilder;
+            break;
+          }
+          case 306: {
+            global::Mozz.V1.PlaybackResumeRequest subBuilder = new global::Mozz.V1.PlaybackResumeRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackResume) {
+              subBuilder.MergeFrom(PlaybackResume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackResume = subBuilder;
+            break;
+          }
+          case 314: {
+            global::Mozz.V1.PlaybackStopRequest subBuilder = new global::Mozz.V1.PlaybackStopRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackStop) {
+              subBuilder.MergeFrom(PlaybackStop);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackStop = subBuilder;
+            break;
+          }
+          case 322: {
+            global::Mozz.V1.PlaybackSeekRequest subBuilder = new global::Mozz.V1.PlaybackSeekRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSeek) {
+              subBuilder.MergeFrom(PlaybackSeek);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSeek = subBuilder;
+            break;
+          }
+          case 330: {
+            global::Mozz.V1.PlaybackSetVolumeRequest subBuilder = new global::Mozz.V1.PlaybackSetVolumeRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSetVolume) {
+              subBuilder.MergeFrom(PlaybackSetVolume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetVolume = subBuilder;
+            break;
+          }
+          case 338: {
+            global::Mozz.V1.PlaybackSetEqualizerRequest subBuilder = new global::Mozz.V1.PlaybackSetEqualizerRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSetEqualizer) {
+              subBuilder.MergeFrom(PlaybackSetEqualizer);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetEqualizer = subBuilder;
+            break;
+          }
+          case 346: {
+            global::Mozz.V1.PlaybackSetReplayGainRequest subBuilder = new global::Mozz.V1.PlaybackSetReplayGainRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackSetReplayGain) {
+              subBuilder.MergeFrom(PlaybackSetReplayGain);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetReplayGain = subBuilder;
+            break;
+          }
+          case 354: {
+            global::Mozz.V1.PlaybackStateRequest subBuilder = new global::Mozz.V1.PlaybackStateRequest();
+            if (commandCase_ == CommandOneofCase.PlaybackState) {
+              subBuilder.MergeFrom(PlaybackState);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackState = subBuilder;
+            break;
+          }
         }
       }
     }
@@ -18580,7 +21861,7 @@ namespace Mozz.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[63]; }
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[75]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -18778,7 +22059,7 @@ namespace Mozz.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[64]; }
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[76]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -18877,6 +22158,36 @@ namespace Mozz.V1 {
           break;
         case ResultOneofCase.SimilarTracks:
           SimilarTracks = other.SimilarTracks.Clone();
+          break;
+        case ResultOneofCase.PlaybackPlay:
+          PlaybackPlay = other.PlaybackPlay.Clone();
+          break;
+        case ResultOneofCase.PlaybackQueueNext:
+          PlaybackQueueNext = other.PlaybackQueueNext.Clone();
+          break;
+        case ResultOneofCase.PlaybackPause:
+          PlaybackPause = other.PlaybackPause.Clone();
+          break;
+        case ResultOneofCase.PlaybackResume:
+          PlaybackResume = other.PlaybackResume.Clone();
+          break;
+        case ResultOneofCase.PlaybackStop:
+          PlaybackStop = other.PlaybackStop.Clone();
+          break;
+        case ResultOneofCase.PlaybackSeek:
+          PlaybackSeek = other.PlaybackSeek.Clone();
+          break;
+        case ResultOneofCase.PlaybackSetVolume:
+          PlaybackSetVolume = other.PlaybackSetVolume.Clone();
+          break;
+        case ResultOneofCase.PlaybackSetEqualizer:
+          PlaybackSetEqualizer = other.PlaybackSetEqualizer.Clone();
+          break;
+        case ResultOneofCase.PlaybackSetReplayGain:
+          PlaybackSetReplayGain = other.PlaybackSetReplayGain.Clone();
+          break;
+        case ResultOneofCase.PlaybackState:
+          PlaybackState = other.PlaybackState.Clone();
           break;
       }
 
@@ -19213,6 +22524,131 @@ namespace Mozz.V1 {
       }
     }
 
+    /// <summary>Field number for the "playback_play" field.</summary>
+    public const int PlaybackPlayFieldNumber = 35;
+    /// <summary>
+    /// Every playback transport command answers with the same PlaybackState
+    /// envelope, so a client learns the result of what it did — and the state
+    /// query returns the identical shape.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackPlay {
+      get { return resultCase_ == ResultOneofCase.PlaybackPlay ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackPlay;
+      }
+    }
+
+    /// <summary>Field number for the "playback_queue_next" field.</summary>
+    public const int PlaybackQueueNextFieldNumber = 36;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackQueueNext {
+      get { return resultCase_ == ResultOneofCase.PlaybackQueueNext ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackQueueNext;
+      }
+    }
+
+    /// <summary>Field number for the "playback_pause" field.</summary>
+    public const int PlaybackPauseFieldNumber = 37;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackPause {
+      get { return resultCase_ == ResultOneofCase.PlaybackPause ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackPause;
+      }
+    }
+
+    /// <summary>Field number for the "playback_resume" field.</summary>
+    public const int PlaybackResumeFieldNumber = 38;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackResume {
+      get { return resultCase_ == ResultOneofCase.PlaybackResume ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackResume;
+      }
+    }
+
+    /// <summary>Field number for the "playback_stop" field.</summary>
+    public const int PlaybackStopFieldNumber = 39;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackStop {
+      get { return resultCase_ == ResultOneofCase.PlaybackStop ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackStop;
+      }
+    }
+
+    /// <summary>Field number for the "playback_seek" field.</summary>
+    public const int PlaybackSeekFieldNumber = 40;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackSeek {
+      get { return resultCase_ == ResultOneofCase.PlaybackSeek ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackSeek;
+      }
+    }
+
+    /// <summary>Field number for the "playback_set_volume" field.</summary>
+    public const int PlaybackSetVolumeFieldNumber = 41;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackSetVolume {
+      get { return resultCase_ == ResultOneofCase.PlaybackSetVolume ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackSetVolume;
+      }
+    }
+
+    /// <summary>Field number for the "playback_set_equalizer" field.</summary>
+    public const int PlaybackSetEqualizerFieldNumber = 42;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackSetEqualizer {
+      get { return resultCase_ == ResultOneofCase.PlaybackSetEqualizer ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackSetEqualizer;
+      }
+    }
+
+    /// <summary>Field number for the "playback_set_replay_gain" field.</summary>
+    public const int PlaybackSetReplayGainFieldNumber = 43;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackSetReplayGain {
+      get { return resultCase_ == ResultOneofCase.PlaybackSetReplayGain ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackSetReplayGain;
+      }
+    }
+
+    /// <summary>Field number for the "playback_state" field.</summary>
+    public const int PlaybackStateFieldNumber = 44;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Mozz.V1.PlaybackStateResponse PlaybackState {
+      get { return resultCase_ == ResultOneofCase.PlaybackState ? (global::Mozz.V1.PlaybackStateResponse) result_ : null; }
+      set {
+        result_ = value;
+        resultCase_ = value == null ? ResultOneofCase.None : ResultOneofCase.PlaybackState;
+      }
+    }
+
     private object result_;
     /// <summary>Enum of possible cases for the "result" oneof.</summary>
     public enum ResultOneofCase {
@@ -19243,6 +22679,16 @@ namespace Mozz.V1 {
       Lyrics = 32,
       RecordingIdentity = 33,
       SimilarTracks = 34,
+      PlaybackPlay = 35,
+      PlaybackQueueNext = 36,
+      PlaybackPause = 37,
+      PlaybackResume = 38,
+      PlaybackStop = 39,
+      PlaybackSeek = 40,
+      PlaybackSetVolume = 41,
+      PlaybackSetEqualizer = 42,
+      PlaybackSetReplayGain = 43,
+      PlaybackState = 44,
     }
     private ResultOneofCase resultCase_ = ResultOneofCase.None;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -19300,6 +22746,16 @@ namespace Mozz.V1 {
       if (!object.Equals(Lyrics, other.Lyrics)) return false;
       if (!object.Equals(RecordingIdentity, other.RecordingIdentity)) return false;
       if (!object.Equals(SimilarTracks, other.SimilarTracks)) return false;
+      if (!object.Equals(PlaybackPlay, other.PlaybackPlay)) return false;
+      if (!object.Equals(PlaybackQueueNext, other.PlaybackQueueNext)) return false;
+      if (!object.Equals(PlaybackPause, other.PlaybackPause)) return false;
+      if (!object.Equals(PlaybackResume, other.PlaybackResume)) return false;
+      if (!object.Equals(PlaybackStop, other.PlaybackStop)) return false;
+      if (!object.Equals(PlaybackSeek, other.PlaybackSeek)) return false;
+      if (!object.Equals(PlaybackSetVolume, other.PlaybackSetVolume)) return false;
+      if (!object.Equals(PlaybackSetEqualizer, other.PlaybackSetEqualizer)) return false;
+      if (!object.Equals(PlaybackSetReplayGain, other.PlaybackSetReplayGain)) return false;
+      if (!object.Equals(PlaybackState, other.PlaybackState)) return false;
       if (ResultCase != other.ResultCase) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
@@ -19335,6 +22791,16 @@ namespace Mozz.V1 {
       if (resultCase_ == ResultOneofCase.Lyrics) hash ^= Lyrics.GetHashCode();
       if (resultCase_ == ResultOneofCase.RecordingIdentity) hash ^= RecordingIdentity.GetHashCode();
       if (resultCase_ == ResultOneofCase.SimilarTracks) hash ^= SimilarTracks.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackPlay) hash ^= PlaybackPlay.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackQueueNext) hash ^= PlaybackQueueNext.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackPause) hash ^= PlaybackPause.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackResume) hash ^= PlaybackResume.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackStop) hash ^= PlaybackStop.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackSeek) hash ^= PlaybackSeek.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackSetVolume) hash ^= PlaybackSetVolume.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackSetEqualizer) hash ^= PlaybackSetEqualizer.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackSetReplayGain) hash ^= PlaybackSetReplayGain.GetHashCode();
+      if (resultCase_ == ResultOneofCase.PlaybackState) hash ^= PlaybackState.GetHashCode();
       hash ^= (int) resultCase_;
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
@@ -19462,6 +22928,46 @@ namespace Mozz.V1 {
         output.WriteRawTag(146, 2);
         output.WriteMessage(SimilarTracks);
       }
+      if (resultCase_ == ResultOneofCase.PlaybackPlay) {
+        output.WriteRawTag(154, 2);
+        output.WriteMessage(PlaybackPlay);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackQueueNext) {
+        output.WriteRawTag(162, 2);
+        output.WriteMessage(PlaybackQueueNext);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackPause) {
+        output.WriteRawTag(170, 2);
+        output.WriteMessage(PlaybackPause);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackResume) {
+        output.WriteRawTag(178, 2);
+        output.WriteMessage(PlaybackResume);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackStop) {
+        output.WriteRawTag(186, 2);
+        output.WriteMessage(PlaybackStop);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSeek) {
+        output.WriteRawTag(194, 2);
+        output.WriteMessage(PlaybackSeek);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetVolume) {
+        output.WriteRawTag(202, 2);
+        output.WriteMessage(PlaybackSetVolume);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetEqualizer) {
+        output.WriteRawTag(210, 2);
+        output.WriteMessage(PlaybackSetEqualizer);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetReplayGain) {
+        output.WriteRawTag(218, 2);
+        output.WriteMessage(PlaybackSetReplayGain);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackState) {
+        output.WriteRawTag(226, 2);
+        output.WriteMessage(PlaybackState);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -19580,6 +23086,46 @@ namespace Mozz.V1 {
         output.WriteRawTag(146, 2);
         output.WriteMessage(SimilarTracks);
       }
+      if (resultCase_ == ResultOneofCase.PlaybackPlay) {
+        output.WriteRawTag(154, 2);
+        output.WriteMessage(PlaybackPlay);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackQueueNext) {
+        output.WriteRawTag(162, 2);
+        output.WriteMessage(PlaybackQueueNext);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackPause) {
+        output.WriteRawTag(170, 2);
+        output.WriteMessage(PlaybackPause);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackResume) {
+        output.WriteRawTag(178, 2);
+        output.WriteMessage(PlaybackResume);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackStop) {
+        output.WriteRawTag(186, 2);
+        output.WriteMessage(PlaybackStop);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSeek) {
+        output.WriteRawTag(194, 2);
+        output.WriteMessage(PlaybackSeek);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetVolume) {
+        output.WriteRawTag(202, 2);
+        output.WriteMessage(PlaybackSetVolume);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetEqualizer) {
+        output.WriteRawTag(210, 2);
+        output.WriteMessage(PlaybackSetEqualizer);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetReplayGain) {
+        output.WriteRawTag(218, 2);
+        output.WriteMessage(PlaybackSetReplayGain);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackState) {
+        output.WriteRawTag(226, 2);
+        output.WriteMessage(PlaybackState);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -19670,6 +23216,36 @@ namespace Mozz.V1 {
       }
       if (resultCase_ == ResultOneofCase.SimilarTracks) {
         size += 2 + pb::CodedOutputStream.ComputeMessageSize(SimilarTracks);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackPlay) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackPlay);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackQueueNext) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackQueueNext);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackPause) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackPause);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackResume) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackResume);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackStop) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackStop);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSeek) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSeek);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetVolume) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSetVolume);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetEqualizer) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSetEqualizer);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackSetReplayGain) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackSetReplayGain);
+      }
+      if (resultCase_ == ResultOneofCase.PlaybackState) {
+        size += 2 + pb::CodedOutputStream.ComputeMessageSize(PlaybackState);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -19842,6 +23418,66 @@ namespace Mozz.V1 {
             SimilarTracks = new global::Mozz.V1.SimilarTracksResponse();
           }
           SimilarTracks.MergeFrom(other.SimilarTracks);
+          break;
+        case ResultOneofCase.PlaybackPlay:
+          if (PlaybackPlay == null) {
+            PlaybackPlay = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackPlay.MergeFrom(other.PlaybackPlay);
+          break;
+        case ResultOneofCase.PlaybackQueueNext:
+          if (PlaybackQueueNext == null) {
+            PlaybackQueueNext = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackQueueNext.MergeFrom(other.PlaybackQueueNext);
+          break;
+        case ResultOneofCase.PlaybackPause:
+          if (PlaybackPause == null) {
+            PlaybackPause = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackPause.MergeFrom(other.PlaybackPause);
+          break;
+        case ResultOneofCase.PlaybackResume:
+          if (PlaybackResume == null) {
+            PlaybackResume = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackResume.MergeFrom(other.PlaybackResume);
+          break;
+        case ResultOneofCase.PlaybackStop:
+          if (PlaybackStop == null) {
+            PlaybackStop = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackStop.MergeFrom(other.PlaybackStop);
+          break;
+        case ResultOneofCase.PlaybackSeek:
+          if (PlaybackSeek == null) {
+            PlaybackSeek = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackSeek.MergeFrom(other.PlaybackSeek);
+          break;
+        case ResultOneofCase.PlaybackSetVolume:
+          if (PlaybackSetVolume == null) {
+            PlaybackSetVolume = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackSetVolume.MergeFrom(other.PlaybackSetVolume);
+          break;
+        case ResultOneofCase.PlaybackSetEqualizer:
+          if (PlaybackSetEqualizer == null) {
+            PlaybackSetEqualizer = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackSetEqualizer.MergeFrom(other.PlaybackSetEqualizer);
+          break;
+        case ResultOneofCase.PlaybackSetReplayGain:
+          if (PlaybackSetReplayGain == null) {
+            PlaybackSetReplayGain = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackSetReplayGain.MergeFrom(other.PlaybackSetReplayGain);
+          break;
+        case ResultOneofCase.PlaybackState:
+          if (PlaybackState == null) {
+            PlaybackState = new global::Mozz.V1.PlaybackStateResponse();
+          }
+          PlaybackState.MergeFrom(other.PlaybackState);
           break;
       }
 
@@ -20102,6 +23738,96 @@ namespace Mozz.V1 {
             SimilarTracks = subBuilder;
             break;
           }
+          case 282: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackPlay) {
+              subBuilder.MergeFrom(PlaybackPlay);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPlay = subBuilder;
+            break;
+          }
+          case 290: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackQueueNext) {
+              subBuilder.MergeFrom(PlaybackQueueNext);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackQueueNext = subBuilder;
+            break;
+          }
+          case 298: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackPause) {
+              subBuilder.MergeFrom(PlaybackPause);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPause = subBuilder;
+            break;
+          }
+          case 306: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackResume) {
+              subBuilder.MergeFrom(PlaybackResume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackResume = subBuilder;
+            break;
+          }
+          case 314: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackStop) {
+              subBuilder.MergeFrom(PlaybackStop);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackStop = subBuilder;
+            break;
+          }
+          case 322: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSeek) {
+              subBuilder.MergeFrom(PlaybackSeek);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSeek = subBuilder;
+            break;
+          }
+          case 330: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSetVolume) {
+              subBuilder.MergeFrom(PlaybackSetVolume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetVolume = subBuilder;
+            break;
+          }
+          case 338: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSetEqualizer) {
+              subBuilder.MergeFrom(PlaybackSetEqualizer);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetEqualizer = subBuilder;
+            break;
+          }
+          case 346: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSetReplayGain) {
+              subBuilder.MergeFrom(PlaybackSetReplayGain);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetReplayGain = subBuilder;
+            break;
+          }
+          case 354: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackState) {
+              subBuilder.MergeFrom(PlaybackState);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackState = subBuilder;
+            break;
+          }
         }
       }
     #endif
@@ -20359,6 +24085,96 @@ namespace Mozz.V1 {
             SimilarTracks = subBuilder;
             break;
           }
+          case 282: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackPlay) {
+              subBuilder.MergeFrom(PlaybackPlay);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPlay = subBuilder;
+            break;
+          }
+          case 290: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackQueueNext) {
+              subBuilder.MergeFrom(PlaybackQueueNext);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackQueueNext = subBuilder;
+            break;
+          }
+          case 298: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackPause) {
+              subBuilder.MergeFrom(PlaybackPause);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackPause = subBuilder;
+            break;
+          }
+          case 306: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackResume) {
+              subBuilder.MergeFrom(PlaybackResume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackResume = subBuilder;
+            break;
+          }
+          case 314: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackStop) {
+              subBuilder.MergeFrom(PlaybackStop);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackStop = subBuilder;
+            break;
+          }
+          case 322: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSeek) {
+              subBuilder.MergeFrom(PlaybackSeek);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSeek = subBuilder;
+            break;
+          }
+          case 330: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSetVolume) {
+              subBuilder.MergeFrom(PlaybackSetVolume);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetVolume = subBuilder;
+            break;
+          }
+          case 338: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSetEqualizer) {
+              subBuilder.MergeFrom(PlaybackSetEqualizer);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetEqualizer = subBuilder;
+            break;
+          }
+          case 346: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackSetReplayGain) {
+              subBuilder.MergeFrom(PlaybackSetReplayGain);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackSetReplayGain = subBuilder;
+            break;
+          }
+          case 354: {
+            global::Mozz.V1.PlaybackStateResponse subBuilder = new global::Mozz.V1.PlaybackStateResponse();
+            if (resultCase_ == ResultOneofCase.PlaybackState) {
+              subBuilder.MergeFrom(PlaybackState);
+            }
+            input.ReadMessage(subBuilder);
+            PlaybackState = subBuilder;
+            break;
+          }
         }
       }
     }
@@ -20384,7 +24200,7 @@ namespace Mozz.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[65]; }
+      get { return global::Mozz.V1.LibraryReflection.Descriptor.MessageTypes[77]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]

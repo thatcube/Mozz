@@ -230,6 +230,18 @@ public final class AudioEngine {
         mozz_player_set_replay_gain(handle, mode.rawValue, preampDB)
     }
 
+    /// Set the listener's own volume, 0.0 silent to 1.0 unity.
+    ///
+    /// This is a level control applied after ReplayGain and the equaliser, not
+    /// a decision about how the track sounds. The engine clamps to 0...1 and
+    /// ramps the change so it does not click, so no clamping is done here — a
+    /// second clamp would be a second place the range could drift from the
+    /// engine's.
+    public func setVolume(_ volume: Double) {
+        guard let handle else { return }
+        mozz_player_set_volume(handle, volume)
+    }
+
     /// Wrap a Swift stream in the C callbacks the engine expects.
     ///
     /// The stream is retained unbalanced here and released by `closeSource`,

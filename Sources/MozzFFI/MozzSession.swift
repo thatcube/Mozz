@@ -784,6 +784,18 @@ final class MozzSession: @unchecked Sendable {
     /// every shell stops solving that separately. `var` only so a test can swap
     /// in a store pointed at a temp directory with a scripted fetch.
     var artworkStore: ArtworkStore
+    /// The session's audio engine, behind the Facade.
+    ///
+    /// One per session rather than one per request, because an engine that did
+    /// not outlive a single command could not play anything: the next command
+    /// would find a different engine with nothing loaded. Building it per
+    /// request is what made every playback command answer "not available".
+    ///
+    /// The engine itself is still constructed lazily inside the service, on the
+    /// first play — it opens the output device the moment it exists, and on iOS
+    /// a device opened before the audio session is active emits silence while
+    /// reporting itself healthy.
+    let playback: PlaybackCommandService
 
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
@@ -799,6 +811,15 @@ final class MozzSession: @unchecked Sendable {
             directory: ArtworkStore.defaultDirectory(),
             byteLimit: MozzSession.artworkByteLimit,
             fetch: { query in await MozzSession.fetchArtwork(query, backends: backends) }
+        )
+        // Resolve per server, at play time. Capturing the table rather than a
+        // backend is the same reasoning as artwork: which server a track comes
+        // from is known when it is asked for, not when the session opens.
+        self.playback = PlaybackCommandService(
+            resolverFor: { serverId in
+                guard let backend = backends.backend(serverId) else { return nil }
+                return StreamingTrackURLResolver(backend: backend)
+            }
         )
     }
 
