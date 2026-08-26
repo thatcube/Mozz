@@ -62,3 +62,6 @@ clients/desktop-tests/**/obj/
 # Built by tools/build-audio-staticlib.sh; a 24 MB binary does not belong in
 # a repository when a script rebuilds it in seconds.
 audio/target/
+
+# Fixture generator build output
+tools/genfix/.build/
