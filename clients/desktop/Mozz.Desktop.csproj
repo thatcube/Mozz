@@ -19,11 +19,7 @@
       <MozzPythonExecutable Condition="'$(MozzPythonExecutable)' == ''">python3</MozzPythonExecutable>
       <MozzVersionScript>$(MSBuildThisFileDirectory)../../tools/version-info.py</MozzVersionScript>
     </PropertyGroup>
-    <Exec
-      Command="&quot;$(MozzPythonExecutable)&quot; &quot;$(MozzVersionScript)&quot; --format msbuild-lines"
-      ConsoleToMSBuild="true"
-      StandardOutputImportance="Low"
-      Condition="'$(MozzMarketingVersion)' == '' or '$(MozzBuildNumber)' == '' or '$(MozzDisplayVersion)' == '' or '$(MozzAssemblyVersion)' == '' or '$(MozzFileVersion)' == ''">
+    <Exec Command="&quot;$(MozzPythonExecutable)&quot; &quot;$(MozzVersionScript)&quot; --format msbuild-lines" ConsoleToMSBuild="true" StandardOutputImportance="Low" Condition="'$(MozzMarketingVersion)' == '' or '$(MozzBuildNumber)' == '' or '$(MozzDisplayVersion)' == '' or '$(MozzAssemblyVersion)' == '' or '$(MozzFileVersion)' == ''">
       <Output TaskParameter="ConsoleOutput" ItemName="_MozzVersionLine" />
     </Exec>
     <PropertyGroup>
@@ -65,6 +61,7 @@
          protoc is not a prerequisite on any of the four desktop CI targets —
          see tools/generate-schema.sh and ADR-0016. -->
     <PackageReference Include="Google.Protobuf" Version="3.33.1" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
   </ItemGroup>
 
   <!-- The audio engine itself is Rust (audio/), reached by P/Invoke. Build its
@@ -84,20 +81,15 @@
   </PropertyGroup>
 
   <Target Name="BuildMozzAudioNative" BeforeTargets="Build;Publish">
-    <Exec Condition="!$([MSBuild]::IsOSPlatform('Windows'))"
-          Command="bash &quot;$(MSBuildThisFileDirectory)../../tools/build-audio-cdylib.sh&quot; --release" />
-    <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))"
-          Command="cargo build --release -p mozz_audio_ffi"
-          WorkingDirectory="$(MozzAudioDir)" />
+    <Exec Condition="!$([MSBuild]::IsOSPlatform('Windows'))" Command="bash &quot;$(MSBuildThisFileDirectory)../../tools/build-audio-cdylib.sh&quot; --release" />
+    <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))" Command="cargo build --release -p mozz_audio_ffi" WorkingDirectory="$(MozzAudioDir)" />
   </Target>
 
-  <Target Name="CopyMozzAudioNativeToOutput" AfterTargets="Build"
-          Condition="Exists('$(MozzAudioLibPath)')">
+  <Target Name="CopyMozzAudioNativeToOutput" AfterTargets="Build" Condition="Exists('$(MozzAudioLibPath)')">
     <Copy SourceFiles="$(MozzAudioLibPath)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyMozzAudioNativeToPublish" AfterTargets="Publish"
-          Condition="Exists('$(MozzAudioLibPath)')">
+  <Target Name="CopyMozzAudioNativeToPublish" AfterTargets="Publish" Condition="Exists('$(MozzAudioLibPath)')">
     <Copy SourceFiles="$(MozzAudioLibPath)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
