@@ -77,6 +77,21 @@ public enum PairingCeremony {
     /// digit path. Several devices may be advertising at once; each is tried in
     /// turn, and one that is not the device scanned is rejected by
     /// ``PairingSession`` rather than by anything here.
+    /// Admit a device, forming a circle first if this one is alone.
+    ///
+    /// The first pairing anyone does is between two devices, neither of which is
+    /// in a circle yet. The one holding the music forms it.
+    public static func admit(
+        from store: CircleStore,
+        path: PairingPath,
+        scanned: Pairing.QRPayload?,
+        endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
+        confirmDigits: @Sendable (String) async -> Bool = { _ in true }
+    ) async throws {
+        try await admit(try store.loadOrCreate(), path: path, scanned: scanned,
+                        endpoints: endpoints, confirmDigits: confirmDigits)
+    }
+
     public static func admit(
         _ circle: CircleSecrets,
         path: PairingPath,

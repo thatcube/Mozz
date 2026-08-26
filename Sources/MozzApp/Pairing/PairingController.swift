@@ -105,10 +105,6 @@ final class PairingController: ObservableObject {
 
     /// A code came back from the camera.
     func admit(scannedText: String, path: PairingPath = .qr) {
-        guard let circle else {
-            stage = .failed("This device is not in a circle yet, so it has nothing to share.")
-            return
-        }
         let payload: Pairing.QRPayload
         do {
             payload = try Pairing.decodeQR(scannedText)
@@ -119,14 +115,20 @@ final class PairingController: ObservableObject {
 
         cancel()
         stage = .connecting
+        let store = self.store
         work = Task { [weak self] in
             do {
+                // Forms a circle if this device is alone, which is what the
+                // very first pairing always is.
                 try await PairingCeremony.admit(
-                    circle, path: path, scanned: payload,
+                    from: store, path: path, scanned: payload,
                     confirmDigits: { digits in
                         await self?.ask(digits) ?? false
                     })
-                await MainActor.run { self?.stage = .joined }
+                await MainActor.run {
+                    self?.circle = try? store.load()
+                    self?.stage = .joined
+                }
             } catch is CancellationError {
                 await MainActor.run { self?.stage = .idle }
             } catch {

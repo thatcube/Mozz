@@ -26,6 +26,34 @@ public struct CircleSecrets: Equatable, Sendable, Codable {
     }
 }
 
+extension CircleSecrets {
+    /// A brand-new circle, for the first device.
+    ///
+    /// `relayKey` is deliberately empty. It is a scoped B2 application key per
+    /// ADR-0012, so it cannot exist before the relay is provisioned, and
+    /// inventing a placeholder that looks like a key would be worse than an
+    /// obviously absent one — pairing and local sync work without it, and
+    /// provisioning fills it in.
+    public static func new() -> CircleSecrets {
+        CircleSecrets(channelId: randomIdentifier(),
+                      channelKey: randomKey(),
+                      credentialsKey: randomKey(),
+                      epoch: 1,
+                      relayKey: Data())
+    }
+
+    /// Names a channel in relay request paths, so it is URL-safe and carries no
+    /// meaning: it identifies a bucket of encrypted objects and nothing about
+    /// whose they are.
+    private static func randomIdentifier() -> String {
+        Pairing.base64URLNoPadding(randomKey().prefix(12))
+    }
+
+    private static func randomKey() -> Data {
+        SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+    }
+}
+
 extension Pairing {
     /// `Curve25519_SHA256_ChachaPoly`, proven to work off Apple platforms by the
     /// FFI probe rather than assumed (CI run 32934126070). That is why this can
