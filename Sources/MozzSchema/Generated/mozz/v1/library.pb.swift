@@ -19,6 +19,11 @@
 // `tools/generate-schema.sh` after editing; CI regenerates and fails if the
 // checked-in output has drifted.
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
+import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -74,6 +79,236 @@ public nonisolated enum Mozz_V1_ReplayGainMode: SwiftProtobuf.Enum, Swift.CaseIt
     .off,
     .track,
     .album,
+  ]
+
+}
+
+/// Which of the three outcomes this response carries. The distinction is
+/// load-bearing, not cosmetic: ABSENT is remembered by the core and not
+/// re-asked, UNAVAILABLE is a transient failure the caller should retry later,
+/// and confusing the two is the exact bug the desktop's
+/// ArtworkUnavailableException exists to prevent.
+public nonisolated enum Mozz_V1_ArtworkStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The bytes are in `data`.
+  case present // = 1
+
+  /// The server was asked and has no cover for this reference.
+  case absent // = 2
+
+  /// Not available right now — still attaching, a timeout, briefly unreachable.
+  /// Says nothing about whether the cover exists; ask again later.
+  case unavailable // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .present
+    case 2: self = .absent
+    case 3: self = .unavailable
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .present: return 1
+    case .absent: return 2
+    case .unavailable: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_ArtworkStatus] = [
+    .unspecified,
+    .present,
+    .absent,
+    .unavailable,
+  ]
+
+}
+
+/// The lifecycle state of one track's offline download, mirroring the core's
+/// DownloadState. The absence of a record means "not downloaded", so a status
+/// query for an untracked track answers with UNSPECIFIED rather than an error.
+public nonisolated enum Mozz_V1_DownloadState: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// No download record exists for the track — it is not downloaded.
+  case unspecified // = 0
+
+  /// Requested, waiting for the shell to transfer it.
+  case queued // = 1
+
+  /// The shell is actively transferring bytes.
+  case downloading // = 2
+
+  /// Fully downloaded and available offline.
+  case downloaded // = 3
+
+  /// The transfer failed; error_message on the record explains why.
+  case failed // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .queued
+    case 2: self = .downloading
+    case 3: self = .downloaded
+    case 4: self = .failed
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .queued: return 1
+    case .downloading: return 2
+    case .downloaded: return 3
+    case .failed: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_DownloadState] = [
+    .unspecified,
+    .queued,
+    .downloading,
+    .downloaded,
+    .failed,
+  ]
+
+}
+
+/// Which of four outcomes a lyrics answer carries. The distinction is
+/// load-bearing, not cosmetic: ABSENT is a definitive "there are none" the caller
+/// can stop asking about, NOT_FETCHED means nothing has been looked up yet, and
+/// FAILED is a resolve that could not trust its negative. Collapsing them is the
+/// exact bug where a panel shows nothing and never retries.
+public nonisolated enum Mozz_V1_LyricsStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The lyrics are in `lyrics`.
+  case present // = 1
+
+  /// A source was consulted and authoritatively has none (including a title that
+  /// says it is instrumental). Stop asking.
+  case absent // = 2
+
+  /// Nothing has been fetched yet — no cache holds an answer. Ask again with
+  /// resolve=true. Only a cache-only read (resolve=false) can return this.
+  case notFetched // = 3
+
+  /// A resolve was attempted but no source could be trusted — offline, throttled,
+  /// or a needed source unreachable. The negative is NOT authoritative; retry
+  /// later. Only a resolving read (resolve=true) can return this.
+  case failed // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .present
+    case 2: self = .absent
+    case 3: self = .notFetched
+    case 4: self = .failed
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .present: return 1
+    case .absent: return 2
+    case .notFetched: return 3
+    case .failed: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_LyricsStatus] = [
+    .unspecified,
+    .present,
+    .absent,
+    .notFetched,
+    .failed,
+  ]
+
+}
+
+/// Three outcomes, mirroring lyrics' present/absent/not-yet. There is deliberately
+/// no FAILED: the store persists only a definitive found/notfound, so a transient
+/// resolution error leaves no trace and is indistinguishable from "never looked
+/// up" — both read as NOT_RESOLVED. That is reported honestly rather than a
+/// fourth state invented that the data cannot support.
+public nonisolated enum Mozz_V1_RecordingIdentityStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// A recording MBID is known (in `recording_mbid`), from an embedded tag or a
+  /// name-search hit.
+  case resolved // = 1
+
+  /// A lookup ran and MusicBrainz has no match — the authoritative negative.
+  case unmatched // = 2
+
+  /// Not looked up yet, or a transient failure the store does not record.
+  case notResolved // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .resolved
+    case 2: self = .unmatched
+    case 3: self = .notResolved
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .resolved: return 1
+    case .unmatched: return 2
+    case .notResolved: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_RecordingIdentityStatus] = [
+    .unspecified,
+    .resolved,
+    .unmatched,
+    .notResolved,
   ]
 
 }
@@ -827,6 +1062,461 @@ public nonisolated struct Mozz_V1_SetPlaybackSettingsResponse: Sendable {
   fileprivate var _settings: Mozz_V1_PlaybackSettings? = nil
 }
 
+public nonisolated struct Mozz_V1_ArtworkRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  /// The backend-private artwork reference from a list row (AlbumSummary,
+  /// Artist, TrackSummary all carry `artwork_key`). Never a URL and never a
+  /// token; the core resolves it against the backend at fetch time.
+  public var artworkKey: String = String()
+
+  /// The desired pixel size. Part of the cache identity: a wall tile and a
+  /// player bar ask for the same cover at different sizes and each is cached
+  /// separately, so the server is asked for each at the size it will be drawn.
+  public var size: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_ArtworkResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var status: Mozz_V1_ArtworkStatus = .unspecified
+
+  /// The raw encoded image, present only when status is PRESENT. May contain
+  /// 0x00, which is why artwork travels over the length-delimited invoke path
+  /// and never a C string.
+  public var data: Data = Data()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The core's durable record of one offline download. It carries both the
+/// catalog's internal id and the (server_id, remote_id) every other command
+/// addresses a track by, so a shell can act on a listed download the same way it
+/// addresses everything else. Progress travels as received/total bytes — a
+/// client computes any fraction — because there is no fraction stored, only the
+/// counters the transfer reports.
+public nonisolated struct Mozz_V1_Download: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The owning track's internal catalog id.
+  public var trackID: Int64 = 0
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var state: Mozz_V1_DownloadState = .unspecified
+
+  /// Bytes transferred so far, and the final size once complete.
+  public var receivedBytes: Int64 = 0
+
+  /// The expected total, when the transfer knows it.
+  public var totalBytes: Int64 {
+    get {_totalBytes ?? 0}
+    set {_totalBytes = newValue}
+  }
+  /// Returns true if `totalBytes` has been explicitly set.
+  public var hasTotalBytes: Bool {self._totalBytes != nil}
+  /// Clears the value of `totalBytes`. Subsequent reads from it will return its default value.
+  public mutating func clearTotalBytes() {self._totalBytes = nil}
+
+  /// Where the file lives, relative to the shell's downloads root, once complete.
+  /// The layout is a portable decision (all platforms lay files out the same);
+  /// the absolute root is the shell's.
+  public var localPath: String {
+    get {_localPath ?? String()}
+    set {_localPath = newValue}
+  }
+  /// Returns true if `localPath` has been explicitly set.
+  public var hasLocalPath: Bool {self._localPath != nil}
+  /// Clears the value of `localPath`. Subsequent reads from it will return its default value.
+  public mutating func clearLocalPath() {self._localPath = nil}
+
+  public var errorMessage: String {
+    get {_errorMessage ?? String()}
+    set {_errorMessage = newValue}
+  }
+  /// Returns true if `errorMessage` has been explicitly set.
+  public var hasErrorMessage: Bool {self._errorMessage != nil}
+  /// Clears the value of `errorMessage`. Subsequent reads from it will return its default value.
+  public mutating func clearErrorMessage() {self._errorMessage = nil}
+
+  /// Unix seconds when the download was first requested.
+  public var requestedAt: Double = 0
+
+  /// Unix seconds when it completed, when it has.
+  public var completedAt: Double {
+    get {_completedAt ?? 0}
+    set {_completedAt = newValue}
+  }
+  /// Returns true if `completedAt` has been explicitly set.
+  public var hasCompletedAt: Bool {self._completedAt != nil}
+  /// Clears the value of `completedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearCompletedAt() {self._completedAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _totalBytes: Int64? = nil
+  fileprivate var _localPath: String? = nil
+  fileprivate var _errorMessage: String? = nil
+  fileprivate var _completedAt: Double? = nil
+}
+
+/// Record the intent to download a track offline. The core marks it queued; the
+/// shell then performs the actual transfer and reports back with the commands
+/// below. Idempotent: enqueuing an already-tracked download returns its current
+/// record rather than resetting it.
+public nonisolated struct Mozz_V1_EnqueueDownloadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_EnqueueDownloadResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var download: Mozz_V1_Download {
+    get {_download ?? Mozz_V1_Download()}
+    set {_download = newValue}
+  }
+  /// Returns true if `download` has been explicitly set.
+  public var hasDownload: Bool {self._download != nil}
+  /// Clears the value of `download`. Subsequent reads from it will return its default value.
+  public mutating func clearDownload() {self._download = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _download: Mozz_V1_Download? = nil
+}
+
+/// The shell reports transfer progress. The first report moves the download from
+/// queued to downloading; each updates the byte counters the status query reads.
+public nonisolated struct Mozz_V1_ReportDownloadProgressRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var receivedBytes: Int64 = 0
+
+  public var totalBytes: Int64 {
+    get {_totalBytes ?? 0}
+    set {_totalBytes = newValue}
+  }
+  /// Returns true if `totalBytes` has been explicitly set.
+  public var hasTotalBytes: Bool {self._totalBytes != nil}
+  /// Clears the value of `totalBytes`. Subsequent reads from it will return its default value.
+  public mutating func clearTotalBytes() {self._totalBytes = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _totalBytes: Int64? = nil
+}
+
+public nonisolated struct Mozz_V1_ReportDownloadProgressResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var download: Mozz_V1_Download {
+    get {_download ?? Mozz_V1_Download()}
+    set {_download = newValue}
+  }
+  /// Returns true if `download` has been explicitly set.
+  public var hasDownload: Bool {self._download != nil}
+  /// Clears the value of `download`. Subsequent reads from it will return its default value.
+  public mutating func clearDownload() {self._download = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _download: Mozz_V1_Download? = nil
+}
+
+/// The shell finished writing the file and hands the core what it needs to make
+/// the track playable offline: where the file landed (relative to the downloads
+/// root) and its final size. The core records completion — deciding, for every
+/// platform in one place, what "complete" means.
+public nonisolated struct Mozz_V1_CompleteDownloadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var localPath: String = String()
+
+  public var sizeBytes: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_CompleteDownloadResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var download: Mozz_V1_Download {
+    get {_download ?? Mozz_V1_Download()}
+    set {_download = newValue}
+  }
+  /// Returns true if `download` has been explicitly set.
+  public var hasDownload: Bool {self._download != nil}
+  /// Clears the value of `download`. Subsequent reads from it will return its default value.
+  public mutating func clearDownload() {self._download = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _download: Mozz_V1_Download? = nil
+}
+
+/// The shell's transfer failed. The reason is recorded so the status query — and
+/// a person looking at a stalled download — can say why.
+public nonisolated struct Mozz_V1_FailDownloadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var message: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_FailDownloadResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var download: Mozz_V1_Download {
+    get {_download ?? Mozz_V1_Download()}
+    set {_download = newValue}
+  }
+  /// Returns true if `download` has been explicitly set.
+  public var hasDownload: Bool {self._download != nil}
+  /// Clears the value of `download`. Subsequent reads from it will return its default value.
+  public mutating func clearDownload() {self._download = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _download: Mozz_V1_Download? = nil
+}
+
+/// Cancel a queued or in-flight download. The shell stops its own transfer; the
+/// core records the cancellation. This mirrors DownloadManager.cancel, which
+/// records a cancellation through the same path a failure takes.
+public nonisolated struct Mozz_V1_CancelDownloadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_CancelDownloadResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var download: Mozz_V1_Download {
+    get {_download ?? Mozz_V1_Download()}
+    set {_download = newValue}
+  }
+  /// Returns true if `download` has been explicitly set.
+  public var hasDownload: Bool {self._download != nil}
+  /// Clears the value of `download`. Subsequent reads from it will return its default value.
+  public mutating func clearDownload() {self._download = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _download: Mozz_V1_Download? = nil
+}
+
+/// Delete a download. The core removes its record and returns the file's former
+/// relative path, so the shell can delete the bytes it owns on disk — the core
+/// owns the record, the shell owns the file.
+public nonisolated struct Mozz_V1_DeleteDownloadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_DeleteDownloadResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Absent when there was no record to delete, or it had no file yet.
+  public var removedLocalPath: String {
+    get {_removedLocalPath ?? String()}
+    set {_removedLocalPath = newValue}
+  }
+  /// Returns true if `removedLocalPath` has been explicitly set.
+  public var hasRemovedLocalPath: Bool {self._removedLocalPath != nil}
+  /// Clears the value of `removedLocalPath`. Subsequent reads from it will return its default value.
+  public mutating func clearRemovedLocalPath() {self._removedLocalPath = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _removedLocalPath: String? = nil
+}
+
+/// The current download state for one track. An absent `download` means the core
+/// has no record for it — "not downloaded" — which is the sane answer for an
+/// unknown or never-downloaded track rather than an error.
+public nonisolated struct Mozz_V1_DownloadStatusRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_DownloadStatusResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var download: Mozz_V1_Download {
+    get {_download ?? Mozz_V1_Download()}
+    set {_download = newValue}
+  }
+  /// Returns true if `download` has been explicitly set.
+  public var hasDownload: Bool {self._download != nil}
+  /// Clears the value of `download`. Subsequent reads from it will return its default value.
+  public mutating func clearDownload() {self._download = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _download: Mozz_V1_Download? = nil
+}
+
+/// Every download the core knows about, optionally narrowed to certain states.
+/// The pollable list a downloads screen renders and a queue drainer walks. An
+/// empty `states` means every state.
+public nonisolated struct Mozz_V1_DownloadsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var states: [Mozz_V1_DownloadState] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_DownloadsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var downloads: [Mozz_V1_Download] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// How much space completed downloads use, for a storage screen. The two numbers
+/// travel together because callers present them together.
+public nonisolated struct Mozz_V1_StorageUsageRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_StorageUsageResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var downloadedTrackCount: Int32 = 0
+
+  public var totalBytes: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Mozz_V1_SubscriptionToken: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -892,6 +1582,246 @@ public nonisolated struct Mozz_V1_LibraryChanged: Sendable {
   /// Which kinds of rows changed, so a client can refresh narrowly rather than
   /// reloading everything.
   public var changedEntities: [String] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A single line of lyrics. `start_seconds` is absent for unsynced (plain-text)
+/// lyrics; any line carrying a timestamp marks the whole set as synced.
+public nonisolated struct Mozz_V1_LyricLine: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var text: String = String()
+
+  public var startSeconds: Double {
+    get {_startSeconds ?? 0}
+    set {_startSeconds = newValue}
+  }
+  /// Returns true if `startSeconds` has been explicitly set.
+  public var hasStartSeconds: Bool {self._startSeconds != nil}
+  /// Clears the value of `startSeconds`. Subsequent reads from it will return its default value.
+  public mutating func clearStartSeconds() {self._startSeconds = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _startSeconds: Double? = nil
+}
+
+/// A track's lyrics: an ordered list of lines plus an attribution. `source` is a
+/// stable token ("jellyfin"/"plex"/"subsonic"/"lrclib"); `source_display_name`
+/// is the human-facing label. Both are absent when the source is unknown.
+public nonisolated struct Mozz_V1_Lyrics: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var lines: [Mozz_V1_LyricLine] = []
+
+  public var source: String {
+    get {_source ?? String()}
+    set {_source = newValue}
+  }
+  /// Returns true if `source` has been explicitly set.
+  public var hasSource: Bool {self._source != nil}
+  /// Clears the value of `source`. Subsequent reads from it will return its default value.
+  public mutating func clearSource() {self._source = nil}
+
+  public var sourceDisplayName: String {
+    get {_sourceDisplayName ?? String()}
+    set {_sourceDisplayName = newValue}
+  }
+  /// Returns true if `sourceDisplayName` has been explicitly set.
+  public var hasSourceDisplayName: Bool {self._sourceDisplayName != nil}
+  /// Clears the value of `sourceDisplayName`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceDisplayName() {self._sourceDisplayName = nil}
+
+  public var isSynced: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _source: String? = nil
+  fileprivate var _sourceDisplayName: String? = nil
+}
+
+public nonisolated struct Mozz_V1_LyricsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  /// false (the default) reads only the caches: fast, network-free, and the ONLY
+  /// mode that can answer NOT_FETCHED. true runs the full server + LRCLIB
+  /// resolution, which answers PRESENT/ABSENT/FAILED but never NOT_FETCHED. A
+  /// shell mirrors the Apple app by asking cache-only first and, only on
+  /// NOT_FETCHED, asking again with resolve=true.
+  public var resolve: Bool = false
+
+  /// The user's "look up lyrics online" preference. Consulted only when resolve
+  /// is true; LRCLIB is the keyless public fallback for when the server has none.
+  public var useOnlineLookup: Bool = false
+
+  /// The user explicitly asked for lyrics right now, so the resolve ignores the
+  /// bad-network backoff. Consulted only when resolve is true.
+  public var userInitiated: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_LyricsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var status: Mozz_V1_LyricsStatus = .unspecified
+
+  /// Present only when status is PRESENT.
+  public var lyrics: Mozz_V1_Lyrics {
+    get {_lyrics ?? Mozz_V1_Lyrics()}
+    set {_lyrics = newValue}
+  }
+  /// Returns true if `lyrics` has been explicitly set.
+  public var hasLyrics: Bool {self._lyrics != nil}
+  /// Clears the value of `lyrics`. Subsequent reads from it will return its default value.
+  public mutating func clearLyrics() {self._lyrics = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _lyrics: Mozz_V1_Lyrics? = nil
+}
+
+/// The canonical MusicBrainz recording identity of a track — the fact that
+/// decides whether two files are "the same recording". A pure read of what the
+/// enrichment passes have already resolved into the local database; it is never
+/// itself a network lookup.
+public nonisolated struct Mozz_V1_RecordingIdentityRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_RecordingIdentityResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var status: Mozz_V1_RecordingIdentityStatus = .unspecified
+
+  /// The recording MBID, present when status is RESOLVED.
+  public var recordingMbid: String {
+    get {_recordingMbid ?? String()}
+    set {_recordingMbid = newValue}
+  }
+  /// Returns true if `recordingMbid` has been explicitly set.
+  public var hasRecordingMbid: Bool {self._recordingMbid != nil}
+  /// Clears the value of `recordingMbid`. Subsequent reads from it will return its default value.
+  public mutating func clearRecordingMbid() {self._recordingMbid = nil}
+
+  /// The canonical recording MBID — the representative of the set of MBIDs that
+  /// are the same recording. Absent until canonicalization runs; until then the
+  /// raw recording_mbid stands in for it.
+  public var canonicalRecordingMbid: String {
+    get {_canonicalRecordingMbid ?? String()}
+    set {_canonicalRecordingMbid = newValue}
+  }
+  /// Returns true if `canonicalRecordingMbid` has been explicitly set.
+  public var hasCanonicalRecordingMbid: Bool {self._canonicalRecordingMbid != nil}
+  /// Clears the value of `canonicalRecordingMbid`. Subsequent reads from it will return its default value.
+  public mutating func clearCanonicalRecordingMbid() {self._canonicalRecordingMbid = nil}
+
+  /// The recording's artist MBID, when known.
+  public var artistMbid: String {
+    get {_artistMbid ?? String()}
+    set {_artistMbid = newValue}
+  }
+  /// Returns true if `artistMbid` has been explicitly set.
+  public var hasArtistMbid: Bool {self._artistMbid != nil}
+  /// Clears the value of `artistMbid`. Subsequent reads from it will return its default value.
+  public mutating func clearArtistMbid() {self._artistMbid = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _recordingMbid: String? = nil
+  fileprivate var _canonicalRecordingMbid: String? = nil
+  fileprivate var _artistMbid: String? = nil
+}
+
+/// One owned library track surfaced as similar to a seed track, with its
+/// aggregate similarity score. The track carries the same full metadata as any
+/// other listing row so a shell can render and play it without a second lookup.
+public nonisolated struct Mozz_V1_SimilarTrack: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var track: Mozz_V1_TrackSummary {
+    get {_track ?? Mozz_V1_TrackSummary()}
+    set {_track = newValue}
+  }
+  /// Returns true if `track` has been explicitly set.
+  public var hasTrack: Bool {self._track != nil}
+  /// Clears the value of `track`. Subsequent reads from it will return its default value.
+  public mutating func clearTrack() {self._track = nil}
+
+  public var score: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _track: Mozz_V1_TrackSummary? = nil
+}
+
+public nonisolated struct Mozz_V1_SimilarTracksRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  /// Upper bound on how many similar tracks to return.
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Deliberately unpaged: the similar set is bounded by the similarity fetch
+/// (~50 per seed), so it is a bounded detail shelf like ArtistAlbums rather than
+/// a full-library listing that needs a cursor.
+public nonisolated struct Mozz_V1_SimilarTracksResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tracks: [Mozz_V1_SimilarTrack] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1004,6 +1934,110 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .setPlaybackSettings(newValue)}
   }
 
+  public var artwork: Mozz_V1_ArtworkRequest {
+    get {
+      if case .artwork(let v)? = command {return v}
+      return Mozz_V1_ArtworkRequest()
+    }
+    set {command = .artwork(newValue)}
+  }
+
+  public var enqueueDownload: Mozz_V1_EnqueueDownloadRequest {
+    get {
+      if case .enqueueDownload(let v)? = command {return v}
+      return Mozz_V1_EnqueueDownloadRequest()
+    }
+    set {command = .enqueueDownload(newValue)}
+  }
+
+  public var reportDownloadProgress: Mozz_V1_ReportDownloadProgressRequest {
+    get {
+      if case .reportDownloadProgress(let v)? = command {return v}
+      return Mozz_V1_ReportDownloadProgressRequest()
+    }
+    set {command = .reportDownloadProgress(newValue)}
+  }
+
+  public var completeDownload: Mozz_V1_CompleteDownloadRequest {
+    get {
+      if case .completeDownload(let v)? = command {return v}
+      return Mozz_V1_CompleteDownloadRequest()
+    }
+    set {command = .completeDownload(newValue)}
+  }
+
+  public var failDownload: Mozz_V1_FailDownloadRequest {
+    get {
+      if case .failDownload(let v)? = command {return v}
+      return Mozz_V1_FailDownloadRequest()
+    }
+    set {command = .failDownload(newValue)}
+  }
+
+  public var cancelDownload: Mozz_V1_CancelDownloadRequest {
+    get {
+      if case .cancelDownload(let v)? = command {return v}
+      return Mozz_V1_CancelDownloadRequest()
+    }
+    set {command = .cancelDownload(newValue)}
+  }
+
+  public var deleteDownload: Mozz_V1_DeleteDownloadRequest {
+    get {
+      if case .deleteDownload(let v)? = command {return v}
+      return Mozz_V1_DeleteDownloadRequest()
+    }
+    set {command = .deleteDownload(newValue)}
+  }
+
+  public var downloadStatus: Mozz_V1_DownloadStatusRequest {
+    get {
+      if case .downloadStatus(let v)? = command {return v}
+      return Mozz_V1_DownloadStatusRequest()
+    }
+    set {command = .downloadStatus(newValue)}
+  }
+
+  public var downloads: Mozz_V1_DownloadsRequest {
+    get {
+      if case .downloads(let v)? = command {return v}
+      return Mozz_V1_DownloadsRequest()
+    }
+    set {command = .downloads(newValue)}
+  }
+
+  public var storageUsage: Mozz_V1_StorageUsageRequest {
+    get {
+      if case .storageUsage(let v)? = command {return v}
+      return Mozz_V1_StorageUsageRequest()
+    }
+    set {command = .storageUsage(newValue)}
+  }
+
+  public var lyrics: Mozz_V1_LyricsRequest {
+    get {
+      if case .lyrics(let v)? = command {return v}
+      return Mozz_V1_LyricsRequest()
+    }
+    set {command = .lyrics(newValue)}
+  }
+
+  public var recordingIdentity: Mozz_V1_RecordingIdentityRequest {
+    get {
+      if case .recordingIdentity(let v)? = command {return v}
+      return Mozz_V1_RecordingIdentityRequest()
+    }
+    set {command = .recordingIdentity(newValue)}
+  }
+
+  public var similarTracks: Mozz_V1_SimilarTracksRequest {
+    get {
+      if case .similarTracks(let v)? = command {return v}
+      return Mozz_V1_SimilarTracksRequest()
+    }
+    set {command = .similarTracks(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Command: Equatable, Sendable {
@@ -1019,6 +2053,19 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     case counts(Mozz_V1_CountsRequest)
     case getPlaybackSettings(Mozz_V1_GetPlaybackSettingsRequest)
     case setPlaybackSettings(Mozz_V1_SetPlaybackSettingsRequest)
+    case artwork(Mozz_V1_ArtworkRequest)
+    case enqueueDownload(Mozz_V1_EnqueueDownloadRequest)
+    case reportDownloadProgress(Mozz_V1_ReportDownloadProgressRequest)
+    case completeDownload(Mozz_V1_CompleteDownloadRequest)
+    case failDownload(Mozz_V1_FailDownloadRequest)
+    case cancelDownload(Mozz_V1_CancelDownloadRequest)
+    case deleteDownload(Mozz_V1_DeleteDownloadRequest)
+    case downloadStatus(Mozz_V1_DownloadStatusRequest)
+    case downloads(Mozz_V1_DownloadsRequest)
+    case storageUsage(Mozz_V1_StorageUsageRequest)
+    case lyrics(Mozz_V1_LyricsRequest)
+    case recordingIdentity(Mozz_V1_RecordingIdentityRequest)
+    case similarTracks(Mozz_V1_SimilarTracksRequest)
 
   }
 
@@ -1150,6 +2197,110 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .setPlaybackSettings(newValue)}
   }
 
+  public var artwork: Mozz_V1_ArtworkResponse {
+    get {
+      if case .artwork(let v)? = result {return v}
+      return Mozz_V1_ArtworkResponse()
+    }
+    set {result = .artwork(newValue)}
+  }
+
+  public var enqueueDownload: Mozz_V1_EnqueueDownloadResponse {
+    get {
+      if case .enqueueDownload(let v)? = result {return v}
+      return Mozz_V1_EnqueueDownloadResponse()
+    }
+    set {result = .enqueueDownload(newValue)}
+  }
+
+  public var reportDownloadProgress: Mozz_V1_ReportDownloadProgressResponse {
+    get {
+      if case .reportDownloadProgress(let v)? = result {return v}
+      return Mozz_V1_ReportDownloadProgressResponse()
+    }
+    set {result = .reportDownloadProgress(newValue)}
+  }
+
+  public var completeDownload: Mozz_V1_CompleteDownloadResponse {
+    get {
+      if case .completeDownload(let v)? = result {return v}
+      return Mozz_V1_CompleteDownloadResponse()
+    }
+    set {result = .completeDownload(newValue)}
+  }
+
+  public var failDownload: Mozz_V1_FailDownloadResponse {
+    get {
+      if case .failDownload(let v)? = result {return v}
+      return Mozz_V1_FailDownloadResponse()
+    }
+    set {result = .failDownload(newValue)}
+  }
+
+  public var cancelDownload: Mozz_V1_CancelDownloadResponse {
+    get {
+      if case .cancelDownload(let v)? = result {return v}
+      return Mozz_V1_CancelDownloadResponse()
+    }
+    set {result = .cancelDownload(newValue)}
+  }
+
+  public var deleteDownload: Mozz_V1_DeleteDownloadResponse {
+    get {
+      if case .deleteDownload(let v)? = result {return v}
+      return Mozz_V1_DeleteDownloadResponse()
+    }
+    set {result = .deleteDownload(newValue)}
+  }
+
+  public var downloadStatus: Mozz_V1_DownloadStatusResponse {
+    get {
+      if case .downloadStatus(let v)? = result {return v}
+      return Mozz_V1_DownloadStatusResponse()
+    }
+    set {result = .downloadStatus(newValue)}
+  }
+
+  public var downloads: Mozz_V1_DownloadsResponse {
+    get {
+      if case .downloads(let v)? = result {return v}
+      return Mozz_V1_DownloadsResponse()
+    }
+    set {result = .downloads(newValue)}
+  }
+
+  public var storageUsage: Mozz_V1_StorageUsageResponse {
+    get {
+      if case .storageUsage(let v)? = result {return v}
+      return Mozz_V1_StorageUsageResponse()
+    }
+    set {result = .storageUsage(newValue)}
+  }
+
+  public var lyrics: Mozz_V1_LyricsResponse {
+    get {
+      if case .lyrics(let v)? = result {return v}
+      return Mozz_V1_LyricsResponse()
+    }
+    set {result = .lyrics(newValue)}
+  }
+
+  public var recordingIdentity: Mozz_V1_RecordingIdentityResponse {
+    get {
+      if case .recordingIdentity(let v)? = result {return v}
+      return Mozz_V1_RecordingIdentityResponse()
+    }
+    set {result = .recordingIdentity(newValue)}
+  }
+
+  public var similarTracks: Mozz_V1_SimilarTracksResponse {
+    get {
+      if case .similarTracks(let v)? = result {return v}
+      return Mozz_V1_SimilarTracksResponse()
+    }
+    set {result = .similarTracks(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -1166,6 +2317,19 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     case counts(Mozz_V1_CountsResponse)
     case getPlaybackSettings(Mozz_V1_GetPlaybackSettingsResponse)
     case setPlaybackSettings(Mozz_V1_SetPlaybackSettingsResponse)
+    case artwork(Mozz_V1_ArtworkResponse)
+    case enqueueDownload(Mozz_V1_EnqueueDownloadResponse)
+    case reportDownloadProgress(Mozz_V1_ReportDownloadProgressResponse)
+    case completeDownload(Mozz_V1_CompleteDownloadResponse)
+    case failDownload(Mozz_V1_FailDownloadResponse)
+    case cancelDownload(Mozz_V1_CancelDownloadResponse)
+    case deleteDownload(Mozz_V1_DeleteDownloadResponse)
+    case downloadStatus(Mozz_V1_DownloadStatusResponse)
+    case downloads(Mozz_V1_DownloadsResponse)
+    case storageUsage(Mozz_V1_StorageUsageResponse)
+    case lyrics(Mozz_V1_LyricsResponse)
+    case recordingIdentity(Mozz_V1_RecordingIdentityResponse)
+    case similarTracks(Mozz_V1_SimilarTracksResponse)
 
   }
 
@@ -1215,6 +2379,22 @@ fileprivate nonisolated let _protobuf_package = "mozz.v1"
 
 nonisolated extension Mozz_V1_ReplayGainMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REPLAY_GAIN_MODE_UNSPECIFIED\0\u{1}REPLAY_GAIN_MODE_OFF\0\u{1}REPLAY_GAIN_MODE_TRACK\0\u{1}REPLAY_GAIN_MODE_ALBUM\0")
+}
+
+nonisolated extension Mozz_V1_ArtworkStatus: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ARTWORK_STATUS_UNSPECIFIED\0\u{1}ARTWORK_STATUS_PRESENT\0\u{1}ARTWORK_STATUS_ABSENT\0\u{1}ARTWORK_STATUS_UNAVAILABLE\0")
+}
+
+nonisolated extension Mozz_V1_DownloadState: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DOWNLOAD_STATE_UNSPECIFIED\0\u{1}DOWNLOAD_STATE_QUEUED\0\u{1}DOWNLOAD_STATE_DOWNLOADING\0\u{1}DOWNLOAD_STATE_DOWNLOADED\0\u{1}DOWNLOAD_STATE_FAILED\0")
+}
+
+nonisolated extension Mozz_V1_LyricsStatus: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LYRICS_STATUS_UNSPECIFIED\0\u{1}LYRICS_STATUS_PRESENT\0\u{1}LYRICS_STATUS_ABSENT\0\u{1}LYRICS_STATUS_NOT_FETCHED\0\u{1}LYRICS_STATUS_FAILED\0")
+}
+
+nonisolated extension Mozz_V1_RecordingIdentityStatus: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0RECORDING_IDENTITY_STATUS_UNSPECIFIED\0\u{1}RECORDING_IDENTITY_STATUS_RESOLVED\0\u{1}RECORDING_IDENTITY_STATUS_UNMATCHED\0\u{1}RECORDING_IDENTITY_STATUS_NOT_RESOLVED\0")
 }
 
 nonisolated extension Mozz_V1_PageCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -2360,6 +3540,786 @@ nonisolated extension Mozz_V1_SetPlaybackSettingsResponse: SwiftProtobuf.Message
   }
 }
 
+nonisolated extension Mozz_V1_ArtworkRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ArtworkRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}artwork_key\0\u{1}size\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.artworkKey) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.artworkKey.isEmpty {
+      try visitor.visitSingularStringField(value: self.artworkKey, fieldNumber: 2)
+    }
+    if self.size != 0 {
+      try visitor.visitSingularInt32Field(value: self.size, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ArtworkRequest, rhs: Mozz_V1_ArtworkRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.artworkKey != rhs.artworkKey {return false}
+    if lhs.size != rhs.size {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_ArtworkResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ArtworkResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}status\0\u{1}data\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 2: try { try decoder.decodeSingularBytesField(value: &self.data) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.status != .unspecified {
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 1)
+    }
+    if !self.data.isEmpty {
+      try visitor.visitSingularBytesField(value: self.data, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ArtworkResponse, rhs: Mozz_V1_ArtworkResponse) -> Bool {
+    if lhs.status != rhs.status {return false}
+    if lhs.data != rhs.data {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_Download: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".Download"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}track_id\0\u{3}server_id\0\u{3}remote_id\0\u{1}state\0\u{3}received_bytes\0\u{3}total_bytes\0\u{3}local_path\0\u{3}error_message\0\u{3}requested_at\0\u{3}completed_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.trackID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.state) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self.receivedBytes) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self._totalBytes) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self._localPath) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._errorMessage) }()
+      case 9: try { try decoder.decodeSingularDoubleField(value: &self.requestedAt) }()
+      case 10: try { try decoder.decodeSingularDoubleField(value: &self._completedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.trackID != 0 {
+      try visitor.visitSingularInt64Field(value: self.trackID, fieldNumber: 1)
+    }
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 2)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 3)
+    }
+    if self.state != .unspecified {
+      try visitor.visitSingularEnumField(value: self.state, fieldNumber: 4)
+    }
+    if self.receivedBytes != 0 {
+      try visitor.visitSingularInt64Field(value: self.receivedBytes, fieldNumber: 5)
+    }
+    try { if let v = self._totalBytes {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._localPath {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._errorMessage {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
+    if self.requestedAt.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.requestedAt, fieldNumber: 9)
+    }
+    try { if let v = self._completedAt {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 10)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_Download, rhs: Mozz_V1_Download) -> Bool {
+    if lhs.trackID != rhs.trackID {return false}
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs.receivedBytes != rhs.receivedBytes {return false}
+    if lhs._totalBytes != rhs._totalBytes {return false}
+    if lhs._localPath != rhs._localPath {return false}
+    if lhs._errorMessage != rhs._errorMessage {return false}
+    if lhs.requestedAt != rhs.requestedAt {return false}
+    if lhs._completedAt != rhs._completedAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_EnqueueDownloadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".EnqueueDownloadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_EnqueueDownloadRequest, rhs: Mozz_V1_EnqueueDownloadRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_EnqueueDownloadResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".EnqueueDownloadResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}download\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._download) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._download {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_EnqueueDownloadResponse, rhs: Mozz_V1_EnqueueDownloadResponse) -> Bool {
+    if lhs._download != rhs._download {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_ReportDownloadProgressRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ReportDownloadProgressRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0\u{3}received_bytes\0\u{3}total_bytes\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.receivedBytes) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self._totalBytes) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    if self.receivedBytes != 0 {
+      try visitor.visitSingularInt64Field(value: self.receivedBytes, fieldNumber: 3)
+    }
+    try { if let v = self._totalBytes {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ReportDownloadProgressRequest, rhs: Mozz_V1_ReportDownloadProgressRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.receivedBytes != rhs.receivedBytes {return false}
+    if lhs._totalBytes != rhs._totalBytes {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_ReportDownloadProgressResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ReportDownloadProgressResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}download\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._download) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._download {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ReportDownloadProgressResponse, rhs: Mozz_V1_ReportDownloadProgressResponse) -> Bool {
+    if lhs._download != rhs._download {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_CompleteDownloadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CompleteDownloadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0\u{3}local_path\0\u{3}size_bytes\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.localPath) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.sizeBytes) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    if !self.localPath.isEmpty {
+      try visitor.visitSingularStringField(value: self.localPath, fieldNumber: 3)
+    }
+    if self.sizeBytes != 0 {
+      try visitor.visitSingularInt64Field(value: self.sizeBytes, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_CompleteDownloadRequest, rhs: Mozz_V1_CompleteDownloadRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.localPath != rhs.localPath {return false}
+    if lhs.sizeBytes != rhs.sizeBytes {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_CompleteDownloadResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CompleteDownloadResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}download\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._download) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._download {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_CompleteDownloadResponse, rhs: Mozz_V1_CompleteDownloadResponse) -> Bool {
+    if lhs._download != rhs._download {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_FailDownloadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".FailDownloadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0\u{1}message\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_FailDownloadRequest, rhs: Mozz_V1_FailDownloadRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.message != rhs.message {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_FailDownloadResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".FailDownloadResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}download\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._download) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._download {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_FailDownloadResponse, rhs: Mozz_V1_FailDownloadResponse) -> Bool {
+    if lhs._download != rhs._download {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_CancelDownloadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CancelDownloadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_CancelDownloadRequest, rhs: Mozz_V1_CancelDownloadRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_CancelDownloadResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CancelDownloadResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}download\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._download) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._download {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_CancelDownloadResponse, rhs: Mozz_V1_CancelDownloadResponse) -> Bool {
+    if lhs._download != rhs._download {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_DeleteDownloadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DeleteDownloadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_DeleteDownloadRequest, rhs: Mozz_V1_DeleteDownloadRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_DeleteDownloadResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DeleteDownloadResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}removed_local_path\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self._removedLocalPath) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._removedLocalPath {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_DeleteDownloadResponse, rhs: Mozz_V1_DeleteDownloadResponse) -> Bool {
+    if lhs._removedLocalPath != rhs._removedLocalPath {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_DownloadStatusRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DownloadStatusRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_DownloadStatusRequest, rhs: Mozz_V1_DownloadStatusRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_DownloadStatusResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DownloadStatusResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}download\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._download) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._download {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_DownloadStatusResponse, rhs: Mozz_V1_DownloadStatusResponse) -> Bool {
+    if lhs._download != rhs._download {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_DownloadsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DownloadsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}states\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedEnumField(value: &self.states) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.states.isEmpty {
+      try visitor.visitPackedEnumField(value: self.states, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_DownloadsRequest, rhs: Mozz_V1_DownloadsRequest) -> Bool {
+    if lhs.states != rhs.states {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_DownloadsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DownloadsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}downloads\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.downloads) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.downloads.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.downloads, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_DownloadsResponse, rhs: Mozz_V1_DownloadsResponse) -> Bool {
+    if lhs.downloads != rhs.downloads {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_StorageUsageRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StorageUsageRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_StorageUsageRequest, rhs: Mozz_V1_StorageUsageRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_StorageUsageResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StorageUsageResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}downloaded_track_count\0\u{3}total_bytes\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.downloadedTrackCount) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.totalBytes) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.downloadedTrackCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.downloadedTrackCount, fieldNumber: 1)
+    }
+    if self.totalBytes != 0 {
+      try visitor.visitSingularInt64Field(value: self.totalBytes, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_StorageUsageResponse, rhs: Mozz_V1_StorageUsageResponse) -> Bool {
+    if lhs.downloadedTrackCount != rhs.downloadedTrackCount {return false}
+    if lhs.totalBytes != rhs.totalBytes {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Mozz_V1_SubscriptionToken: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SubscriptionToken"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0")
@@ -2503,9 +4463,379 @@ nonisolated extension Mozz_V1_LibraryChanged: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
+nonisolated extension Mozz_V1_LyricLine: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LyricLine"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{3}start_seconds\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self._startSeconds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 1)
+    }
+    try { if let v = self._startSeconds {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_LyricLine, rhs: Mozz_V1_LyricLine) -> Bool {
+    if lhs.text != rhs.text {return false}
+    if lhs._startSeconds != rhs._startSeconds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_Lyrics: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".Lyrics"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}lines\0\u{1}source\0\u{3}source_display_name\0\u{3}is_synced\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.lines) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._source) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._sourceDisplayName) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.isSynced) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.lines.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.lines, fieldNumber: 1)
+    }
+    try { if let v = self._source {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._sourceDisplayName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    if self.isSynced != false {
+      try visitor.visitSingularBoolField(value: self.isSynced, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_Lyrics, rhs: Mozz_V1_Lyrics) -> Bool {
+    if lhs.lines != rhs.lines {return false}
+    if lhs._source != rhs._source {return false}
+    if lhs._sourceDisplayName != rhs._sourceDisplayName {return false}
+    if lhs.isSynced != rhs.isSynced {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_LyricsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LyricsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0\u{1}resolve\0\u{3}use_online_lookup\0\u{3}user_initiated\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.resolve) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.useOnlineLookup) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.userInitiated) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    if self.resolve != false {
+      try visitor.visitSingularBoolField(value: self.resolve, fieldNumber: 3)
+    }
+    if self.useOnlineLookup != false {
+      try visitor.visitSingularBoolField(value: self.useOnlineLookup, fieldNumber: 4)
+    }
+    if self.userInitiated != false {
+      try visitor.visitSingularBoolField(value: self.userInitiated, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_LyricsRequest, rhs: Mozz_V1_LyricsRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.resolve != rhs.resolve {return false}
+    if lhs.useOnlineLookup != rhs.useOnlineLookup {return false}
+    if lhs.userInitiated != rhs.userInitiated {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_LyricsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LyricsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}status\0\u{1}lyrics\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._lyrics) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.status != .unspecified {
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 1)
+    }
+    try { if let v = self._lyrics {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_LyricsResponse, rhs: Mozz_V1_LyricsResponse) -> Bool {
+    if lhs.status != rhs.status {return false}
+    if lhs._lyrics != rhs._lyrics {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_RecordingIdentityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".RecordingIdentityRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_RecordingIdentityRequest, rhs: Mozz_V1_RecordingIdentityRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_RecordingIdentityResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".RecordingIdentityResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}status\0\u{3}recording_mbid\0\u{3}canonical_recording_mbid\0\u{3}artist_mbid\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._recordingMbid) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._canonicalRecordingMbid) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._artistMbid) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.status != .unspecified {
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 1)
+    }
+    try { if let v = self._recordingMbid {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._canonicalRecordingMbid {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._artistMbid {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_RecordingIdentityResponse, rhs: Mozz_V1_RecordingIdentityResponse) -> Bool {
+    if lhs.status != rhs.status {return false}
+    if lhs._recordingMbid != rhs._recordingMbid {return false}
+    if lhs._canonicalRecordingMbid != rhs._canonicalRecordingMbid {return false}
+    if lhs._artistMbid != rhs._artistMbid {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_SimilarTrack: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SimilarTrack"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}track\0\u{1}score\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._track) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.score) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._track {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.score.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.score, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_SimilarTrack, rhs: Mozz_V1_SimilarTrack) -> Bool {
+    if lhs._track != rhs._track {return false}
+    if lhs.score != rhs.score {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_SimilarTracksRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SimilarTracksRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_SimilarTracksRequest, rhs: Mozz_V1_SimilarTracksRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_SimilarTracksResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SimilarTracksResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}tracks\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.tracks) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tracks.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.tracks, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_SimilarTracksResponse, rhs: Mozz_V1_SimilarTracksResponse) -> Bool {
+    if lhs.tracks != rhs.tracks {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Request"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0\u{1}artwork\0\u{3}enqueue_download\0\u{3}report_download_progress\0\u{3}complete_download\0\u{3}fail_download\0\u{3}cancel_download\0\u{3}delete_download\0\u{3}download_status\0\u{1}downloads\0\u{3}storage_usage\0\u{1}lyrics\0\u{3}recording_identity\0\u{3}similar_tracks\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2670,6 +5000,175 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
           self.command = .setPlaybackSettings(v)
         }
       }()
+      case 22: try {
+        var v: Mozz_V1_ArtworkRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .artwork(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .artwork(v)
+        }
+      }()
+      case 23: try {
+        var v: Mozz_V1_EnqueueDownloadRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .enqueueDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .enqueueDownload(v)
+        }
+      }()
+      case 24: try {
+        var v: Mozz_V1_ReportDownloadProgressRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .reportDownloadProgress(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .reportDownloadProgress(v)
+        }
+      }()
+      case 25: try {
+        var v: Mozz_V1_CompleteDownloadRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .completeDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .completeDownload(v)
+        }
+      }()
+      case 26: try {
+        var v: Mozz_V1_FailDownloadRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .failDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .failDownload(v)
+        }
+      }()
+      case 27: try {
+        var v: Mozz_V1_CancelDownloadRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .cancelDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .cancelDownload(v)
+        }
+      }()
+      case 28: try {
+        var v: Mozz_V1_DeleteDownloadRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .deleteDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .deleteDownload(v)
+        }
+      }()
+      case 29: try {
+        var v: Mozz_V1_DownloadStatusRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .downloadStatus(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .downloadStatus(v)
+        }
+      }()
+      case 30: try {
+        var v: Mozz_V1_DownloadsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .downloads(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .downloads(v)
+        }
+      }()
+      case 31: try {
+        var v: Mozz_V1_StorageUsageRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .storageUsage(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .storageUsage(v)
+        }
+      }()
+      case 32: try {
+        var v: Mozz_V1_LyricsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .lyrics(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .lyrics(v)
+        }
+      }()
+      case 33: try {
+        var v: Mozz_V1_RecordingIdentityRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .recordingIdentity(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .recordingIdentity(v)
+        }
+      }()
+      case 34: try {
+        var v: Mozz_V1_SimilarTracksRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .similarTracks(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .similarTracks(v)
+        }
+      }()
       default: break
       }
     }
@@ -2732,6 +5231,58 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
       guard case .setPlaybackSettings(let v)? = self.command else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
     }()
+    case .artwork?: try {
+      guard case .artwork(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+    }()
+    case .enqueueDownload?: try {
+      guard case .enqueueDownload(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+    }()
+    case .reportDownloadProgress?: try {
+      guard case .reportDownloadProgress(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
+    }()
+    case .completeDownload?: try {
+      guard case .completeDownload(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
+    }()
+    case .failDownload?: try {
+      guard case .failDownload(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+    }()
+    case .cancelDownload?: try {
+      guard case .cancelDownload(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+    }()
+    case .deleteDownload?: try {
+      guard case .deleteDownload(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
+    }()
+    case .downloadStatus?: try {
+      guard case .downloadStatus(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+    }()
+    case .downloads?: try {
+      guard case .downloads(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+    }()
+    case .storageUsage?: try {
+      guard case .storageUsage(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
+    }()
+    case .lyrics?: try {
+      guard case .lyrics(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
+    }()
+    case .recordingIdentity?: try {
+      guard case .recordingIdentity(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
+    }()
+    case .similarTracks?: try {
+      guard case .similarTracks(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -2777,7 +5328,7 @@ nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0\u{1}artwork\0\u{3}enqueue_download\0\u{3}report_download_progress\0\u{3}complete_download\0\u{3}fail_download\0\u{3}cancel_download\0\u{3}delete_download\0\u{3}download_status\0\u{1}downloads\0\u{3}storage_usage\0\u{1}lyrics\0\u{3}recording_identity\0\u{3}similar_tracks\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2955,6 +5506,175 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
           self.result = .setPlaybackSettings(v)
         }
       }()
+      case 22: try {
+        var v: Mozz_V1_ArtworkResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .artwork(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .artwork(v)
+        }
+      }()
+      case 23: try {
+        var v: Mozz_V1_EnqueueDownloadResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .enqueueDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .enqueueDownload(v)
+        }
+      }()
+      case 24: try {
+        var v: Mozz_V1_ReportDownloadProgressResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .reportDownloadProgress(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .reportDownloadProgress(v)
+        }
+      }()
+      case 25: try {
+        var v: Mozz_V1_CompleteDownloadResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .completeDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .completeDownload(v)
+        }
+      }()
+      case 26: try {
+        var v: Mozz_V1_FailDownloadResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .failDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .failDownload(v)
+        }
+      }()
+      case 27: try {
+        var v: Mozz_V1_CancelDownloadResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .cancelDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .cancelDownload(v)
+        }
+      }()
+      case 28: try {
+        var v: Mozz_V1_DeleteDownloadResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .deleteDownload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .deleteDownload(v)
+        }
+      }()
+      case 29: try {
+        var v: Mozz_V1_DownloadStatusResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .downloadStatus(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .downloadStatus(v)
+        }
+      }()
+      case 30: try {
+        var v: Mozz_V1_DownloadsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .downloads(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .downloads(v)
+        }
+      }()
+      case 31: try {
+        var v: Mozz_V1_StorageUsageResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .storageUsage(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .storageUsage(v)
+        }
+      }()
+      case 32: try {
+        var v: Mozz_V1_LyricsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .lyrics(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .lyrics(v)
+        }
+      }()
+      case 33: try {
+        var v: Mozz_V1_RecordingIdentityResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .recordingIdentity(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .recordingIdentity(v)
+        }
+      }()
+      case 34: try {
+        var v: Mozz_V1_SimilarTracksResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .similarTracks(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .similarTracks(v)
+        }
+      }()
       default: break
       }
     }
@@ -3020,6 +5740,58 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
     case .setPlaybackSettings?: try {
       guard case .setPlaybackSettings(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+    }()
+    case .artwork?: try {
+      guard case .artwork(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+    }()
+    case .enqueueDownload?: try {
+      guard case .enqueueDownload(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+    }()
+    case .reportDownloadProgress?: try {
+      guard case .reportDownloadProgress(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
+    }()
+    case .completeDownload?: try {
+      guard case .completeDownload(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
+    }()
+    case .failDownload?: try {
+      guard case .failDownload(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+    }()
+    case .cancelDownload?: try {
+      guard case .cancelDownload(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+    }()
+    case .deleteDownload?: try {
+      guard case .deleteDownload(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
+    }()
+    case .downloadStatus?: try {
+      guard case .downloadStatus(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+    }()
+    case .downloads?: try {
+      guard case .downloads(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+    }()
+    case .storageUsage?: try {
+      guard case .storageUsage(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
+    }()
+    case .lyrics?: try {
+      guard case .lyrics(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
+    }()
+    case .recordingIdentity?: try {
+      guard case .recordingIdentity(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
+    }()
+    case .similarTracks?: try {
+      guard case .similarTracks(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
     }()
     case nil: break
     }

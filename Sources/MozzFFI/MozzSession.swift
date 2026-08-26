@@ -1,4 +1,5 @@
 import Foundation
+import MozzCommands
 import MozzContinuity
 import MozzCore
 import MozzDatabase
@@ -778,6 +779,11 @@ final class MozzSession: @unchecked Sendable {
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
+    /// The core's artwork cache. Resolves a reference through whichever backend
+    /// is attached, downloads it, and keeps it on disk under a byte budget so
+    /// every shell stops solving that separately. `var` only so a test can swap
+    /// in a store pointed at a temp directory with a scripted fetch.
+    var artworkStore: ArtworkStore
 
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
@@ -785,6 +791,51 @@ final class MozzSession: @unchecked Sendable {
         self.recommendations = RecommendationService(store: RecommendationStore(database))
         self.lyrics = LyricsService()
         self.favorites = FavoritesStore(database)
+        // Capture the backend table, not `self`: the fetch closure resolves the
+        // reference against whichever server is attached when the cover is asked
+        // for, which is the point of resolving lazily rather than at attach time.
+        let backends = self.backends
+        self.artworkStore = ArtworkStore(
+            directory: ArtworkStore.defaultDirectory(),
+            byteLimit: MozzSession.artworkByteLimit,
+            fetch: { query in await MozzSession.fetchArtwork(query, backends: backends) }
+        )
+    }
+
+    /// The disk budget for cached covers, matching iOS's 256 MB so all three
+    /// platforms keep about the same amount and behave alike under pressure.
+    static let artworkByteLimit = 256 * 1024 * 1024
+
+    /// Resolve a reference to a URL through the attached backend and download it,
+    /// mapping every outcome onto the absent/unavailable distinction the store
+    /// remembers differently. This is the same resolution the `artworkURL` JSON
+    /// handler does — `backend.artworkURL(for:size:)` — with the fetch added.
+    ///
+    ///  - no backend yet (still attaching) → unavailable; asking again later is
+    ///    right, and remembering it as absent is the bug the desktop's
+    ///    ArtworkUnavailableException exists to prevent.
+    ///  - backend resolves the reference to nothing → absent; the server has no
+    ///    such cover.
+    ///  - HTTP 404 → absent; a non-404 error status or a thrown network error →
+    ///    unavailable; an empty body → absent; otherwise the bytes.
+    static func fetchArtwork(
+        _ query: ArtworkQuery, backends: BackendTable
+    ) async -> ArtworkOutcome {
+        guard let backend = backends.backend(query.serverId) else { return .unavailable }
+        guard let url = backend.artworkURL(
+            for: ArtworkRef(key: query.artworkKey), size: query.size) else {
+            return .absent
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse {
+                if http.statusCode == 404 { return .absent }
+                guard (200..<300).contains(http.statusCode) else { return .unavailable }
+            }
+            return data.isEmpty ? .absent : .bytes(data)
+        } catch {
+            return .unavailable
+        }
     }
 }
 

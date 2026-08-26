@@ -175,7 +175,45 @@ public struct LyricsService: Sendable {
 
     // MARK: Resolution
 
-    /// Resolves lyrics for `track`, consulting the caches first.
+    /// The outcome of a pure, network-free cache read — the honest distinction
+    /// `resolve` cannot draw, because `resolve` always ends by asking a source.
+    public enum CachedLyrics: Sendable, Equatable {
+        /// A cache layer holds an answer. The inner value is the lyrics, or `nil`
+        /// for a negative: every layer only ever persists a `nil` when it is
+        /// authoritative (an explicit-instrumental title, or a lookup that reached
+        /// every source it needed), so `hit(nil)` means "there are none", not
+        /// "unknown".
+        case hit(Lyrics?)
+        /// No cache layer has an answer for this track yet. Nobody has resolved it,
+        /// so the caller should `resolve` rather than read this as "no lyrics".
+        case miss
+    }
+
+    /// Reads only the caches — the same L1–L4 order `resolve` consults before it
+    /// would touch the network — and never performs a lookup or writes anything.
+    ///
+    /// This is what lets a caller tell "we asked and there are none" (`hit(nil)`)
+    /// apart from "nobody has asked yet" (`miss`): a distinction `resolve` erases,
+    /// because it always finishes by asking a source and so can only ever answer
+    /// present-or-negative, never not-yet-fetched. The explicit-instrumental title
+    /// check is included because it is a pure, offline decision — `resolve` reaches
+    /// the identical verdict from the same input without a round-trip.
+    public func cached(track: Track, backend: (any MusicBackend)?) async -> CachedLyrics {
+        let key = LyricsCacheKey.make(
+            trackID: track.id, connectionID: backend?.connection.id
+        )
+        // L1 memo, L2 offline, L3 disk — the outer optional is presence; a present
+        // entry with an inner `nil` is an authoritative negative (see the type).
+        if let memoed = await memo.value(for: key) { return .hit(memoed) }
+        if let saved = await offline.cached(key) { return .hit(saved) }
+        if let onDisk = await disk.cached(key) { return .hit(onDisk) }
+        // L4 title heuristic: a pure decision, so it is honest to answer it here
+        // rather than force a resolve that would reach the same negative.
+        if isExplicitlyInstrumental(title: track.title) { return .hit(nil) }
+        return .miss
+    }
+
+    /// Resolves a track's lyrics, consulting the caches first.
     ///
     /// - Parameters:
     ///   - backend: the backend that owns the track. Its `fetchLyrics` must throw

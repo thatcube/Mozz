@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import MozzCore
 import MozzDatabase
+import MozzEnrichment
 import MozzSchema
 import SwiftProtobuf
 @testable import MozzCommands
@@ -29,12 +30,14 @@ import SwiftProtobuf
     }
 
     private static func dispatcher(_ repository: LibraryRepository) throws -> CommandDispatcher {
-        // Catalog tests never touch playback settings; an isolated in-memory
-        // store keeps them independent. The playback-settings tests below build
-        // their own dispatcher over a shared store so a write is visible to the
-        // next read.
+        // Catalog tests never touch playback settings or downloads; isolated
+        // in-memory stores keep them independent. The playback-settings and
+        // download tests below build their own dispatcher over a store that
+        // shares the catalog's database, so a write is visible to the next read.
         let store = PlaybackSettingsStore(try MusicDatabase.inMemory())
-        return CommandDispatcher(service: LibraryCommandService(repository: repository, playbackSettings: store))
+        let downloads = DownloadStore(try MusicDatabase.inMemory())
+        return CommandDispatcher(service: LibraryCommandService(
+            repository: repository, playbackSettings: store, downloads: downloads))
     }
 
     /// Round-trip a request the way a shell would: encode, hand over bytes,
@@ -623,5 +626,776 @@ import SwiftProtobuf
             return
         }
         #expect(payload.settings.replayGainMode == .album)
+    }
+
+    // MARK: Downloads
+    //
+    // The lifecycle a shell drives over the wire: enqueue, report progress,
+    // complete (or fail, or cancel), delete — plus the two pollable reads
+    // (status, list) and storage usage. These prove the download *decision* is
+    // reachable from a non-Swift shell, which before had no download capability
+    // at all because the module was only ever called directly from Apple code.
+
+    /// A database whose repository (reads) and download store (writes) share one
+    /// connection, so a write through a command is visible to the next read —
+    /// exactly the arrangement a real session has. `Self.dispatcher` deliberately
+    /// gives download-untouched catalog tests an isolated store instead.
+    private static func downloadFixture(
+        tracks: Int = 80
+    ) async throws -> (dispatcher: CommandDispatcher, repository: LibraryRepository) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("commands-dl-\(UUID().uuidString).sqlite")
+        let db = try MusicDatabase.open(at: url)
+        try await SyntheticCatalog(db).generate(
+            serverId: SyntheticCatalog.defaultServerID,
+            size: .init(artists: tracks / 25, albums: tracks / 8, tracks: tracks)
+        )
+        let repository = LibraryRepository(db)
+        let dispatcher = CommandDispatcher(service: LibraryCommandService(
+            repository: repository,
+            playbackSettings: PlaybackSettingsStore(try MusicDatabase.inMemory()),
+            downloads: DownloadStore(db)))
+        return (dispatcher, repository)
+    }
+
+    /// The first `n` tracks in the catalog, to drive downloads against real ids.
+    private static func someTracks(
+        _ repository: LibraryRepository, _ n: Int
+    ) async throws -> [TrackRecord] {
+        let page = try await repository.tracksPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: n)
+        try #require(page.rows.count >= n)
+        return Array(page.rows.prefix(n))
+    }
+
+    /// The whole path a shell walks: queue it, report bytes moving, finish. Each
+    /// step's response and a following status poll must agree on the state and
+    /// the byte counters, because a client renders the poll, not the write.
+    @Test func aDownloadRunsItsFullLifecycle() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        // Enqueue → queued, no bytes yet.
+        let enqueued = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.enqueueDownload = request
+        }
+        guard case .enqueueDownload(let queued) = enqueued.result else {
+            Issue.record("expected enqueueDownload, got \(String(describing: enqueued.result))")
+            return
+        }
+        #expect(queued.download.state == .queued)
+        #expect(queued.download.serverID == track.serverId)
+        #expect(queued.download.remoteID == track.remoteId)
+        #expect(queued.download.trackID == (track.id ?? -1))
+        #expect(queued.download.receivedBytes == 0)
+
+        // First progress → downloading, counters set.
+        let progressed = try await Self.send(dispatcher) {
+            var request = Mozz_V1_ReportDownloadProgressRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            request.receivedBytes = 512
+            request.totalBytes = 4096
+            $0.reportDownloadProgress = request
+        }
+        guard case .reportDownloadProgress(let midway) = progressed.result else {
+            Issue.record("expected reportDownloadProgress, got \(String(describing: progressed.result))")
+            return
+        }
+        #expect(midway.download.state == .downloading)
+        #expect(midway.download.receivedBytes == 512)
+        #expect(midway.download.hasTotalBytes)
+        #expect(midway.download.totalBytes == 4096)
+
+        // Complete → downloaded, path + final size recorded, completedAt present.
+        let completed = try await Self.send(dispatcher) {
+            var request = Mozz_V1_CompleteDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            request.localPath = "downloads/\(track.remoteId).flac"
+            request.sizeBytes = 4096
+            $0.completeDownload = request
+        }
+        guard case .completeDownload(let done) = completed.result else {
+            Issue.record("expected completeDownload, got \(String(describing: completed.result))")
+            return
+        }
+        #expect(done.download.state == .downloaded)
+        #expect(done.download.receivedBytes == 4096)
+        #expect(done.download.hasLocalPath)
+        #expect(done.download.localPath == "downloads/\(track.remoteId).flac")
+        #expect(done.download.hasCompletedAt)
+
+        // A status poll sees the same finished download.
+        let status = try await Self.send(dispatcher) {
+            var request = Mozz_V1_DownloadStatusRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.downloadStatus = request
+        }
+        guard case .downloadStatus(let polled) = status.result else {
+            Issue.record("expected downloadStatus, got \(String(describing: status.result))")
+            return
+        }
+        #expect(polled.hasDownload)
+        #expect(polled.download.state == .downloaded)
+        #expect(polled.download.localPath == "downloads/\(track.remoteId).flac")
+    }
+
+    /// Enqueuing a track that is already tracked returns its current record
+    /// rather than resetting progress — a shell that re-requests a download in
+    /// flight must not knock it back to zero.
+    @Test func enqueueIsIdempotent() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        func enqueue() async throws -> Mozz_V1_Download {
+            let response = try await Self.send(dispatcher) {
+                var request = Mozz_V1_EnqueueDownloadRequest()
+                request.serverID = track.serverId
+                request.remoteID = track.remoteId
+                $0.enqueueDownload = request
+            }
+            guard case .enqueueDownload(let payload) = response.result else {
+                Issue.record("expected enqueueDownload, got \(String(describing: response.result))")
+                return Mozz_V1_Download()
+            }
+            return payload.download
+        }
+
+        _ = try await enqueue()
+        // Move it forward, then re-enqueue: the second enqueue must observe the
+        // advanced state, not overwrite it.
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_ReportDownloadProgressRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            request.receivedBytes = 128
+            $0.reportDownloadProgress = request
+        }
+        let again = try await enqueue()
+        #expect(again.state == .downloading)
+        #expect(again.receivedBytes == 128)
+    }
+
+    /// A failure keeps its reason, so a status poll — and a person looking at a
+    /// stalled download — can say why it stopped.
+    @Test func aFailedDownloadCarriesItsReason() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.enqueueDownload = request
+        }
+        let failed = try await Self.send(dispatcher) {
+            var request = Mozz_V1_FailDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            request.message = "network dropped"
+            $0.failDownload = request
+        }
+        guard case .failDownload(let payload) = failed.result else {
+            Issue.record("expected failDownload, got \(String(describing: failed.result))")
+            return
+        }
+        #expect(payload.download.state == .failed)
+        #expect(payload.download.hasErrorMessage)
+        #expect(payload.download.errorMessage == "network dropped")
+    }
+
+    /// Cancelling records a failure whose message is exactly "Cancelled",
+    /// identical to DownloadManager.cancel, so the two entry points cannot
+    /// disagree about what a cancelled download looks like.
+    @Test func cancellingRecordsItAsCancelled() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.enqueueDownload = request
+        }
+        let cancelled = try await Self.send(dispatcher) {
+            var request = Mozz_V1_CancelDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.cancelDownload = request
+        }
+        guard case .cancelDownload(let payload) = cancelled.result else {
+            Issue.record("expected cancelDownload, got \(String(describing: cancelled.result))")
+            return
+        }
+        #expect(payload.download.state == .failed)
+        #expect(payload.download.errorMessage == "Cancelled")
+    }
+
+    /// Deleting returns the file's former relative path — what the shell removes
+    /// from disk — and clears the record, so a following status poll reports the
+    /// track as no longer downloaded.
+    @Test func deletingReturnsTheFormerPathAndClearsTheRecord() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.enqueueDownload = request
+        }
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_CompleteDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            request.localPath = "downloads/\(track.remoteId).flac"
+            request.sizeBytes = 2048
+            $0.completeDownload = request
+        }
+
+        let deleted = try await Self.send(dispatcher) {
+            var request = Mozz_V1_DeleteDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.deleteDownload = request
+        }
+        guard case .deleteDownload(let payload) = deleted.result else {
+            Issue.record("expected deleteDownload, got \(String(describing: deleted.result))")
+            return
+        }
+        #expect(payload.hasRemovedLocalPath)
+        #expect(payload.removedLocalPath == "downloads/\(track.remoteId).flac")
+
+        let status = try await Self.send(dispatcher) {
+            var request = Mozz_V1_DownloadStatusRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.downloadStatus = request
+        }
+        guard case .downloadStatus(let polled) = status.result else {
+            Issue.record("expected downloadStatus, got \(String(describing: status.result))")
+            return
+        }
+        #expect(!polled.hasDownload, "a deleted download must no longer report a record")
+    }
+
+    /// Deleting a download that never existed is a benign no-op, not a failure:
+    /// the response simply carries no removed path.
+    @Test func deletingAnUnknownDownloadRemovesNothing() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        // A real track, but no download was ever recorded for it.
+        let deleted = try await Self.send(dispatcher) {
+            var request = Mozz_V1_DeleteDownloadRequest()
+            request.serverID = track.serverId
+            request.remoteID = track.remoteId
+            $0.deleteDownload = request
+        }
+        guard case .deleteDownload(let payload) = deleted.result else {
+            Issue.record("expected deleteDownload, got \(String(describing: deleted.result))")
+            return
+        }
+        #expect(!payload.hasRemovedLocalPath)
+    }
+
+    /// The property the task calls out by name: a status query for a track the
+    /// catalog does not know must answer "not downloaded" (an absent record),
+    /// never a failure and never a crash. This is what lets a client poll any
+    /// track's status without first proving the track exists.
+    @Test func statusForAnUnknownTrackIsAbsentNotAFailure() async throws {
+        let (dispatcher, _) = try await Self.downloadFixture()
+
+        let status = try await Self.send(dispatcher) {
+            var request = Mozz_V1_DownloadStatusRequest()
+            request.serverID = SyntheticCatalog.defaultServerID
+            request.remoteID = "no-such-track-at-all"
+            $0.downloadStatus = request
+        }
+        guard case .downloadStatus(let payload) = status.result else {
+            Issue.record("a status poll for an unknown track must not fail")
+            return
+        }
+        #expect(!payload.hasDownload)
+    }
+
+    /// A *mutation* for a track the catalog never saw is a real error, unlike a
+    /// status poll — there is nothing to download — and the failure names the
+    /// remote id so a caller can see which request was wrong.
+    @Test func enqueueingAnUnknownTrackFails() async throws {
+        let (dispatcher, _) = try await Self.downloadFixture()
+
+        let response = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = SyntheticCatalog.defaultServerID
+            request.remoteID = "ghost-track"
+            $0.enqueueDownload = request
+        }
+        guard case .failure(let failure) = response.result else {
+            Issue.record("enqueuing an unknown track must fail, not silently succeed")
+            return
+        }
+        #expect(failure.message.contains("ghost-track"))
+    }
+
+    /// The list a downloads screen renders. Every entry carries its track's
+    /// (server, remote) identity so a shell can act on it, and a state filter
+    /// narrows it — the completed-only view a "Downloaded" tab shows.
+    @Test func downloadsListReflectsStateAndFilters() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let tracks = try await Self.someTracks(repository, 3)
+
+        // Two completed, one left queued.
+        for track in tracks.prefix(2) {
+            _ = try await Self.send(dispatcher) {
+                var request = Mozz_V1_EnqueueDownloadRequest()
+                request.serverID = track.serverId
+                request.remoteID = track.remoteId
+                $0.enqueueDownload = request
+            }
+            _ = try await Self.send(dispatcher) {
+                var request = Mozz_V1_CompleteDownloadRequest()
+                request.serverID = track.serverId
+                request.remoteID = track.remoteId
+                request.localPath = "downloads/\(track.remoteId).flac"
+                request.sizeBytes = 1000
+                $0.completeDownload = request
+            }
+        }
+        let queuedTrack = tracks[2]
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = queuedTrack.serverId
+            request.remoteID = queuedTrack.remoteId
+            $0.enqueueDownload = request
+        }
+
+        // No filter → all three, each addressable.
+        let all = try await Self.send(dispatcher) {
+            $0.downloads = Mozz_V1_DownloadsRequest()
+        }
+        guard case .downloads(let allPayload) = all.result else {
+            Issue.record("expected downloads, got \(String(describing: all.result))")
+            return
+        }
+        #expect(allPayload.downloads.count == 3)
+        for entry in allPayload.downloads {
+            #expect(!entry.serverID.isEmpty)
+            #expect(!entry.remoteID.isEmpty)
+        }
+
+        // Filter to downloaded → only the two completed ones.
+        let downloadedOnly = try await Self.send(dispatcher) {
+            var request = Mozz_V1_DownloadsRequest()
+            request.states = [.downloaded]
+            $0.downloads = request
+        }
+        guard case .downloads(let filtered) = downloadedOnly.result else {
+            Issue.record("expected downloads, got \(String(describing: downloadedOnly.result))")
+            return
+        }
+        #expect(filtered.downloads.count == 2)
+        #expect(filtered.downloads.allSatisfy { $0.state == .downloaded })
+        let completedRemoteIds = Set(tracks.prefix(2).map(\.remoteId))
+        #expect(Set(filtered.downloads.map(\.remoteID)) == completedRemoteIds)
+    }
+
+    /// Storage usage counts only completed downloads and sums their sizes — the
+    /// number a storage screen shows. A queued or failed download uses no disk
+    /// and must not be counted.
+    @Test func storageUsageCountsOnlyCompletedDownloads() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let tracks = try await Self.someTracks(repository, 3)
+
+        // Two completed (1500 + 2500 bytes)…
+        let sizes: [Int64] = [1500, 2500]
+        for (track, size) in zip(tracks.prefix(2), sizes) {
+            _ = try await Self.send(dispatcher) {
+                var request = Mozz_V1_EnqueueDownloadRequest()
+                request.serverID = track.serverId
+                request.remoteID = track.remoteId
+                $0.enqueueDownload = request
+            }
+            _ = try await Self.send(dispatcher) {
+                var request = Mozz_V1_CompleteDownloadRequest()
+                request.serverID = track.serverId
+                request.remoteID = track.remoteId
+                request.localPath = "downloads/\(track.remoteId).flac"
+                request.sizeBytes = size
+                $0.completeDownload = request
+            }
+        }
+        // …and one merely queued, which must not count toward storage.
+        _ = try await Self.send(dispatcher) {
+            var request = Mozz_V1_EnqueueDownloadRequest()
+            request.serverID = tracks[2].serverId
+            request.remoteID = tracks[2].remoteId
+            $0.enqueueDownload = request
+        }
+
+        let usage = try await Self.send(dispatcher) {
+            $0.storageUsage = Mozz_V1_StorageUsageRequest()
+        }
+        guard case .storageUsage(let payload) = usage.result else {
+            Issue.record("expected storageUsage, got \(String(describing: usage.result))")
+            return
+        }
+        #expect(payload.downloadedTrackCount == 2)
+        #expect(payload.totalBytes == 4000)
+    }
+
+    /// The request id is echoed on a download command's response, the same as
+    /// every other path, so a caller can pair concurrent requests.
+    @Test func theRequestIdComesBackOnDownloadCommands() async throws {
+        let (dispatcher, repository) = try await Self.downloadFixture()
+        let track = try #require(try await Self.someTracks(repository, 1).first)
+
+        var request = Mozz_V1_Request()
+        request.id = 77_042
+        request.enqueueDownload = {
+            var enqueue = Mozz_V1_EnqueueDownloadRequest()
+            enqueue.serverID = track.serverId
+            enqueue.remoteID = track.remoteId
+            return enqueue
+        }()
+
+        let bytes = await dispatcher.handle(try request.serializedData())
+        let response = try Mozz_V1_Response(serializedBytes: bytes)
+        #expect(response.id == 77_042)
+    }
+
+    // MARK: Enrichment
+    //
+    // Lyrics, canonical recording identity, and similar tracks over the same
+    // bytes-in/bytes-out surface — the features that used to reach only the Apple
+    // shell. The load-bearing property is the lyrics status: absent, not-fetched,
+    // and failed are three different answers, and a shell that can't tell them
+    // apart is the exact bug where a panel shows nothing and never retries.
+
+    /// The seed/owned-track MBIDs, deliberately distinct raw vs canonical so a
+    /// test can't pass by confusing one for the other.
+    private static let rawL  = "aaaaaaa1-0000-4000-8000-0000000000a1"
+    private static let canL  = "caaaaaa1-0000-4000-8000-0000000000c1"
+    private static let rawB2 = "bbbbbbb2-0000-4000-8000-0000000000b2"
+    private static let canB2 = "cbbbbbb2-0000-4000-8000-0000000000c2"
+    private static let rawC3 = "ccccccc3-0000-4000-8000-0000000000c3"
+    private static let canC3 = "ccccccc3-0000-4000-8000-0000000000d3"
+    private static let artistMbid = "a4715555-0000-4000-8000-000000000a55"
+
+    private struct EnrichmentFixture {
+        let dispatcher: CommandDispatcher
+        let writer: CatalogWriter
+        let store: EnrichmentStore
+        let memo: LyricsMemoCache
+        let disk: LyricsDiskCache
+        let offline: LyricsDiskCache
+    }
+
+    /// A fixture over one real database, sharing it between the catalog writer,
+    /// the enrichment store, and the command service, so a seed is visible to the
+    /// next command — the download tests use the same shared-DB shape.
+    private static func enrichmentFixture() async throws -> EnrichmentFixture {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("commands-enrich-\(UUID().uuidString).sqlite")
+        let db = try MusicDatabase.open(at: url)
+        let writer = CatalogWriter(db)
+        try await writer.saveServer(ServerConnection(
+            id: "srv1", kind: .plex, name: "T",
+            baseURL: URL(string: "https://x.local")!, userID: nil, clientIdentifier: "c1"))
+        let repository = LibraryRepository(db)
+        let store = EnrichmentStore(db)
+
+        let diskDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let offlineDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: diskDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: offlineDir, withIntermediateDirectories: true)
+        // Fresh caches AND fresh backoffs: the service reads process-wide statics
+        // by default, so a test must inject its own to stay isolated and to keep
+        // the resolve gate open (a fresh NetworkBackoff attempts).
+        let memo = LyricsMemoCache(limit: 32)
+        let disk = LyricsDiskCache(directory: diskDir)
+        let offline = LyricsDiskCache(directory: offlineDir)
+        let lyricsService = LyricsService(
+            memo: memo, disk: disk, offline: offline,
+            lrclibBackoff: NetworkBackoff(), serverBackoff: NetworkBackoff())
+
+        let service = LibraryCommandService(
+            repository: repository,
+            playbackSettings: PlaybackSettingsStore(try MusicDatabase.inMemory()),
+            downloads: DownloadStore(try MusicDatabase.inMemory()),
+            lyricsService: lyricsService, enrichmentStore: store)
+        return EnrichmentFixture(
+            dispatcher: CommandDispatcher(service: service),
+            writer: writer, store: store, memo: memo, disk: disk, offline: offline)
+    }
+
+    /// The lyrics cache key for an owned track with no backend — just the remote
+    /// id, since `Track.id` is the remote id and there is no connection id.
+    private static func lyricsKey(_ remoteId: String) -> String {
+        LyricsCacheKey.make(trackID: remoteId, connectionID: nil)
+    }
+
+    private static func lyricsResponse(
+        _ fx: EnrichmentFixture, remoteId: String,
+        resolve: Bool = false, useOnlineLookup: Bool = false
+    ) async throws -> Mozz_V1_Response {
+        try await send(fx.dispatcher) {
+            var request = Mozz_V1_LyricsRequest()
+            request.serverID = "srv1"
+            request.remoteID = remoteId
+            request.resolve = resolve
+            request.useOnlineLookup = useOnlineLookup
+            $0.lyrics = request
+        }
+    }
+
+    // MARK: Lyrics
+
+    @Test func lyricsUnknownTrackIsAFailure() async throws {
+        let fx = try await Self.enrichmentFixture()
+        let response = try await Self.lyricsResponse(fx, remoteId: "ghost")
+        guard case .failure(let failure) = response.result else {
+            Issue.record("lyrics for a track the catalog never saw must fail, not answer emptily")
+            return
+        }
+        #expect(failure.message.contains("ghost"))
+    }
+
+    /// A cache-only read of a track nobody has resolved is NOT_FETCHED — the one
+    /// answer resolve can never give, and the whole reason cache-only mode exists.
+    @Test func lyricsCacheOnlyMissIsNotFetched() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Ordinary Song", artistName: "An Artist")], serverId: "srv1")
+        let response = try await Self.lyricsResponse(fx, remoteId: "tL")
+        guard case .lyrics(let payload) = response.result else {
+            Issue.record("expected lyrics, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .notFetched)
+        #expect(!payload.hasLyrics)
+    }
+
+    @Test func lyricsCacheOnlyPositiveIsPresent() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Ordinary Song", artistName: "An Artist")], serverId: "srv1")
+        let lyrics = Lyrics(lines: [LyricLine(text: "first line", start: 0.5),
+                                    LyricLine(text: "second line", start: 1.0)])
+        await fx.memo.set(lyrics, for: Self.lyricsKey("tL"))
+
+        let response = try await Self.lyricsResponse(fx, remoteId: "tL")
+        guard case .lyrics(let payload) = response.result else {
+            Issue.record("expected lyrics, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .present)
+        #expect(payload.lyrics.lines.count == 2)
+        #expect(payload.lyrics.lines.first?.text == "first line")
+        #expect(payload.lyrics.isSynced)
+    }
+
+    /// A persisted negative reads back as ABSENT ("we asked, there are none"),
+    /// distinct from the NOT_FETCHED of an untouched track above.
+    @Test func lyricsCacheOnlyPersistedNegativeIsAbsent() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Ordinary Song", artistName: "An Artist")], serverId: "srv1")
+        await fx.disk.store(nil, for: Self.lyricsKey("tL"))
+
+        let response = try await Self.lyricsResponse(fx, remoteId: "tL")
+        guard case .lyrics(let payload) = response.result else {
+            Issue.record("expected lyrics, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .absent)
+        #expect(!payload.hasLyrics)
+    }
+
+    /// resolve mode returns a cached positive without any network — proving the
+    /// caches are consulted first.
+    @Test func lyricsResolveReturnsCachedPositive() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Ordinary Song", artistName: "An Artist")], serverId: "srv1")
+        let lyrics = Lyrics(lines: [LyricLine(text: "cached words", start: 2.0)])
+        await fx.disk.store(lyrics, for: Self.lyricsKey("tL"))
+
+        let response = try await Self.lyricsResponse(fx, remoteId: "tL", resolve: true)
+        guard case .lyrics(let payload) = response.result else {
+            Issue.record("expected lyrics, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .present)
+        #expect(payload.lyrics.lines.first?.text == "cached words")
+    }
+
+    /// resolve over a persisted authoritative negative is ABSENT, recovered via
+    /// the follow-up cache read (resolve alone stays silent for both absent and
+    /// failed).
+    @Test func lyricsResolveAuthoritativeNegativeIsAbsent() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Ordinary Song", artistName: "An Artist")], serverId: "srv1")
+        await fx.disk.store(nil, for: Self.lyricsKey("tL"))
+
+        let response = try await Self.lyricsResponse(fx, remoteId: "tL", resolve: true)
+        guard case .lyrics(let payload) = response.result else {
+            Issue.record("expected lyrics, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .absent)
+    }
+
+    /// resolve with nothing cached, online lookup off, and no reachable backend:
+    /// the negative is not authoritative, so it is FAILED (retry), NOT absent. The
+    /// follow-up cache read is a miss because resolve refused to persist an
+    /// untrusted negative.
+    @Test func lyricsResolveTransientIsFailed() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Ordinary Song", artistName: "An Artist")], serverId: "srv1")
+
+        let response = try await Self.lyricsResponse(
+            fx, remoteId: "tL", resolve: true, useOnlineLookup: false)
+        guard case .lyrics(let payload) = response.result else {
+            Issue.record("expected lyrics, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .failed)
+        #expect(!payload.hasLyrics)
+    }
+
+    // MARK: Recording identity
+
+    @Test func recordingIdentityResolvedCarriesRawCanonicalAndArtist() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Song", artistName: "AA",
+                   mbid: Self.rawL, artistMbid: Self.artistMbid)], serverId: "srv1")
+        try await fx.store.setCanonical(mbid: Self.rawL, canonical: Self.canL, at: 100)
+
+        let response = try await Self.send(fx.dispatcher) {
+            var request = Mozz_V1_RecordingIdentityRequest()
+            request.serverID = "srv1"
+            request.remoteID = "tL"
+            $0.recordingIdentity = request
+        }
+        guard case .recordingIdentity(let payload) = response.result else {
+            Issue.record("expected recordingIdentity, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .resolved)
+        #expect(payload.recordingMbid == Self.rawL)
+        #expect(payload.canonicalRecordingMbid == Self.canL)
+        #expect(payload.artistMbid == Self.artistMbid)
+    }
+
+    @Test func recordingIdentityUnmatchedAfterNotFoundLookup() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tU", title: "Obscure", artistName: "Nobody")], serverId: "srv1")
+        // A name-search that found nothing writes the authoritative notfound.
+        try await fx.store.recordTrackResolution(
+            trackRef: PlayEventStore.trackRef(serverId: "srv1", remoteId: "tU"),
+            mbid: nil, artistMbid: nil, at: 100)
+
+        let response = try await Self.send(fx.dispatcher) {
+            var request = Mozz_V1_RecordingIdentityRequest()
+            request.serverID = "srv1"
+            request.remoteID = "tU"
+            $0.recordingIdentity = request
+        }
+        guard case .recordingIdentity(let payload) = response.result else {
+            Issue.record("expected recordingIdentity, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.status == .unmatched)
+        #expect(!payload.hasRecordingMbid)
+    }
+
+    /// Both an un-looked-up track and a track the catalog never saw read as
+    /// NOT_RESOLVED — a pollable "not yet", never an error.
+    @Test func recordingIdentityNotResolvedForUnlookedAndUnknown() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tN", title: "Fresh", artistName: "AA")], serverId: "srv1")
+
+        for remoteId in ["tN", "ghost"] {
+            let response = try await Self.send(fx.dispatcher) {
+                var request = Mozz_V1_RecordingIdentityRequest()
+                request.serverID = "srv1"
+                request.remoteID = remoteId
+                $0.recordingIdentity = request
+            }
+            guard case .recordingIdentity(let payload) = response.result else {
+                Issue.record("expected recordingIdentity for \(remoteId), got \(String(describing: response.result))")
+                return
+            }
+            #expect(payload.status == .notResolved)
+        }
+    }
+
+    // MARK: Similar tracks
+
+    @Test func similarTracksRankedHydratedAndScored() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks([
+            Track(id: "tL", title: "Seed", artistName: "AA", mbid: Self.rawL),
+            Track(id: "tB", title: "Near", artistName: "BB", mbid: Self.rawB2),
+            Track(id: "tC", title: "Far", artistName: "CC", mbid: Self.rawC3),
+        ], serverId: "srv1")
+        try await fx.store.setCanonical(mbid: Self.rawL, canonical: Self.canL, at: 100)
+        try await fx.store.setCanonical(mbid: Self.rawB2, canonical: Self.canB2, at: 100)
+        try await fx.store.setCanonical(mbid: Self.rawC3, canonical: Self.canC3, at: 100)
+        // Similar rows are keyed by the SEED's canonical MBID; the default
+        // algorithm is what the FFI wires, so seed under it.
+        try await fx.store.replaceSimilarRecordings(
+            sourceMbid: Self.canL, algorithm: EnrichmentConfig.defaultListenBrainzAlgorithm,
+            pairs: [(Self.canB2, 0.9), (Self.canC3, 0.5)], at: 500)
+
+        let response = try await Self.send(fx.dispatcher) {
+            var request = Mozz_V1_SimilarTracksRequest()
+            request.serverID = "srv1"
+            request.remoteID = "tL"
+            request.limit = 10
+            $0.similarTracks = request
+        }
+        guard case .similarTracks(let payload) = response.result else {
+            Issue.record("expected similarTracks, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.tracks.count == 2)
+        #expect(payload.tracks.map(\.track.remoteID) == ["tB", "tC"])   // ranked by score
+        #expect(payload.tracks.first?.track.title == "Near")            // full metadata hydrated
+        #expect(payload.tracks.first?.score == 0.9)
+        #expect(payload.tracks.last?.score == 0.5)
+    }
+
+    /// No canonical MBID yet → an empty set, not an error: similarity is keyed by
+    /// the canonical, which canonicalization has not produced. Mirrors the app.
+    @Test func similarTracksEmptyWithoutCanonical() async throws {
+        let fx = try await Self.enrichmentFixture()
+        try await fx.writer.upsertTracks(
+            [Track(id: "tL", title: "Seed", artistName: "AA", mbid: Self.rawL)], serverId: "srv1")
+        // Embedded MBID present, but setCanonical never ran.
+
+        let response = try await Self.send(fx.dispatcher) {
+            var request = Mozz_V1_SimilarTracksRequest()
+            request.serverID = "srv1"
+            request.remoteID = "tL"
+            request.limit = 10
+            $0.similarTracks = request
+        }
+        guard case .similarTracks(let payload) = response.result else {
+            Issue.record("expected similarTracks, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.tracks.isEmpty)
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import MozzCommands
 import MozzDatabase
+import MozzEnrichment
 
 // The schema-generated command surface, over the C ABI.
 //
@@ -44,10 +45,19 @@ public func mozz_session_invoke(
     }
 
     let bytes = Data(UnsafeBufferPointer(start: request, count: Int(requestLength)))
+    // Capture the enrichment seams as locals so the backend resolver is a small,
+    // Sendable closure over the backend table rather than the whole session.
+    let backends = session.backends
     let dispatcher = CommandDispatcher(
         service: LibraryCommandService(
             repository: session.repository,
-            playbackSettings: PlaybackSettingsStore(session.database)))
+            playbackSettings: PlaybackSettingsStore(session.database),
+            downloads: DownloadStore(session.database),
+            artwork: session.artworkStore,
+            lyricsService: session.lyrics,
+            enrichmentStore: EnrichmentStore(session.database),
+            backendResolver: { backends.backend($0) },
+            similarityAlgorithm: EnrichmentConfig.defaultListenBrainzAlgorithm))
 
     // `handle` is synchronous by design — see the note on `mozz_session_call`.
     // A host calling across a C ABI has no async to await into, so the bridge

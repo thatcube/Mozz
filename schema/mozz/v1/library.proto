@@ -256,6 +256,233 @@ message SetPlaybackSettingsResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Artwork
+//
+// The bytes of a cover, fetched and cached by the core so every shell stops
+// solving that once each. The reference is resolved against the attached
+// backend, downloaded, and kept on disk under a byte budget; the shell only
+// decodes the bytes into whatever it draws.
+//
+// This is the one command whose response carries a `bytes` field, and the
+// reason binary commands need `mozz_session_invoke` rather than the JSON
+// C-string door: an encoded image contains 0x00 freely, and a C string ends at
+// the first one.
+// ---------------------------------------------------------------------------
+
+message ArtworkRequest {
+  string server_id = 1;
+  // The backend-private artwork reference from a list row (AlbumSummary,
+  // Artist, TrackSummary all carry `artwork_key`). Never a URL and never a
+  // token; the core resolves it against the backend at fetch time.
+  string artwork_key = 2;
+  // The desired pixel size. Part of the cache identity: a wall tile and a
+  // player bar ask for the same cover at different sizes and each is cached
+  // separately, so the server is asked for each at the size it will be drawn.
+  int32 size = 3;
+}
+
+// Which of the three outcomes this response carries. The distinction is
+// load-bearing, not cosmetic: ABSENT is remembered by the core and not
+// re-asked, UNAVAILABLE is a transient failure the caller should retry later,
+// and confusing the two is the exact bug the desktop's
+// ArtworkUnavailableException exists to prevent.
+enum ArtworkStatus {
+  ARTWORK_STATUS_UNSPECIFIED = 0;
+  // The bytes are in `data`.
+  ARTWORK_STATUS_PRESENT = 1;
+  // The server was asked and has no cover for this reference.
+  ARTWORK_STATUS_ABSENT = 2;
+  // Not available right now — still attaching, a timeout, briefly unreachable.
+  // Says nothing about whether the cover exists; ask again later.
+  ARTWORK_STATUS_UNAVAILABLE = 3;
+}
+
+message ArtworkResponse {
+  ArtworkStatus status = 1;
+  // The raw encoded image, present only when status is PRESENT. May contain
+  // 0x00, which is why artwork travels over the length-delimited invoke path
+  // and never a C string.
+  bytes data = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Downloads
+//
+// Offline downloads exist in the core (MozzDownloads) but had no command, so
+// only the Apple shell — which calls the module directly — could reach them.
+// The desktop, and any future shell, therefore had no download capability at
+// all. These commands close that gap.
+//
+// The split follows the core/shell line: downloading is a *decision* — what to
+// fetch, what counts as complete, what a failure is, how progress is reported —
+// and that decision lives here, keyed to the source-of-truth download record.
+// Only the byte transfer and the file write stay in the shell, which reports
+// back through ReportDownloadProgress / CompleteDownload / FailDownload so the
+// one durable record reflects reality on every platform.
+//
+// Progress is polled, not pushed. A download is long-running but the command
+// surface is request/response, and the one push channel this schema defines
+// (WatchLibrary/Event, below) is declared but not yet implemented — its own
+// doc even names "a download completing" as a trigger it will eventually carry.
+// Until it is wired, DownloadStatus and Downloads are pollable queries whose
+// byte counters a client reads on a timer, which is exactly how the Apple
+// Downloads and album-detail screens already refresh today.
+// ---------------------------------------------------------------------------
+
+// The lifecycle state of one track's offline download, mirroring the core's
+// DownloadState. The absence of a record means "not downloaded", so a status
+// query for an untracked track answers with UNSPECIFIED rather than an error.
+enum DownloadState {
+  // No download record exists for the track — it is not downloaded.
+  DOWNLOAD_STATE_UNSPECIFIED = 0;
+  // Requested, waiting for the shell to transfer it.
+  DOWNLOAD_STATE_QUEUED = 1;
+  // The shell is actively transferring bytes.
+  DOWNLOAD_STATE_DOWNLOADING = 2;
+  // Fully downloaded and available offline.
+  DOWNLOAD_STATE_DOWNLOADED = 3;
+  // The transfer failed; error_message on the record explains why.
+  DOWNLOAD_STATE_FAILED = 4;
+}
+
+// The core's durable record of one offline download. It carries both the
+// catalog's internal id and the (server_id, remote_id) every other command
+// addresses a track by, so a shell can act on a listed download the same way it
+// addresses everything else. Progress travels as received/total bytes — a
+// client computes any fraction — because there is no fraction stored, only the
+// counters the transfer reports.
+message Download {
+  // The owning track's internal catalog id.
+  int64 track_id = 1;
+  string server_id = 2;
+  string remote_id = 3;
+  DownloadState state = 4;
+  // Bytes transferred so far, and the final size once complete.
+  int64 received_bytes = 5;
+  // The expected total, when the transfer knows it.
+  optional int64 total_bytes = 6;
+  // Where the file lives, relative to the shell's downloads root, once complete.
+  // The layout is a portable decision (all platforms lay files out the same);
+  // the absolute root is the shell's.
+  optional string local_path = 7;
+  optional string error_message = 8;
+  // Unix seconds when the download was first requested.
+  double requested_at = 9;
+  // Unix seconds when it completed, when it has.
+  optional double completed_at = 10;
+}
+
+// Record the intent to download a track offline. The core marks it queued; the
+// shell then performs the actual transfer and reports back with the commands
+// below. Idempotent: enqueuing an already-tracked download returns its current
+// record rather than resetting it.
+message EnqueueDownloadRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message EnqueueDownloadResponse {
+  Download download = 1;
+}
+
+// The shell reports transfer progress. The first report moves the download from
+// queued to downloading; each updates the byte counters the status query reads.
+message ReportDownloadProgressRequest {
+  string server_id = 1;
+  string remote_id = 2;
+  int64 received_bytes = 3;
+  optional int64 total_bytes = 4;
+}
+
+message ReportDownloadProgressResponse {
+  Download download = 1;
+}
+
+// The shell finished writing the file and hands the core what it needs to make
+// the track playable offline: where the file landed (relative to the downloads
+// root) and its final size. The core records completion — deciding, for every
+// platform in one place, what "complete" means.
+message CompleteDownloadRequest {
+  string server_id = 1;
+  string remote_id = 2;
+  string local_path = 3;
+  int64 size_bytes = 4;
+}
+
+message CompleteDownloadResponse {
+  Download download = 1;
+}
+
+// The shell's transfer failed. The reason is recorded so the status query — and
+// a person looking at a stalled download — can say why.
+message FailDownloadRequest {
+  string server_id = 1;
+  string remote_id = 2;
+  string message = 3;
+}
+
+message FailDownloadResponse {
+  Download download = 1;
+}
+
+// Cancel a queued or in-flight download. The shell stops its own transfer; the
+// core records the cancellation. This mirrors DownloadManager.cancel, which
+// records a cancellation through the same path a failure takes.
+message CancelDownloadRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message CancelDownloadResponse {
+  Download download = 1;
+}
+
+// Delete a download. The core removes its record and returns the file's former
+// relative path, so the shell can delete the bytes it owns on disk — the core
+// owns the record, the shell owns the file.
+message DeleteDownloadRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message DeleteDownloadResponse {
+  // Absent when there was no record to delete, or it had no file yet.
+  optional string removed_local_path = 1;
+}
+
+// The current download state for one track. An absent `download` means the core
+// has no record for it — "not downloaded" — which is the sane answer for an
+// unknown or never-downloaded track rather than an error.
+message DownloadStatusRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message DownloadStatusResponse {
+  optional Download download = 1;
+}
+
+// Every download the core knows about, optionally narrowed to certain states.
+// The pollable list a downloads screen renders and a queue drainer walks. An
+// empty `states` means every state.
+message DownloadsRequest {
+  repeated DownloadState states = 1;
+}
+
+message DownloadsResponse {
+  repeated Download downloads = 1;
+}
+
+// How much space completed downloads use, for a storage screen. The two numbers
+// travel together because callers present them together.
+message StorageUsageRequest {}
+
+message StorageUsageResponse {
+  int32 downloaded_track_count = 1;
+  int64 total_bytes = 2;
+}
+
+// ---------------------------------------------------------------------------
 // Subscriptions
 //
 // The reason these are first-class rather than bolted on: SwiftUI views observe
@@ -289,6 +516,139 @@ message LibraryChanged {
 }
 
 // ---------------------------------------------------------------------------
+// Enrichment
+//
+// The features that make Mozz more than a file browser — a track's lyrics, its
+// canonical MusicBrainz recording identity, and the owned tracks similar to it.
+// These were reachable only from the Apple app because they had no command on
+// this surface, so every other shell saw a library missing them. They are core
+// behaviour, not shell behaviour: what counts as the same recording, and which
+// tracks are similar, must be one answer on every platform or the same library
+// looks like two different libraries. So they live behind this one surface like
+// everything else.
+// ---------------------------------------------------------------------------
+
+// A single line of lyrics. `start_seconds` is absent for unsynced (plain-text)
+// lyrics; any line carrying a timestamp marks the whole set as synced.
+message LyricLine {
+  string text = 1;
+  optional double start_seconds = 2;
+}
+
+// A track's lyrics: an ordered list of lines plus an attribution. `source` is a
+// stable token ("jellyfin"/"plex"/"subsonic"/"lrclib"); `source_display_name`
+// is the human-facing label. Both are absent when the source is unknown.
+message Lyrics {
+  repeated LyricLine lines = 1;
+  optional string source = 2;
+  optional string source_display_name = 3;
+  bool is_synced = 4;
+}
+
+message LyricsRequest {
+  string server_id = 1;
+  string remote_id = 2;
+  // false (the default) reads only the caches: fast, network-free, and the ONLY
+  // mode that can answer NOT_FETCHED. true runs the full server + LRCLIB
+  // resolution, which answers PRESENT/ABSENT/FAILED but never NOT_FETCHED. A
+  // shell mirrors the Apple app by asking cache-only first and, only on
+  // NOT_FETCHED, asking again with resolve=true.
+  bool resolve = 3;
+  // The user's "look up lyrics online" preference. Consulted only when resolve
+  // is true; LRCLIB is the keyless public fallback for when the server has none.
+  bool use_online_lookup = 4;
+  // The user explicitly asked for lyrics right now, so the resolve ignores the
+  // bad-network backoff. Consulted only when resolve is true.
+  bool user_initiated = 5;
+}
+
+// Which of four outcomes a lyrics answer carries. The distinction is
+// load-bearing, not cosmetic: ABSENT is a definitive "there are none" the caller
+// can stop asking about, NOT_FETCHED means nothing has been looked up yet, and
+// FAILED is a resolve that could not trust its negative. Collapsing them is the
+// exact bug where a panel shows nothing and never retries.
+enum LyricsStatus {
+  LYRICS_STATUS_UNSPECIFIED = 0;
+  // The lyrics are in `lyrics`.
+  LYRICS_STATUS_PRESENT = 1;
+  // A source was consulted and authoritatively has none (including a title that
+  // says it is instrumental). Stop asking.
+  LYRICS_STATUS_ABSENT = 2;
+  // Nothing has been fetched yet — no cache holds an answer. Ask again with
+  // resolve=true. Only a cache-only read (resolve=false) can return this.
+  LYRICS_STATUS_NOT_FETCHED = 3;
+  // A resolve was attempted but no source could be trusted — offline, throttled,
+  // or a needed source unreachable. The negative is NOT authoritative; retry
+  // later. Only a resolving read (resolve=true) can return this.
+  LYRICS_STATUS_FAILED = 4;
+}
+
+message LyricsResponse {
+  LyricsStatus status = 1;
+  // Present only when status is PRESENT.
+  optional Lyrics lyrics = 2;
+}
+
+// The canonical MusicBrainz recording identity of a track — the fact that
+// decides whether two files are "the same recording". A pure read of what the
+// enrichment passes have already resolved into the local database; it is never
+// itself a network lookup.
+message RecordingIdentityRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+// Three outcomes, mirroring lyrics' present/absent/not-yet. There is deliberately
+// no FAILED: the store persists only a definitive found/notfound, so a transient
+// resolution error leaves no trace and is indistinguishable from "never looked
+// up" — both read as NOT_RESOLVED. That is reported honestly rather than a
+// fourth state invented that the data cannot support.
+enum RecordingIdentityStatus {
+  RECORDING_IDENTITY_STATUS_UNSPECIFIED = 0;
+  // A recording MBID is known (in `recording_mbid`), from an embedded tag or a
+  // name-search hit.
+  RECORDING_IDENTITY_STATUS_RESOLVED = 1;
+  // A lookup ran and MusicBrainz has no match — the authoritative negative.
+  RECORDING_IDENTITY_STATUS_UNMATCHED = 2;
+  // Not looked up yet, or a transient failure the store does not record.
+  RECORDING_IDENTITY_STATUS_NOT_RESOLVED = 3;
+}
+
+message RecordingIdentityResponse {
+  RecordingIdentityStatus status = 1;
+  // The recording MBID, present when status is RESOLVED.
+  optional string recording_mbid = 2;
+  // The canonical recording MBID — the representative of the set of MBIDs that
+  // are the same recording. Absent until canonicalization runs; until then the
+  // raw recording_mbid stands in for it.
+  optional string canonical_recording_mbid = 3;
+  // The recording's artist MBID, when known.
+  optional string artist_mbid = 4;
+}
+
+// One owned library track surfaced as similar to a seed track, with its
+// aggregate similarity score. The track carries the same full metadata as any
+// other listing row so a shell can render and play it without a second lookup.
+message SimilarTrack {
+  TrackSummary track = 1;
+  double score = 2;
+}
+
+message SimilarTracksRequest {
+  string server_id = 1;
+  string remote_id = 2;
+  // Upper bound on how many similar tracks to return.
+  int32 limit = 3;
+}
+
+// Deliberately unpaged: the similar set is bounded by the similarity fetch
+// (~50 per seed), so it is a bounded detail shelf like ArtistAlbums rather than
+// a full-library listing that needs a cursor.
+message SimilarTracksResponse {
+  repeated SimilarTrack tracks = 1;
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 //
 // One envelope in, one envelope out. The oneof is what closes the loop: adding
@@ -313,6 +673,19 @@ message Request {
     CountsRequest counts = 19;
     GetPlaybackSettingsRequest get_playback_settings = 20;
     SetPlaybackSettingsRequest set_playback_settings = 21;
+    ArtworkRequest artwork = 22;
+    EnqueueDownloadRequest enqueue_download = 23;
+    ReportDownloadProgressRequest report_download_progress = 24;
+    CompleteDownloadRequest complete_download = 25;
+    FailDownloadRequest fail_download = 26;
+    CancelDownloadRequest cancel_download = 27;
+    DeleteDownloadRequest delete_download = 28;
+    DownloadStatusRequest download_status = 29;
+    DownloadsRequest downloads = 30;
+    StorageUsageRequest storage_usage = 31;
+    LyricsRequest lyrics = 32;
+    RecordingIdentityRequest recording_identity = 33;
+    SimilarTracksRequest similar_tracks = 34;
   }
 }
 
@@ -337,6 +710,19 @@ message Response {
     CountsResponse counts = 19;
     GetPlaybackSettingsResponse get_playback_settings = 20;
     SetPlaybackSettingsResponse set_playback_settings = 21;
+    ArtworkResponse artwork = 22;
+    EnqueueDownloadResponse enqueue_download = 23;
+    ReportDownloadProgressResponse report_download_progress = 24;
+    CompleteDownloadResponse complete_download = 25;
+    FailDownloadResponse fail_download = 26;
+    CancelDownloadResponse cancel_download = 27;
+    DeleteDownloadResponse delete_download = 28;
+    DownloadStatusResponse download_status = 29;
+    DownloadsResponse downloads = 30;
+    StorageUsageResponse storage_usage = 31;
+    LyricsResponse lyrics = 32;
+    RecordingIdentityResponse recording_identity = 33;
+    SimilarTracksResponse similar_tracks = 34;
   }
 }
 

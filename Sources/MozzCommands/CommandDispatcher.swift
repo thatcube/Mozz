@@ -188,6 +188,156 @@ public struct CommandDispatcher: Sendable {
             payload.settings = Self.wire(stored)
             return Self.response(id: request.id) { $0.setPlaybackSettings = payload }
 
+        case .artwork(let arguments):
+            let outcome = await service.artwork(
+                serverId: ServerID(arguments.serverID),
+                artworkKey: arguments.artworkKey,
+                size: Int(arguments.size)
+            )
+            var payload = Mozz_V1_ArtworkResponse()
+            switch outcome {
+            case .bytes(let data):
+                payload.status = .present
+                payload.data = data
+            case .absent:
+                payload.status = .absent
+            case .unavailable:
+                payload.status = .unavailable
+            }
+            return Self.response(id: request.id) { $0.artwork = payload }
+
+        // MARK: Downloads
+        //
+        // Every mutating case addresses a track by (server, remote) and echoes
+        // those ids straight back onto the wire Download, since the record is
+        // keyed only by internal id and the caller thinks in remote ids.
+
+        case .enqueueDownload(let arguments):
+            let record = try await service.enqueueDownload(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            var payload = Mozz_V1_EnqueueDownloadResponse()
+            payload.download = Self.wire(record, serverId: arguments.serverID, remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.enqueueDownload = payload }
+
+        case .reportDownloadProgress(let arguments):
+            let record = try await service.reportDownloadProgress(
+                serverId: ServerID(arguments.serverID),
+                remoteId: arguments.remoteID,
+                receivedBytes: arguments.receivedBytes,
+                totalBytes: arguments.hasTotalBytes ? arguments.totalBytes : nil)
+            var payload = Mozz_V1_ReportDownloadProgressResponse()
+            payload.download = Self.wire(record, serverId: arguments.serverID, remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.reportDownloadProgress = payload }
+
+        case .completeDownload(let arguments):
+            let record = try await service.completeDownload(
+                serverId: ServerID(arguments.serverID),
+                remoteId: arguments.remoteID,
+                localPath: arguments.localPath,
+                sizeBytes: arguments.sizeBytes)
+            var payload = Mozz_V1_CompleteDownloadResponse()
+            payload.download = Self.wire(record, serverId: arguments.serverID, remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.completeDownload = payload }
+
+        case .failDownload(let arguments):
+            let record = try await service.failDownload(
+                serverId: ServerID(arguments.serverID),
+                remoteId: arguments.remoteID,
+                message: arguments.message)
+            var payload = Mozz_V1_FailDownloadResponse()
+            payload.download = Self.wire(record, serverId: arguments.serverID, remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.failDownload = payload }
+
+        case .cancelDownload(let arguments):
+            let record = try await service.cancelDownload(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            var payload = Mozz_V1_CancelDownloadResponse()
+            payload.download = Self.wire(record, serverId: arguments.serverID, remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.cancelDownload = payload }
+
+        case .deleteDownload(let arguments):
+            let removed = try await service.deleteDownload(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            var payload = Mozz_V1_DeleteDownloadResponse()
+            if let removed { payload.removedLocalPath = removed }
+            return Self.response(id: request.id) { $0.deleteDownload = payload }
+
+        case .downloadStatus(let arguments):
+            let record = try await service.downloadStatus(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            var payload = Mozz_V1_DownloadStatusResponse()
+            // Absent record = "not downloaded"; the optional field is simply left
+            // unset rather than filled with an invented empty download.
+            if let record {
+                payload.download = Self.wire(
+                    record, serverId: arguments.serverID, remoteId: arguments.remoteID)
+            }
+            return Self.response(id: request.id) { $0.downloadStatus = payload }
+
+        case .downloads(let arguments):
+            let downloads = try await service.downloads(in: Self.downloadStates(arguments.states))
+            var payload = Mozz_V1_DownloadsResponse()
+            payload.downloads = downloads.map {
+                Self.wire($0.record, serverId: $0.serverId, remoteId: $0.remoteId)
+            }
+            return Self.response(id: request.id) { $0.downloads = payload }
+
+        case .storageUsage:
+            let usage = try await service.storageUsage()
+            var payload = Mozz_V1_StorageUsageResponse()
+            payload.downloadedTrackCount = Int32(usage.downloadedTrackCount)
+            payload.totalBytes = usage.totalBytes
+            return Self.response(id: request.id) { $0.storageUsage = payload }
+
+        case .lyrics(let arguments):
+            let availability = try await service.lyrics(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID,
+                resolve: arguments.resolve, useOnlineLookup: arguments.useOnlineLookup,
+                userInitiated: arguments.userInitiated)
+            var payload = Mozz_V1_LyricsResponse()
+            switch availability {
+            case .present(let lyrics):
+                payload.status = .present
+                payload.lyrics = Self.wire(lyrics)
+            case .absent:
+                payload.status = .absent
+            case .notFetched:
+                payload.status = .notFetched
+            case .failed:
+                payload.status = .failed
+            }
+            return Self.response(id: request.id) { $0.lyrics = payload }
+
+        case .recordingIdentity(let arguments):
+            let identity = try await service.recordingIdentity(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            var payload = Mozz_V1_RecordingIdentityResponse()
+            switch identity {
+            case .resolved(let recordingMbid, let canonical, let artist):
+                payload.status = .resolved
+                payload.recordingMbid = recordingMbid
+                if let canonical { payload.canonicalRecordingMbid = canonical }
+                if let artist { payload.artistMbid = artist }
+            case .unmatched:
+                payload.status = .unmatched
+            case .notResolved:
+                payload.status = .notResolved
+            }
+            return Self.response(id: request.id) { $0.recordingIdentity = payload }
+
+        case .similarTracks(let arguments):
+            let scored = try await service.similarTracks(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID,
+                limit: Int(arguments.limit))
+            var payload = Mozz_V1_SimilarTracksResponse()
+            payload.tracks = scored.map {
+                var similar = Mozz_V1_SimilarTrack()
+                similar.track = Self.wire($0.track)
+                similar.score = $0.score
+                return similar
+            }
+            return Self.response(id: request.id) { $0.similarTracks = payload }
+
         case .watchLibrary:
             // Declared in the schema before it is implemented, deliberately: the
             // shape of a subscription had to be settled while the wire format
@@ -295,6 +445,79 @@ public struct CommandDispatcher: Sendable {
         if let addedAt = track.addedAt { summary.addedAt = addedAt }
         if let gain = track.normalizationGainDB { summary.normalizationGainDb = gain }
         return summary
+    }
+
+    // MARK: Enrichment mapping
+
+    /// Domain lyrics → wire. `start_seconds` is set only on lines that carry a
+    /// timestamp (unsynced lines leave it unset); `is_synced` is the domain
+    /// model's own derived flag. The source token and its display name travel
+    /// together, both unset when the source is unknown.
+    private static func wire(_ lyrics: Lyrics) -> Mozz_V1_Lyrics {
+        var wired = Mozz_V1_Lyrics()
+        wired.lines = lyrics.lines.map { line in
+            var wiredLine = Mozz_V1_LyricLine()
+            wiredLine.text = line.text
+            if let start = line.start { wiredLine.startSeconds = start }
+            return wiredLine
+        }
+        if let source = lyrics.source {
+            wired.source = source.rawValue
+            wired.sourceDisplayName = source.displayName
+        }
+        wired.isSynced = lyrics.isSynced
+        return wired
+    }
+
+    // MARK: Download mapping
+
+    /// Core record → wire. The (server, remote) identity is threaded in by the
+    /// caller — the record itself is keyed only by internal id — so a listed or
+    /// queried download arrives on the wire addressable the same way every other
+    /// track is. Progress travels as the raw received/total byte counters; a
+    /// client computes any fraction it wants to draw.
+    private static func wire(
+        _ record: DownloadRecord, serverId: ServerID, remoteId: String
+    ) -> Mozz_V1_Download {
+        var wired = Mozz_V1_Download()
+        wired.trackID = record.trackId
+        wired.serverID = serverId
+        wired.remoteID = remoteId
+        wired.state = wire(record.downloadState)
+        wired.receivedBytes = record.sizeBytes
+        if let totalBytes = record.totalBytes { wired.totalBytes = totalBytes }
+        if let localPath = record.localPath { wired.localPath = localPath }
+        if let errorMessage = record.errorMessage { wired.errorMessage = errorMessage }
+        wired.requestedAt = record.requestedAt
+        if let completedAt = record.completedAt { wired.completedAt = completedAt }
+        return wired
+    }
+
+    /// Core → wire state. A record whose stored string does not parse (a value
+    /// written by a newer build) maps to UNSPECIFIED rather than a wrong case.
+    private static func wire(_ state: DownloadState?) -> Mozz_V1_DownloadState {
+        switch state {
+        case .queued: return .queued
+        case .downloading: return .downloading
+        case .downloaded: return .downloaded
+        case .failed: return .failed
+        case .none: return .unspecified
+        }
+    }
+
+    /// Wire → core states for the list filter. UNSPECIFIED and any unrecognized
+    /// value (from a newer client) are dropped; an empty result means "no
+    /// filter", which the repository reads as every state.
+    private static func downloadStates(_ wire: [Mozz_V1_DownloadState]) -> [DownloadState] {
+        wire.compactMap { state in
+            switch state {
+            case .queued: return .queued
+            case .downloading: return .downloading
+            case .downloaded: return .downloaded
+            case .failed: return .failed
+            case .unspecified, .UNRECOGNIZED: return nil
+            }
+        }
     }
 
     // MARK: Playback settings mapping

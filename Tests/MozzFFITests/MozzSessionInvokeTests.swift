@@ -140,6 +140,47 @@ final class MozzSessionInvokeTests: XCTestCase {
         XCTAssertEqual(Set(seen).count, seen.count, "an album came back twice")
     }
 
+    /// A response carrying a zero byte must survive the crossing too — this is
+    /// the reason artwork travels this door and never the C-string one.
+    ///
+    /// An encoded cover contains 0x00 freely; sent back as a null-terminated
+    /// string it would be truncated at the first one and fail to parse, or worse
+    /// parse into the wrong bytes. Here the store is swapped for one that returns
+    /// a known blob riddled with zeros, and the bytes must come back identical.
+    func testArtworkBytesWithZerosSurviveTheABIRoundTrip() async throws {
+        let path = try makeLibrary()
+        try await seed(path)
+        let handle = mozz_session_open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let payload = Data([0x00, 0x11, 0x00, 0x00, 0xFF, 0x00, 0x7F])
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("invoke-art-\(UUID().uuidString)", isDirectory: true)
+        let session = try XCTUnwrap(SessionRegistry.shared.session(handle))
+        session.artworkStore = ArtworkStore(directory: directory, byteLimit: 1_000_000) { _ in
+            .bytes(payload)
+        }
+
+        var artwork = Mozz_V1_ArtworkRequest()
+        artwork.serverID = SyntheticCatalog.defaultServerID
+        artwork.artworkKey = "cover"
+        artwork.size = 512
+        var request = Mozz_V1_Request()
+        request.id = 21
+        request.artwork = artwork
+
+        let response = try invoke(handle, request)
+
+        XCTAssertEqual(response.id, 21)
+        guard case .artwork(let result) = response.result else {
+            XCTFail("expected artwork, got \(String(describing: response.result))")
+            return
+        }
+        XCTAssertEqual(result.status, .present)
+        XCTAssertEqual(result.data, payload)
+        XCTAssertTrue(result.data.contains(0), "this test is pointless without a zero byte")
+    }
+
     // MARK: Refusing safely
 
     /// A bad handle must answer, not crash. There is no exception to catch on

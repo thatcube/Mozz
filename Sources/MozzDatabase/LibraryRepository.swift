@@ -359,6 +359,26 @@ public struct LibraryRepository: Sendable {
         }
     }
 
+    /// The `TrackRecord`s for `remoteIds`, in exactly that order, skipping any the
+    /// catalog does not have. The record form (not the domain form
+    /// ``tracksForPlayback`` returns) so a caller that needs the full wire summary
+    /// — id, artwork key, favorite, rating — has it without a second fetch. Used to
+    /// hydrate the ranked remote ids that ``EnrichmentStore/similarOwnedTracks``
+    /// yields back into full rows while preserving the similarity order.
+    public func tracks(forRemoteIds remoteIds: [String], serverId: ServerID) async throws -> [TrackRecord] {
+        guard !remoteIds.isEmpty else { return [] }
+        return try await database.read { db in
+            let placeholders = Array(repeating: "?", count: remoteIds.count).joined(separator: ", ")
+            var args: [DatabaseValueConvertible?] = [serverId]
+            args.append(contentsOf: remoteIds)
+            let byId = try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track WHERE serverId = ? AND remoteId IN (\(placeholders))
+                """, arguments: StatementArguments(args))
+                .reduce(into: [String: TrackRecord]()) { $0[$1.remoteId] = $1 }
+            return remoteIds.compactMap { byId[$0] }
+        }
+    }
+
     /// Every track as a domain model, alphabetical (matching ``tracksPage``), for
     /// a "Play/Shuffle all songs" action. The fetch AND the record→domain mapping
     /// run inside the database read (off the main thread), so tapping Play never
@@ -799,6 +819,54 @@ public struct LibraryRepository: Sendable {
                 downloadedTrackCount: row?["c"] ?? 0,
                 totalBytes: row?["b"] ?? 0
             )
+        }
+    }
+
+    /// A download record together with the (server, remote) identity of its
+    /// track. `downloads(in:)` returns the bare record, which is keyed only by
+    /// the internal `trackId`; a cross-platform command surface addresses tracks
+    /// by (server_id, remote_id), so a listable download has to carry that
+    /// identity for a shell to act on it the same way it addresses everything
+    /// else. The two ids live on the `track` row, hence the join.
+    public struct IdentifiedDownload: Sendable {
+        public var record: DownloadRecord
+        public var serverId: ServerID
+        public var remoteId: String
+
+        public init(record: DownloadRecord, serverId: ServerID, remoteId: String) {
+            self.record = record
+            self.serverId = serverId
+            self.remoteId = remoteId
+        }
+    }
+
+    /// Download records in the given states (default: everything), joined to
+    /// their track so each entry carries its (server, remote) identity. Newest
+    /// request first. Downloads whose track has been pruned from the catalog are
+    /// dropped by the inner join — a download with no track is not actionable.
+    public func identifiedDownloads(
+        in states: [DownloadState] = DownloadState.allCases
+    ) async throws -> [IdentifiedDownload] {
+        // An empty filter would build `IN ()`, which is a syntax error; treat it
+        // as "every state" so callers need not special-case it.
+        let effective = states.isEmpty ? DownloadState.allCases : states
+        let placeholders = effective.map { _ in "?" }.joined(separator: ", ")
+        let args = StatementArguments(effective.map(\.rawValue))
+        return try await database.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT download.*, track.serverId AS trackServerId,
+                       track.remoteId AS trackRemoteId
+                FROM download
+                JOIN track ON track.id = download.trackId
+                WHERE download.state IN (\(placeholders))
+                ORDER BY download.requestedAt DESC, download.trackId DESC
+                """, arguments: args).map { row in
+                IdentifiedDownload(
+                    record: try DownloadRecord(row: row),
+                    serverId: row["trackServerId"],
+                    remoteId: row["trackRemoteId"]
+                )
+            }
         }
     }
 

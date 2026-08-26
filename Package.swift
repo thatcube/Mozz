@@ -108,8 +108,10 @@ let package = Package(
             dependencies: [
                 "MozzCore",
                 "MozzDatabase",
+                "MozzEnrichment",
                 "MozzSchema",
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
 
@@ -298,7 +300,7 @@ let package = Package(
         .testTarget(
             name: "MozzCommandsTests",
             dependencies: [
-                "MozzCommands", "MozzDatabase", "MozzCore", "MozzSchema",
+                "MozzCommands", "MozzDatabase", "MozzCore", "MozzSchema", "MozzEnrichment",
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ]
         ),
