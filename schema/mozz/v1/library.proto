@@ -32,9 +32,27 @@ message AlbumSummary {
   string remote_id = 1;
   string title = 2;
   string artist_name = 3;
+  // A missing year is not the same as year 0: the desktop's "newest release"
+  // tie-breaker treats unknown dates as less certain than dated releases.
   optional int32 year = 4;
   optional string artwork_key = 5;
   int32 track_count = 6;
+  int64 id = 7;
+  string server_id = 8;
+  optional string artist_remote_id = 9;
+  string group_key = 10;
+  optional string sort_title = 11;
+  repeated string genres = 12;
+  bool is_favorite = 13;
+  // Unix seconds from the server, when known. Presence is significant because
+  // "unknown" sorts below a real timestamp, including the epoch.
+  optional double added_at = 14;
+  // The legacy desktop computes this via a separate command when absent; carrying
+  // the core's answer here keeps the typed album path from needing that detour.
+  optional string release_kind = 15;
+  // Presence is significant while clients migrate: absent means "fall back to
+  // the old classifier", while false means the core explicitly classified it.
+  optional bool is_single_or_ep = 16;
 }
 
 message Artist {
@@ -42,6 +60,34 @@ message Artist {
   string name = 2;
   optional string artwork_key = 3;
   int32 album_count = 4;
+  int64 id = 5;
+  string server_id = 6;
+  optional string sort_name = 7;
+  optional string hero_artwork_key = 8;
+  repeated string genres = 9;
+  bool is_favorite = 10;
+}
+
+// Track listings carry the metadata a shell needs to render and start playback
+// without a second lookup. That mirrors the existing facade's list payload,
+// where rating/favourite/loudness data travel with the row because hiding them
+// behind per-track detail calls would make scrolling and queueing chatty.
+message TrackSummary {
+  string remote_id = 1;
+  string title = 2;
+  string artist_name = 3;
+  optional string album_title = 4;
+  optional string album_remote_id = 5;
+  optional int32 track_number = 6;
+  optional int32 disc_number = 7;
+  double duration_seconds = 8;
+  optional string artwork_key = 9;
+  bool is_favorite = 10;
+  optional double rating = 11;
+  optional double added_at = 12;
+  optional double normalization_gain_db = 13;
+  int64 id = 14;
+  string server_id = 15;
 }
 
 message Library {
@@ -80,6 +126,35 @@ message AlbumsResponse {
   Page page = 2;
 }
 
+// Uses the same cursor shape as albums so all large library shelves have one
+// paging contract. The old facade accepts offset too, but the cursor is the
+// behaviour kept here because it is stable while sync is mutating the database.
+message ArtistsRequest {
+  string server_id = 1;
+  // Absent means "from the beginning".
+  optional PageCursor after = 2;
+  int32 limit = 3;
+}
+
+message ArtistsResponse {
+  repeated Artist artists = 1;
+  Page page = 2;
+}
+
+// Tracks are the largest listing in most libraries, so they get the same
+// keyset cursor as albums/artists rather than preserving the old offset field.
+message TracksRequest {
+  string server_id = 1;
+  // Absent means "from the beginning".
+  optional PageCursor after = 2;
+  int32 limit = 3;
+}
+
+message TracksResponse {
+  repeated TrackSummary tracks = 1;
+  Page page = 2;
+}
+
 // Both fields are required. Today this is a runtime guard in the facade; here
 // it is the shape of the message, and every generated client enforces it.
 message ArtistRequest {
@@ -89,6 +164,46 @@ message ArtistRequest {
 
 message ArtistResponse {
   Artist artist = 1;
+}
+
+// Detail shelves are intentionally unpaged: the existing core answers them as a
+// bounded album list for one artist, ordered by the repository's album-detail
+// query, and the schema records that shape instead of inventing a cursor.
+message ArtistAlbumsRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message ArtistAlbumsResponse {
+  repeated AlbumSummary albums = 1;
+}
+
+// A caller may know the consolidated album group key from a list row or only a
+// representative album remote id from an older path. Keeping both preserves the
+// existing facade behaviour: prefer the group when present, otherwise resolve
+// the group containing the remote id.
+message AlbumTracksRequest {
+  string server_id = 1;
+  optional string remote_id = 2;
+  optional string group_key = 3;
+}
+
+message AlbumTracksResponse {
+  repeated TrackSummary tracks = 1;
+}
+
+// Counts are a cheap server-scoped summary used for headers/progress without
+// materialising any list. The three numbers travel together because callers
+// present them together and the repository already computes them as the public
+// library totals.
+message CountsRequest {
+  string server_id = 1;
+}
+
+message CountsResponse {
+  int32 artists = 1;
+  int32 albums = 2;
+  int32 tracks = 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +257,11 @@ message Request {
     ArtistRequest artist = 12;
     WatchLibraryRequest watch_library = 13;
     CancelRequest cancel = 14;
+    ArtistsRequest artists = 15;
+    TracksRequest tracks = 16;
+    AlbumTracksRequest album_tracks = 17;
+    ArtistAlbumsRequest artist_albums = 18;
+    CountsRequest counts = 19;
   }
 }
 
@@ -159,6 +279,11 @@ message Response {
     ArtistResponse artist = 12;
     SubscriptionToken watch_library = 13;
     CancelResponse cancel = 14;
+    ArtistsResponse artists = 15;
+    TracksResponse tracks = 16;
+    AlbumTracksResponse album_tracks = 17;
+    ArtistAlbumsResponse artist_albums = 18;
+    CountsResponse counts = 19;
   }
 }
 

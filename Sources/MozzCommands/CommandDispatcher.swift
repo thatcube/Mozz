@@ -77,13 +77,7 @@ public struct CommandDispatcher: Sendable {
             return Self.response(id: request.id) { $0.libraries = payload }
 
         case .albums(let arguments):
-            let cursor = arguments.hasAfter
-                ? LibraryRepository.PageCursor(token: arguments.after.token)
-                : nil
-            // A cursor that arrives unreadable is a caller error, not an empty
-            // first page. Silently starting over would look to a user like the
-            // list jumping back to the top for no reason.
-            if arguments.hasAfter && cursor == nil {
+            guard let cursor = Self.pageCursor(arguments.after, present: arguments.hasAfter) else {
                 return Self.failure(id: request.id, "unreadable page cursor")
             }
 
@@ -95,14 +89,40 @@ public struct CommandDispatcher: Sendable {
 
             var payload = Mozz_V1_AlbumsResponse()
             payload.albums = page.rows.map(Self.wire)
-            var pageInfo = Mozz_V1_Page()
-            if let next = page.next {
-                var token = Mozz_V1_PageCursor()
-                token.token = next.token
-                pageInfo.next = token
-            }
-            payload.page = pageInfo
+            payload.page = Self.pageInfo(page.next)
             return Self.response(id: request.id) { $0.albums = payload }
+
+        case .artists(let arguments):
+            guard let cursor = Self.pageCursor(arguments.after, present: arguments.hasAfter) else {
+                return Self.failure(id: request.id, "unreadable page cursor")
+            }
+
+            let page = try await service.artists(
+                serverId: ServerID(arguments.serverID),
+                after: cursor,
+                limit: Int(arguments.limit)
+            )
+
+            var payload = Mozz_V1_ArtistsResponse()
+            payload.artists = page.rows.map { Self.wire($0) }
+            payload.page = Self.pageInfo(page.next)
+            return Self.response(id: request.id) { $0.artists = payload }
+
+        case .tracks(let arguments):
+            guard let cursor = Self.pageCursor(arguments.after, present: arguments.hasAfter) else {
+                return Self.failure(id: request.id, "unreadable page cursor")
+            }
+
+            let page = try await service.tracks(
+                serverId: ServerID(arguments.serverID),
+                after: cursor,
+                limit: Int(arguments.limit)
+            )
+
+            var payload = Mozz_V1_TracksResponse()
+            payload.tracks = page.rows.map(Self.wire)
+            payload.page = Self.pageInfo(page.next)
+            return Self.response(id: request.id) { $0.tracks = payload }
 
         case .artist(let arguments):
             guard let artist = try await service.artist(
@@ -111,9 +131,50 @@ public struct CommandDispatcher: Sendable {
             ) else {
                 return Self.failure(id: request.id, "artist not found: \(arguments.remoteID)")
             }
+            let albums = try await service.artistAlbums(
+                serverId: ServerID(arguments.serverID),
+                remoteId: arguments.remoteID
+            )
+            let heroArtworkKey = ArtistDetailPresentation.heroArtworkKey(artist: artist, albums: albums)
             var payload = Mozz_V1_ArtistResponse()
-            payload.artist = Self.wire(artist)
+            payload.artist = Self.wire(artist, heroArtworkKey: heroArtworkKey)
             return Self.response(id: request.id) { $0.artist = payload }
+
+        case .artistAlbums(let arguments):
+            let albums = try await service.artistAlbums(
+                serverId: ServerID(arguments.serverID),
+                remoteId: arguments.remoteID
+            )
+            var payload = Mozz_V1_ArtistAlbumsResponse()
+            payload.albums = albums.map(Self.wire)
+            return Self.response(id: request.id) { $0.artistAlbums = payload }
+
+        case .albumTracks(let arguments):
+            let tracks: [TrackRecord]
+            if arguments.hasGroupKey {
+                tracks = try await service.albumTracks(
+                    serverId: ServerID(arguments.serverID),
+                    groupKey: arguments.groupKey
+                )
+            } else if arguments.hasRemoteID {
+                tracks = try await service.albumTracks(
+                    serverId: ServerID(arguments.serverID),
+                    remoteId: arguments.remoteID
+                )
+            } else {
+                return Self.failure(id: request.id, "albumTracks needs remoteId or groupKey")
+            }
+            var payload = Mozz_V1_AlbumTracksResponse()
+            payload.tracks = tracks.map(Self.wire)
+            return Self.response(id: request.id) { $0.albumTracks = payload }
+
+        case .counts(let arguments):
+            let counts = try await service.counts(serverId: ServerID(arguments.serverID))
+            var payload = Mozz_V1_CountsResponse()
+            payload.artists = Int32(counts.artists)
+            payload.albums = Int32(counts.albums)
+            payload.tracks = Int32(counts.tracks)
+            return Self.response(id: request.id) { $0.counts = payload }
 
         case .watchLibrary:
             // Declared in the schema before it is implemented, deliberately: the
@@ -135,6 +196,25 @@ public struct CommandDispatcher: Sendable {
 
     // MARK: Wire mapping
 
+    private static func pageCursor(
+        _ after: Mozz_V1_PageCursor,
+        present: Bool
+    ) -> LibraryRepository.PageCursor?? {
+        guard present else { return .some(nil) }
+        guard let cursor = LibraryRepository.PageCursor(token: after.token) else { return nil }
+        return .some(cursor)
+    }
+
+    private static func pageInfo(_ next: LibraryRepository.PageCursor?) -> Mozz_V1_Page {
+        var page = Mozz_V1_Page()
+        if let next {
+            var token = Mozz_V1_PageCursor()
+            token.token = next.token
+            page.next = token
+        }
+        return page
+    }
+
     private static func wire(_ server: ServerConnection) -> Mozz_V1_Library {
         var library = Mozz_V1_Library()
         library.id = server.id
@@ -145,22 +225,64 @@ public struct CommandDispatcher: Sendable {
 
     private static func wire(_ album: AlbumRecord) -> Mozz_V1_AlbumSummary {
         var summary = Mozz_V1_AlbumSummary()
+        summary.id = album.id ?? 0
+        summary.serverID = album.serverId
         summary.remoteID = album.remoteId
         summary.title = album.title
+        if let sortTitle = album.sortTitle { summary.sortTitle = sortTitle }
         summary.artistName = album.artistName
+        if let artistRemoteId = album.artistRemoteId { summary.artistRemoteID = artistRemoteId }
         if let year = album.year { summary.year = Int32(year) }
         if let artwork = album.artworkKey { summary.artworkKey = artwork }
         summary.trackCount = Int32(album.trackCount ?? 0)
+        summary.groupKey = album.albumGroupKey
+        summary.genres = album.genres
+        summary.isFavorite = album.isFavorite
+        if let addedAt = album.addedAt { summary.addedAt = addedAt }
+        let release = AlbumReleaseClassifier.kind(trackCount: album.trackCount)
+        summary.releaseKind = release.rawValue
+        summary.isSingleOrEp = release.isSingleOrEP
         return summary
     }
 
-    private static func wire(_ artist: ArtistRecord) -> Mozz_V1_Artist {
+    private static func wire(
+        _ artist: ArtistRecord,
+        heroArtworkKey: String? = nil
+    ) -> Mozz_V1_Artist {
         var wired = Mozz_V1_Artist()
+        wired.id = artist.id ?? 0
+        wired.serverID = artist.serverId
         wired.remoteID = artist.remoteId
         wired.name = artist.name
+        if let sortName = artist.sortName { wired.sortName = sortName }
         if let artwork = artist.artworkKey { wired.artworkKey = artwork }
+        if let heroArtworkKey = heroArtworkKey ?? artist.artworkKey {
+            wired.heroArtworkKey = heroArtworkKey
+        }
         wired.albumCount = Int32(artist.albumCount ?? 0)
+        wired.genres = artist.genres
+        wired.isFavorite = artist.isFavorite
         return wired
+    }
+
+    private static func wire(_ track: TrackRecord) -> Mozz_V1_TrackSummary {
+        var summary = Mozz_V1_TrackSummary()
+        summary.id = track.id ?? 0
+        summary.serverID = track.serverId
+        summary.remoteID = track.remoteId
+        summary.title = track.title
+        summary.artistName = track.artistName
+        if let albumTitle = track.albumTitle { summary.albumTitle = albumTitle }
+        if let albumRemoteId = track.albumRemoteId { summary.albumRemoteID = albumRemoteId }
+        if let trackNumber = track.trackNumber { summary.trackNumber = Int32(trackNumber) }
+        if let discNumber = track.discNumber { summary.discNumber = Int32(discNumber) }
+        summary.durationSeconds = track.duration
+        if let artwork = track.artworkKey { summary.artworkKey = artwork }
+        summary.isFavorite = track.isFavorite
+        if let rating = track.rating { summary.rating = rating }
+        if let addedAt = track.addedAt { summary.addedAt = addedAt }
+        if let gain = track.normalizationGainDB { summary.normalizationGainDb = gain }
+        return summary
     }
 
     // MARK: Envelopes

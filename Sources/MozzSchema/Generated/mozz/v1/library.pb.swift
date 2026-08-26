@@ -78,6 +78,8 @@ public nonisolated struct Mozz_V1_AlbumSummary: Sendable {
 
   public var artistName: String = String()
 
+  /// A missing year is not the same as year 0: the desktop's "newest release"
+  /// tie-breaker treats unknown dates as less certain than dated releases.
   public var year: Int32 {
     get {_year ?? 0}
     set {_year = newValue}
@@ -98,12 +100,78 @@ public nonisolated struct Mozz_V1_AlbumSummary: Sendable {
 
   public var trackCount: Int32 = 0
 
+  public var id: Int64 = 0
+
+  public var serverID: String = String()
+
+  public var artistRemoteID: String {
+    get {_artistRemoteID ?? String()}
+    set {_artistRemoteID = newValue}
+  }
+  /// Returns true if `artistRemoteID` has been explicitly set.
+  public var hasArtistRemoteID: Bool {self._artistRemoteID != nil}
+  /// Clears the value of `artistRemoteID`. Subsequent reads from it will return its default value.
+  public mutating func clearArtistRemoteID() {self._artistRemoteID = nil}
+
+  public var groupKey: String = String()
+
+  public var sortTitle: String {
+    get {_sortTitle ?? String()}
+    set {_sortTitle = newValue}
+  }
+  /// Returns true if `sortTitle` has been explicitly set.
+  public var hasSortTitle: Bool {self._sortTitle != nil}
+  /// Clears the value of `sortTitle`. Subsequent reads from it will return its default value.
+  public mutating func clearSortTitle() {self._sortTitle = nil}
+
+  public var genres: [String] = []
+
+  public var isFavorite: Bool = false
+
+  /// Unix seconds from the server, when known. Presence is significant because
+  /// "unknown" sorts below a real timestamp, including the epoch.
+  public var addedAt: Double {
+    get {_addedAt ?? 0}
+    set {_addedAt = newValue}
+  }
+  /// Returns true if `addedAt` has been explicitly set.
+  public var hasAddedAt: Bool {self._addedAt != nil}
+  /// Clears the value of `addedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearAddedAt() {self._addedAt = nil}
+
+  /// The legacy desktop computes this via a separate command when absent; carrying
+  /// the core's answer here keeps the typed album path from needing that detour.
+  public var releaseKind: String {
+    get {_releaseKind ?? String()}
+    set {_releaseKind = newValue}
+  }
+  /// Returns true if `releaseKind` has been explicitly set.
+  public var hasReleaseKind: Bool {self._releaseKind != nil}
+  /// Clears the value of `releaseKind`. Subsequent reads from it will return its default value.
+  public mutating func clearReleaseKind() {self._releaseKind = nil}
+
+  /// Presence is significant while clients migrate: absent means "fall back to
+  /// the old classifier", while false means the core explicitly classified it.
+  public var isSingleOrEp: Bool {
+    get {_isSingleOrEp ?? false}
+    set {_isSingleOrEp = newValue}
+  }
+  /// Returns true if `isSingleOrEp` has been explicitly set.
+  public var hasIsSingleOrEp: Bool {self._isSingleOrEp != nil}
+  /// Clears the value of `isSingleOrEp`. Subsequent reads from it will return its default value.
+  public mutating func clearIsSingleOrEp() {self._isSingleOrEp = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _year: Int32? = nil
   fileprivate var _artworkKey: String? = nil
+  fileprivate var _artistRemoteID: String? = nil
+  fileprivate var _sortTitle: String? = nil
+  fileprivate var _addedAt: Double? = nil
+  fileprivate var _releaseKind: String? = nil
+  fileprivate var _isSingleOrEp: Bool? = nil
 }
 
 public nonisolated struct Mozz_V1_Artist: Sendable {
@@ -126,11 +194,148 @@ public nonisolated struct Mozz_V1_Artist: Sendable {
 
   public var albumCount: Int32 = 0
 
+  public var id: Int64 = 0
+
+  public var serverID: String = String()
+
+  public var sortName: String {
+    get {_sortName ?? String()}
+    set {_sortName = newValue}
+  }
+  /// Returns true if `sortName` has been explicitly set.
+  public var hasSortName: Bool {self._sortName != nil}
+  /// Clears the value of `sortName`. Subsequent reads from it will return its default value.
+  public mutating func clearSortName() {self._sortName = nil}
+
+  public var heroArtworkKey: String {
+    get {_heroArtworkKey ?? String()}
+    set {_heroArtworkKey = newValue}
+  }
+  /// Returns true if `heroArtworkKey` has been explicitly set.
+  public var hasHeroArtworkKey: Bool {self._heroArtworkKey != nil}
+  /// Clears the value of `heroArtworkKey`. Subsequent reads from it will return its default value.
+  public mutating func clearHeroArtworkKey() {self._heroArtworkKey = nil}
+
+  public var genres: [String] = []
+
+  public var isFavorite: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _artworkKey: String? = nil
+  fileprivate var _sortName: String? = nil
+  fileprivate var _heroArtworkKey: String? = nil
+}
+
+/// Track listings carry the metadata a shell needs to render and start playback
+/// without a second lookup. That mirrors the existing facade's list payload,
+/// where rating/favourite/loudness data travel with the row because hiding them
+/// behind per-track detail calls would make scrolling and queueing chatty.
+public nonisolated struct Mozz_V1_TrackSummary: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var remoteID: String = String()
+
+  public var title: String = String()
+
+  public var artistName: String = String()
+
+  public var albumTitle: String {
+    get {_albumTitle ?? String()}
+    set {_albumTitle = newValue}
+  }
+  /// Returns true if `albumTitle` has been explicitly set.
+  public var hasAlbumTitle: Bool {self._albumTitle != nil}
+  /// Clears the value of `albumTitle`. Subsequent reads from it will return its default value.
+  public mutating func clearAlbumTitle() {self._albumTitle = nil}
+
+  public var albumRemoteID: String {
+    get {_albumRemoteID ?? String()}
+    set {_albumRemoteID = newValue}
+  }
+  /// Returns true if `albumRemoteID` has been explicitly set.
+  public var hasAlbumRemoteID: Bool {self._albumRemoteID != nil}
+  /// Clears the value of `albumRemoteID`. Subsequent reads from it will return its default value.
+  public mutating func clearAlbumRemoteID() {self._albumRemoteID = nil}
+
+  public var trackNumber: Int32 {
+    get {_trackNumber ?? 0}
+    set {_trackNumber = newValue}
+  }
+  /// Returns true if `trackNumber` has been explicitly set.
+  public var hasTrackNumber: Bool {self._trackNumber != nil}
+  /// Clears the value of `trackNumber`. Subsequent reads from it will return its default value.
+  public mutating func clearTrackNumber() {self._trackNumber = nil}
+
+  public var discNumber: Int32 {
+    get {_discNumber ?? 0}
+    set {_discNumber = newValue}
+  }
+  /// Returns true if `discNumber` has been explicitly set.
+  public var hasDiscNumber: Bool {self._discNumber != nil}
+  /// Clears the value of `discNumber`. Subsequent reads from it will return its default value.
+  public mutating func clearDiscNumber() {self._discNumber = nil}
+
+  public var durationSeconds: Double = 0
+
+  public var artworkKey: String {
+    get {_artworkKey ?? String()}
+    set {_artworkKey = newValue}
+  }
+  /// Returns true if `artworkKey` has been explicitly set.
+  public var hasArtworkKey: Bool {self._artworkKey != nil}
+  /// Clears the value of `artworkKey`. Subsequent reads from it will return its default value.
+  public mutating func clearArtworkKey() {self._artworkKey = nil}
+
+  public var isFavorite: Bool = false
+
+  public var rating: Double {
+    get {_rating ?? 0}
+    set {_rating = newValue}
+  }
+  /// Returns true if `rating` has been explicitly set.
+  public var hasRating: Bool {self._rating != nil}
+  /// Clears the value of `rating`. Subsequent reads from it will return its default value.
+  public mutating func clearRating() {self._rating = nil}
+
+  public var addedAt: Double {
+    get {_addedAt ?? 0}
+    set {_addedAt = newValue}
+  }
+  /// Returns true if `addedAt` has been explicitly set.
+  public var hasAddedAt: Bool {self._addedAt != nil}
+  /// Clears the value of `addedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearAddedAt() {self._addedAt = nil}
+
+  public var normalizationGainDb: Double {
+    get {_normalizationGainDb ?? 0}
+    set {_normalizationGainDb = newValue}
+  }
+  /// Returns true if `normalizationGainDb` has been explicitly set.
+  public var hasNormalizationGainDb: Bool {self._normalizationGainDb != nil}
+  /// Clears the value of `normalizationGainDb`. Subsequent reads from it will return its default value.
+  public mutating func clearNormalizationGainDb() {self._normalizationGainDb = nil}
+
+  public var id: Int64 = 0
+
+  public var serverID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _albumTitle: String? = nil
+  fileprivate var _albumRemoteID: String? = nil
+  fileprivate var _trackNumber: Int32? = nil
+  fileprivate var _discNumber: Int32? = nil
+  fileprivate var _artworkKey: String? = nil
+  fileprivate var _rating: Double? = nil
+  fileprivate var _addedAt: Double? = nil
+  fileprivate var _normalizationGainDb: Double? = nil
 }
 
 public nonisolated struct Mozz_V1_Library: Sendable {
@@ -222,6 +427,109 @@ public nonisolated struct Mozz_V1_AlbumsResponse: Sendable {
   fileprivate var _page: Mozz_V1_Page? = nil
 }
 
+/// Uses the same cursor shape as albums so all large library shelves have one
+/// paging contract. The old facade accepts offset too, but the cursor is the
+/// behaviour kept here because it is stable while sync is mutating the database.
+public nonisolated struct Mozz_V1_ArtistsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  /// Absent means "from the beginning".
+  public var after: Mozz_V1_PageCursor {
+    get {_after ?? Mozz_V1_PageCursor()}
+    set {_after = newValue}
+  }
+  /// Returns true if `after` has been explicitly set.
+  public var hasAfter: Bool {self._after != nil}
+  /// Clears the value of `after`. Subsequent reads from it will return its default value.
+  public mutating func clearAfter() {self._after = nil}
+
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _after: Mozz_V1_PageCursor? = nil
+}
+
+public nonisolated struct Mozz_V1_ArtistsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var artists: [Mozz_V1_Artist] = []
+
+  public var page: Mozz_V1_Page {
+    get {_page ?? Mozz_V1_Page()}
+    set {_page = newValue}
+  }
+  /// Returns true if `page` has been explicitly set.
+  public var hasPage: Bool {self._page != nil}
+  /// Clears the value of `page`. Subsequent reads from it will return its default value.
+  public mutating func clearPage() {self._page = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _page: Mozz_V1_Page? = nil
+}
+
+/// Tracks are the largest listing in most libraries, so they get the same
+/// keyset cursor as albums/artists rather than preserving the old offset field.
+public nonisolated struct Mozz_V1_TracksRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  /// Absent means "from the beginning".
+  public var after: Mozz_V1_PageCursor {
+    get {_after ?? Mozz_V1_PageCursor()}
+    set {_after = newValue}
+  }
+  /// Returns true if `after` has been explicitly set.
+  public var hasAfter: Bool {self._after != nil}
+  /// Clears the value of `after`. Subsequent reads from it will return its default value.
+  public mutating func clearAfter() {self._after = nil}
+
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _after: Mozz_V1_PageCursor? = nil
+}
+
+public nonisolated struct Mozz_V1_TracksResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tracks: [Mozz_V1_TrackSummary] = []
+
+  public var page: Mozz_V1_Page {
+    get {_page ?? Mozz_V1_Page()}
+    set {_page = newValue}
+  }
+  /// Returns true if `page` has been explicitly set.
+  public var hasPage: Bool {self._page != nil}
+  /// Clears the value of `page`. Subsequent reads from it will return its default value.
+  public mutating func clearPage() {self._page = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _page: Mozz_V1_Page? = nil
+}
+
 /// Both fields are required. Today this is a runtime guard in the facade; here
 /// it is the shape of the message, and every generated client enforces it.
 public nonisolated struct Mozz_V1_ArtistRequest: Sendable {
@@ -257,6 +565,116 @@ public nonisolated struct Mozz_V1_ArtistResponse: Sendable {
   public init() {}
 
   fileprivate var _artist: Mozz_V1_Artist? = nil
+}
+
+/// Detail shelves are intentionally unpaged: the existing core answers them as a
+/// bounded album list for one artist, ordered by the repository's album-detail
+/// query, and the schema records that shape instead of inventing a cursor.
+public nonisolated struct Mozz_V1_ArtistAlbumsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_ArtistAlbumsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var albums: [Mozz_V1_AlbumSummary] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A caller may know the consolidated album group key from a list row or only a
+/// representative album remote id from an older path. Keeping both preserves the
+/// existing facade behaviour: prefer the group when present, otherwise resolve
+/// the group containing the remote id.
+public nonisolated struct Mozz_V1_AlbumTracksRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String {
+    get {_remoteID ?? String()}
+    set {_remoteID = newValue}
+  }
+  /// Returns true if `remoteID` has been explicitly set.
+  public var hasRemoteID: Bool {self._remoteID != nil}
+  /// Clears the value of `remoteID`. Subsequent reads from it will return its default value.
+  public mutating func clearRemoteID() {self._remoteID = nil}
+
+  public var groupKey: String {
+    get {_groupKey ?? String()}
+    set {_groupKey = newValue}
+  }
+  /// Returns true if `groupKey` has been explicitly set.
+  public var hasGroupKey: Bool {self._groupKey != nil}
+  /// Clears the value of `groupKey`. Subsequent reads from it will return its default value.
+  public mutating func clearGroupKey() {self._groupKey = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _remoteID: String? = nil
+  fileprivate var _groupKey: String? = nil
+}
+
+public nonisolated struct Mozz_V1_AlbumTracksResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tracks: [Mozz_V1_TrackSummary] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Counts are a cheap server-scoped summary used for headers/progress without
+/// materialising any list. The three numbers travel together because callers
+/// present them together and the repository already computes them as the public
+/// library totals.
+public nonisolated struct Mozz_V1_CountsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_CountsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var artists: Int32 = 0
+
+  public var albums: Int32 = 0
+
+  public var tracks: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct Mozz_V1_SubscriptionToken: Sendable {
@@ -380,6 +798,46 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .cancel(newValue)}
   }
 
+  public var artists: Mozz_V1_ArtistsRequest {
+    get {
+      if case .artists(let v)? = command {return v}
+      return Mozz_V1_ArtistsRequest()
+    }
+    set {command = .artists(newValue)}
+  }
+
+  public var tracks: Mozz_V1_TracksRequest {
+    get {
+      if case .tracks(let v)? = command {return v}
+      return Mozz_V1_TracksRequest()
+    }
+    set {command = .tracks(newValue)}
+  }
+
+  public var albumTracks: Mozz_V1_AlbumTracksRequest {
+    get {
+      if case .albumTracks(let v)? = command {return v}
+      return Mozz_V1_AlbumTracksRequest()
+    }
+    set {command = .albumTracks(newValue)}
+  }
+
+  public var artistAlbums: Mozz_V1_ArtistAlbumsRequest {
+    get {
+      if case .artistAlbums(let v)? = command {return v}
+      return Mozz_V1_ArtistAlbumsRequest()
+    }
+    set {command = .artistAlbums(newValue)}
+  }
+
+  public var counts: Mozz_V1_CountsRequest {
+    get {
+      if case .counts(let v)? = command {return v}
+      return Mozz_V1_CountsRequest()
+    }
+    set {command = .counts(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Command: Equatable, Sendable {
@@ -388,6 +846,11 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     case artist(Mozz_V1_ArtistRequest)
     case watchLibrary(Mozz_V1_WatchLibraryRequest)
     case cancel(Mozz_V1_CancelRequest)
+    case artists(Mozz_V1_ArtistsRequest)
+    case tracks(Mozz_V1_TracksRequest)
+    case albumTracks(Mozz_V1_AlbumTracksRequest)
+    case artistAlbums(Mozz_V1_ArtistAlbumsRequest)
+    case counts(Mozz_V1_CountsRequest)
 
   }
 
@@ -463,6 +926,46 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .cancel(newValue)}
   }
 
+  public var artists: Mozz_V1_ArtistsResponse {
+    get {
+      if case .artists(let v)? = result {return v}
+      return Mozz_V1_ArtistsResponse()
+    }
+    set {result = .artists(newValue)}
+  }
+
+  public var tracks: Mozz_V1_TracksResponse {
+    get {
+      if case .tracks(let v)? = result {return v}
+      return Mozz_V1_TracksResponse()
+    }
+    set {result = .tracks(newValue)}
+  }
+
+  public var albumTracks: Mozz_V1_AlbumTracksResponse {
+    get {
+      if case .albumTracks(let v)? = result {return v}
+      return Mozz_V1_AlbumTracksResponse()
+    }
+    set {result = .albumTracks(newValue)}
+  }
+
+  public var artistAlbums: Mozz_V1_ArtistAlbumsResponse {
+    get {
+      if case .artistAlbums(let v)? = result {return v}
+      return Mozz_V1_ArtistAlbumsResponse()
+    }
+    set {result = .artistAlbums(newValue)}
+  }
+
+  public var counts: Mozz_V1_CountsResponse {
+    get {
+      if case .counts(let v)? = result {return v}
+      return Mozz_V1_CountsResponse()
+    }
+    set {result = .counts(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -472,6 +975,11 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     case artist(Mozz_V1_ArtistResponse)
     case watchLibrary(Mozz_V1_SubscriptionToken)
     case cancel(Mozz_V1_CancelResponse)
+    case artists(Mozz_V1_ArtistsResponse)
+    case tracks(Mozz_V1_TracksResponse)
+    case albumTracks(Mozz_V1_AlbumTracksResponse)
+    case artistAlbums(Mozz_V1_ArtistAlbumsResponse)
+    case counts(Mozz_V1_CountsResponse)
 
   }
 
@@ -585,7 +1093,7 @@ nonisolated extension Mozz_V1_Page: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AlbumSummary"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}title\0\u{3}artist_name\0\u{1}year\0\u{3}artwork_key\0\u{3}track_count\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}title\0\u{3}artist_name\0\u{1}year\0\u{3}artwork_key\0\u{3}track_count\0\u{1}id\0\u{3}server_id\0\u{3}artist_remote_id\0\u{3}group_key\0\u{3}sort_title\0\u{1}genres\0\u{3}is_favorite\0\u{3}added_at\0\u{3}release_kind\0\u{3}is_single_or_ep\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -599,6 +1107,16 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
       case 4: try { try decoder.decodeSingularInt32Field(value: &self._year) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self._artworkKey) }()
       case 6: try { try decoder.decodeSingularInt32Field(value: &self.trackCount) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 9: try { try decoder.decodeSingularStringField(value: &self._artistRemoteID) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.groupKey) }()
+      case 11: try { try decoder.decodeSingularStringField(value: &self._sortTitle) }()
+      case 12: try { try decoder.decodeRepeatedStringField(value: &self.genres) }()
+      case 13: try { try decoder.decodeSingularBoolField(value: &self.isFavorite) }()
+      case 14: try { try decoder.decodeSingularDoubleField(value: &self._addedAt) }()
+      case 15: try { try decoder.decodeSingularStringField(value: &self._releaseKind) }()
+      case 16: try { try decoder.decodeSingularBoolField(value: &self._isSingleOrEp) }()
       default: break
       }
     }
@@ -627,6 +1145,36 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
     if self.trackCount != 0 {
       try visitor.visitSingularInt32Field(value: self.trackCount, fieldNumber: 6)
     }
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 7)
+    }
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 8)
+    }
+    try { if let v = self._artistRemoteID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 9)
+    } }()
+    if !self.groupKey.isEmpty {
+      try visitor.visitSingularStringField(value: self.groupKey, fieldNumber: 10)
+    }
+    try { if let v = self._sortTitle {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 11)
+    } }()
+    if !self.genres.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.genres, fieldNumber: 12)
+    }
+    if self.isFavorite != false {
+      try visitor.visitSingularBoolField(value: self.isFavorite, fieldNumber: 13)
+    }
+    try { if let v = self._addedAt {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 14)
+    } }()
+    try { if let v = self._releaseKind {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 15)
+    } }()
+    try { if let v = self._isSingleOrEp {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 16)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -637,6 +1185,16 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
     if lhs._year != rhs._year {return false}
     if lhs._artworkKey != rhs._artworkKey {return false}
     if lhs.trackCount != rhs.trackCount {return false}
+    if lhs.id != rhs.id {return false}
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs._artistRemoteID != rhs._artistRemoteID {return false}
+    if lhs.groupKey != rhs.groupKey {return false}
+    if lhs._sortTitle != rhs._sortTitle {return false}
+    if lhs.genres != rhs.genres {return false}
+    if lhs.isFavorite != rhs.isFavorite {return false}
+    if lhs._addedAt != rhs._addedAt {return false}
+    if lhs._releaseKind != rhs._releaseKind {return false}
+    if lhs._isSingleOrEp != rhs._isSingleOrEp {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -644,7 +1202,7 @@ nonisolated extension Mozz_V1_AlbumSummary: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Artist"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}name\0\u{3}artwork_key\0\u{3}album_count\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}name\0\u{3}artwork_key\0\u{3}album_count\0\u{1}id\0\u{3}server_id\0\u{3}sort_name\0\u{3}hero_artwork_key\0\u{1}genres\0\u{3}is_favorite\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -656,6 +1214,12 @@ nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 2: try { try decoder.decodeSingularStringField(value: &self.name) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._artworkKey) }()
       case 4: try { try decoder.decodeSingularInt32Field(value: &self.albumCount) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self._sortName) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._heroArtworkKey) }()
+      case 9: try { try decoder.decodeRepeatedStringField(value: &self.genres) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self.isFavorite) }()
       default: break
       }
     }
@@ -678,6 +1242,24 @@ nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if self.albumCount != 0 {
       try visitor.visitSingularInt32Field(value: self.albumCount, fieldNumber: 4)
     }
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 5)
+    }
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 6)
+    }
+    try { if let v = self._sortName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._heroArtworkKey {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
+    if !self.genres.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.genres, fieldNumber: 9)
+    }
+    if self.isFavorite != false {
+      try visitor.visitSingularBoolField(value: self.isFavorite, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -686,6 +1268,116 @@ nonisolated extension Mozz_V1_Artist: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.name != rhs.name {return false}
     if lhs._artworkKey != rhs._artworkKey {return false}
     if lhs.albumCount != rhs.albumCount {return false}
+    if lhs.id != rhs.id {return false}
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs._sortName != rhs._sortName {return false}
+    if lhs._heroArtworkKey != rhs._heroArtworkKey {return false}
+    if lhs.genres != rhs.genres {return false}
+    if lhs.isFavorite != rhs.isFavorite {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_TrackSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".TrackSummary"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}remote_id\0\u{1}title\0\u{3}artist_name\0\u{3}album_title\0\u{3}album_remote_id\0\u{3}track_number\0\u{3}disc_number\0\u{3}duration_seconds\0\u{3}artwork_key\0\u{3}is_favorite\0\u{1}rating\0\u{3}added_at\0\u{3}normalization_gain_db\0\u{1}id\0\u{3}server_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.artistName) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._albumTitle) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._albumRemoteID) }()
+      case 6: try { try decoder.decodeSingularInt32Field(value: &self._trackNumber) }()
+      case 7: try { try decoder.decodeSingularInt32Field(value: &self._discNumber) }()
+      case 8: try { try decoder.decodeSingularDoubleField(value: &self.durationSeconds) }()
+      case 9: try { try decoder.decodeSingularStringField(value: &self._artworkKey) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self.isFavorite) }()
+      case 11: try { try decoder.decodeSingularDoubleField(value: &self._rating) }()
+      case 12: try { try decoder.decodeSingularDoubleField(value: &self._addedAt) }()
+      case 13: try { try decoder.decodeSingularDoubleField(value: &self._normalizationGainDb) }()
+      case 14: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 15: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 1)
+    }
+    if !self.title.isEmpty {
+      try visitor.visitSingularStringField(value: self.title, fieldNumber: 2)
+    }
+    if !self.artistName.isEmpty {
+      try visitor.visitSingularStringField(value: self.artistName, fieldNumber: 3)
+    }
+    try { if let v = self._albumTitle {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._albumRemoteID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._trackNumber {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._discNumber {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 7)
+    } }()
+    if self.durationSeconds.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.durationSeconds, fieldNumber: 8)
+    }
+    try { if let v = self._artworkKey {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 9)
+    } }()
+    if self.isFavorite != false {
+      try visitor.visitSingularBoolField(value: self.isFavorite, fieldNumber: 10)
+    }
+    try { if let v = self._rating {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 11)
+    } }()
+    try { if let v = self._addedAt {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 12)
+    } }()
+    try { if let v = self._normalizationGainDb {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 13)
+    } }()
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 14)
+    }
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 15)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_TrackSummary, rhs: Mozz_V1_TrackSummary) -> Bool {
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.title != rhs.title {return false}
+    if lhs.artistName != rhs.artistName {return false}
+    if lhs._albumTitle != rhs._albumTitle {return false}
+    if lhs._albumRemoteID != rhs._albumRemoteID {return false}
+    if lhs._trackNumber != rhs._trackNumber {return false}
+    if lhs._discNumber != rhs._discNumber {return false}
+    if lhs.durationSeconds != rhs.durationSeconds {return false}
+    if lhs._artworkKey != rhs._artworkKey {return false}
+    if lhs.isFavorite != rhs.isFavorite {return false}
+    if lhs._rating != rhs._rating {return false}
+    if lhs._addedAt != rhs._addedAt {return false}
+    if lhs._normalizationGainDb != rhs._normalizationGainDb {return false}
+    if lhs.id != rhs.id {return false}
+    if lhs.serverID != rhs.serverID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -863,6 +1555,172 @@ nonisolated extension Mozz_V1_AlbumsResponse: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
+nonisolated extension Mozz_V1_ArtistsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ArtistsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{1}after\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._after) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    try { if let v = self._after {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ArtistsRequest, rhs: Mozz_V1_ArtistsRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs._after != rhs._after {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_ArtistsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ArtistsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}artists\0\u{1}page\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.artists) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._page) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.artists.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.artists, fieldNumber: 1)
+    }
+    try { if let v = self._page {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ArtistsResponse, rhs: Mozz_V1_ArtistsResponse) -> Bool {
+    if lhs.artists != rhs.artists {return false}
+    if lhs._page != rhs._page {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_TracksRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".TracksRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{1}after\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._after) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    try { if let v = self._after {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_TracksRequest, rhs: Mozz_V1_TracksRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs._after != rhs._after {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_TracksResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".TracksResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}tracks\0\u{1}page\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.tracks) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._page) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.tracks.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.tracks, fieldNumber: 1)
+    }
+    try { if let v = self._page {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_TracksResponse, rhs: Mozz_V1_TracksResponse) -> Bool {
+    if lhs.tracks != rhs.tracks {return false}
+    if lhs._page != rhs._page {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Mozz_V1_ArtistRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ArtistRequest"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
@@ -927,6 +1785,215 @@ nonisolated extension Mozz_V1_ArtistResponse: SwiftProtobuf.Message, SwiftProtob
 
   public static func ==(lhs: Mozz_V1_ArtistResponse, rhs: Mozz_V1_ArtistResponse) -> Bool {
     if lhs._artist != rhs._artist {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_ArtistAlbumsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ArtistAlbumsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ArtistAlbumsRequest, rhs: Mozz_V1_ArtistAlbumsRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_ArtistAlbumsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ArtistAlbumsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}albums\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.albums) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.albums.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.albums, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_ArtistAlbumsResponse, rhs: Mozz_V1_ArtistAlbumsResponse) -> Bool {
+    if lhs.albums != rhs.albums {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_AlbumTracksRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AlbumTracksRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0\u{3}group_key\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._remoteID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._groupKey) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    try { if let v = self._remoteID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._groupKey {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_AlbumTracksRequest, rhs: Mozz_V1_AlbumTracksRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs._remoteID != rhs._remoteID {return false}
+    if lhs._groupKey != rhs._groupKey {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_AlbumTracksResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AlbumTracksResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}tracks\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.tracks) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tracks.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.tracks, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_AlbumTracksResponse, rhs: Mozz_V1_AlbumTracksResponse) -> Bool {
+    if lhs.tracks != rhs.tracks {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_CountsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CountsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_CountsRequest, rhs: Mozz_V1_CountsRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_CountsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CountsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}artists\0\u{1}albums\0\u{1}tracks\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.artists) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.albums) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.tracks) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.artists != 0 {
+      try visitor.visitSingularInt32Field(value: self.artists, fieldNumber: 1)
+    }
+    if self.albums != 0 {
+      try visitor.visitSingularInt32Field(value: self.albums, fieldNumber: 2)
+    }
+    if self.tracks != 0 {
+      try visitor.visitSingularInt32Field(value: self.tracks, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_CountsResponse, rhs: Mozz_V1_CountsResponse) -> Bool {
+    if lhs.artists != rhs.artists {return false}
+    if lhs.albums != rhs.albums {return false}
+    if lhs.tracks != rhs.tracks {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1077,7 +2144,7 @@ nonisolated extension Mozz_V1_LibraryChanged: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Request"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1151,6 +2218,71 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
           self.command = .cancel(v)
         }
       }()
+      case 15: try {
+        var v: Mozz_V1_ArtistsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .artists(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .artists(v)
+        }
+      }()
+      case 16: try {
+        var v: Mozz_V1_TracksRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .tracks(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .tracks(v)
+        }
+      }()
+      case 17: try {
+        var v: Mozz_V1_AlbumTracksRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .albumTracks(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .albumTracks(v)
+        }
+      }()
+      case 18: try {
+        var v: Mozz_V1_ArtistAlbumsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .artistAlbums(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .artistAlbums(v)
+        }
+      }()
+      case 19: try {
+        var v: Mozz_V1_CountsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .counts(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .counts(v)
+        }
+      }()
       default: break
       }
     }
@@ -1184,6 +2316,26 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
     case .cancel?: try {
       guard case .cancel(let v)? = self.command else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+    }()
+    case .artists?: try {
+      guard case .artists(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+    }()
+    case .tracks?: try {
+      guard case .tracks(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+    }()
+    case .albumTracks?: try {
+      guard case .albumTracks(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+    }()
+    case .artistAlbums?: try {
+      guard case .artistAlbums(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+    }()
+    case .counts?: try {
+      guard case .counts(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
     }()
     case nil: break
     }
@@ -1230,7 +2382,7 @@ nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1317,6 +2469,71 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
           self.result = .cancel(v)
         }
       }()
+      case 15: try {
+        var v: Mozz_V1_ArtistsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .artists(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .artists(v)
+        }
+      }()
+      case 16: try {
+        var v: Mozz_V1_TracksResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .tracks(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .tracks(v)
+        }
+      }()
+      case 17: try {
+        var v: Mozz_V1_AlbumTracksResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .albumTracks(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .albumTracks(v)
+        }
+      }()
+      case 18: try {
+        var v: Mozz_V1_ArtistAlbumsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .artistAlbums(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .artistAlbums(v)
+        }
+      }()
+      case 19: try {
+        var v: Mozz_V1_CountsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .counts(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .counts(v)
+        }
+      }()
       default: break
       }
     }
@@ -1354,6 +2571,26 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
     case .cancel?: try {
       guard case .cancel(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+    }()
+    case .artists?: try {
+      guard case .artists(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+    }()
+    case .tracks?: try {
+      guard case .tracks(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+    }()
+    case .albumTracks?: try {
+      guard case .albumTracks(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+    }()
+    case .artistAlbums?: try {
+      guard case .artistAlbums(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+    }()
+    case .counts?: try {
+      guard case .counts(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
     }()
     case nil: break
     }

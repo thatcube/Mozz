@@ -42,6 +42,23 @@ public protocol CommandService: Sendable {
         limit: Int
     ) async throws -> LibraryRepository.Page<AlbumRecord>
 
+    /// One page of artists, in the library's own sort order.
+    ///
+    /// Same cursor contract as `albums`: callers only echo the token they were
+    /// given, and the repository owns the ordering details.
+    func artists(
+        serverId: ServerID,
+        after: LibraryRepository.PageCursor?,
+        limit: Int
+    ) async throws -> LibraryRepository.Page<ArtistRecord>
+
+    /// One page of tracks, in the library's own sort order.
+    func tracks(
+        serverId: ServerID,
+        after: LibraryRepository.PageCursor?,
+        limit: Int
+    ) async throws -> LibraryRepository.Page<TrackRecord>
+
     /// One artist, or `nil` when the server has no such artist.
     ///
     /// Both arguments are required, which the schema now enforces at every call
@@ -49,6 +66,18 @@ public protocol CommandService: Sendable {
     /// string — `guard let remoteId = request.remoteId, let serverId else …` —
     /// so a caller that forgot one learned about it from a failed response.
     func artist(serverId: ServerID, remoteId: String) async throws -> ArtistRecord?
+
+    /// Albums by an artist, in the repository's detail-shelf order.
+    func artistAlbums(serverId: ServerID, remoteId: String) async throws -> [AlbumRecord]
+
+    /// Tracks of one album, resolving a representative album id to its group.
+    func albumTracks(serverId: ServerID, remoteId: String) async throws -> [TrackRecord]
+
+    /// Tracks of one consolidated album group.
+    func albumTracks(serverId: ServerID, groupKey: String) async throws -> [TrackRecord]
+
+    /// Library totals for one server.
+    func counts(serverId: ServerID) async throws -> (artists: Int, albums: Int, tracks: Int)
 }
 
 /// The core's implementation, over the source-of-truth database.
@@ -75,7 +104,43 @@ public struct LibraryCommandService: CommandService {
         try await repository.albumsPage(serverId: serverId, after: after, limit: limit)
     }
 
+    public func artists(
+        serverId: ServerID,
+        after: LibraryRepository.PageCursor?,
+        limit: Int
+    ) async throws -> LibraryRepository.Page<ArtistRecord> {
+        try await repository.artistsPage(serverId: serverId, after: after, limit: limit)
+    }
+
+    public func tracks(
+        serverId: ServerID,
+        after: LibraryRepository.PageCursor?,
+        limit: Int
+    ) async throws -> LibraryRepository.Page<TrackRecord> {
+        try await repository.tracksPage(serverId: serverId, after: after, limit: limit)
+    }
+
     public func artist(serverId: ServerID, remoteId: String) async throws -> ArtistRecord? {
         try await repository.artist(serverId: serverId, remoteId: remoteId)
+    }
+
+    public func artistAlbums(serverId: ServerID, remoteId: String) async throws -> [AlbumRecord] {
+        try await repository.albums(forArtistRemoteId: remoteId, serverId: serverId)
+    }
+
+    public func albumTracks(serverId: ServerID, remoteId: String) async throws -> [TrackRecord] {
+        try await repository.tracks(forAlbumGroupContaining: remoteId, serverId: serverId)
+    }
+
+    public func albumTracks(serverId: ServerID, groupKey: String) async throws -> [TrackRecord] {
+        try await repository.tracks(forAlbumGroupKey: groupKey, serverId: serverId)
+    }
+
+    public func counts(serverId: ServerID) async throws -> (artists: Int, albums: Int, tracks: Int) {
+        (
+            artists: try await repository.artistCount(serverId: serverId),
+            albums: try await repository.albumCount(serverId: serverId),
+            tracks: try await repository.trackCount(serverId: serverId)
+        )
     }
 }

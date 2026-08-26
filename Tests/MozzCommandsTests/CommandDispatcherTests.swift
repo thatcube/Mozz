@@ -51,6 +51,8 @@ import SwiftProtobuf
     @Test func albumsComeBackAsAPageWithACursor() async throws {
         let repository = try await Self.makeLibrary()
         let dispatcher = Self.dispatcher(repository)
+        let expected = try await repository.albumsPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 10)
 
         let response = try await Self.send(dispatcher) {
             var albums = Mozz_V1_AlbumsRequest()
@@ -69,6 +71,103 @@ import SwiftProtobuf
         // have the right count.
         #expect(payload.albums.allSatisfy { !$0.title.isEmpty })
         #expect(payload.albums.allSatisfy { !$0.remoteID.isEmpty })
+        let actual = try #require(payload.albums.first)
+        let expectedAlbum = try #require(expected.rows.first)
+        #expect(actual.id == (expectedAlbum.id ?? 0))
+        #expect(actual.serverID == SyntheticCatalog.defaultServerID)
+        #expect(actual.artistRemoteID == expectedAlbum.artistRemoteId)
+        #expect(actual.groupKey == expectedAlbum.albumGroupKey)
+        #expect(actual.hasSortTitle)
+        #expect(actual.sortTitle == expectedAlbum.sortTitle)
+        #expect(actual.genres == expectedAlbum.genres)
+        #expect(!actual.genres.isEmpty)
+        #expect(actual.isFavorite == expectedAlbum.isFavorite)
+        #expect(actual.hasAddedAt)
+        #expect(actual.addedAt == expectedAlbum.addedAt)
+        let release = AlbumReleaseClassifier.kind(trackCount: expectedAlbum.trackCount)
+        #expect(actual.hasReleaseKind)
+        #expect(actual.releaseKind == release.rawValue)
+        #expect(actual.hasIsSingleOrEp)
+        #expect(actual.isSingleOrEp == release.isSingleOrEP)
+    }
+
+    @Test func artistsComeBackAsAPageWithACursor() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+        let expected = try await repository.artistsPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 5)
+
+        let response = try await Self.send(dispatcher) {
+            var artists = Mozz_V1_ArtistsRequest()
+            artists.serverID = SyntheticCatalog.defaultServerID
+            artists.limit = 5
+            $0.artists = artists
+        }
+
+        guard case .artists(let payload) = response.result else {
+            Issue.record("expected artists, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.artists.count == 5)
+        #expect(payload.page.hasNext, "a 5-of-16 page should offer a cursor")
+        #expect(payload.artists.allSatisfy { !$0.name.isEmpty })
+        #expect(payload.artists.allSatisfy { !$0.remoteID.isEmpty })
+        let actual = try #require(payload.artists.first)
+        let expectedArtist = try #require(expected.rows.first)
+        #expect(actual.id == (expectedArtist.id ?? 0))
+        #expect(actual.serverID == SyntheticCatalog.defaultServerID)
+        #expect(actual.hasSortName)
+        #expect(actual.sortName == expectedArtist.sortName)
+        #expect(actual.hasHeroArtworkKey)
+        #expect(actual.heroArtworkKey == expectedArtist.artworkKey)
+        #expect(actual.genres == expectedArtist.genres)
+        #expect(!actual.genres.isEmpty)
+        #expect(actual.isFavorite == expectedArtist.isFavorite)
+    }
+
+    @Test func tracksComeBackAsAPageWithACursor() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+        let expected = try await repository.tracksPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 12)
+
+        let response = try await Self.send(dispatcher) {
+            var tracks = Mozz_V1_TracksRequest()
+            tracks.serverID = SyntheticCatalog.defaultServerID
+            tracks.limit = 12
+            $0.tracks = tracks
+        }
+
+        guard case .tracks(let payload) = response.result else {
+            Issue.record("expected tracks, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.tracks.count == 12)
+        #expect(payload.page.hasNext, "a 12-of-400 page should offer a cursor")
+        #expect(payload.tracks.allSatisfy { !$0.title.isEmpty })
+        #expect(payload.tracks.allSatisfy { !$0.remoteID.isEmpty })
+        #expect(payload.tracks.allSatisfy { $0.durationSeconds > 0 })
+        let actual = try #require(payload.tracks.first)
+        let expectedTrack = try #require(expected.rows.first)
+        #expect(actual.id == (expectedTrack.id ?? 0))
+        #expect(actual.serverID == SyntheticCatalog.defaultServerID)
+        #expect(actual.hasAlbumTitle)
+        #expect(actual.albumTitle == expectedTrack.albumTitle)
+        #expect(actual.hasAlbumRemoteID)
+        #expect(actual.albumRemoteID == expectedTrack.albumRemoteId)
+        #expect(actual.hasTrackNumber)
+        #expect(actual.trackNumber == Int32(expectedTrack.trackNumber ?? 0))
+        #expect(actual.hasDiscNumber)
+        #expect(actual.discNumber == Int32(expectedTrack.discNumber ?? 0))
+        #expect(actual.hasArtworkKey)
+        #expect(actual.artworkKey == expectedTrack.artworkKey)
+        #expect(actual.isFavorite == expectedTrack.isFavorite)
+        #expect(actual.hasAddedAt)
+        #expect(actual.addedAt == expectedTrack.addedAt)
+        if let gain = expectedTrack.normalizationGainDB {
+            #expect(actual.hasNormalizationGainDb)
+            #expect(actual.normalizationGainDb == gain)
+        }
     }
 
     /// Walking the pages must visit each album once — the property the cursor
@@ -128,8 +227,126 @@ import SwiftProtobuf
             Issue.record("expected artist, got \(String(describing: response.result))")
             return
         }
+        let albums = try await repository.albums(
+            forArtistRemoteId: known.remoteId,
+            serverId: SyntheticCatalog.defaultServerID
+        )
+        let hero = ArtistDetailPresentation.heroArtworkKey(artist: known, albums: albums)
         #expect(payload.artist.remoteID == known.remoteId)
         #expect(payload.artist.name == known.name)
+        #expect(payload.artist.id == (known.id ?? 0))
+        #expect(payload.artist.serverID == SyntheticCatalog.defaultServerID)
+        #expect(payload.artist.hasSortName)
+        #expect(payload.artist.sortName == known.sortName)
+        #expect(payload.artist.hasHeroArtworkKey)
+        #expect(payload.artist.heroArtworkKey == hero)
+        #expect(payload.artist.genres == known.genres)
+        #expect(!payload.artist.genres.isEmpty)
+        #expect(payload.artist.isFavorite == known.isFavorite)
+    }
+
+    @Test func artistAlbumsComeBackForAnArtist() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+
+        let page = try await repository.artistsPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
+        let known = try #require(page.rows.first)
+        let expected = try await repository.albums(
+            forArtistRemoteId: known.remoteId,
+            serverId: SyntheticCatalog.defaultServerID
+        )
+
+        let response = try await Self.send(dispatcher) {
+            var artistAlbums = Mozz_V1_ArtistAlbumsRequest()
+            artistAlbums.serverID = SyntheticCatalog.defaultServerID
+            artistAlbums.remoteID = known.remoteId
+            $0.artistAlbums = artistAlbums
+        }
+
+        guard case .artistAlbums(let payload) = response.result else {
+            Issue.record("expected artistAlbums, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.albums.map(\.remoteID) == expected.map(\.remoteId))
+        #expect(payload.albums.allSatisfy { !$0.title.isEmpty })
+    }
+
+    @Test func albumTracksComeBackForAnAlbumRemoteId() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+
+        let page = try await repository.albumsPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
+        let known = try #require(page.rows.first)
+        let expected = try await repository.tracks(
+            forAlbumGroupContaining: known.remoteId,
+            serverId: SyntheticCatalog.defaultServerID
+        )
+
+        let response = try await Self.send(dispatcher) {
+            var albumTracks = Mozz_V1_AlbumTracksRequest()
+            albumTracks.serverID = SyntheticCatalog.defaultServerID
+            albumTracks.remoteID = known.remoteId
+            $0.albumTracks = albumTracks
+        }
+
+        guard case .albumTracks(let payload) = response.result else {
+            Issue.record("expected albumTracks, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.tracks.map(\.remoteID) == expected.map(\.remoteId))
+        #expect(payload.tracks.allSatisfy { !$0.title.isEmpty })
+    }
+
+    @Test func albumTracksPreferTheAlbumGroupKeyWhenPresent() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+
+        let page = try await repository.albumsPage(
+            serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
+        let known = try #require(page.rows.first)
+        let expected = try await repository.tracks(
+            forAlbumGroupKey: known.albumGroupKey,
+            serverId: SyntheticCatalog.defaultServerID
+        )
+
+        let response = try await Self.send(dispatcher) {
+            var albumTracks = Mozz_V1_AlbumTracksRequest()
+            albumTracks.serverID = SyntheticCatalog.defaultServerID
+            albumTracks.remoteID = "ignored-when-group-key-is-present"
+            albumTracks.groupKey = known.albumGroupKey
+            $0.albumTracks = albumTracks
+        }
+
+        guard case .albumTracks(let payload) = response.result else {
+            Issue.record("expected albumTracks, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.tracks.map(\.remoteID) == expected.map(\.remoteId))
+    }
+
+    @Test func countsComeBackForTheServer() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+
+        let expectedArtists = try await repository.artistCount(serverId: SyntheticCatalog.defaultServerID)
+        let expectedAlbums = try await repository.albumCount(serverId: SyntheticCatalog.defaultServerID)
+        let expectedTracks = try await repository.trackCount(serverId: SyntheticCatalog.defaultServerID)
+
+        let response = try await Self.send(dispatcher) {
+            var counts = Mozz_V1_CountsRequest()
+            counts.serverID = SyntheticCatalog.defaultServerID
+            $0.counts = counts
+        }
+
+        guard case .counts(let payload) = response.result else {
+            Issue.record("expected counts, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.artists == Int32(expectedArtists))
+        #expect(payload.albums == Int32(expectedAlbums))
+        #expect(payload.tracks == Int32(expectedTracks))
     }
 
     // MARK: Failing usefully
@@ -176,6 +393,23 @@ import SwiftProtobuf
             return
         }
         #expect(failure.message.contains("cursor"))
+    }
+
+    @Test func albumTracksWithoutAnAlbumIdentifierFailsUsefully() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = Self.dispatcher(repository)
+
+        let response = try await Self.send(dispatcher) {
+            var albumTracks = Mozz_V1_AlbumTracksRequest()
+            albumTracks.serverID = SyntheticCatalog.defaultServerID
+            $0.albumTracks = albumTracks
+        }
+
+        guard case .failure(let failure) = response.result else {
+            Issue.record("albumTracks without an album id must fail")
+            return
+        }
+        #expect(failure.message.contains("remoteId or groupKey"))
     }
 
     /// Bytes that are not a request at all must not take the process down.

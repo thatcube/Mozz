@@ -151,7 +151,12 @@ import SwiftProtobuf
         switch request.command {
         case .libraries: name = "libraries"
         case .albums: name = "albums"
+        case .artists: name = "artists"
+        case .tracks: name = "tracks"
         case .artist: name = "artist"
+        case .albumTracks: name = "albumTracks"
+        case .artistAlbums: name = "artistAlbums"
+        case .counts: name = "counts"
         case .watchLibrary: name = "watchLibrary"
         case .cancel: name = "cancel"
         case .none: name = "none"
