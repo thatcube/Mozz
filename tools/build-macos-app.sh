@@ -112,6 +112,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$MOZZ_RESOLVED_BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Mozz plays from a server the user runs, which is almost always on the
+       local network. Since macOS 15 an app must declare why it needs local
+       network access before the system will even offer the permission prompt;
+       without this key the request is refused silently and every LAN
+       connection fails as EHOSTUNREACH, which surfaces as "No route to host"
+       from .NET while curl on the same machine succeeds.
+
+       That is exactly what happened when this bundle was first signed with a
+       real certificate: the signing identity changed, macOS treated it as a
+       new app, the previously granted permission no longer applied, and album
+       art and profile pictures stopped loading with nothing in the UI to say
+       why. Streaming kept working only because decoding happens in a separate
+       FFmpeg process with its own grant. -->
+  <key>NSLocalNetworkUsageDescription</key><string>Mozz connects to your media server to stream music and download album art. Your server is usually on your local network.</string>
   <!-- This script is the local developer bundler. Marking its bundles lets the
        credential store avoid legacy Keychain ACL prompts that only happen
        because this binary is rebuilt constantly. Release/notarised bundles are
