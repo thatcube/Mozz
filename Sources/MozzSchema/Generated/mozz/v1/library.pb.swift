@@ -313,6 +313,102 @@ public nonisolated enum Mozz_V1_RecordingIdentityStatus: SwiftProtobuf.Enum, Swi
 
 }
 
+/// What the engine is doing. Mirrors the Rust engine's own state enum. UNSPECIFIED
+/// (0) exists only so a client that reads a zero value does not mistake it for a
+/// real state; the engine never reports it.
+public nonisolated enum Mozz_V1_PlaybackEngineState: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case idle // = 1
+  case playing // = 2
+  case paused // = 3
+  case ended // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .idle
+    case 2: self = .playing
+    case 3: self = .paused
+    case 4: self = .ended
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .idle: return 1
+    case .playing: return 2
+    case .paused: return 3
+    case .ended: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_PlaybackEngineState] = [
+    .unspecified,
+    .idle,
+    .playing,
+    .paused,
+    .ended,
+  ]
+
+}
+
+/// Why the last decode failed. The transient/permanent split is load-bearing and
+/// must never be collapsed: INTERRUPTED must be retried, UNSUPPORTED and CORRUPT
+/// must never be. The engine — not a shell — decides which is which, so the
+/// snapshot also carries failure_is_retryable directly rather than making each
+/// client re-map these cases and drift.
+public nonisolated enum Mozz_V1_PlaybackFailureKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case none // = 0
+  case unsupported // = 1
+  case interrupted // = 2
+  case corrupt // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .none
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .none
+    case 1: self = .unsupported
+    case 2: self = .interrupted
+    case 3: self = .corrupt
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .none: return 0
+    case .unsupported: return 1
+    case .interrupted: return 2
+    case .corrupt: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_PlaybackFailureKind] = [
+    .none,
+    .unsupported,
+    .interrupted,
+    .corrupt,
+  ]
+
+}
+
 /// An opaque resume position for a paged listing. Clients must not parse it;
 /// they hand back whatever the previous page returned.
 public nonisolated struct Mozz_V1_PageCursor: Sendable {
@@ -1828,6 +1924,206 @@ public nonisolated struct Mozz_V1_SimilarTracksResponse: Sendable {
   public init() {}
 }
 
+/// The one observable answer a request/response surface can give about a
+/// continuous thing. Every transport command returns it, so a client sees the
+/// result of what it just did without a second round-trip, and the query command
+/// returns exactly the same shape.
+public nonisolated struct Mozz_V1_PlaybackState: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var engineState: Mozz_V1_PlaybackEngineState = .unspecified
+
+  /// Seconds of the current track ACTUALLY HEARD — read from the engine's output,
+  /// never from a clock. The two differ by the whole buffer, most visibly on a
+  /// slow network, so a clock-derived position runs ahead of its own sound.
+  public var positionSeconds: Double = 0
+
+  /// The internal track id (TrackSummary.id) the audio is currently in — not
+  /// necessarily the last one queued. 0 when nothing is loaded.
+  public var currentTrackID: UInt64 = 0
+
+  /// True when a decode has failed since the last command.
+  public var hasFailed_p: Bool = false
+
+  public var failureKind: Mozz_V1_PlaybackFailureKind = .none
+
+  /// The engine's own verdict on whether the failure is worth retrying. A client
+  /// reads THIS, not failure_kind, to decide — collapsing the kinds itself is the
+  /// bug this field exists to prevent.
+  public var failureIsRetryable: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Play a track now, discarding anything queued. The core resolves (server_id,
+/// remote_id) to a URL and builds the byte stream itself.
+public nonisolated struct Mozz_V1_PlaybackPlayRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Queue a track behind the current one so the two meet with no gap. This is a
+/// genuine gapless join, not a timing heuristic: the engine holds the queued
+/// stream and starts it the instant the current track's last sample is consumed,
+/// so queueing early is correct — there is nothing to wait for.
+public nonisolated struct Mozz_V1_PlaybackQueueNextRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var serverID: String = String()
+
+  public var remoteID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_PlaybackPauseRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_PlaybackResumeRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_PlaybackStopRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Move within the current track. The response reports where the engine actually
+/// landed via PlaybackState.position_seconds.
+public nonisolated struct Mozz_V1_PlaybackSeekRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var positionSeconds: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The listener's own level, 0.0 silent to 1.0 unity. Applied after ReplayGain
+/// and the equaliser. The engine clamps and ramps, so an out-of-range value is
+/// normalized rather than rejected.
+public nonisolated struct Mozz_V1_PlaybackSetVolumeRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var volume: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Set the live ten-band equaliser on the engine. Fewer than ten gains are padded
+/// with zero and extras are ignored. This drives the running engine; persisting
+/// the choice for sync is SetPlaybackSettings' separate job.
+public nonisolated struct Mozz_V1_PlaybackSetEqualizerRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bandGainsDb: [Double] = []
+
+  public var preampDb: Double = 0
+
+  public var enabled: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Set live loudness normalization on the engine. UNSPECIFIED takes the core
+/// default (Track). Like the equaliser command, this drives the running engine
+/// rather than persisting the setting.
+public nonisolated struct Mozz_V1_PlaybackSetReplayGainRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var mode: Mozz_V1_ReplayGainMode = .unspecified
+
+  public var preampDb: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Query current playback state. The interesting command: playback is continuous
+/// but the surface is request/response, so a client polls this for position and
+/// for whether a failure occurred (and, crucially, whether to retry it).
+public nonisolated struct Mozz_V1_PlaybackStateRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Every transport command answers with the post-command state, so the return
+/// type is uniform and a client always learns the result of what it did.
+public nonisolated struct Mozz_V1_PlaybackStateResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var state: Mozz_V1_PlaybackState {
+    get {_state ?? Mozz_V1_PlaybackState()}
+    set {_state = newValue}
+  }
+  /// Returns true if `state` has been explicitly set.
+  public var hasState: Bool {self._state != nil}
+  /// Clears the value of `state`. Subsequent reads from it will return its default value.
+  public mutating func clearState() {self._state = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _state: Mozz_V1_PlaybackState? = nil
+}
+
 public nonisolated struct Mozz_V1_Request: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -2038,6 +2334,86 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .similarTracks(newValue)}
   }
 
+  public var playbackPlay: Mozz_V1_PlaybackPlayRequest {
+    get {
+      if case .playbackPlay(let v)? = command {return v}
+      return Mozz_V1_PlaybackPlayRequest()
+    }
+    set {command = .playbackPlay(newValue)}
+  }
+
+  public var playbackQueueNext: Mozz_V1_PlaybackQueueNextRequest {
+    get {
+      if case .playbackQueueNext(let v)? = command {return v}
+      return Mozz_V1_PlaybackQueueNextRequest()
+    }
+    set {command = .playbackQueueNext(newValue)}
+  }
+
+  public var playbackPause: Mozz_V1_PlaybackPauseRequest {
+    get {
+      if case .playbackPause(let v)? = command {return v}
+      return Mozz_V1_PlaybackPauseRequest()
+    }
+    set {command = .playbackPause(newValue)}
+  }
+
+  public var playbackResume: Mozz_V1_PlaybackResumeRequest {
+    get {
+      if case .playbackResume(let v)? = command {return v}
+      return Mozz_V1_PlaybackResumeRequest()
+    }
+    set {command = .playbackResume(newValue)}
+  }
+
+  public var playbackStop: Mozz_V1_PlaybackStopRequest {
+    get {
+      if case .playbackStop(let v)? = command {return v}
+      return Mozz_V1_PlaybackStopRequest()
+    }
+    set {command = .playbackStop(newValue)}
+  }
+
+  public var playbackSeek: Mozz_V1_PlaybackSeekRequest {
+    get {
+      if case .playbackSeek(let v)? = command {return v}
+      return Mozz_V1_PlaybackSeekRequest()
+    }
+    set {command = .playbackSeek(newValue)}
+  }
+
+  public var playbackSetVolume: Mozz_V1_PlaybackSetVolumeRequest {
+    get {
+      if case .playbackSetVolume(let v)? = command {return v}
+      return Mozz_V1_PlaybackSetVolumeRequest()
+    }
+    set {command = .playbackSetVolume(newValue)}
+  }
+
+  public var playbackSetEqualizer: Mozz_V1_PlaybackSetEqualizerRequest {
+    get {
+      if case .playbackSetEqualizer(let v)? = command {return v}
+      return Mozz_V1_PlaybackSetEqualizerRequest()
+    }
+    set {command = .playbackSetEqualizer(newValue)}
+  }
+
+  public var playbackSetReplayGain: Mozz_V1_PlaybackSetReplayGainRequest {
+    get {
+      if case .playbackSetReplayGain(let v)? = command {return v}
+      return Mozz_V1_PlaybackSetReplayGainRequest()
+    }
+    set {command = .playbackSetReplayGain(newValue)}
+  }
+
+  public var playbackState: Mozz_V1_PlaybackStateRequest {
+    get {
+      if case .playbackState(let v)? = command {return v}
+      return Mozz_V1_PlaybackStateRequest()
+    }
+    set {command = .playbackState(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Command: Equatable, Sendable {
@@ -2066,6 +2442,16 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     case lyrics(Mozz_V1_LyricsRequest)
     case recordingIdentity(Mozz_V1_RecordingIdentityRequest)
     case similarTracks(Mozz_V1_SimilarTracksRequest)
+    case playbackPlay(Mozz_V1_PlaybackPlayRequest)
+    case playbackQueueNext(Mozz_V1_PlaybackQueueNextRequest)
+    case playbackPause(Mozz_V1_PlaybackPauseRequest)
+    case playbackResume(Mozz_V1_PlaybackResumeRequest)
+    case playbackStop(Mozz_V1_PlaybackStopRequest)
+    case playbackSeek(Mozz_V1_PlaybackSeekRequest)
+    case playbackSetVolume(Mozz_V1_PlaybackSetVolumeRequest)
+    case playbackSetEqualizer(Mozz_V1_PlaybackSetEqualizerRequest)
+    case playbackSetReplayGain(Mozz_V1_PlaybackSetReplayGainRequest)
+    case playbackState(Mozz_V1_PlaybackStateRequest)
 
   }
 
@@ -2301,6 +2687,89 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .similarTracks(newValue)}
   }
 
+  /// Every playback transport command answers with the same PlaybackState
+  /// envelope, so a client learns the result of what it did — and the state
+  /// query returns the identical shape.
+  public var playbackPlay: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackPlay(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackPlay(newValue)}
+  }
+
+  public var playbackQueueNext: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackQueueNext(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackQueueNext(newValue)}
+  }
+
+  public var playbackPause: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackPause(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackPause(newValue)}
+  }
+
+  public var playbackResume: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackResume(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackResume(newValue)}
+  }
+
+  public var playbackStop: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackStop(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackStop(newValue)}
+  }
+
+  public var playbackSeek: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackSeek(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackSeek(newValue)}
+  }
+
+  public var playbackSetVolume: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackSetVolume(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackSetVolume(newValue)}
+  }
+
+  public var playbackSetEqualizer: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackSetEqualizer(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackSetEqualizer(newValue)}
+  }
+
+  public var playbackSetReplayGain: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackSetReplayGain(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackSetReplayGain(newValue)}
+  }
+
+  public var playbackState: Mozz_V1_PlaybackStateResponse {
+    get {
+      if case .playbackState(let v)? = result {return v}
+      return Mozz_V1_PlaybackStateResponse()
+    }
+    set {result = .playbackState(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -2330,6 +2799,19 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     case lyrics(Mozz_V1_LyricsResponse)
     case recordingIdentity(Mozz_V1_RecordingIdentityResponse)
     case similarTracks(Mozz_V1_SimilarTracksResponse)
+    /// Every playback transport command answers with the same PlaybackState
+    /// envelope, so a client learns the result of what it did — and the state
+    /// query returns the identical shape.
+    case playbackPlay(Mozz_V1_PlaybackStateResponse)
+    case playbackQueueNext(Mozz_V1_PlaybackStateResponse)
+    case playbackPause(Mozz_V1_PlaybackStateResponse)
+    case playbackResume(Mozz_V1_PlaybackStateResponse)
+    case playbackStop(Mozz_V1_PlaybackStateResponse)
+    case playbackSeek(Mozz_V1_PlaybackStateResponse)
+    case playbackSetVolume(Mozz_V1_PlaybackStateResponse)
+    case playbackSetEqualizer(Mozz_V1_PlaybackStateResponse)
+    case playbackSetReplayGain(Mozz_V1_PlaybackStateResponse)
+    case playbackState(Mozz_V1_PlaybackStateResponse)
 
   }
 
@@ -2395,6 +2877,14 @@ nonisolated extension Mozz_V1_LyricsStatus: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension Mozz_V1_RecordingIdentityStatus: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0RECORDING_IDENTITY_STATUS_UNSPECIFIED\0\u{1}RECORDING_IDENTITY_STATUS_RESOLVED\0\u{1}RECORDING_IDENTITY_STATUS_UNMATCHED\0\u{1}RECORDING_IDENTITY_STATUS_NOT_RESOLVED\0")
+}
+
+nonisolated extension Mozz_V1_PlaybackEngineState: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLAYBACK_ENGINE_STATE_UNSPECIFIED\0\u{1}PLAYBACK_ENGINE_STATE_IDLE\0\u{1}PLAYBACK_ENGINE_STATE_PLAYING\0\u{1}PLAYBACK_ENGINE_STATE_PAUSED\0\u{1}PLAYBACK_ENGINE_STATE_ENDED\0")
+}
+
+nonisolated extension Mozz_V1_PlaybackFailureKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLAYBACK_FAILURE_KIND_NONE\0\u{1}PLAYBACK_FAILURE_KIND_UNSUPPORTED\0\u{1}PLAYBACK_FAILURE_KIND_INTERRUPTED\0\u{1}PLAYBACK_FAILURE_KIND_CORRUPT\0")
 }
 
 nonisolated extension Mozz_V1_PageCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -4833,9 +5323,379 @@ nonisolated extension Mozz_V1_SimilarTracksResponse: SwiftProtobuf.Message, Swif
   }
 }
 
+nonisolated extension Mozz_V1_PlaybackState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackState"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}engine_state\0\u{3}position_seconds\0\u{3}current_track_id\0\u{3}has_failed\0\u{3}failure_kind\0\u{3}failure_is_retryable\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.engineState) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.positionSeconds) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.currentTrackID) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.hasFailed_p) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.failureKind) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.failureIsRetryable) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.engineState != .unspecified {
+      try visitor.visitSingularEnumField(value: self.engineState, fieldNumber: 1)
+    }
+    if self.positionSeconds.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.positionSeconds, fieldNumber: 2)
+    }
+    if self.currentTrackID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.currentTrackID, fieldNumber: 3)
+    }
+    if self.hasFailed_p != false {
+      try visitor.visitSingularBoolField(value: self.hasFailed_p, fieldNumber: 4)
+    }
+    if self.failureKind != .none {
+      try visitor.visitSingularEnumField(value: self.failureKind, fieldNumber: 5)
+    }
+    if self.failureIsRetryable != false {
+      try visitor.visitSingularBoolField(value: self.failureIsRetryable, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackState, rhs: Mozz_V1_PlaybackState) -> Bool {
+    if lhs.engineState != rhs.engineState {return false}
+    if lhs.positionSeconds != rhs.positionSeconds {return false}
+    if lhs.currentTrackID != rhs.currentTrackID {return false}
+    if lhs.hasFailed_p != rhs.hasFailed_p {return false}
+    if lhs.failureKind != rhs.failureKind {return false}
+    if lhs.failureIsRetryable != rhs.failureIsRetryable {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackPlayRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackPlayRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackPlayRequest, rhs: Mozz_V1_PlaybackPlayRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackQueueNextRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackQueueNextRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}server_id\0\u{3}remote_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serverID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.remoteID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serverID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serverID, fieldNumber: 1)
+    }
+    if !self.remoteID.isEmpty {
+      try visitor.visitSingularStringField(value: self.remoteID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackQueueNextRequest, rhs: Mozz_V1_PlaybackQueueNextRequest) -> Bool {
+    if lhs.serverID != rhs.serverID {return false}
+    if lhs.remoteID != rhs.remoteID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackPauseRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackPauseRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackPauseRequest, rhs: Mozz_V1_PlaybackPauseRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackResumeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackResumeRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackResumeRequest, rhs: Mozz_V1_PlaybackResumeRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackStopRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackStopRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackStopRequest, rhs: Mozz_V1_PlaybackStopRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackSeekRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackSeekRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}position_seconds\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularDoubleField(value: &self.positionSeconds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.positionSeconds.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.positionSeconds, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackSeekRequest, rhs: Mozz_V1_PlaybackSeekRequest) -> Bool {
+    if lhs.positionSeconds != rhs.positionSeconds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackSetVolumeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackSetVolumeRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}volume\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularDoubleField(value: &self.volume) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.volume.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.volume, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackSetVolumeRequest, rhs: Mozz_V1_PlaybackSetVolumeRequest) -> Bool {
+    if lhs.volume != rhs.volume {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackSetEqualizerRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackSetEqualizerRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}band_gains_db\0\u{3}preamp_db\0\u{1}enabled\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedDoubleField(value: &self.bandGainsDb) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.preampDb) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.enabled) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.bandGainsDb.isEmpty {
+      try visitor.visitPackedDoubleField(value: self.bandGainsDb, fieldNumber: 1)
+    }
+    if self.preampDb.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.preampDb, fieldNumber: 2)
+    }
+    if self.enabled != false {
+      try visitor.visitSingularBoolField(value: self.enabled, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackSetEqualizerRequest, rhs: Mozz_V1_PlaybackSetEqualizerRequest) -> Bool {
+    if lhs.bandGainsDb != rhs.bandGainsDb {return false}
+    if lhs.preampDb != rhs.preampDb {return false}
+    if lhs.enabled != rhs.enabled {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackSetReplayGainRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackSetReplayGainRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}mode\0\u{3}preamp_db\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.mode) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.preampDb) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.mode != .unspecified {
+      try visitor.visitSingularEnumField(value: self.mode, fieldNumber: 1)
+    }
+    if self.preampDb.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.preampDb, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackSetReplayGainRequest, rhs: Mozz_V1_PlaybackSetReplayGainRequest) -> Bool {
+    if lhs.mode != rhs.mode {return false}
+    if lhs.preampDb != rhs.preampDb {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackStateRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackStateRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackStateRequest, rhs: Mozz_V1_PlaybackStateRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_PlaybackStateResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackStateResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}state\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._state) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._state {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackStateResponse, rhs: Mozz_V1_PlaybackStateResponse) -> Bool {
+    if lhs._state != rhs._state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Request"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0\u{1}artwork\0\u{3}enqueue_download\0\u{3}report_download_progress\0\u{3}complete_download\0\u{3}fail_download\0\u{3}cancel_download\0\u{3}delete_download\0\u{3}download_status\0\u{1}downloads\0\u{3}storage_usage\0\u{1}lyrics\0\u{3}recording_identity\0\u{3}similar_tracks\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0\u{1}artwork\0\u{3}enqueue_download\0\u{3}report_download_progress\0\u{3}complete_download\0\u{3}fail_download\0\u{3}cancel_download\0\u{3}delete_download\0\u{3}download_status\0\u{1}downloads\0\u{3}storage_usage\0\u{1}lyrics\0\u{3}recording_identity\0\u{3}similar_tracks\0\u{3}playback_play\0\u{3}playback_queue_next\0\u{3}playback_pause\0\u{3}playback_resume\0\u{3}playback_stop\0\u{3}playback_seek\0\u{3}playback_set_volume\0\u{3}playback_set_equalizer\0\u{3}playback_set_replay_gain\0\u{3}playback_state\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -5169,6 +6029,136 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
           self.command = .similarTracks(v)
         }
       }()
+      case 35: try {
+        var v: Mozz_V1_PlaybackPlayRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackPlay(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackPlay(v)
+        }
+      }()
+      case 36: try {
+        var v: Mozz_V1_PlaybackQueueNextRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackQueueNext(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackQueueNext(v)
+        }
+      }()
+      case 37: try {
+        var v: Mozz_V1_PlaybackPauseRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackPause(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackPause(v)
+        }
+      }()
+      case 38: try {
+        var v: Mozz_V1_PlaybackResumeRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackResume(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackResume(v)
+        }
+      }()
+      case 39: try {
+        var v: Mozz_V1_PlaybackStopRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackStop(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackStop(v)
+        }
+      }()
+      case 40: try {
+        var v: Mozz_V1_PlaybackSeekRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackSeek(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackSeek(v)
+        }
+      }()
+      case 41: try {
+        var v: Mozz_V1_PlaybackSetVolumeRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackSetVolume(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackSetVolume(v)
+        }
+      }()
+      case 42: try {
+        var v: Mozz_V1_PlaybackSetEqualizerRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackSetEqualizer(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackSetEqualizer(v)
+        }
+      }()
+      case 43: try {
+        var v: Mozz_V1_PlaybackSetReplayGainRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackSetReplayGain(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackSetReplayGain(v)
+        }
+      }()
+      case 44: try {
+        var v: Mozz_V1_PlaybackStateRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .playbackState(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .playbackState(v)
+        }
+      }()
       default: break
       }
     }
@@ -5283,6 +6273,46 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
       guard case .similarTracks(let v)? = self.command else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
     }()
+    case .playbackPlay?: try {
+      guard case .playbackPlay(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 35)
+    }()
+    case .playbackQueueNext?: try {
+      guard case .playbackQueueNext(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
+    }()
+    case .playbackPause?: try {
+      guard case .playbackPause(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
+    }()
+    case .playbackResume?: try {
+      guard case .playbackResume(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
+    }()
+    case .playbackStop?: try {
+      guard case .playbackStop(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 39)
+    }()
+    case .playbackSeek?: try {
+      guard case .playbackSeek(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
+    }()
+    case .playbackSetVolume?: try {
+      guard case .playbackSetVolume(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
+    }()
+    case .playbackSetEqualizer?: try {
+      guard case .playbackSetEqualizer(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
+    }()
+    case .playbackSetReplayGain?: try {
+      guard case .playbackSetReplayGain(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
+    }()
+    case .playbackState?: try {
+      guard case .playbackState(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -5328,7 +6358,7 @@ nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0\u{1}artwork\0\u{3}enqueue_download\0\u{3}report_download_progress\0\u{3}complete_download\0\u{3}fail_download\0\u{3}cancel_download\0\u{3}delete_download\0\u{3}download_status\0\u{1}downloads\0\u{3}storage_usage\0\u{1}lyrics\0\u{3}recording_identity\0\u{3}similar_tracks\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0\u{1}artwork\0\u{3}enqueue_download\0\u{3}report_download_progress\0\u{3}complete_download\0\u{3}fail_download\0\u{3}cancel_download\0\u{3}delete_download\0\u{3}download_status\0\u{1}downloads\0\u{3}storage_usage\0\u{1}lyrics\0\u{3}recording_identity\0\u{3}similar_tracks\0\u{3}playback_play\0\u{3}playback_queue_next\0\u{3}playback_pause\0\u{3}playback_resume\0\u{3}playback_stop\0\u{3}playback_seek\0\u{3}playback_set_volume\0\u{3}playback_set_equalizer\0\u{3}playback_set_replay_gain\0\u{3}playback_state\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -5675,6 +6705,136 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
           self.result = .similarTracks(v)
         }
       }()
+      case 35: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackPlay(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackPlay(v)
+        }
+      }()
+      case 36: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackQueueNext(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackQueueNext(v)
+        }
+      }()
+      case 37: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackPause(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackPause(v)
+        }
+      }()
+      case 38: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackResume(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackResume(v)
+        }
+      }()
+      case 39: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackStop(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackStop(v)
+        }
+      }()
+      case 40: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackSeek(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackSeek(v)
+        }
+      }()
+      case 41: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackSetVolume(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackSetVolume(v)
+        }
+      }()
+      case 42: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackSetEqualizer(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackSetEqualizer(v)
+        }
+      }()
+      case 43: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackSetReplayGain(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackSetReplayGain(v)
+        }
+      }()
+      case 44: try {
+        var v: Mozz_V1_PlaybackStateResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .playbackState(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .playbackState(v)
+        }
+      }()
       default: break
       }
     }
@@ -5792,6 +6952,46 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
     case .similarTracks?: try {
       guard case .similarTracks(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
+    }()
+    case .playbackPlay?: try {
+      guard case .playbackPlay(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 35)
+    }()
+    case .playbackQueueNext?: try {
+      guard case .playbackQueueNext(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
+    }()
+    case .playbackPause?: try {
+      guard case .playbackPause(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
+    }()
+    case .playbackResume?: try {
+      guard case .playbackResume(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
+    }()
+    case .playbackStop?: try {
+      guard case .playbackStop(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 39)
+    }()
+    case .playbackSeek?: try {
+      guard case .playbackSeek(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
+    }()
+    case .playbackSetVolume?: try {
+      guard case .playbackSetVolume(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
+    }()
+    case .playbackSetEqualizer?: try {
+      guard case .playbackSetEqualizer(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
+    }()
+    case .playbackSetReplayGain?: try {
+      guard case .playbackSetReplayGain(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
+    }()
+    case .playbackState?: try {
+      guard case .playbackState(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
     }()
     case nil: break
     }

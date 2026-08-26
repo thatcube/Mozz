@@ -57,7 +57,8 @@ public func mozz_session_invoke(
             lyricsService: session.lyrics,
             enrichmentStore: EnrichmentStore(session.database),
             backendResolver: { backends.backend($0) },
-            similarityAlgorithm: EnrichmentConfig.defaultListenBrainzAlgorithm))
+            similarityAlgorithm: EnrichmentConfig.defaultListenBrainzAlgorithm,
+            playback: session.playback))
 
     // `handle` is synchronous by design — see the note on `mozz_session_call`.
     // A host calling across a C ABI has no async to await into, so the bridge

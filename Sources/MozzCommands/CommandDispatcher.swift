@@ -1,4 +1,5 @@
 import Foundation
+import MozzAudioEngine
 import MozzCore
 import MozzDatabase
 import MozzSchema
@@ -338,6 +339,51 @@ public struct CommandDispatcher: Sendable {
             }
             return Self.response(id: request.id) { $0.similarTracks = payload }
 
+        case .playbackPlay(let arguments):
+            let snapshot = try await service.playbackPlay(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.playbackPlay = Self.wire(snapshot) }
+
+        case .playbackQueueNext(let arguments):
+            let snapshot = try await service.playbackQueueNext(
+                serverId: ServerID(arguments.serverID), remoteId: arguments.remoteID)
+            return Self.response(id: request.id) { $0.playbackQueueNext = Self.wire(snapshot) }
+
+        case .playbackPause:
+            let snapshot = try await service.playbackPause()
+            return Self.response(id: request.id) { $0.playbackPause = Self.wire(snapshot) }
+
+        case .playbackResume:
+            let snapshot = try await service.playbackResume()
+            return Self.response(id: request.id) { $0.playbackResume = Self.wire(snapshot) }
+
+        case .playbackStop:
+            let snapshot = try await service.playbackStop()
+            return Self.response(id: request.id) { $0.playbackStop = Self.wire(snapshot) }
+
+        case .playbackSeek(let arguments):
+            let snapshot = try await service.playbackSeek(toSeconds: arguments.positionSeconds)
+            return Self.response(id: request.id) { $0.playbackSeek = Self.wire(snapshot) }
+
+        case .playbackSetVolume(let arguments):
+            let snapshot = try await service.playbackSetVolume(arguments.volume)
+            return Self.response(id: request.id) { $0.playbackSetVolume = Self.wire(snapshot) }
+
+        case .playbackSetEqualizer(let arguments):
+            let snapshot = try await service.playbackSetEqualizer(
+                bandGainsDB: arguments.bandGainsDb, preampDB: arguments.preampDb,
+                enabled: arguments.enabled)
+            return Self.response(id: request.id) { $0.playbackSetEqualizer = Self.wire(snapshot) }
+
+        case .playbackSetReplayGain(let arguments):
+            let snapshot = try await service.playbackSetReplayGain(
+                mode: Self.replayGainMode(arguments.mode), preampDB: arguments.preampDb)
+            return Self.response(id: request.id) { $0.playbackSetReplayGain = Self.wire(snapshot) }
+
+        case .playbackState:
+            let snapshot = try await service.playbackState()
+            return Self.response(id: request.id) { $0.playbackState = Self.wire(snapshot) }
+
         case .watchLibrary:
             // Declared in the schema before it is implemented, deliberately: the
             // shape of a subscription had to be settled while the wire format
@@ -562,6 +608,43 @@ public struct CommandDispatcher: Sendable {
         // A client that omitted the field, or a build newer than this one, takes
         // the core's default rather than an invented value.
         case .unspecified, .UNRECOGNIZED: return .default
+        }
+    }
+
+    // MARK: Playback wire mapping
+
+    /// Wrap a playback snapshot in its response envelope. The engine's own enums
+    /// map straight across — the failure kind is carried verbatim AND the
+    /// engine's retryable verdict alongside it, so a client never re-derives
+    /// "should I retry" and drifts.
+    private static func wire(_ snapshot: PlaybackStateSnapshot) -> Mozz_V1_PlaybackStateResponse {
+        var state = Mozz_V1_PlaybackState()
+        state.engineState = wire(snapshot.state)
+        state.positionSeconds = snapshot.positionSeconds
+        state.currentTrackID = snapshot.currentTrackID
+        state.hasFailed_p = snapshot.hasFailed
+        state.failureKind = wire(snapshot.failureKind)
+        state.failureIsRetryable = snapshot.failureIsRetryable
+        var response = Mozz_V1_PlaybackStateResponse()
+        response.state = state
+        return response
+    }
+
+    private static func wire(_ state: AudioEngine.State) -> Mozz_V1_PlaybackEngineState {
+        switch state {
+        case .idle: return .idle
+        case .playing: return .playing
+        case .paused: return .paused
+        case .ended: return .ended
+        }
+    }
+
+    private static func wire(_ kind: AudioEngine.FailureKind) -> Mozz_V1_PlaybackFailureKind {
+        switch kind {
+        case .none: return .none
+        case .unsupported: return .unsupported
+        case .interrupted: return .interrupted
+        case .corrupt: return .corrupt
         }
     }
 

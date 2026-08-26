@@ -185,6 +185,47 @@ final class MozzSessionInvokeTests: XCTestCase {
 
     /// A bad handle must answer, not crash. There is no exception to catch on
     /// the other side of a C ABI.
+    /// Playback has to survive being asked about twice.
+    ///
+    /// The command surface was built before the session owned an engine, so a
+    /// fresh service was constructed per request and every playback command
+    /// answered "not available" — a Facade that described playback perfectly
+    /// and could not perform it. Nothing in the schema, the dispatcher or the
+    /// tests objected, because each of those was correct in isolation.
+    ///
+    /// Asking twice is the point: a per-request engine would answer the second
+    /// call from a different engine than the first.
+    func testPlaybackStateIsAvailableAndSurvivesAcrossCalls() async throws {
+        let path = try makeLibrary()
+        try await seed(path, albums: 2)
+        let handle = mozz_session_open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        var request = Mozz_V1_Request()
+        request.id = 77
+        request.playbackState = Mozz_V1_PlaybackStateRequest()
+
+        let first = try invoke(handle, request)
+        XCTAssertEqual(first.id, 77)
+        guard case .playbackState(let state) = first.result else {
+            XCTFail("expected playback state, got \(String(describing: first.result))")
+            return
+        }
+        // Idle rather than a failure: nothing is playing, which is a state, not
+        // an error. A missing engine used to surface here as `.failure`.
+        // `hasFailed_p` rather than `hasFailed`: swift-protobuf renames it because
+        // `hasX` is already how it spells "was this optional field present".
+        XCTAssertFalse(
+            state.state.hasFailed_p, "a session with an engine should not report failure")
+
+        request.id = 78
+        let second = try invoke(handle, request)
+        guard case .playbackState = second.result else {
+            XCTFail("playback stopped being available between calls")
+            return
+        }
+    }
+
     func testAnUnknownHandleFailsRatherThanCrashing() throws {
         var request = Mozz_V1_Request()
         request.id = 5

@@ -649,6 +649,129 @@ message SimilarTracksResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Playback transport (ADR-0016)
+//
+// Audio control — play, queue, pause, resume, stop, seek, level, EQ, ReplayGain
+// — reaches the one shared engine through these commands rather than each shell
+// linking the engine directly. A shell that links the engine is a shell that
+// can decide how music sounds, and two of those drift; the whole point of one
+// engine is defeated the moment a second doorway into it exists.
+//
+// The core owns the server credentials, so the core builds the authenticated
+// byte stream (see the Swift HTTPStream/FileStream). A track is addressed the
+// same (server_id, remote_id) way as everywhere else; the core resolves it to a
+// URL with the SAME offline-first logic the Apple shell already uses (a
+// downloaded file when present, otherwise a backend stream URL), so no shell
+// re-implements authenticated streaming.
+// ---------------------------------------------------------------------------
+
+// What the engine is doing. Mirrors the Rust engine's own state enum. UNSPECIFIED
+// (0) exists only so a client that reads a zero value does not mistake it for a
+// real state; the engine never reports it.
+enum PlaybackEngineState {
+  PLAYBACK_ENGINE_STATE_UNSPECIFIED = 0;
+  PLAYBACK_ENGINE_STATE_IDLE = 1;
+  PLAYBACK_ENGINE_STATE_PLAYING = 2;
+  PLAYBACK_ENGINE_STATE_PAUSED = 3;
+  PLAYBACK_ENGINE_STATE_ENDED = 4;
+}
+
+// Why the last decode failed. The transient/permanent split is load-bearing and
+// must never be collapsed: INTERRUPTED must be retried, UNSUPPORTED and CORRUPT
+// must never be. The engine — not a shell — decides which is which, so the
+// snapshot also carries failure_is_retryable directly rather than making each
+// client re-map these cases and drift.
+enum PlaybackFailureKind {
+  PLAYBACK_FAILURE_KIND_NONE = 0;
+  PLAYBACK_FAILURE_KIND_UNSUPPORTED = 1;
+  PLAYBACK_FAILURE_KIND_INTERRUPTED = 2;
+  PLAYBACK_FAILURE_KIND_CORRUPT = 3;
+}
+
+// The one observable answer a request/response surface can give about a
+// continuous thing. Every transport command returns it, so a client sees the
+// result of what it just did without a second round-trip, and the query command
+// returns exactly the same shape.
+message PlaybackState {
+  PlaybackEngineState engine_state = 1;
+  // Seconds of the current track ACTUALLY HEARD — read from the engine's output,
+  // never from a clock. The two differ by the whole buffer, most visibly on a
+  // slow network, so a clock-derived position runs ahead of its own sound.
+  double position_seconds = 2;
+  // The internal track id (TrackSummary.id) the audio is currently in — not
+  // necessarily the last one queued. 0 when nothing is loaded.
+  uint64 current_track_id = 3;
+  // True when a decode has failed since the last command.
+  bool has_failed = 4;
+  PlaybackFailureKind failure_kind = 5;
+  // The engine's own verdict on whether the failure is worth retrying. A client
+  // reads THIS, not failure_kind, to decide — collapsing the kinds itself is the
+  // bug this field exists to prevent.
+  bool failure_is_retryable = 6;
+}
+
+// Play a track now, discarding anything queued. The core resolves (server_id,
+// remote_id) to a URL and builds the byte stream itself.
+message PlaybackPlayRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+// Queue a track behind the current one so the two meet with no gap. This is a
+// genuine gapless join, not a timing heuristic: the engine holds the queued
+// stream and starts it the instant the current track's last sample is consumed,
+// so queueing early is correct — there is nothing to wait for.
+message PlaybackQueueNextRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message PlaybackPauseRequest {}
+message PlaybackResumeRequest {}
+message PlaybackStopRequest {}
+
+// Move within the current track. The response reports where the engine actually
+// landed via PlaybackState.position_seconds.
+message PlaybackSeekRequest {
+  double position_seconds = 1;
+}
+
+// The listener's own level, 0.0 silent to 1.0 unity. Applied after ReplayGain
+// and the equaliser. The engine clamps and ramps, so an out-of-range value is
+// normalized rather than rejected.
+message PlaybackSetVolumeRequest {
+  double volume = 1;
+}
+
+// Set the live ten-band equaliser on the engine. Fewer than ten gains are padded
+// with zero and extras are ignored. This drives the running engine; persisting
+// the choice for sync is SetPlaybackSettings' separate job.
+message PlaybackSetEqualizerRequest {
+  repeated double band_gains_db = 1;
+  double preamp_db = 2;
+  bool enabled = 3;
+}
+
+// Set live loudness normalization on the engine. UNSPECIFIED takes the core
+// default (Track). Like the equaliser command, this drives the running engine
+// rather than persisting the setting.
+message PlaybackSetReplayGainRequest {
+  ReplayGainMode mode = 1;
+  double preamp_db = 2;
+}
+
+// Query current playback state. The interesting command: playback is continuous
+// but the surface is request/response, so a client polls this for position and
+// for whether a failure occurred (and, crucially, whether to retry it).
+message PlaybackStateRequest {}
+
+// Every transport command answers with the post-command state, so the return
+// type is uniform and a client always learns the result of what it did.
+message PlaybackStateResponse {
+  PlaybackState state = 1;
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 //
 // One envelope in, one envelope out. The oneof is what closes the loop: adding
@@ -686,6 +809,16 @@ message Request {
     LyricsRequest lyrics = 32;
     RecordingIdentityRequest recording_identity = 33;
     SimilarTracksRequest similar_tracks = 34;
+    PlaybackPlayRequest playback_play = 35;
+    PlaybackQueueNextRequest playback_queue_next = 36;
+    PlaybackPauseRequest playback_pause = 37;
+    PlaybackResumeRequest playback_resume = 38;
+    PlaybackStopRequest playback_stop = 39;
+    PlaybackSeekRequest playback_seek = 40;
+    PlaybackSetVolumeRequest playback_set_volume = 41;
+    PlaybackSetEqualizerRequest playback_set_equalizer = 42;
+    PlaybackSetReplayGainRequest playback_set_replay_gain = 43;
+    PlaybackStateRequest playback_state = 44;
   }
 }
 
@@ -723,6 +856,19 @@ message Response {
     LyricsResponse lyrics = 32;
     RecordingIdentityResponse recording_identity = 33;
     SimilarTracksResponse similar_tracks = 34;
+    // Every playback transport command answers with the same PlaybackState
+    // envelope, so a client learns the result of what it did — and the state
+    // query returns the identical shape.
+    PlaybackStateResponse playback_play = 35;
+    PlaybackStateResponse playback_queue_next = 36;
+    PlaybackStateResponse playback_pause = 37;
+    PlaybackStateResponse playback_resume = 38;
+    PlaybackStateResponse playback_stop = 39;
+    PlaybackStateResponse playback_seek = 40;
+    PlaybackStateResponse playback_set_volume = 41;
+    PlaybackStateResponse playback_set_equalizer = 42;
+    PlaybackStateResponse playback_set_replay_gain = 43;
+    PlaybackStateResponse playback_state = 44;
   }
 }
 

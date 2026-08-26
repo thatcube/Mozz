@@ -1,4 +1,5 @@
 import Foundation
+import MozzAudioEngine
 import MozzCore
 import MozzDatabase
 import MozzEnrichment
@@ -204,6 +205,48 @@ public protocol CommandService: Sendable {
     /// (similarity is keyed by it) or no similarity data has been fetched — the
     /// same network-free DB read the Apple radio tier makes.
     func similarTracks(serverId: ServerID, remoteId: String, limit: Int) async throws -> [ScoredTrack]
+
+    // MARK: Playback transport (ADR-0016)
+
+    /// Play a track now, discarding anything queued. The core resolves
+    /// (server, remote) to a URL and builds the byte stream itself, so no shell
+    /// re-implements authenticated streaming. Throws
+    /// ``PlaybackCommandError/unknownTrack(serverId:remoteId:)`` for a track the
+    /// catalog never saw, and ``PlaybackCommandError/unavailable`` where playback
+    /// is not wired into the process. Returns the post-command state.
+    func playbackPlay(serverId: ServerID, remoteId: String) async throws -> PlaybackStateSnapshot
+
+    /// Queue a track behind the current one for a gapless join. Same errors and
+    /// return as ``playbackPlay(serverId:remoteId:)``.
+    func playbackQueueNext(serverId: ServerID, remoteId: String) async throws -> PlaybackStateSnapshot
+
+    /// Hold playback where it is. Returns the post-command state.
+    func playbackPause() async throws -> PlaybackStateSnapshot
+
+    /// Resume from where it was held. Returns the post-command state.
+    func playbackResume() async throws -> PlaybackStateSnapshot
+
+    /// Stop and unload. Returns the post-command state.
+    func playbackStop() async throws -> PlaybackStateSnapshot
+
+    /// Move within the current track. The returned state reports where the engine
+    /// actually landed (`positionSeconds`), not the requested target.
+    func playbackSeek(toSeconds seconds: Double) async throws -> PlaybackStateSnapshot
+
+    /// Set the listener's level, 0.0…1.0. The engine clamps and ramps.
+    func playbackSetVolume(_ volume: Double) async throws -> PlaybackStateSnapshot
+
+    /// Drive the live ten-band equaliser on the engine (distinct from persisting
+    /// the choice, which is SetPlaybackSettings' job).
+    func playbackSetEqualizer(bandGainsDB: [Double], preampDB: Double, enabled: Bool) async throws -> PlaybackStateSnapshot
+
+    /// Drive live loudness normalization on the engine.
+    func playbackSetReplayGain(mode: ReplayGainMode, preampDB: Double) async throws -> PlaybackStateSnapshot
+
+    /// Query current playback state — the one command that reads the continuous
+    /// thing: engine state, position (from the engine, never a clock), current
+    /// track, and whether a failure occurred and is retryable.
+    func playbackState() async throws -> PlaybackStateSnapshot
 }
 
 /// The outcome of a lyrics command. The three non-present cases are distinct on
@@ -294,6 +337,12 @@ public struct LibraryCommandService: CommandService {
     private let enrichmentStore: EnrichmentStore?
     private let backendResolver: @Sendable (ServerID) -> (any MusicBackend)?
     private let similarityAlgorithm: String
+    /// The session-lifetime playback engine, injected so one engine survives
+    /// across the per-request command services. Optional and defaulting to nil:
+    /// the live FFI session does not yet own one (see PlaybackCommandError
+    /// .unavailable), and the existing call sites that pass no playback keep
+    /// compiling — the same optional-injection pattern as `artwork`/`lyricsService`.
+    private let playback: PlaybackCommandService?
 
     public init(
         repository: LibraryRepository,
@@ -303,7 +352,8 @@ public struct LibraryCommandService: CommandService {
         lyricsService: LyricsService? = nil,
         enrichmentStore: EnrichmentStore? = nil,
         backendResolver: @escaping @Sendable (ServerID) -> (any MusicBackend)? = { _ in nil },
-        similarityAlgorithm: String = EnrichmentConfig.defaultListenBrainzAlgorithm
+        similarityAlgorithm: String = EnrichmentConfig.defaultListenBrainzAlgorithm,
+        playback: PlaybackCommandService? = nil
     ) {
         self.repository = repository
         self.playbackSettingsStore = playbackSettings
@@ -313,6 +363,7 @@ public struct LibraryCommandService: CommandService {
         self.enrichmentStore = enrichmentStore
         self.backendResolver = backendResolver
         self.similarityAlgorithm = similarityAlgorithm
+        self.playback = playback
     }
 
     public func libraries() async throws -> [ServerConnection] {
@@ -558,6 +609,88 @@ public struct LibraryCommandService: CommandService {
             scored.map { ($0.candidate.remoteId, $0.score) }, uniquingKeysWith: { first, _ in first })
         let records = try await repository.tracks(forRemoteIds: orderedRemoteIds, serverId: serverId)
         return records.map { ScoredTrack(track: $0, score: scoreByRemoteId[$0.remoteId] ?? 0) }
+    }
+
+    // MARK: Playback transport (ADR-0016)
+
+    public func playbackPlay(serverId: ServerID, remoteId: String) async throws -> PlaybackStateSnapshot {
+        let (track, key) = try await resolvePlayableTrack(serverId: serverId, remoteId: remoteId)
+        return try await requirePlayback().playNow(serverId: serverId, track: track, trackKey: key)
+    }
+
+    public func playbackQueueNext(serverId: ServerID, remoteId: String) async throws -> PlaybackStateSnapshot {
+        let (track, key) = try await resolvePlayableTrack(serverId: serverId, remoteId: remoteId)
+        return try await requirePlayback().playNext(serverId: serverId, track: track, trackKey: key)
+    }
+
+    public func playbackPause() async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().pause()
+    }
+
+    public func playbackResume() async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().resume()
+    }
+
+    public func playbackStop() async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().stop()
+    }
+
+    public func playbackSeek(toSeconds seconds: Double) async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().seek(toSeconds: seconds)
+    }
+
+    public func playbackSetVolume(_ volume: Double) async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().setVolume(volume)
+    }
+
+    public func playbackSetEqualizer(bandGainsDB: [Double], preampDB: Double, enabled: Bool) async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().setEqualizer(gainsDB: bandGainsDB, preampDB: preampDB, enabled: enabled)
+    }
+
+    public func playbackSetReplayGain(mode: ReplayGainMode, preampDB: Double) async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().setReplayGain(mode: Self.engineReplayGainMode(mode), preampDB: preampDB)
+    }
+
+    public func playbackState() async throws -> PlaybackStateSnapshot {
+        try await requirePlayback().state()
+    }
+
+    /// The injected engine, or a thrown `.unavailable` where playback is not
+    /// wired — honest rather than a silent no-op.
+    private func requirePlayback() throws -> PlaybackCommandService {
+        guard let playback else { throw PlaybackCommandError.unavailable }
+        return playback
+    }
+
+    /// The domain track plus the engine key (its internal id) for a playable
+    /// (server, remote) identity. Throws for a track the catalog never saw, so an
+    /// unknown track fails cleanly here before any engine is touched.
+    private func resolvePlayableTrack(serverId: ServerID, remoteId: String) async throws -> (Track, UInt64) {
+        guard let record = try await repository.track(serverId: serverId, remoteId: remoteId) else {
+            throw PlaybackCommandError.unknownTrack(serverId: serverId, remoteId: remoteId)
+        }
+        // The engine reports back whatever UInt64 key it is handed, and the
+        // wire's TrackSummary.id is this same internal id — so the internal id is
+        // the key that makes `currentTrackID` meaningful to a client. The domain
+        // Track.id, by contrast, is the remote string id. A persisted record
+        // always has an internal id; a nil one is a corrupt row, not a missing
+        // track, so treat it as unknown rather than force-unwrapping.
+        guard let internalId = record.id else {
+            throw PlaybackCommandError.unknownTrack(serverId: serverId, remoteId: remoteId)
+        }
+        return (record.toDomain(), UInt64(bitPattern: internalId))
+    }
+
+    /// Map the core's ReplayGain mode onto the engine's. The command signature
+    /// speaks the core vocabulary (consistent with SetPlaybackSettings); the
+    /// engine has its own enum, and the mapping lives here rather than making
+    /// clients agree on it.
+    private static func engineReplayGainMode(_ mode: ReplayGainMode) -> AudioEngine.ReplayGainMode {
+        switch mode {
+        case .off: return .off
+        case .track: return .track
+        case .album: return .album
+        }
     }
 
     // MARK: Download helpers
