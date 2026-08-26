@@ -22,6 +22,24 @@ nothing, applies no gain and makes no choices, because every decision it was
 allowed to make would be a way for two platforms to sound different.
 _Avoid_: audio backend, output layer, driver, audio engine
 
+**Boundary**:
+The point where one track gives way to the next. Not an event — a *label on a
+sample position*. Gapless playback makes the last sample of one track and the
+first of the next adjacent, so nothing happens to the audio there and there is
+nothing to observe; a boundary is only "reached" when the audio reaches it. The
+decoder runs ahead of the speaker by however much buffer it has filled, so
+anything announced when a track finishes decoding is announced early, by a
+margin that moves with buffer pressure.
+_Avoid_: track change event, track transition, song ended
+
+**Position**:
+How much of the current track has actually been heard — measured from the audio
+handed to the operating system, never from a clock and never from how far the
+decoder has read. Those differ by the whole buffer. A player that reports
+decoded position appears to run ahead of its own sound, most visibly on a slow
+network, where the gap is largest.
+_Avoid_: playhead, elapsed, current time
+
 **Shell**:
 One platform's user interface, written in that platform's own framework. A
 shell is deliberately not shared; two shells presenting the same capability
