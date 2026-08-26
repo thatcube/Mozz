@@ -16,6 +16,18 @@
  * the source rate - which is the path any CI machine takes.
  */
 
+/*
+ * nanosleep is POSIX, not ISO C, and this is built with -std=c11 rather than
+ * gnu11. glibc hides anything outside the standard when __STRICT_ANSI__ is set,
+ * so without this the declaration is missing and -Werror turns that into:
+ *
+ *     error: implicit declaration of function 'nanosleep'
+ *
+ * Apple's headers expose it regardless, which is why this only ever failed on
+ * Linux. Must precede every include to have any effect.
+ */
+#define _POSIX_C_SOURCE 199309L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
