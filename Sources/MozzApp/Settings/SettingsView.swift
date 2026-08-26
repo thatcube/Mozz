@@ -117,6 +117,14 @@ struct SettingsView: View {
 
                     Section {
                         NavigationLink {
+                            PairingView()
+                        } label: {
+                            Label("Devices", mozz: "iphone.and.arrow.forward")
+                        }
+                    }
+
+                    Section {
+                        NavigationLink {
                             AppearanceSettingsView()
                         } label: {
                             Label("Appearance", mozz: "paintpalette")

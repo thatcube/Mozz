@@ -336,6 +336,7 @@ let package = Package(
                 "MozzCore", "MozzNetworking", "MozzDatabase",
                 "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
                 "MozzPlayback", "MozzDownloads", "MozzRecommend", "MozzEnrichment",
+                "MozzPairing",
             ],
             resources: [.process("Resources")]
         ),
