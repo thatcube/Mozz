@@ -8,6 +8,8 @@
 //! that change how a track sounds, so two devices are not allowed to drift merely
 //! because they hand the buffer to different operating systems.
 
+pub mod ring;
+
 use std::f64::consts::PI;
 
 /// The ten ISO centre frequencies used by Mozz's existing equaliser surfaces.
