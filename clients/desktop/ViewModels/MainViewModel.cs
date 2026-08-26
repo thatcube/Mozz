@@ -315,6 +315,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // looked the same whether the server had no art, the network was
         // refusing the connection, or nothing had attached yet.
         _artwork.ArtworkFailed += reason => Dispatcher.UIThread.Post(() => StatusMessage = reason);
+        // And take the complaint back down once covers start arriving, so a
+        // solved problem stops being advertised.
+        ArtworkService.ArtworkRecovered += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (StatusMessage?.Contains("album art", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                StatusMessage = null;
+            }
+        });
 
         _engine = new MiniAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far

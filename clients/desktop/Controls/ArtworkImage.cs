@@ -107,6 +107,37 @@ public sealed class ArtworkImage : Control
         }
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        ArtworkService.ArtworkRecovered += OnArtworkRecovered;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        ArtworkService.ArtworkRecovered -= OnArtworkRecovered;
+    }
+
+    /// <summary>
+    /// Ask again for a cover that was written off while the server was
+    /// unreachable.
+    ///
+    /// A tile that has drawn its placeholder never asks twice, which is right
+    /// while nothing has changed and wrong the instant something has - such as
+    /// macOS granting local network access, which happens after the app has
+    /// already tried and which the app is never told about.
+    /// </summary>
+    private void OnArtworkRecovered()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_bitmap is not null) return;   // already showing art; leave it be
+            _hasBound = false;
+            Rebind();
+        });
+    }
+
     private void Rebind()
     {
         var request = BuildRequest();

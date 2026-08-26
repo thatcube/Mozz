@@ -182,10 +182,24 @@ SIZE="$(du -sh "$APP" | cut -f1)"
 echo "✓ $APP ($SIZE) — version $MOZZ_RESOLVED_DISPLAY_VERSION"
 
 if [ "$RUN" = "1" ]; then
+  # Launch from /Applications, never from the build directory.
+  #
+  # macOS only grants local network access to an app running from a normal
+  # install location. Run the same signed bundle out of a worktree's build/
+  # folder and every connection to a LAN server fails with EHOSTUNREACH, while
+  # curl, nc and the child ffmpeg process all reach it fine - so music plays and
+  # album art silently does not, and the app never appears in the Local Network
+  # settings list to be granted. That cost a full evening to find. Copying first
+  # takes a second and removes the whole class of problem.
+  INSTALLED="/Applications/$(basename "$APP")"
+  echo "▸ Installing to $INSTALLED…"
+  rm -rf "$INSTALLED"
+  cp -R "$APP" "$INSTALLED"
+
   echo "▸ Launching…"
   if [ -n "$LIBRARY" ]; then
-    MOZZ_LIBRARY="$LIBRARY" open -n "$APP"
+    MOZZ_LIBRARY="$LIBRARY" open -n "$INSTALLED"
   else
-    open -n "$APP"
+    open -n "$INSTALLED"
   fi
 fi

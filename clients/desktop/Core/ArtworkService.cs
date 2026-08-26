@@ -60,6 +60,79 @@ public sealed class ArtworkService : IDisposable
     /// </summary>
     public void ResetFailureReport() => _reporter.Reset();
 
+    /// <summary>
+    /// Raised when artwork starts working again after a spell of failing.
+    ///
+    /// Static because the tiles that need to hear it are created and destroyed
+    /// constantly by list virtualization and have no handle on the service.
+    /// </summary>
+    public static event Action? ArtworkRecovered;
+
+    private readonly RetrySchedule _retry = new();
+    private ArtworkRef? _lastTransientFailure;
+    private int _probing;
+
+    /// <summary>
+    /// Keep quietly retrying one cover that failed, and announce it the moment
+    /// one works.
+    ///
+    /// macOS only prompts for local network access once the app actually tries,
+    /// and granting it tells the app nothing. By then every visible tile has
+    /// already failed and drawn its placeholder, and a tile never asks twice -
+    /// so the covers stayed blank until the user happened to navigate away and
+    /// back. Nobody should have to discover that.
+    ///
+    /// One probe, not one per tile: the question "is the server reachable" has
+    /// the same answer for all five thousand of them.
+    /// </summary>
+    private void BeginRecoveryProbe(ArtworkRef failed)
+    {
+        _lastTransientFailure = failed;
+        if (Interlocked.Exchange(ref _probing, 1) == 1) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(_retry.Next()).ConfigureAwait(false);
+
+                    var probe = _lastTransientFailure;
+                    if (probe is null) return;
+
+                    try
+                    {
+                        await FetchAsync(probe.Value, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (ArtworkUnavailableException)
+                    {
+                        continue;   // still broken; wait longer and ask again
+                    }
+                    catch (Exception)
+                    {
+                        continue;
+                    }
+
+                    // A cover came back. Anything written off while the server
+                    // was unreachable deserves another chance, and the tiles
+                    // showing placeholders need to be told to ask again.
+                    _cache.ForgetFailures();
+                    _directUrlCache.ForgetFailures();
+                    _reporter.Reset();
+                    _retry.Reset();
+                    _lastTransientFailure = null;
+                    ArtworkRecovered?.Invoke();
+                    return;
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _probing, 0);
+            }
+        });
+    }
+
     private readonly MozzServer _server;
     private readonly HttpClient _http;
     private readonly ArtworkCache<Bitmap> _cache;
@@ -144,6 +217,7 @@ public sealed class ArtworkService : IDisposable
             Report(ex.Message.Contains("attached", StringComparison.OrdinalIgnoreCase)
                 ? "Waiting for the server before album art can load."
                 : $"Album art unavailable: {ex.Message}");
+            BeginRecoveryProbe(request);
             throw new ArtworkUnavailableException(
                 $"could not resolve artwork for {request.ArtworkKey}", ex);
         }
@@ -188,6 +262,7 @@ public sealed class ArtworkService : IDisposable
                 ? "Can't reach your server for album art. If it is on your local network, "
                   + "check System Settings › Privacy & Security › Local Network and allow Mozz."
                 : $"Album art unavailable: {ex.Message}");
+            BeginRecoveryProbe(request);
             throw new ArtworkUnavailableException("artwork fetch failed", ex);
         }
     }
