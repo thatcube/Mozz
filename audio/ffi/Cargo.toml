@@ -1,0 +1,14 @@
+[package]
+name = "mozz_audio_ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI for the Mozz audio engine"
+license = "GPL-3.0-or-later"
+
+# A staticlib so a Swift or C# shell links it directly, and an rlib so Rust
+# tests can drive the same functions the shells will call.
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+mozz_audio = { path = ".." }

@@ -299,6 +299,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mozz_audio_ffi"
+version = "0.1.0"
+dependencies = [
+ "mozz_audio",
+]
+
+[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
