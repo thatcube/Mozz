@@ -92,6 +92,14 @@ jobs:
       - name: Build the audio engine
         run: tools/build-audio-xcframework.sh --all
 
+      # The Apple app reaches into core modules directly, 122 times across 13 of
+      # them, while every other shell goes through the Facade. That private door
+      # is why a feature can ship on iOS and be invisible everywhere else -
+      # downloads, lyrics, similar tracks and artwork were all in exactly that
+      # state. Closing it is phased; this makes sure it cannot widen meanwhile.
+      - name: The Apple app has not reached further into the core
+        run: tools/check-shell-imports.sh --check
+
       - name: Run the test suite
         run: swift test --parallel
 
