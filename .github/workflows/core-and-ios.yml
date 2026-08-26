@@ -100,6 +100,13 @@ jobs:
       - name: The Apple app has not reached further into the core
         run: tools/check-shell-imports.sh --check
 
+      # A platform lacking a capability is behind, never exempt. That is easy to
+      # agree with and hard to notice breaking: a command can exist, be
+      # implemented, be in every generated client, and still be reachable from
+      # one app, with nothing in the build objecting.
+      - name: No shell lost a capability
+        run: tools/check-parity.sh --check
+
       - name: Run the test suite
         run: swift test --parallel
 
