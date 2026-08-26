@@ -227,11 +227,32 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
             lock (_gate) _inflight.Remove(key);
             return null;
         }
+        catch (ArtworkUnavailableException)
+        {
+            // "Not right now" — a server still attaching, a timeout, a server
+            // that is briefly unreachable. None of that is evidence the cover is
+            // missing, and the negative set is never emptied, so recording it
+            // here would hide that cover until the app restarts.
+            lock (_gate) _inflight.Remove(key);
+            return null;
+        }
         catch
         {
             Fail(key);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Forget every remembered failure, so the next request for each tries again.
+    ///
+    /// Called when a server attaches. Anything that failed before there was a
+    /// backend to ask deserves a second chance, and without this the covers only
+    /// reappear for tiles that happen to be re-rendered.
+    /// </summary>
+    public void ForgetFailures()
+    {
+        lock (_gate) _negative.Clear();
     }
 
     private void Touch(LinkedListNode<Node> node)

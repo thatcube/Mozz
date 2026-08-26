@@ -476,6 +476,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // Before anything can be played: the tracks come from the local
             // database, but their stream URLs come from an attached backend.
             await Connect.AttachSavedAccountsAsync();
+
+            // Artwork resolves through an attached backend, and tiles start
+            // asking as soon as anything renders — which is before this point.
+            // Those requests come back "no attached server", which the cache
+            // cannot tell apart from "no such cover", so without this the whole
+            // library keeps its letter placeholders until the app restarts.
+            _artwork.ForgetFailures();
+
             await RefreshActiveAccountProfileAsync();
             await ReconcileContinuityAsync();
 
@@ -608,6 +616,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             IsSettingsBusy = true;
             await _server.AttachAsync(account);
+            _artwork.ForgetFailures();
             _lastWrittenContinuityQueueHash = null;
             await RefreshActiveAccountProfileAsync();
             await ReconcileContinuityAsync();

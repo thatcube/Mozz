@@ -84,23 +84,39 @@ public sealed class ArtworkService : IDisposable
     public Task<Bitmap?> LoadDirectUrlAsync(ArtworkRef request, CancellationToken token)
         => _directUrlCache.GetAsync(request, token);
 
+    /// <summary>
+    /// Forget every remembered artwork failure, on both caches.
+    ///
+    /// See <see cref="ArtworkUnavailableException"/>: a failure recorded while
+    /// no server was attached is not evidence that a cover is missing.
+    /// </summary>
+    public void ForgetFailures()
+    {
+        _cache.ForgetFailures();
+        _directUrlCache.ForgetFailures();
+    }
+
     private async Task<byte[]?> FetchAsync(ArtworkRef request, CancellationToken token)
     {
         string? url;
         try
         {
-            // The core resolves the key against the attached backend. With no
-            // server attached — the synthetic demo library, say — this throws, and
-            // "no attached server" is just "no art" from here.
             url = await _server
                 .ArtworkUrlAsync(request.ServerId, request.ArtworkKey, request.Size, token)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            // The core resolves the key against the attached backend, so this
+            // throws while a server is still attaching — which says nothing
+            // about whether the cover exists. Returning null here would have the
+            // cache write it off for the rest of the session.
+            throw new ArtworkUnavailableException(
+                $"could not resolve artwork for {request.ArtworkKey}", ex);
         }
 
+        // A resolved-but-empty URL is the one honest "there is no art here":
+        // the backend was asked and had nothing. That is worth remembering.
         if (string.IsNullOrEmpty(url)) return null;
 
         try
@@ -108,12 +124,30 @@ public sealed class ArtworkService : IDisposable
             using var response = await _http
                 .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token)
                 .ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return null;
+
+            // A 404 is the server saying this art does not exist; anything else
+            // — unauthorised, unavailable, gateway trouble — is about the moment
+            // rather than the artwork, and should be retried later.
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new ArtworkUnavailableException(
+                    $"artwork fetch returned {(int)response.StatusCode}");
+            }
+
             return await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
         }
-        catch
+        catch (ArtworkUnavailableException)
         {
-            return null;
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ArtworkUnavailableException("artwork fetch failed", ex);
         }
     }
 
