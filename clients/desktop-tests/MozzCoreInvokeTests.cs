@@ -70,6 +70,21 @@ public class MozzCoreInvokeTests
     }
 
     /// <summary>
+    /// Close the session, then remove its directory — in that order.
+    ///
+    /// The core holds library.sqlite open, and Windows will not delete a file
+    /// something still has open. POSIX will, which is why disposing the core
+    /// after the cleanup passed everywhere except the one platform this library
+    /// is hardest to build on. `using var core` disposed at end of scope, which
+    /// is after the finally block, so the delete always ran first.
+    /// </summary>
+    private static void Close(MozzCore core, string root)
+    {
+        core.Dispose();
+        Directory.Delete(root, recursive: true);
+    }
+
+    /// <summary>
     /// The reason this path exists at all: a request carrying a zero byte.
     ///
     /// A <c>libraries</c> request is an empty message inside the command oneof,
@@ -83,7 +98,7 @@ public class MozzCoreInvokeTests
     {
         RequireLibrary();
 
-        using var core = OpenTemporaryLibrary(out var root);
+        var core = OpenTemporaryLibrary(out var root);
         try
         {
             var request = new Request { Id = 3, Libraries = new LibrariesRequest() };
@@ -96,7 +111,7 @@ public class MozzCoreInvokeTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            Close(core, root);
         }
     }
 
@@ -109,7 +124,7 @@ public class MozzCoreInvokeTests
     {
         RequireLibrary();
 
-        using var core = OpenTemporaryLibrary(out var root);
+        var core = OpenTemporaryLibrary(out var root);
         try
         {
             var response = core.Invoke(new Request { Id = 1, Libraries = new LibrariesRequest() });
@@ -119,7 +134,7 @@ public class MozzCoreInvokeTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            Close(core, root);
         }
     }
 
@@ -133,7 +148,7 @@ public class MozzCoreInvokeTests
     {
         RequireLibrary();
 
-        using var core = OpenTemporaryLibrary(out var root);
+        var core = OpenTemporaryLibrary(out var root);
         try
         {
             var request = new Request
@@ -147,7 +162,7 @@ public class MozzCoreInvokeTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            Close(core, root);
         }
     }
 
@@ -160,7 +175,7 @@ public class MozzCoreInvokeTests
     {
         RequireLibrary();
 
-        using var core = OpenTemporaryLibrary(out var root);
+        var core = OpenTemporaryLibrary(out var root);
         try
         {
             for (var i = 1; i <= 50; i++)
@@ -172,7 +187,7 @@ public class MozzCoreInvokeTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            Close(core, root);
         }
     }
 }
