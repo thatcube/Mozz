@@ -1192,6 +1192,19 @@ public final class PlaybackEngine {
         maybeExtendQueue()
     }
 
+    /// Refresh the snapshot now, instead of waiting for the timer.
+    ///
+    /// The snapshot is only as fresh as the last tick, which is fine for a
+    /// progress bar and awkward for a test: observing real playback otherwise
+    /// means turning the main run loop, and turning the main run loop blocks
+    /// the async work that loading a track depends on. So a test sleeps to let
+    /// the decode thread run, then asks for a refresh, rather than racing a
+    /// timer it cannot see.
+    func refreshNowForTesting() {
+        pollEngineProgress()
+        tick()
+    }
+
     private func tick() {
         guard currentTrack != nil else { return }
         // A server-seeked/recovered transcode's playhead 0 is `startOffset` into
