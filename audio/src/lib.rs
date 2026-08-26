@@ -9,6 +9,7 @@
 //! because they hand the buffer to different operating systems.
 
 pub mod decode;
+pub mod engine;
 pub mod ring;
 
 use std::f64::consts::PI;

@@ -323,8 +323,14 @@ impl Consumer {
         }
     }
 
-    /// Claim the newest boundary at or before `frame`, discarding older ones.
-    fn take_boundary_up_to(&mut self, frame: u64) -> Option<Boundary> {
+    /// Claim the newest boundary strictly before `end`, discarding older ones.
+    ///
+    /// `end` is exclusive because a read covering frames `[start, end)` has
+    /// reached `end - 1`, not `end`. A boundary sitting exactly at `end` labels
+    /// the first frame of the *next* read, and reporting it here would announce
+    /// every track change one buffer early - a fifth of a second at typical
+    /// sizes, and enough to make Now Playing visibly disagree with the speaker.
+    fn take_boundary_up_to(&mut self, end: u64) -> Option<Boundary> {
         let mut found = None;
         loop {
             let read = self.shared.boundary_read.load(Ordering::Relaxed);
@@ -335,7 +341,7 @@ impl Consumer {
 
             let slot = &self.shared.boundaries[read % MAX_PENDING_BOUNDARIES];
             let at = slot.frame.load(Ordering::Relaxed);
-            if at > frame {
+            if at >= end {
                 break;
             }
 
