@@ -311,6 +311,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // does, and it is ambient because the tiles are made by data templates and
         // have no constructor to hand it to.
         _artwork = ArtworkService.Install(_server);
+        // Covers failing used to be silent, so a wall of letter placeholders
+        // looked the same whether the server had no art, the network was
+        // refusing the connection, or nothing had attached yet.
+        _artwork.ArtworkFailed += reason => Dispatcher.UIThread.Post(() => StatusMessage = reason);
 
         _engine = new MiniAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far
@@ -483,6 +487,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // cannot tell apart from "no such cover", so without this the whole
             // library keeps its letter placeholders until the app restarts.
             _artwork.ForgetFailures();
+            _artwork.ResetFailureReport();
 
             await RefreshActiveAccountProfileAsync();
             await ReconcileContinuityAsync();

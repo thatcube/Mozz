@@ -30,6 +30,36 @@ public sealed class ArtworkService : IDisposable
     /// </summary>
     public static ArtworkService? Current { get; set; }
 
+    /// <summary>
+    /// Raised the first time artwork fails for a reason worth telling someone
+    /// about, with a sentence fit for the status bar.
+    ///
+    /// Covers failing used to be completely silent — not surfaced, not logged —
+    /// so a library that rendered every tile as a letter placeholder looked
+    /// identical whether the server had no art, the network was refusing the
+    /// connection, or the app had simply not attached yet. Hours were spent on
+    /// that ambiguity. One sentence would have removed it.
+    ///
+    /// Once, not per tile: five thousand albums failing for the same reason is
+    /// still one thing the user needs to know.
+    /// </summary>
+    public event Action<string>? ArtworkFailed
+    {
+        add => _reporter.Reported += value;
+        remove => _reporter.Reported -= value;
+    }
+
+    private readonly FailureReporter _reporter = new();
+
+    private void Report(string reason) => _reporter.Report(reason);
+
+    /// <summary>
+    /// Forget which failure has already been reported, so a problem that
+    /// survives a server attaching is announced rather than suppressed because
+    /// it was mentioned before there was a server to mention it about.
+    /// </summary>
+    public void ResetFailureReport() => _reporter.Reset();
+
     private readonly MozzServer _server;
     private readonly HttpClient _http;
     private readonly ArtworkCache<Bitmap> _cache;
@@ -111,6 +141,9 @@ public sealed class ArtworkService : IDisposable
             // throws while a server is still attaching — which says nothing
             // about whether the cover exists. Returning null here would have the
             // cache write it off for the rest of the session.
+            Report(ex.Message.Contains("attached", StringComparison.OrdinalIgnoreCase)
+                ? "Waiting for the server before album art can load."
+                : $"Album art unavailable: {ex.Message}");
             throw new ArtworkUnavailableException(
                 $"could not resolve artwork for {request.ArtworkKey}", ex);
         }
@@ -147,6 +180,14 @@ public sealed class ArtworkService : IDisposable
         }
         catch (Exception ex)
         {
+            // "No route to host" for a server that curl and ping both reach is
+            // almost always macOS refusing local network access to this app
+            // rather than anything about the network. Say so, because the raw
+            // socket error sends people to look at their router.
+            Report(ex is HttpRequestException { HttpRequestError: HttpRequestError.ConnectionError }
+                ? "Can't reach your server for album art. If it is on your local network, "
+                  + "check System Settings › Privacy & Security › Local Network and allow Mozz."
+                : $"Album art unavailable: {ex.Message}");
             throw new ArtworkUnavailableException("artwork fetch failed", ex);
         }
     }

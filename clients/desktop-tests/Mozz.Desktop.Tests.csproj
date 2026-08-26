@@ -29,6 +29,7 @@
     <Compile Include="..\desktop\Generated\**\*.cs" />
     <Compile Include="..\desktop\Core\MozzCore.cs" />
     <Compile Include="..\desktop\Core\ArtworkUnavailableException.cs" />
+    <Compile Include="..\desktop\Core\FailureReporter.cs" />
     <Compile Include="..\desktop\Core\MozzServer.cs" />
     <Compile Include="..\desktop\Core\Models.cs" />
     <Compile Include="..\desktop\Core\AppPreferences.cs" />
