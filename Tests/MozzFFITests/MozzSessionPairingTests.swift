@@ -143,6 +143,64 @@ final class MozzSessionPairingTests: XCTestCase {
         XCTAssertNotNil(response["ok"])
     }
 
+    func testAHostCanFormACircleWhenItIsAlone() async throws {
+        let created = try payload(try await call(["cmd": "circleCreate"]))
+
+        let channelKey = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(created["channelKey"] as? String)))
+        let credentialsKey = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(created["credentialsKey"] as? String)))
+        XCTAssertEqual(channelKey.count, 32)
+        XCTAssertEqual(credentialsKey.count, 32)
+        XCTAssertNotEqual(channelKey, credentialsKey)
+        XCTAssertEqual(created["epoch"] as? Int, 1)
+        // Empty until a relay is provisioned; a placeholder that looked like a
+        // key would be worse than an obviously absent one.
+        XCTAssertEqual(created["relayKey"] as? String, "")
+
+        let second = try payload(try await call(["cmd": "circleCreate"]))
+        XCTAssertNotEqual(created["channelId"] as? String, second["channelId"] as? String)
+    }
+
+    func testACircleFormedByAHostCanBeHandedToAJoiner() async throws {
+        // The desktop's real first-run path: form a circle, then admit a phone.
+        let formed = try payload(try await call(["cmd": "circleCreate"]))
+
+        let joinerBegan = try payload(try await call(["cmd": "pairingBegin", "role": "joiner", "pairingPath": "qr"]))
+        let joinerId = try XCTUnwrap(joinerBegan["pairingId"] as? String)
+        let qrText = try XCTUnwrap(joinerBegan["qrText"] as? String)
+        let hello = try XCTUnwrap((joinerBegan["steps"] as? [[String: Any]])?.first?["frame"] as? String)
+
+        let memberBegan = try payload(try await call([
+            "cmd": "pairingBegin", "role": "member", "pairingPath": "qr", "scannedCode": qrText,
+        ]))
+        let memberId = try XCTUnwrap(memberBegan["pairingId"] as? String)
+
+        let memberSteps = try steps(try await call(["cmd": "pairingReceive", "pairingId": memberId, "frame": hello]))
+        let answer = try XCTUnwrap(memberSteps.first { $0["kind"] as? String == "send" }?["frame"] as? String)
+        let sealStep = try XCTUnwrap(memberSteps.first { $0["kind"] as? String == "seal" })
+        _ = try steps(try await call(["cmd": "pairingReceive", "pairingId": joinerId, "frame": answer]))
+
+        let sealedSteps = try steps(try await call([
+            "cmd": "pairingSeal", "pairingId": memberId, "circle": formed,
+            "transcript": try XCTUnwrap(sealStep["transcript"] as? String),
+            "joinerPublicKey": try XCTUnwrap(sealStep["joinerPublicKey"] as? String),
+        ]))
+        let sealedFrame = try XCTUnwrap(sealedSteps.first { $0["kind"] as? String == "send" }?["frame"] as? String)
+
+        let finalSteps = try steps(try await call(["cmd": "pairingReceive", "pairingId": joinerId, "frame": sealedFrame]))
+        let openStep = try XCTUnwrap(finalSteps.first { $0["kind"] as? String == "open" })
+        let opened = try payload(try await call([
+            "cmd": "pairingOpen", "pairingId": joinerId,
+            "encapsulated": try XCTUnwrap(openStep["encapsulated"] as? String),
+            "ciphertext": try XCTUnwrap(openStep["ciphertext"] as? String),
+            "transcript": try XCTUnwrap(openStep["transcript"] as? String),
+        ]))
+
+        // The joiner ends up in the circle the host formed, not some other one.
+        XCTAssertEqual(opened["channelId"] as? String, formed["channelId"] as? String)
+        XCTAssertEqual(opened["channelKey"] as? String, formed["channelKey"] as? String)
+        XCTAssertEqual(opened["credentialsKey"] as? String, formed["credentialsKey"] as? String)
+    }
+
     func testANonPairingCommandIsLeftForTheOtherTables() async throws {
         let data = try JSONSerialization.data(withJSONObject: ["id": 1, "cmd": "libraries"])
         let request = try JSONDecoder().decode(SessionRequest.self, from: data)
