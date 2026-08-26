@@ -4,6 +4,23 @@ namespace Mozz.Desktop.ViewModels;
 
 public static class DesktopLayout
 {
+    /// <summary>
+    /// The content pane is wide enough for the fixed desktop chrome: a full
+    /// 248px navigation rail, a three-zone transport bar, and detail heroes with
+    /// art and text side by side.
+    /// </summary>
+    public const double ExpandedWidth = 1100;
+
+    /// <summary>
+    /// Below this width the icon rail itself costs more than it saves: the
+    /// remaining pane is too narrow for a two-column detail hero plus comfortable
+    /// text, so navigation has to leave the flow and come back as an overlay.
+    /// </summary>
+    public const double MediumWidth = 760;
+
+    public const double ExpandedSidebarWidth = 248;
+    public const double MediumSidebarWidth = 72;
+
     public const double AlbumTilePitch = 196;
     public const double ArtistTilePitch = 178;
     public const double GenreTilePitch = 236;
@@ -12,6 +29,20 @@ public static class DesktopLayout
     public const double HomeMixTilePitch = 430;
 
     public static int ColumnsFor(double width, double pitch) => Math.Max(1, (int)(width / pitch));
+
+    public static DesktopLayoutTier TierForWindowWidth(double width)
+    {
+        if (width >= ExpandedWidth) return DesktopLayoutTier.Expanded;
+        if (width >= MediumWidth) return DesktopLayoutTier.Medium;
+        return DesktopLayoutTier.Compact;
+    }
+}
+
+public enum DesktopLayoutTier
+{
+    Compact,
+    Medium,
+    Expanded
 }
 
 /// <summary>

@@ -4,6 +4,7 @@ using Avalonia.VisualTree;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 
@@ -11,9 +12,151 @@ namespace Mozz.Desktop.Views;
 
 public partial class MainWindow : Window
 {
+    private DesktopLayoutTier _layoutTier = DesktopLayoutTier.Expanded;
+    private bool _compactNavigationOpen;
+
     public MainWindow()
     {
         InitializeComponent();
+        Opened += (_, _) => ApplyLayoutForWidth(Bounds.Width);
+    }
+
+    private void OnWindowResized(object? sender, SizeChangedEventArgs e)
+    {
+        ApplyLayoutForWidth(e.NewSize.Width);
+    }
+
+    private void ApplyLayoutForWidth(double width)
+    {
+        var tier = DesktopLayout.TierForWindowWidth(width);
+        ApplyLayoutTier(tier);
+    }
+
+    private void ApplyLayoutTier(DesktopLayoutTier tier)
+    {
+        _layoutTier = tier;
+
+        Classes.Set("expanded", tier == DesktopLayoutTier.Expanded);
+        Classes.Set("medium", tier == DesktopLayoutTier.Medium);
+        Classes.Set("compact", tier == DesktopLayoutTier.Compact);
+
+        var sidebarInFlow = tier != DesktopLayoutTier.Compact;
+        SidebarPane.IsVisible = sidebarInFlow;
+        MainContentGrid.ColumnDefinitions[0].Width = tier switch
+        {
+            DesktopLayoutTier.Expanded => new GridLength(DesktopLayout.ExpandedSidebarWidth),
+            DesktopLayoutTier.Medium => new GridLength(DesktopLayout.MediumSidebarWidth),
+            _ => new GridLength(0)
+        };
+
+        CompactNavigationButton.IsVisible = tier == DesktopLayoutTier.Compact;
+        if (tier != DesktopLayoutTier.Compact) _compactNavigationOpen = false;
+        CompactNavigationLayer.IsVisible = tier == DesktopLayoutTier.Compact && _compactNavigationOpen;
+
+        // The medium rail keeps navigation one click away while giving the
+        // content pane back roughly one album column. Compact removes the rail
+        // entirely because a permanent strip at that width forces detail pages
+        // and track rows to choose between clipping and uselessly narrow text.
+        var iconOnly = tier == DesktopLayoutTier.Medium;
+        foreach (var control in IconOnlySidebarText()) control.IsVisible = !iconOnly;
+        SidebarInterior.Margin = iconOnly ? new Thickness(8, 18, 8, 14) : new Thickness(14, 18, 14, 14);
+        SidebarHeader.HorizontalAlignment = iconOnly ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+        foreach (var button in SidebarNavigationButtons())
+        {
+            button.Padding = iconOnly ? new Thickness(11, 9) : new Thickness(12, 9);
+            button.HorizontalContentAlignment = iconOnly ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        }
+
+        ApplyNowPlayingPageLayout(tier);
+        ApplyTransportLayout(tier);
+    }
+
+    private void ApplyNowPlayingPageLayout(DesktopLayoutTier tier)
+    {
+        var compact = tier == DesktopLayoutTier.Compact;
+
+        // Full now-playing can afford two columns. At compact width the artwork
+        // and metadata stack so the scrubber and queue do not become horizontal
+        // scroll traps inside the page.
+        NowPlayingHeroGrid.ColumnDefinitions = compact
+            ? new ColumnDefinitions("*")
+            : new ColumnDefinitions("320,*");
+        NowPlayingHeroGrid.RowDefinitions = compact
+            ? new RowDefinitions("Auto,Auto")
+            : new RowDefinitions("Auto");
+        Grid.SetColumn(NowPlayingText, compact ? 0 : 1);
+        Grid.SetRow(NowPlayingText, compact ? 1 : 0);
+        NowPlayingText.Margin = compact ? new Thickness(0, 16, 0, 0) : new Thickness(0);
+
+        NowPlayingLowerGrid.ColumnDefinitions = compact
+            ? new ColumnDefinitions("*")
+            : new ColumnDefinitions("*,*");
+        NowPlayingLowerGrid.RowDefinitions = compact
+            ? new RowDefinitions("Auto,Auto")
+            : new RowDefinitions("Auto");
+        Grid.SetColumn(NowPlayingQueuePanel, compact ? 0 : 1);
+        Grid.SetRow(NowPlayingQueuePanel, compact ? 1 : 0);
+        NowPlayingQueuePanel.Margin = compact ? new Thickness(0, 16, 0, 0) : new Thickness(0);
+    }
+
+    private void ApplyTransportLayout(DesktopLayoutTier tier)
+    {
+        var expanded = tier == DesktopLayoutTier.Expanded;
+        var compact = tier == DesktopLayoutTier.Compact;
+
+        BottomTransportGrid.ColumnDefinitions = expanded
+            ? new ColumnDefinitions("*,Auto,*")
+            : new ColumnDefinitions("*,Auto,0");
+        BottomTransportBar.Height = compact ? 76 : 88;
+        BottomVolumeControls.IsVisible = expanded;
+
+        // Shuffle, repeat and volume are useful, but they are secondary. When the
+        // bar narrows, preserving the track identity and the play/skip cluster
+        // avoids the failure mode where the player is still visible but cannot
+        // actually be driven.
+        BottomShuffleButton.IsVisible = expanded;
+        BottomRepeatButton.IsVisible = expanded;
+        BottomPositionRow.IsVisible = !compact;
+        BottomScrubber.Width = expanded ? 420 : 240;
+        NowPlayingSummaryText.MaxWidth = expanded ? 270 : compact ? 160 : 260;
+    }
+
+    private Control[] IconOnlySidebarText() =>
+    [
+        SidebarTitle,
+        SidebarSearch,
+        SidebarLibraryCard,
+        LblHome,
+        LblSongs,
+        LblAlbums,
+        LblArtists,
+        LblGenres,
+        LblPlaylists,
+        SidebarProfileText
+    ];
+
+    private Button[] SidebarNavigationButtons() =>
+    [
+        NavHome,
+        NavSongs,
+        NavAlbums,
+        NavArtists,
+        NavGenres,
+        NavPlaylists,
+        NavSettings
+    ];
+
+    private void OnCompactNavigationButtonClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_layoutTier != DesktopLayoutTier.Compact) return;
+        _compactNavigationOpen = true;
+        CompactNavigationLayer.IsVisible = true;
+    }
+
+    private void OnCompactNavigationCloseClicked(object? sender, RoutedEventArgs e)
+    {
+        _compactNavigationOpen = false;
+        CompactNavigationLayer.IsVisible = false;
     }
 
     // Double-clicking a row starts playback. Kept in code-behind because it is a
