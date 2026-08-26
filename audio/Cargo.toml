@@ -7,3 +7,7 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+cpal = "0.18.2"
+symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "flac", "alac", "vorbis", "wav"] }
