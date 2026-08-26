@@ -329,6 +329,14 @@ impl Engine {
         self.ring.queued_frames() + self.carry.len() / self.channels.max(1)
     }
 
+    /// How much audio has been handed to the device, in absolute ring frames.
+    ///
+    /// Monotonic and unaffected by a seek, so it is the fixed point a position
+    /// can be re-based against after one.
+    pub fn frames_consumed(&self) -> u64 {
+        self.ring.frames_read()
+    }
+
     /// Do one packet's worth of work.
     pub fn pump(&mut self) -> Result<Pumped, DecodeError> {
         // Anything left from last time goes first, or the stream would come out

@@ -25,7 +25,7 @@
 //! which is the problem this crate exists to avoid.
 
 use std::io::{Read, Seek};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -182,7 +182,15 @@ struct Observable {
     /// Position is the difference between this and the ring's read position,
     /// which is exact. Counting frames since a track was queued would be wrong
     /// by however much of the previous track was still waiting to be heard.
-    track_start_frame: AtomicU64,
+    ///
+    /// Signed, and better read as "the ring frame at which this track's frame
+    /// zero would have been heard". A seek moves it rather than writing the
+    /// position directly, because the position is recomputed from it on every
+    /// read - so a value written here survives, and one written to
+    /// `frames_played` is gone by the next audio callback. Seeking forward past
+    /// what has been heard puts that imagined origin before the ring started,
+    /// which is negative and perfectly meaningful.
+    track_start_frame: AtomicI64,
 }
 
 impl crate::sink::PlaybackObserver for Observable {
@@ -196,11 +204,11 @@ impl crate::sink::PlaybackObserver for Observable {
         if let Some(boundary) = outcome.boundary {
             self.current_track.store(boundary.track, Ordering::Relaxed);
             self.track_start_frame
-                .store(boundary.frame, Ordering::Relaxed);
+                .store(boundary.frame as i64, Ordering::Relaxed);
         }
         let start = self.track_start_frame.load(Ordering::Relaxed);
-        self.frames_played
-            .store(outcome.end_frame.saturating_sub(start), Ordering::Relaxed);
+        let played = (outcome.end_frame as i64 - start).max(0) as u64;
+        self.frames_played.store(played, Ordering::Relaxed);
     }
 }
 
@@ -232,7 +240,7 @@ impl Player {
             sample_rate: AtomicU64::new(sample_rate as u64),
             failed: AtomicBool::new(false),
             failure_kind: AtomicU64::new(0),
-            track_start_frame: AtomicU64::new(0),
+            track_start_frame: AtomicI64::new(0),
         });
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -563,6 +571,19 @@ fn apply(
         }
         Command::Seek(seconds) => {
             if let Ok(landed) = engine.seek(seconds) {
+                // Move the origin, not the position. `observe` recomputes
+                // frames_played from track_start_frame on every read, so a
+                // position written here is overwritten by the next audio
+                // callback - which is exactly why seeking appeared to do
+                // nothing to the bar while the audio plainly moved.
+                //
+                // The next audio the device takes begins at ring frame
+                // `frames_consumed` and is `landed` frames into the track, so
+                // the track's imagined frame zero sits at the difference.
+                let consumed = engine.frames_consumed() as i64;
+                observable
+                    .track_start_frame
+                    .store(consumed - landed as i64, Ordering::Relaxed);
                 observable.frames_played.store(landed, Ordering::Relaxed);
             }
         }
@@ -819,6 +840,42 @@ mod tests {
         assert!(
             later < early + 1.0,
             "position ran far ahead of real time: {early} to {later}"
+        );
+    }
+
+    /// Seeking has to move the reported position, and it has to stay moved.
+    ///
+    /// Position is recomputed from the track's origin on every read, so writing
+    /// the new position at the moment of the seek lasted exactly until the next
+    /// audio callback overwrote it. From outside that looked like the seek
+    /// being ignored - the audio plainly jumped, the bar did not follow - which
+    /// is the sort of disagreement that gets blamed on the wrong half.
+    #[test]
+    fn seeking_moves_the_reported_position_and_it_stays_moved() {
+        let player = Player::new(8_000, 1, 8192).expect("should start");
+        // Five seconds at 8 kHz, so there is plenty of track either side.
+        player.play_now(source(&[8_000; 40_000]), Some("wav".into()), 1, None);
+
+        assert!(
+            eventually(|| player.position_seconds() > 0.05),
+            "position never moved; nothing is consuming the ring"
+        );
+
+        player.seek(2.0);
+
+        assert!(
+            eventually(|| player.position_seconds() >= 2.0),
+            "seek never reached the target; position is {}",
+            player.position_seconds()
+        );
+
+        // The regression: the next callback recomputed the old position and the
+        // bar snapped back to roughly where it had been.
+        std::thread::sleep(Duration::from_millis(150));
+        let after = player.position_seconds();
+        assert!(
+            after >= 2.0,
+            "position fell back to {after} after the seek"
         );
     }
 
