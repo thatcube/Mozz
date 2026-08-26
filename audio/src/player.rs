@@ -526,7 +526,15 @@ fn apply(
                         let _ = sink.resume();
                     }
                 }
-                Err(error) => fail(observable, error),
+                Err(error) => {
+                    // The caller asked to change track, so the one playing is no
+                    // longer wanted - and reporting Ended while it plays on is a
+                    // contradiction the shell cannot show honestly. It looked
+                    // exactly like "it played the wrong song": new title, new
+                    // artwork, previous audio.
+                    engine.stop();
+                    fail(observable, error);
+                }
             }
         }
         Command::PlayNext {
@@ -541,6 +549,9 @@ fn apply(
                     .state
                     .store(State::Playing.code(), Ordering::Relaxed);
             }
+            // Deliberately not stop(): this is a track queued ahead, and a
+            // preload that cannot open is no reason to cut short the one being
+            // listened to.
             Err(error) => fail(observable, error),
         },
         Command::Pause => {
