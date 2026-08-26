@@ -130,12 +130,46 @@ jobs:
           restore-keys: |
             swiftbuild-win-x64-6.3.3-
 
+      # The audio engine is Rust now, and both halves of this job need it: the
+      # Swift core links its staticlib, and the C# app P/Invokes its DLL (the
+      # .csproj builds that itself, but only if cargo is on PATH).
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            audio/target
+          key: cargo-win-x64-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: |
+            cargo-win-x64-
+
+      # The staticlib the Swift package links. Off Apple there is no
+      # XCFramework to carry it, so build it here and hand `swift build` the
+      # directory to find it in — the same way SQLite is handed over above.
+      - name: Build the audio engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location audio
+          cargo build --release -p mozz_audio_ffi
+          if ($LASTEXITCODE -ne 0) { Write-Error "cargo build failed"; exit 1 }
+          Pop-Location
+          $lib = "audio\target\release\mozz_audio_ffi.lib"
+          if (-not (Test-Path $lib)) { Write-Error "$lib was not produced"; exit 1 }
+          "MOZZ_AUDIO_LIB=$(Resolve-Path 'audio\target\release')" |
+            Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build MozzFFI.dll
         shell: pwsh
         run: |
           swift build -c release --product MozzFFI `
             -Xcc -I"$env:SQLITE_ROOT\include" `
-            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib"
+            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib" `
+            -Xlinker "/LIBPATH:$env:MOZZ_AUDIO_LIB"
 
 
       - name: Test the typed command path against the built core
@@ -373,6 +407,26 @@ jobs:
           restore-keys: |
             swiftbuild-macos-arm64-
 
+      # macOS takes the XCFramework path, so it needs the one prerequisite
+      # SwiftPM cannot satisfy itself. Same step core-and-ios.yml already runs;
+      # without --all because this job builds no iOS slice.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            audio/target
+          key: cargo-macos-arm64-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-arm64-
+
+      - name: Build the audio engine
+        run: tools/build-audio-xcframework.sh
+
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI
 
@@ -514,11 +568,37 @@ jobs:
           restore-keys: |
             swiftbuild-linux-${{ matrix.arch }}-6.1.2-
 
+      # Same as the Windows job: off Apple the Swift package links the Rust
+      # staticlib directly, so build it before `swift build` and pass the
+      # directory it landed in.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            audio/target
+          key: cargo-linux-${{ matrix.arch }}-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-${{ matrix.arch }}-
+
+      - name: Build the audio engine
+        run: |
+          set -euo pipefail
+          (cd audio && cargo build --release -p mozz_audio_ffi)
+          lib="audio/target/release/libmozz_audio_ffi.a"
+          [ -f "$lib" ] || { echo "$lib was not produced" >&2; exit 1; }
+          echo "MOZZ_AUDIO_LIB=$(cd audio/target/release && pwd)" >> "$GITHUB_ENV"
+
       - name: Build libMozzFFI.so
         run: |
           swift build -c release --product MozzFFI \
             -Xcc -I"$SQLITE_ROOT/include" \
-            -Xlinker -L"$SQLITE_ROOT/lib"
+            -Xlinker -L"$SQLITE_ROOT/lib" \
+            -Xlinker -L"$MOZZ_AUDIO_LIB"
 
 
       - name: Test the typed command path against the built core

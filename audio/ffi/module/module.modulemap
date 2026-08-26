@@ -1,0 +1,20 @@
+// The Swift-facing module for the Rust audio engine's C ABI, off Apple.
+//
+// On Apple platforms the engine arrives as an XCFramework, which carries its
+// own copy of this map (see tools/build-audio-xcframework.sh). An XCFramework
+// is built by `xcodebuild -create-xcframework` and cannot exist anywhere else,
+// so Windows and Linux need their own way to see the same header — otherwise
+// the desktop build fails at manifest load, before a line is compiled.
+//
+// Same module name and same header as the Apple side, deliberately: it means
+// `import MozzAudioFFI` in Sources/MozzAudioEngine is one import satisfied
+// differently per host, not two spellings that can drift apart.
+//
+// Headers only. The library itself is `libmozz_audio_ffi.a` (or
+// `mozz_audio_ffi.lib`), named by MozzAudioEngine's linkerSettings and found
+// through a search path the build passes in — the same shape the package
+// already uses for SQLite.
+module MozzAudioFFI {
+    header "../include/mozz_audio.h"
+    export *
+}
