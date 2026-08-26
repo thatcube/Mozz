@@ -1,0 +1,6 @@
+// Lets Swift import the audio engine's C ABI as a module. A SwiftPM package has
+// no bridging header, so this is how the declarations reach Swift at all.
+module CMozzAudio {
+    header "mozz_audio.h"
+    export *
+}

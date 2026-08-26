@@ -79,6 +79,16 @@ jobs:
       # the same bytes. The continuity queue hash matters most: two devices
       # compute it independently and compare, so a drift between the code and
       # the fixture surfaces months later as devices that will not pair.
+      # The core now contains a Rust audio engine, so building the package has a
+      # prerequisite SwiftPM cannot satisfy itself: it cannot run cargo. This is
+      # the honest cost of the engine being real rather than a stub behind a
+      # flag, and it is paid here rather than by whoever first runs the tests.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the audio engine
+        run: tools/build-audio-staticlib.sh --release
+
       - name: Run the test suite
         run: swift test --parallel
 
