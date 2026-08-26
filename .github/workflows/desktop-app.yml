@@ -76,7 +76,12 @@ jobs:
       # job is the only place the Windows credential path — and the sample
       # pipeline — are ever run on Windows before a user signs in.
       - name: Test the credential store and audio pipeline
-        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+        # Everything that needs no core, run early for fast feedback. The typed
+        # command path needs the Swift library and so runs in a second pass
+        # after it is built, below.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName!~MozzCoreInvokeTests" 
 
       # Same amalgamation build as the spike, and for the same reason: GRDB's
       # GRDBSQLite is a systemLibrary target and Windows ships no SQLite. Static,
@@ -132,6 +137,15 @@ jobs:
             -Xcc -I"$env:SQLITE_ROOT\include" `
             -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib"
 
+
+      - name: Test the typed command path against the built core
+        # The marshalling under test is an unsafe byte* LibraryImport, a fixed
+        # block and a span copied out before Swift's buffer is released. None of
+        # that can be checked with a stand-in, which is exactly where such a bug
+        # would hide — so this needs the real library and runs once it exists.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName~MozzCoreInvokeTests"
       - name: Publish the app
         shell: pwsh
         run: |
@@ -342,7 +356,12 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Test the credential store and audio pipeline
-        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+        # Everything that needs no core, run early for fast feedback. The typed
+        # command path needs the Swift library and so runs in a second pass
+        # after it is built, below.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName!~MozzCoreInvokeTests" 
 
       # Same reasoning as the Windows job, and worth having even though this one
       # is already the fastest: the build is still the largest part of it.
@@ -357,6 +376,15 @@ jobs:
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI
 
+
+      - name: Test the typed command path against the built core
+        # The marshalling under test is an unsafe byte* LibraryImport, a fixed
+        # block and a span copied out before Swift's buffer is released. None of
+        # that can be checked with a stand-in, which is exactly where such a bug
+        # would hide — so this needs the real library and runs once it exists.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName~MozzCoreInvokeTests"
       - name: Publish the app
         run: |
           dotnet publish clients/desktop/Mozz.Desktop.csproj \
@@ -371,7 +399,9 @@ jobs:
         run: |
           set -euo pipefail
           otool -L publish/osx-arm64/libMozzFFI.dylib
-          for symbol in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string; do
+          # mozz_session_invoke/free_bytes carry the schema-described commands;
+          # they are a separate pair because protobuf cannot travel as a C string.
+          for symbol in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string mozz_session_invoke mozz_session_free_bytes; do
             if ! nm -gU publish/osx-arm64/libMozzFFI.dylib | grep -q "_${symbol}$"; then
               echo "exported symbol missing: ${symbol}" >&2
               exit 1
@@ -444,7 +474,12 @@ jobs:
             libicu-dev ffmpeg
 
       - name: Test the credential store and audio pipeline
-        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+        # Everything that needs no core, run early for fast feedback. The typed
+        # command path needs the Swift library and so runs in a second pass
+        # after it is built, below.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName!~MozzCoreInvokeTests" 
 
       # Ubuntu does ship libsqlite3, unlike Windows — but shipping it is not the
       # same as shipping it with FTS5, and Mozz's search is FTS5. Building the
@@ -485,6 +520,15 @@ jobs:
             -Xcc -I"$SQLITE_ROOT/include" \
             -Xlinker -L"$SQLITE_ROOT/lib"
 
+
+      - name: Test the typed command path against the built core
+        # The marshalling under test is an unsafe byte* LibraryImport, a fixed
+        # block and a span copied out before Swift's buffer is released. None of
+        # that can be checked with a stand-in, which is exactly where such a bug
+        # would hide — so this needs the real library and runs once it exists.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName~MozzCoreInvokeTests"
       - name: Publish the app
         run: |
           dotnet publish clients/desktop/Mozz.Desktop.csproj \

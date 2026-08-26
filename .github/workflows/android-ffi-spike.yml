@@ -251,6 +251,7 @@ jobs:
           echo "=== exported ABI ==="
           missing=0
           for s in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string \
+                   mozz_session_invoke mozz_session_free_bytes \
                    mozz_ffi_probe mozz_ffi_benchmark mozz_ffi_search mozz_ffi_probe_hpke \
                    mozz_ffi_verify_continuity_hashes; do
             if [ "$(printf '%s\n' "$defined" | grep -cE "[[:space:]]${s}\$" || true)" -gt 0 ]; then
