@@ -210,6 +210,16 @@ impl Producer {
         self.shared.written.load(Ordering::Relaxed) as u64
     }
 
+    /// Absolute index of the next frame to be read, i.e. how much has been heard.
+    ///
+    /// Monotonic, and deliberately untouched by [`reset`](Self::reset): a seek
+    /// throws away audio that was queued, not audio that was played. A caller
+    /// re-basing a position after a seek needs this to know where the audio it
+    /// is about to write will land.
+    pub fn frames_read(&self) -> u64 {
+        self.shared.read.load(Ordering::Acquire) as u64
+    }
+
     /// Append interleaved samples, returning how many frames were taken.
     ///
     /// A short write means the ring is full, which is how a decoder learns to
