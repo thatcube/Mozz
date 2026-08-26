@@ -20,6 +20,7 @@ c/{channelId}/d/{deviceId}/history/{epoch}/{seq}    append-only play events
 c/{channelId}/d/{deviceId}/history/{epoch}/compact  this device's rolled-up past
 c/{channelId}/d/{deviceId}/state/{epoch}            likes, settings — latest wins
 c/{channelId}/d/{deviceId}/library/{epoch}          library snapshot, if made here
+c/{channelId}/d/{deviceId}/servers/{epoch}          server connections and tokens
 c/{channelId}/now/{epoch}                           see "Now playing" below
 ```
 
@@ -58,6 +59,26 @@ is sufficient: nothing Mozz does needs a total order over two devices' plays.
 genuinely needed a total order would be a design mistake here, because there is
 no authority to provide one and inventing a clock server would reintroduce the
 thing this architecture exists to avoid.
+
+## Servers sync, under their own key
+
+A server added on the phone must appear on the PC. Anything else means the app
+works until the day the user does something completely reasonable, and then
+quietly does not.
+
+`servers/` therefore syncs like everything else, with one difference: it is
+encrypted with `credentialsKey` rather than `channelKey`, and that key lives in
+the platform secure store — Keychain, Keystore, DPAPI — while `channelKey` can
+sit in ordinary app storage.
+
+That distinction is the entire point. Someone who copies the app's files or
+restores its backup gets a listening history. Reading the tokens additionally
+requires the secure store, which is a different and much harder thing to reach.
+Compartmentalisation by key alone would be decoration; compartmentalisation by
+storage tier is real.
+
+It merges like any other state object: newest write per server id wins, and a
+device that has not seen a server simply learns about it.
 
 ## Mutable things, and the honest limit
 

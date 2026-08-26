@@ -163,35 +163,44 @@ info := "mozz/pair/v1/channel" || 0x00 || transcriptHash
 aad  := version || joinerPubKey
 
 plaintext := canonical JSON, sorted keys:
-    { "channelId":  string,
-      "channelKey": base64,     # symmetric; encrypts everything in the channel
-      "epoch":      integer,    # see Rotation
-      "relayKey":   base64,     # scoped B2 application key, per ADR-0012
-      "servers":    [ { "backend": string,    # plex | jellyfin | subsonic
-                        "id":      string,
-                        "name":    string,
-                        "token":   string,
-                        "url":     string } ] }
+    { "channelId":      string,
+      "channelKey":     base64,   # encrypts history, library, likes, settings
+      "credentialsKey": base64,   # encrypts servers/ objects — nothing else
+      "epoch":          integer,  # see Rotation
+      "relayKey":       base64 }  # scoped B2 application key, per ADR-0012
 ```
 
-### Why the servers ride here and nowhere else
+### Two keys, and why servers are not in the seal
 
-`servers` carries the auth tokens, and it is the reason a new PC needs no
-retyping — which is most of what "it just works" means in practice.
+An earlier draft put the server list *in this seal and nowhere else*, so tokens
+never touched the relay. The instinct was right — a scrobble and a media-library
+token do not belong in one blast radius — but the conclusion was wrong, because
+it meant a server added on your phone stayed invisible on your PC forever. That
+is not a trade-off, it is a defect with a rationale attached.
 
-It travels **only** in this one-time seal, and never through the relay. That is
-deliberate compartmentalisation rather than an oversight: the channel key
-protects listening history and library snapshots, so if it ever leaks, what
-leaks is what someone listened to. Server tokens grant access to their entire
-media library, and putting those in the same blast radius as a scrobble would
-be trading the crown jewels for convenience.
+So pairing hands over **two** symmetric keys, and servers sync continuously like
+everything else:
 
-The consequence to be honest about: **a server added after pairing does not
-reach existing devices this way.** Pairing hands over the servers known at that
-moment. Propagating a later addition needs either a fresh device-to-device
-exchange or a decision to relax this rule — and relaxing it puts tokens in the
-relay, which is the thing this paragraph exists to prevent. That is an open
-question owned by ADR-0011, not something to solve quietly here.
+| Key | Protects | Where it is stored |
+|---|---|---|
+| `channelKey` | history, library snapshots, likes, settings | ordinary app storage |
+| `credentialsKey` | `servers/` objects only | the platform secure store |
+
+The separation is only real because the *storage tiers* differ. Keychain on
+Apple, Keystore on Android, DPAPI on Windows — reachable by the app, not by
+someone who has merely copied its files or restored its backup. An attacker who
+walks off with app data gets a listening history; the tokens need the secure
+store as well.
+
+Rotation is per-key. Removing a device rotates both. A user changing a server
+password re-encrypts only `servers/`, and nothing else in the channel has to
+move.
+
+**A better version exists and is deliberately not v1:** Plex and Jellyfin can
+both mint per-device tokens, so each device could hold only its own and removal
+could revoke it at the server rather than merely locking it out of the channel.
+That is strictly better and it needs per-backend work in three clients, so it is
+recorded as future work rather than smuggled into the first release.
 
 Binding `transcriptHash` into `info` means a sealed payload cannot be replayed
 into a *different* ceremony: the recipient derives the same `info` only if it saw
