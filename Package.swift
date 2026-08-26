@@ -43,7 +43,37 @@ let audioEngineLinkage: [LinkerSetting] = [
     .linkedFramework("AudioToolbox", .when(platforms: [.macOS, .iOS, .tvOS])),
     .linkedFramework("AudioUnit", .when(platforms: [.macOS])),
     .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS, .tvOS])),
+    // Off Apple there is no XCFramework to supply the library, so name it. The
+    // search path comes from the build command, exactly as SQLite's does — see
+    // the MozzAudioFFI target below.
+    .linkedLibrary("mozz_audio_ffi", .when(platforms: [.windows, .linux])),
+    // cpal reaches Linux audio through ALSA. On MSVC a staticlib carries its
+    // own `/DEFAULTLIB:` directives and the WASAPI imports resolve themselves,
+    // but ELF has no such mechanism: the symbols are simply undefined until
+    // whoever links last names the library.
+    .linkedLibrary("asound", .when(platforms: [.linux])),
 ]
+
+// How the engine's C ABI reaches Swift, which is not the same on every host.
+//
+// An XCFramework is the right container on Apple and an impossible one
+// anywhere else: `xcodebuild -create-xcframework` only exists on a Mac. Left
+// unconditional, this target failed the Windows and Linux desktop builds at
+// manifest load — "does not contain a binary artifact" — before a single file
+// was compiled, and no amount of CI could have satisfied it.
+//
+// So the container differs and nothing else does: same module name, same
+// generated header, one `import MozzAudioFFI` in MozzAudioEngine. The
+// condition is on the HOST that evaluates this manifest, which is what makes
+// it correct for cross-compilation too — an iOS build runs on a Mac and takes
+// the XCFramework; an Android build runs on Linux and takes the staticlib.
+#if os(macOS)
+let audioFFITarget: Target = .binaryTarget(
+    name: "MozzAudioFFI", path: "audio/target/MozzAudioFFI.xcframework")
+#else
+let audioFFITarget: Target = .systemLibrary(
+    name: "MozzAudioFFI", path: "audio/ffi/module")
+#endif
 
 let package = Package(
     name: "MozzKit",
@@ -239,9 +269,10 @@ let package = Package(
         // matters beyond tidiness: a package carrying unsafeFlags cannot be
         // depended on by anything else.
         //
-        // Built by tools/build-audio-xcframework.sh, which SwiftPM cannot run
-        // itself. That prerequisite is the honest cost of the engine being real.
-        .binaryTarget(name: "MozzAudioFFI", path: "audio/target/MozzAudioFFI.xcframework"),
+        // Built by tools/build-audio-xcframework.sh on Apple, or by cargo
+        // directly off it. See the audioFFITarget definition above for why the
+        // container has to differ per host.
+        audioFFITarget,
         .target(
             name: "MozzAudioEngine", dependencies: ["MozzAudioFFI"],
             linkerSettings: audioEngineLinkage),
