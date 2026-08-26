@@ -40,6 +40,20 @@ if (( ${#protos[@]} == 0 )); then
   exit 1
 fi
 
+# Which tools produced the committed output.
+#
+# Generated code is committed, so it is a function of the schema AND of the
+# generator that ran. Two different protoc-gen-swift versions can emit different
+# but equally correct code, and --check would then fail on a machine whose brew
+# is a week newer — reporting "stale" for something that is not stale at all.
+# Record the versions so that failure can name itself.
+STAMP="$SWIFT_OUT/.toolchain"
+
+tool_versions() {
+  printf 'protoc %s\n' "$(protoc --version | awk '{print $2}')"
+  printf 'protoc-gen-swift %s\n' "$(protoc-gen-swift --version 2>&1 | awk '{print $NF}')"
+}
+
 generate_into() {
   local swift_dir="$1" csharp_dir="$2"
   mkdir -p "$swift_dir" "$csharp_dir"
@@ -50,9 +64,22 @@ generate_into() {
 }
 
 if $check_mode; then
+  # Compare toolchains before comparing output, so a version difference reports
+  # itself as a version difference rather than as phantom drift.
+  if [[ -f "$STAMP" ]] && ! diff <(tool_versions) "$STAMP" >/dev/null 2>&1; then
+    echo "Schema toolchain differs from the one that generated the committed output." >&2
+    echo "This is a toolchain mismatch, NOT a stale schema. Committed with:" >&2
+    sed 's/^/  /' "$STAMP" >&2
+    echo "Running here:" >&2
+    tool_versions | sed 's/^/  /' >&2
+    echo "Install the recorded versions, or regenerate and commit with the newer ones." >&2
+    exit 1
+  fi
+
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   generate_into "$tmp/swift" "$tmp/csharp"
+  tool_versions > "$tmp/swift/.toolchain"
 
   stale=false
   diff -ru "$ROOT/$SWIFT_OUT" "$tmp/swift" >/dev/null 2>&1 || stale=true
@@ -71,7 +98,10 @@ fi
 
 rm -rf "$SWIFT_OUT" "$CSHARP_OUT"
 generate_into "$SWIFT_OUT" "$CSHARP_OUT"
+tool_versions > "$STAMP"
 
 echo "Regenerated from ${#protos[@]} schema file(s):"
 echo "  $SWIFT_OUT"
 echo "  $CSHARP_OUT"
+echo "Toolchain recorded in $STAMP:"
+sed 's/^/  /' "$STAMP"
