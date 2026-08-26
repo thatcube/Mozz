@@ -36,6 +36,21 @@ public final class AudioEngine {
         case album = 2
     }
 
+    /// Why the most recent decode failed. Distinguishes a broken file (which
+    /// must never be retried) from a dropped network (which must). The engine —
+    /// not each shell — owns which is which; ``failureIsRetryable`` answers the
+    /// question directly so nothing has to hard-code these cases.
+    public enum FailureKind: UInt32, Sendable {
+        /// No failure since the last command.
+        case none = 0
+        /// Not audio this engine can decode — permanent; do not retry.
+        case unsupported = 1
+        /// The stream was interrupted (a network/IO blip) — worth retrying.
+        case interrupted = 2
+        /// The audio decoded to garbage — permanent; do not retry.
+        case corrupt = 3
+    }
+
     /// Supplies the bytes of one track.
     ///
     /// A protocol rather than a URL, because the credentials for a media server
@@ -177,6 +192,20 @@ public final class AudioEngine {
     public var hasFailed: Bool {
         guard let handle else { return false }
         return mozz_player_has_failed(handle)
+    }
+
+    /// Why the last decode failed (``FailureKind/none`` when it hasn't).
+    public var failureKind: FailureKind {
+        guard let handle else { return .none }
+        return FailureKind(rawValue: mozz_player_failure_kind(handle)) ?? .none
+    }
+
+    /// Whether the last failure is worth retrying (a transient interruption)
+    /// rather than remembering (a file that will never decode). The engine
+    /// decides; a caller should not map ``failureKind`` cases itself.
+    public var failureIsRetryable: Bool {
+        guard let handle else { return false }
+        return mozz_player_failure_is_retryable(handle)
     }
 
     /// Set the ten-band equaliser.

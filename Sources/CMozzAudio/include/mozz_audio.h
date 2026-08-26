@@ -186,6 +186,45 @@ void mozz_player_set_equalizer(struct MozzPlayer *player,
  */
 void mozz_player_set_replay_gain(struct MozzPlayer *player, uint32_t mode, double preamp_db);
 
+/**
+ * Why the last decode failed: 0 none, 1 unsupported, 2 interrupted, 3 corrupt.
+ *
+ * A bool was not enough. "This is not audio we can decode" and "the network
+ * went away" call for opposite responses - one should be remembered so the
+ * track is never retried, the other must be retried and must not mark the
+ * track as broken. A shell with only `has_failed` either retries forever on a
+ * file that will never play, or writes off a good track over a one second
+ * network fault.
+ *
+ * # Safety
+ * `player` must be a live handle or null.
+ */
+uint32_t mozz_player_failure_kind(const struct MozzPlayer *player);
+
+/**
+ * True when the last failure is worth retrying rather than remembering.
+ *
+ * Offered alongside the raw kind so a shell does not have to hard-code which
+ * numbers mean transient - a judgement that belongs with the engine, and one
+ * that would otherwise be duplicated and drift in every shell.
+ *
+ * # Safety
+ * `player` must be a live handle or null.
+ */
+bool mozz_player_failure_is_retryable(const struct MozzPlayer *player);
+
+/**
+ * Set the listener's volume, `0.0` silent to `1.0` unity.
+ *
+ * This is the shell's own level control, applied after ReplayGain and the
+ * equaliser. Values are clamped to `0.0..=1.0` inside the engine, and the
+ * change is ramped so it does not click. A null player is ignored.
+ *
+ * # Safety
+ * `player` must be a live handle or null.
+ */
+void mozz_player_set_volume(struct MozzPlayer *player, double volume);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

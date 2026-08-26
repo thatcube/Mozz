@@ -76,9 +76,9 @@ public sealed class AudioErrorEventArgs(string message, Exception? exception = n
 
 /// <summary>
 /// The whole surface the rest of the app is allowed to see. One implementation
-/// (<see cref="MiniAudioEngine"/>) hides the output device and the decoders
-/// behind it, the same way <c>MozzCore</c> is the only file that knows the core
-/// is native. Swapping the backend must not touch a single view model.
+/// (<see cref="Native.RustAudioEngine"/>) hides the output device and the
+/// decoders behind it, the same way <c>MozzCore</c> is the only file that knows
+/// the core is native. Swapping the backend must not touch a single view model.
 /// </summary>
 public interface IAudioEngine : IDisposable
 {

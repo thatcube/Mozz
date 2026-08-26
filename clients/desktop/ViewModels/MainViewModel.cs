@@ -325,7 +325,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             }
         });
 
-        _engine = new MiniAudioEngine { Volume = Volume };
+        _engine = new Mozz.Desktop.Audio.Native.RustAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far
         // more than it plays an album end to end, and album mode deliberately
         // preserves the loudness relationship *within* a record — which is the

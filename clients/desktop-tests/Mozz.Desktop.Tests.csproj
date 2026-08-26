@@ -56,18 +56,19 @@
   </ItemGroup>
 
   <!--
-    The audio engine's pure-managed core is compiled in directly too, for the
-    same reason: it lets the DSP, ring buffer, WAV decoder and gapless pipeline
-    be tested headlessly, and because these files are platform-neutral BCL-only
-    code the tests then run unchanged on the Windows CI leg — which is the only
-    place the sample pipeline gets exercised off macOS before a user does.
+    The audio engine's pure-managed code is compiled in directly too, for the
+    same reason: it lets the byte-stream sources (file and HTTP) be tested
+    headlessly, and because these files are platform-neutral BCL-only code the
+    tests then run unchanged on the Windows CI leg.
 
-    MiniAudioEngine.cs is excluded on purpose: it is the one file that binds the
-    native Hexa.NET.MiniAudio device, and nothing under test needs a sound card.
-    Excluding it keeps the native package out of the headless run entirely.
+    Audio\Native\** is excluded on purpose: those files P/Invoke the Rust
+    engine's shared library (libmozz_audio_ffi), and nothing under test needs a
+    sound card or the dylib. Excluding them keeps the native dependency out of
+    the headless run entirely — the streaming layer beneath them is what the
+    tests exercise, and it is pure managed code.
   -->
   <ItemGroup>
-    <Compile Include="..\desktop\Audio\**\*.cs" Exclude="..\desktop\Audio\MiniAudioEngine.cs" />
+    <Compile Include="..\desktop\Audio\**\*.cs" Exclude="..\desktop\Audio\Native\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

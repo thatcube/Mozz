@@ -8,9 +8,9 @@ namespace Mozz.Desktop.Audio;
 /// credential, a wall of <c>ffmpeg</c> stderr — into one short line fit to show a
 /// human, with the secret taken out first.
 ///
-/// It lives in its own file, apart from <see cref="MiniAudioEngine"/>, on purpose:
-/// that engine is the one audio file the headless test project cannot compile
-/// (it binds the native device), and redaction is exactly the sort of
+/// It lives in its own file, apart from <see cref="Native.RustAudioEngine"/>, on
+/// purpose: that engine is the one audio file the headless test project cannot
+/// compile (it binds the native library), and redaction is exactly the sort of
 /// string-wrangling that must be tested. Everything here is pure and
 /// side-effect-free.
 /// </summary>
