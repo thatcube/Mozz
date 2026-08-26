@@ -360,6 +360,11 @@ let package = Package(
                 // These are the same modules the iOS app links; nothing here is
                 // a desktop-only fork.
                 "MozzNetworking", "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
+                // Pairing. The protocol and the crypto live here so a non-Apple
+                // client drives the SAME implementation rather than a second one
+                // that has to agree with it byte for byte. Only the socket and
+                // the discovery are native per platform.
+                "MozzPairing",
                 // Recommendations and artwork/metadata enrichment are portable,
                 // so linking them here is what makes them available to a Windows
                 // or Android client at all — and puts them under the portability

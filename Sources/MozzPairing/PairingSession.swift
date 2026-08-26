@@ -222,6 +222,23 @@ public struct PairingSession {
         }
     }
 
+    /// Open a seal addressed to this session, using the private key it already
+    /// holds.
+    ///
+    /// Exists so a caller never needs the private key to finish a ceremony,
+    /// which is what lets a non-Swift host drive pairing over an FFI without the
+    /// key ever crossing the boundary.
+    public func openSealedCircle(
+        encapsulated: Data,
+        ciphertext: Data,
+        transcriptHash: Data
+    ) throws -> CircleSecrets {
+        try Pairing.openCircle(encapsulated: encapsulated,
+                               ciphertext: ciphertext,
+                               privateKey: privateKey,
+                               transcriptHash: transcriptHash)
+    }
+
     /// The member's caller has done the HPKE seal and hands back the result.
     public mutating func provideSeal(encapsulated: Data, ciphertext: Data) throws -> [PairingStep] {
         guard state == .awaitingSealMaterial else {

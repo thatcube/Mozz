@@ -76,6 +76,18 @@ struct SessionRequest: Decodable {
     var musicSectionID: String?
     var pinId: Int?
     var code: String?
+    // Pairing. The host owns the socket and pumps frames through these.
+    var pairingId: String?
+    var role: String?
+    var pairingPath: String?
+    var scannedCode: String?
+    var frame: String?
+    var matched: Bool?
+    var circle: WireCircleSecrets?
+    var transcript: String?
+    var joinerPublicKey: String?
+    var encapsulated: String?
+    var ciphertext: String?
     var artworkKey: String?
     var size: Int?
     var maxBitrateKbps: Int?
@@ -1581,6 +1593,7 @@ private func dispatch(
     default:
         // Not a catalog command — try the server/sync/streaming table before
         // declaring it unknown, so both halves share one envelope and one error.
+        if let response = try await dispatchPairingCommand(request) { return response }
         if let response = try await dispatchServerCommand(request, session) { return response }
         return sessionFailure(request.id, request.cmd, unknownCommandMessage(request.cmd))
     }
