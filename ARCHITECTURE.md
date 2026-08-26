@@ -99,7 +99,7 @@ guarantee two subtly different apps.
           │                                     │
           ▼                                     │
    ┌──────────────────┐                         │
-   │  Core and iOS    │  swift test (651)       │
+   │  Core and iOS    │  swift test (658)       │
    │                  │  swift build -c release │
    │                  │  iOS simulator build    │
    └────────┬─────────┘                         │

@@ -815,7 +815,7 @@ extension SessionContext {
 /// Swift object pointer is easy to get subtly wrong, and an integer that indexes
 /// a guarded table turns a use-after-free into a clean "unknown handle" error
 /// instead of a crash.
-private final class SessionRegistry: @unchecked Sendable {
+final class SessionRegistry: @unchecked Sendable {
     static let shared = SessionRegistry()
     private let lock = NSLock()
     private var sessions: [Int64: MozzSession] = [:]
@@ -1711,7 +1711,7 @@ private func copySessionString(_ string: String) -> UnsafeMutablePointer<CChar>?
 
 // MARK: - async bridge
 
-private final class SessionResultBox<T>: @unchecked Sendable {
+final class SessionResultBox<T>: @unchecked Sendable {
     var result: Result<T, any Error>?
 }
 
@@ -1722,7 +1722,10 @@ private final class SessionResultBox<T>: @unchecked Sendable {
 /// polled-completion API is the eventual answer, but every call here is a
 /// database read measured in single-digit milliseconds, so the simpler shape
 /// buys correctness now and can change without the request format moving.
-private func runBlockingSession<T: Sendable>(
+/// Not file-private: `mozz_session_invoke` in MozzSessionInvoke.swift bridges the
+/// same way, and a second copy of a semaphore-and-detached-task dance is exactly
+/// the kind of duplication that drifts.
+func runBlockingSession<T: Sendable>(
     _ body: @escaping @Sendable () async throws -> T
 ) throws -> T {
     let box = SessionResultBox<T>()

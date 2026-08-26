@@ -235,6 +235,9 @@ let package = Package(
             name: "MozzFFI",
             dependencies: [
                 "MozzCore", "MozzDatabase", "MozzContinuity",
+                // The schema-described command surface. `mozz_session_invoke`
+                // carries its wire format; see MozzSessionInvoke.swift.
+                "MozzCommands",
                 // The session facade signs in, mirrors a catalog and resolves
                 // stream URLs, so it needs every backend and the sync engine.
                 // These are the same modules the iOS app links; nothing here is
@@ -280,7 +283,14 @@ let package = Package(
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
         .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
-        .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
+        .testTarget(
+            name: "MozzFFITests",
+            dependencies: [
+                "MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic",
+                "MozzCommands", "MozzSchema",
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ]
+        ),
         .testTarget(
             name: "MozzSchemaTests",
             dependencies: ["MozzSchema", .product(name: "SwiftProtobuf", package: "swift-protobuf")]

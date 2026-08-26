@@ -41,6 +41,21 @@ public struct CommandDispatcher: Sendable {
         }
     }
 
+    /// An encoded failure for a request that could not even be understood.
+    ///
+    /// Static because the caller may not have a dispatcher — a bad handle or an
+    /// empty buffer is refused before one is built. Reports against id 0, since
+    /// a request that did not parse has no id to echo and inventing one would be
+    /// worse than admitting there is none.
+    public static func malformed(_ message: String) -> Data {
+        var failure = Mozz_V1_Failure()
+        failure.message = message
+        var response = Mozz_V1_Response()
+        response.id = 0
+        response.failure = failure
+        return (try? response.serializedData()) ?? Data()
+    }
+
     // MARK: Dispatch
 
     /// The exhaustive switch. This is the load-bearing part of the whole design.
