@@ -28,6 +28,13 @@ use crate::decode::{AudioDecoder, DecodeError, StreamSpec};
 use crate::ring::{Consumer, Producer};
 use crate::{Equalizer, EqualizerProfile, ReplayGainSettings};
 
+/// A track waiting to start the instant the current one runs out.
+struct Queued {
+    decoder: AudioDecoder,
+    track: u64,
+    gain_db: Option<f64>,
+}
+
 /// What one call to [`Engine::pump`] managed to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pumped {
@@ -35,18 +42,94 @@ pub enum Pumped {
     Wrote(usize),
     /// The ring has no room. Nothing was decoded, and nothing was lost.
     Full,
-    /// The current track decoded to its end.
+    /// The current track decoded to its end and a queued one took over with
+    /// nothing between them. Carries the track that just started.
     ///
-    /// The engine keeps its position so the next track can be started without
-    /// the ring draining, which is what makes the join gapless.
+    /// Distinct from [`Pumped::TrackEnded`] because a caller needs to know it
+    /// should queue another, and because "one track ended" and "the music
+    /// stopped" are not the same thing.
+    Advanced(u64),
+    /// The current track decoded to its end and nothing was queued behind it.
     TrackEnded,
     /// There is no track loaded.
     Idle,
 }
 
+/// The shell's volume control: a linear gain applied last in the chain.
+///
+/// A change ramps to the new level across one buffer rather than jumping, so
+/// the discontinuity that a hard multiply would put in the signal - heard as a
+/// click - never occurs. The ramp is short (one packet, a few milliseconds),
+/// which is enough to remove the click without the level audibly sliding.
+#[derive(Debug, Clone, Copy)]
+struct Volume {
+    current: f32,
+    target: f32,
+}
+
+impl Volume {
+    fn new() -> Self {
+        Self {
+            current: 1.0,
+            target: 1.0,
+        }
+    }
+
+    /// Aim for `level`, clamped to the sensible `0.0..=1.0` range. The move is
+    /// realised by [`Volume::process`] on the next buffer.
+    fn set(&mut self, level: f32) {
+        self.target = level.clamp(0.0, 1.0);
+    }
+
+    /// Scale `samples` in place, ramping from the current level to the target
+    /// across the buffer so no single buffer contains a step.
+    fn process(&mut self, samples: &mut [f32], channels: usize) {
+        if self.current == self.target {
+            // Unity needs no work, and skipping it keeps a full-volume signal
+            // bit-for-bit what the equaliser produced.
+            if self.current != 1.0 {
+                for s in samples.iter_mut() {
+                    *s *= self.current;
+                }
+            }
+            return;
+        }
+
+        let channels = channels.max(1);
+        let frames = samples.len() / channels;
+        if frames == 0 {
+            for s in samples.iter_mut() {
+                *s *= self.target;
+            }
+            self.current = self.target;
+            return;
+        }
+
+        // Every sample in a frame gets the same gain, so the ramp advances once
+        // per frame rather than per sample and the channels stay in step.
+        let step = (self.target - self.current) / frames as f32;
+        let mut gain = self.current;
+        for frame in samples.chunks_mut(channels) {
+            for s in frame.iter_mut() {
+                *s *= gain;
+            }
+            gain += step;
+        }
+        self.current = self.target;
+    }
+}
+
 /// Decode, process, and fill the ring.
 pub struct Engine {
     decoder: Option<AudioDecoder>,
+    /// The track to start the moment the current decoder runs out.
+    ///
+    /// This exists because gapless means queueing *ahead*, while a track is
+    /// still playing. Without it, `play_next` had to replace the live decoder,
+    /// which truncated whatever was playing - so the only safe moment to call
+    /// it was after the current track had already finished decoding, by which
+    /// point queueing ahead is exactly what has not happened.
+    next: Option<Queued>,
     equalizer: Equalizer,
     /// The settings the equaliser realises.
     ///
@@ -56,6 +139,13 @@ pub struct Engine {
     profile: EqualizerProfile,
     equalizer_enabled: bool,
     replay_gain: ReplayGainSettings,
+    /// The shell's own volume control, applied after everything else.
+    ///
+    /// Distinct from ReplayGain (which describes the recording) and the
+    /// equaliser (which describes tone): this is the level the listener sets
+    /// moment to moment, so it belongs last in the chain and persists across
+    /// tracks rather than being reset with the decoder.
+    volume: Volume,
     ring: Producer,
     channels: usize,
     /// The identifier reported at the boundary when this track starts playing.
@@ -73,10 +163,12 @@ impl Engine {
     pub fn new(ring: Producer, channels: usize) -> Self {
         Self {
             decoder: None,
+            next: None,
             equalizer: Equalizer::new(44_100.0, channels),
             profile: EqualizerProfile::flat(),
             equalizer_enabled: false,
             replay_gain: ReplayGainSettings::default(),
+            volume: Volume::new(),
             ring,
             channels,
             pending_track: None,
@@ -92,6 +184,30 @@ impl Engine {
     /// the new audio will land, so the change is reported when it is heard
     /// rather than now.
     pub fn play_next(&mut self, decoder: AudioDecoder, track: u64, gain_db: Option<f64>) {
+        if self.decoder.is_some() {
+            // Something is playing, so this waits behind it. Replacing the live
+            // decoder here is what the previous version did, and it silently
+            // truncated the current track - which made queueing ahead, the
+            // entire point of the method, the one thing it could not do.
+            self.next = Some(Queued {
+                decoder,
+                track,
+                gain_db,
+            });
+            return;
+        }
+        self.start(decoder, track, gain_db);
+    }
+
+    /// True when nothing is waiting behind the current track.
+    ///
+    /// A caller uses this to decide whether to fetch another, rather than
+    /// queueing the same track repeatedly.
+    pub fn wants_next(&self) -> bool {
+        self.next.is_none()
+    }
+
+    fn start(&mut self, decoder: AudioDecoder, track: u64, gain_db: Option<f64>) {
         let spec = decoder.spec();
         self.configure_for(spec);
         self.replay_gain.track_gain_db = gain_db;
@@ -105,6 +221,9 @@ impl Engine {
     /// This is a skip or a seek. Audio already handed to the speaker cannot be
     /// recalled, but nothing behind it should still be heard.
     pub fn play_now(&mut self, decoder: AudioDecoder, track: u64, gain_db: Option<f64>) {
+        // Whatever was queued was queued behind audio that is being discarded,
+        // so it is no longer what comes next.
+        self.next = None;
         self.ring.reset();
         // Filters hold the tail of the audio that went through them. Carried
         // into unrelated audio that is a transient at the join, so the filter
@@ -118,6 +237,7 @@ impl Engine {
         self.ring.reset();
         self.equalizer.reset();
         self.decoder = None;
+        self.next = None;
         self.pending_track = None;
         self.carry.clear();
     }
@@ -145,6 +265,14 @@ impl Engine {
         let track_gain = self.replay_gain.track_gain_db;
         self.replay_gain = settings;
         self.replay_gain.track_gain_db = track_gain;
+    }
+
+    /// Set the shell's volume, `0.0` silent to `1.0` unity.
+    ///
+    /// The change is ramped by [`Volume`] across the next buffer rather than
+    /// applied as a step, so moving the slider is a fade, not a click.
+    pub fn set_volume(&mut self, level: f32) {
+        self.volume.set(level);
     }
 
     /// Seek the current track, discarding queued audio from the old position.
@@ -200,6 +328,16 @@ impl Engine {
         let decoded = match decoder.next_frames()? {
             Some(frames) => frames,
             None => {
+                // The decoder ran out. If something is waiting, it takes over
+                // immediately and its first sample lands against the last of
+                // this track with nothing between them - which is what gapless
+                // is. No ring reset, no equaliser reset: both would put a seam
+                // exactly where there must not be one.
+                if let Some(queued) = self.next.take() {
+                    let track = queued.track;
+                    self.start(queued.decoder, track, queued.gain_db);
+                    return Ok(Pumped::Advanced(track));
+                }
                 self.decoder = None;
                 return Ok(Pumped::TrackEnded);
             }
@@ -213,6 +351,9 @@ impl Engine {
         // round would let a bass-heavy preset change how loud a track lands.
         crate::apply_replay_gain(&mut self.carry, self.replay_gain);
         self.equalizer.process(&mut self.carry);
+        // Volume last, so the listener's level rides on top of the final tone
+        // and normalisation rather than being reshaped by them.
+        self.volume.process(&mut self.carry, self.channels);
 
         let taken = self.write_frames_from_carry();
         Ok(if taken == 0 {
@@ -255,7 +396,9 @@ impl Engine {
 pub fn fill(engine: &mut Engine) -> Result<Pumped, DecodeError> {
     loop {
         match engine.pump()? {
-            Pumped::Wrote(_) => continue,
+            // Advancing is not stopping: a queued track taking over means there
+            // is more to decode, so filling continues through the join.
+            Pumped::Wrote(_) | Pumped::Advanced(_) => continue,
             other => return Ok(other),
         }
     }
@@ -359,6 +502,109 @@ mod tests {
                 "frame {index} is near silence at the join: {sample}"
             );
         }
+    }
+
+    /// The test that was missing, and whose absence hid a real bug.
+    ///
+    /// Every other gapless test queued the second track only *after* the first
+    /// had finished decoding, which is the one moment queueing ahead has
+    /// already failed to happen. Queued while the first is still playing,
+    /// `play_next` used to replace the live decoder and silently truncate it -
+    /// so the method whose entire purpose is to queue ahead was the one thing
+    /// that could not.
+    #[test]
+    fn queueing_while_a_track_is_playing_does_not_truncate_it() {
+        let (tx, mut rx) = ring(8192, 1);
+        let mut engine = Engine::new(tx, 1);
+
+        // Long enough that one pump decodes a small fraction of it. A short
+        // track hides this bug completely: a single packet decodes the whole
+        // thing, so replacing the decoder afterwards loses nothing and the
+        // test passes against broken code. The first version of this test did
+        // exactly that and proved nothing.
+        const FIRST: usize = 40_000;
+        const SECOND: usize = 5_000;
+
+        engine.play_next(decoder(&[16_384; FIRST]), 1, None);
+        engine.pump().unwrap();
+        // Still playing, and most of it is not decoded yet.
+        engine.play_next(decoder(&[-16_384; SECOND]), 2, None);
+
+        let mut collected = Vec::new();
+        for _ in 0..100_000 {
+            let state = engine.pump().unwrap();
+            collected.extend_from_slice(&drain(&mut rx, 1));
+            if matches!(state, Pumped::TrackEnded | Pumped::Idle) {
+                collected.extend_from_slice(&drain(&mut rx, 1));
+                break;
+            }
+        }
+
+        assert_eq!(
+            collected.len(),
+            FIRST + SECOND,
+            "a short count means queueing truncated the track that was playing"
+        );
+        assert!(
+            collected[..FIRST].iter().all(|s| *s > 0.4),
+            "first track intact"
+        );
+        assert!(
+            collected[FIRST..].iter().all(|s| *s < -0.4),
+            "second track followed it"
+        );
+    }
+
+    #[test]
+    fn advancing_reports_the_track_that_took_over() {
+        let (tx, _rx) = ring(4096, 1);
+        let mut engine = Engine::new(tx, 1);
+
+        engine.play_next(decoder(&[8_000; 20]), 11, None);
+        engine.pump().unwrap();
+        engine.play_next(decoder(&[8_000; 20]), 22, None);
+
+        let mut advanced = None;
+        for _ in 0..50 {
+            if let Pumped::Advanced(track) = engine.pump().unwrap() {
+                advanced = Some(track);
+                break;
+            }
+        }
+        assert_eq!(advanced, Some(22));
+    }
+
+    /// A caller needs to know whether to fetch another track, rather than
+    /// queueing the same one repeatedly.
+    #[test]
+    fn it_says_whether_something_is_already_waiting() {
+        let (tx, _rx) = ring(4096, 1);
+        let mut engine = Engine::new(tx, 1);
+
+        assert!(engine.wants_next(), "nothing playing, nothing queued");
+        engine.play_next(decoder(&[8_000; 40]), 1, None);
+        engine.pump().unwrap();
+        assert!(engine.wants_next(), "playing, but nothing behind it");
+        engine.play_next(decoder(&[8_000; 40]), 2, None);
+        assert!(!engine.wants_next(), "something is waiting now");
+    }
+
+    /// Playing something now discards what was queued behind the audio being
+    /// thrown away, because it is no longer what comes next.
+    #[test]
+    fn playing_now_also_drops_whatever_was_queued_behind_it() {
+        let (tx, mut rx) = ring(4096, 1);
+        let mut engine = Engine::new(tx, 1);
+
+        engine.play_next(decoder(&[16_384; 80]), 1, None);
+        engine.pump().unwrap();
+        engine.play_next(decoder(&[16_384; 80]), 2, None);
+        engine.play_now(decoder(&[-8_192; 10]), 3, None);
+
+        let _ = fill(&mut engine);
+        let out = drain(&mut rx, 1);
+        assert_eq!(out.len(), 10, "only the new track should remain");
+        assert!(engine.wants_next(), "the stale queue should be gone");
     }
 
     /// The boundary must be reported when the audio reaches it, and must
@@ -492,5 +738,77 @@ mod tests {
 
         assert_eq!(engine.pump().unwrap(), Pumped::Idle);
         assert!(drain(&mut rx, 1).is_empty());
+    }
+
+    #[test]
+    fn volume_scales_the_signal_the_listener_hears() {
+        let (tx, mut rx) = ring(4096, 1);
+        let mut engine = Engine::new(tx, 1);
+        // Set volume before the track so the whole buffer is at the new level
+        // rather than ramping up from unity.
+        engine.set_volume(0.5);
+        engine.play_next(decoder(&[16_384; 100]), 1, None);
+
+        fill(&mut engine).unwrap();
+        let out = drain(&mut rx, 1);
+
+        assert_eq!(out.len(), 100);
+        // 16_384/32_768 = 0.5 at unity; half volume halves it again. The gain
+        // ramps from unity across the first buffer, so the settled tail is the
+        // level to check, not the first frame.
+        assert!(
+            (out[out.len() - 1] - 0.25).abs() < 0.01,
+            "expected ~0.25 at half volume, got {}",
+            out[out.len() - 1]
+        );
+    }
+
+    #[test]
+    fn a_volume_change_ramps_rather_than_stepping() {
+        // A hard cut would put a step in the signal - a click. The ramp means
+        // the first frame after a change is still near the old level and the
+        // last is at the new one, with everything in between monotonic.
+        let mut volume = Volume::new();
+        volume.set(0.0);
+        let mut buffer = vec![1.0f32; 8];
+        volume.process(&mut buffer, 1);
+
+        assert!(
+            buffer[0] > buffer[buffer.len() - 1],
+            "the ramp should descend, got {buffer:?}"
+        );
+        assert!(
+            buffer[0] > 0.9,
+            "the first frame should still be near the old level, got {}",
+            buffer[0]
+        );
+        for pair in buffer.windows(2) {
+            assert!(
+                pair[0] >= pair[1],
+                "the ramp must be monotonic, got {buffer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn volume_persists_across_a_track_change() {
+        // Volume is the listener's setting, not the track's, so starting a new
+        // track must not quietly reset it to unity.
+        let (tx, mut rx) = ring(4096, 1);
+        let mut engine = Engine::new(tx, 1);
+        engine.set_volume(0.5);
+        engine.play_now(decoder(&[16_384; 20]), 1, None);
+        fill(&mut engine).unwrap();
+        let _ = drain(&mut rx, 1);
+
+        engine.play_now(decoder(&[16_384; 100]), 2, None);
+        fill(&mut engine).unwrap();
+        let out = drain(&mut rx, 1);
+
+        assert!(
+            (out[out.len() - 1] - 0.25).abs() < 0.01,
+            "half volume should carry into the next track, got {}",
+            out[out.len() - 1]
+        );
     }
 }

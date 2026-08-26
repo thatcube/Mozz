@@ -32,7 +32,7 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::io::{Read, Seek, SeekFrom};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use mozz_audio::player::{Player, State};
+use mozz_audio::player::{FailureKind, Player, State};
 use mozz_audio::{EqualizerProfile, ReplayGainMode, ReplayGainSettings};
 
 /// Read bytes from a shell-owned stream.
@@ -356,6 +356,60 @@ pub unsafe extern "C" fn mozz_player_set_replay_gain(
     player.inner.set_replay_gain(settings);
 }
 
+/// Why the last decode failed: 0 none, 1 unsupported, 2 interrupted, 3 corrupt.
+///
+/// A bool was not enough. "This is not audio we can decode" and "the network
+/// went away" call for opposite responses - one should be remembered so the
+/// track is never retried, the other must be retried and must not mark the
+/// track as broken. A shell with only `has_failed` either retries forever on a
+/// file that will never play, or writes off a good track over a one second
+/// network fault.
+///
+/// # Safety
+/// `player` must be a live handle or null.
+#[no_mangle]
+pub unsafe extern "C" fn mozz_player_failure_kind(player: *const MozzPlayer) -> u32 {
+    let Some(player) = (unsafe { player.as_ref() }) else {
+        return 0;
+    };
+    match player.inner.failure_kind() {
+        FailureKind::None => 0,
+        FailureKind::Unsupported => 1,
+        FailureKind::Interrupted => 2,
+        FailureKind::Corrupt => 3,
+    }
+}
+
+/// True when the last failure is worth retrying rather than remembering.
+///
+/// Offered alongside the raw kind so a shell does not have to hard-code which
+/// numbers mean transient - a judgement that belongs with the engine, and one
+/// that would otherwise be duplicated and drift in every shell.
+///
+/// # Safety
+/// `player` must be a live handle or null.
+#[no_mangle]
+pub unsafe extern "C" fn mozz_player_failure_is_retryable(player: *const MozzPlayer) -> bool {
+    unsafe { player.as_ref() }
+        .map(|p| p.inner.failure_kind().is_worth_retrying())
+        .unwrap_or(false)
+}
+
+/// Set the listener's volume, `0.0` silent to `1.0` unity.
+///
+/// This is the shell's own level control, applied after ReplayGain and the
+/// equaliser. Values are clamped to `0.0..=1.0` inside the engine, and the
+/// change is ramped so it does not click. A null player is ignored.
+///
+/// # Safety
+/// `player` must be a live handle or null.
+#[no_mangle]
+pub unsafe extern "C" fn mozz_player_set_volume(player: *mut MozzPlayer, volume: f64) {
+    if let Some(player) = unsafe { player.as_ref() } {
+        player.inner.set_volume(volume as f32);
+    }
+}
+
 /// Turn a possibly-null C string into an extension hint.
 ///
 /// # Safety
@@ -517,6 +571,7 @@ mod tests {
             mozz_player_seek(null, 30.0);
             mozz_player_set_replay_gain(null, 1, 3.0);
             mozz_player_set_equalizer(null, [0.0f64; 10].as_ptr(), 0.0, true);
+            mozz_player_set_volume(null, 0.5);
             mozz_player_free(null);
 
             assert_eq!(mozz_player_state(null), 0);

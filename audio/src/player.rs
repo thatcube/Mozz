@@ -44,6 +44,56 @@ use crate::{EqualizerProfile, ReplayGainSettings};
 pub trait Source: Read + Seek + Send + Sync + 'static {}
 impl<T: Read + Seek + Send + Sync + 'static> Source for T {}
 
+/// Why a decode failed, in the terms a caller has to act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
+    /// Nothing has failed.
+    None,
+    /// Not something we can play. Permanent: retrying achieves nothing, and
+    /// the track should be remembered as unplayable.
+    Unsupported,
+    /// The stream broke partway. Likely transient, so the track must be
+    /// retried and must NOT be written off.
+    Interrupted,
+    /// The audio is malformed past the point decoding can continue.
+    Corrupt,
+}
+
+impl FailureKind {
+    fn of(error: &DecodeError) -> Self {
+        match error {
+            DecodeError::Unsupported(_) => Self::Unsupported,
+            DecodeError::Interrupted(_) => Self::Interrupted,
+            DecodeError::Corrupt(_) => Self::Corrupt,
+        }
+    }
+
+    fn code(self) -> u64 {
+        match self {
+            Self::None => 0,
+            Self::Unsupported => 1,
+            Self::Interrupted => 2,
+            Self::Corrupt => 3,
+        }
+    }
+
+    fn from_code(code: u64) -> Self {
+        match code {
+            1 => Self::Unsupported,
+            2 => Self::Interrupted,
+            3 => Self::Corrupt,
+            _ => Self::None,
+        }
+    }
+
+    /// True when retrying could plausibly work.
+    ///
+    /// The whole reason this type exists rather than a bool.
+    pub fn is_worth_retrying(self) -> bool {
+        matches!(self, Self::Interrupted)
+    }
+}
+
 /// What the player is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -99,6 +149,7 @@ enum Command {
     Seek(f64),
     SetEqualizer(EqualizerProfile, bool),
     SetReplayGain(ReplayGainSettings),
+    SetVolume(f32),
     Shutdown,
 }
 
@@ -117,6 +168,15 @@ struct Observable {
     /// Set when a decode fails, so a shell can say what happened rather than
     /// showing a player that silently stopped.
     failed: AtomicBool,
+    /// Why it failed: 0 none, 1 unsupported, 2 interrupted, 3 corrupt.
+    ///
+    /// A bool is not enough. "This is not audio we can decode" and "the network
+    /// went away" call for opposite responses - one should be remembered so the
+    /// track is never retried, the other must be retried and must not mark the
+    /// track as broken. Collapsing them means either retrying forever on a file
+    /// that will never play, or writing off a good track over a one second
+    /// network fault.
+    failure_kind: AtomicU64,
     /// Absolute ring frame at which the current track began.
     ///
     /// Position is the difference between this and the ring's read position,
@@ -164,6 +224,7 @@ impl Player {
             current_track: AtomicU64::new(0),
             sample_rate: AtomicU64::new(sample_rate as u64),
             failed: AtomicBool::new(false),
+            failure_kind: AtomicU64::new(0),
             track_start_frame: AtomicU64::new(0),
         });
 
@@ -254,6 +315,11 @@ impl Player {
         self.send(Command::SetReplayGain(settings));
     }
 
+    /// Set the listener's volume, `0.0` silent to `1.0` unity.
+    pub fn set_volume(&self, level: f32) {
+        self.send(Command::SetVolume(level));
+    }
+
     /// What the player is doing.
     pub fn state(&self) -> State {
         State::from_code(self.observable.state.load(Ordering::Relaxed))
@@ -278,6 +344,11 @@ impl Player {
     /// True when a decode failed since the last command.
     pub fn has_failed(&self) -> bool {
         self.observable.failed.load(Ordering::Relaxed)
+    }
+
+    /// Why the last decode failed, or [`FailureKind::None`].
+    pub fn failure_kind(&self) -> FailureKind {
+        FailureKind::from_code(self.observable.failure_kind.load(Ordering::Relaxed))
     }
 
     fn send(&self, command: Command) {
@@ -365,6 +436,12 @@ fn run(
                 // audio callback for a core.
                 std::thread::sleep(Duration::from_millis(5));
             }
+            Ok(Pumped::Advanced(_)) => {
+                // A queued track took over with no gap. Nothing is ending, so
+                // nothing is draining; the boundary the ring carries is what
+                // will tell the listener, when the audio reaches it.
+                draining = false;
+            }
             Ok(Pumped::TrackEnded) => {
                 // The decoder reaching the end of a track is not the track
                 // finishing. Everything decoded is still in the ring waiting to
@@ -387,8 +464,10 @@ fn run(
                 // A decode failure stops this track but not the player: the
                 // next command must still be heard, and a shell needs to be
                 // able to say what went wrong.
-                let _ = error;
                 draining = false;
+                observable
+                    .failure_kind
+                    .store(FailureKind::of(&error).code(), Ordering::Relaxed);
                 observable.failed.store(true, Ordering::Relaxed);
                 observable
                     .state
@@ -413,6 +492,7 @@ fn apply(
             gain_db,
         } => {
             observable.failed.store(false, Ordering::Relaxed);
+            observable.failure_kind.store(0, Ordering::Relaxed);
             match AudioDecoder::open(SourceBox(source), extension.as_deref()) {
                 Ok(decoder) => {
                     observable
@@ -478,12 +558,15 @@ fn apply(
         }
         Command::SetEqualizer(profile, enabled) => engine.set_equalizer(&profile, enabled),
         Command::SetReplayGain(settings) => engine.set_replay_gain(settings),
+        Command::SetVolume(level) => engine.set_volume(level),
         Command::Shutdown => {}
     }
 }
 
 fn fail(observable: &Observable, error: DecodeError) {
-    let _ = error;
+    observable
+        .failure_kind
+        .store(FailureKind::of(&error).code(), Ordering::Relaxed);
     observable.failed.store(true, Ordering::Relaxed);
     observable
         .state
