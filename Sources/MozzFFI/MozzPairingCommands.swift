@@ -250,6 +250,13 @@ private func pairingCommand(
         await PairingRegistry.shared.end(id)
         return sessionSuccess(request, WireCircleSecrets(circle))
 
+    case "circleCreate":
+        // Generates a circle; storing it is the host's job, because where a
+        // secret belongs is the one thing that is genuinely platform-specific.
+        // The first pairing anyone does is between two devices where neither is
+        // in a circle, so whichever side holds the music forms one.
+        return sessionSuccess(request, WireCircleSecrets(CircleSecrets.new()))
+
     case "pairingEnd":
         guard let id = request.pairingId else { throw PairingCommandError.missing("pairingId") }
         await PairingRegistry.shared.end(id)
