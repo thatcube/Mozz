@@ -99,21 +99,39 @@ public actor PairingLink {
         return try PairingFrame.decode(buffered.removeFirst())
     }
 
+    /// Cancellation has to reach the socket, not just the task.
+    ///
+    /// `NWConnection.receive` calls back when bytes arrive and at no other time,
+    /// so a continuation waiting on it ignores `Task.cancel()` entirely and waits
+    /// forever. In the app that is someone backing out of the pairing screen and
+    /// leaving a task that never finishes; it showed up here as a test that hung
+    /// rather than failed. Cancelling the connection makes the callback fire,
+    /// which is what actually unblocks it.
     private func readChunk() async throws -> Data {
         let connection = self.connection
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            connection.receive(minimumIncompleteLength: 1,
-                               maximumLength: PairingWire.maxFrameLength) { data, _, isComplete, error in
-                if let error {
-                    continuation.resume(throwing: PairingTransportError.connectionFailed("\(error)"))
-                } else if let data, !data.isEmpty {
-                    continuation.resume(returning: data)
-                } else if isComplete {
-                    continuation.resume(throwing: PairingTransportError.closedBeforeCompleting)
-                } else {
-                    continuation.resume(returning: Data())
+        let resumed = Resumed()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                if Task.isCancelled {
+                    if resumed.claim() { continuation.resume(throwing: CancellationError()) }
+                    return
+                }
+                connection.receive(minimumIncompleteLength: 1,
+                                   maximumLength: PairingWire.maxFrameLength) { data, _, isComplete, error in
+                    guard resumed.claim() else { return }
+                    if let error {
+                        continuation.resume(throwing: PairingTransportError.connectionFailed("\(error)"))
+                    } else if let data, !data.isEmpty {
+                        continuation.resume(returning: data)
+                    } else if isComplete {
+                        continuation.resume(throwing: PairingTransportError.closedBeforeCompleting)
+                    } else {
+                        continuation.resume(returning: Data())
+                    }
                 }
             }
+        } onCancel: {
+            connection.cancel()
         }
     }
 
@@ -161,7 +179,14 @@ public actor PairingHost {
     /// through Bonjour.
     public var port: UInt16? { listener.port?.rawValue }
 
+    private var started = false
+
     public func start() async throws {
+        // Idempotent: a caller that hands an already-started host to
+        // PairingCeremony must not re-register handlers or resume a second
+        // continuation.
+        guard !started else { return }
+        started = true
         listener.newConnectionHandler = { [weak self] connection in
             guard let self else { return connection.cancel() }
             Task { await self.accept(connection) }
