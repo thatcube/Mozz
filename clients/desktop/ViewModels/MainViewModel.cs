@@ -301,6 +301,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _ = RefreshActiveAccountProfileAsync();
         };
         RestoreSettings();
+        InitializeDownloads();
 
         // The previewer builds view models with no library present; don't try to
         // open a database from the designer.
@@ -2795,6 +2796,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(IsConnectSelected));
         OnPropertyChanged(nameof(IsSettingsSelected));
+        OnPropertyChanged(nameof(IsDownloadsSelected));
         OnPropertyChanged(nameof(ShowTracks));
         OnPropertyChanged(nameof(ShowHomeRows));
         OnPropertyChanged(nameof(ShowHomeEmpty));
@@ -2803,6 +2805,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ShowGenres));
         OnPropertyChanged(nameof(ShowPlaylists));
         OnPropertyChanged(nameof(ShowSearch));
+        OnPropertyChanged(nameof(ShowDownloads));
         OnPropertyChanged(nameof(ShowConnect));
         OnPropertyChanged(nameof(ShowSettings));
         OnPropertyChanged(nameof(ShowAlbumDetail));
@@ -2846,6 +2849,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _positionTimer?.Stop();
         _seekDebounce?.Stop();
         _continuityReconcileTimer?.Stop();
+        _downloadPollTimer?.Stop();
         _continuityFlushCts?.Cancel();
         _continuityFlushCts?.Dispose();
         _engine?.Dispose();

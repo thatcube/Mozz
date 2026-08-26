@@ -18,7 +18,7 @@ namespace Mozz.Desktop.Core;
 /// so adding a capability is a new request here and a new case in Swift — with
 /// no P/Invoke declaration to keep in step across two toolchains.
 /// </summary>
-public sealed partial class MozzCore : IDisposable
+public sealed partial class MozzCore : IDisposable, Downloads.ICoreInvoker
 {
     // SwiftPM emits MozzFFI.dll on Windows, libMozzFFI.dylib on macOS and
     // libMozzFFI.so on Linux. .NET's probing adds the prefix and extension, so

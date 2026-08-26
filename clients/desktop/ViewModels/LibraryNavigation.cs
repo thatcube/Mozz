@@ -12,6 +12,7 @@ public enum LibrarySection
     Genres,
     Playlists,
     Search,
+    Downloads,
     Connect,
     Settings,
 }

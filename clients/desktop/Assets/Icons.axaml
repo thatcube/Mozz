@@ -36,4 +36,6 @@
     <StreamGeometry x:Key="IconCode">M7 8l-4 4l4 4 M17 8l4 4l-4 4 M14 4l-4 16</StreamGeometry>
     <StreamGeometry x:Key="IconStar">M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873l-6.158 -3.245</StreamGeometry>
     <StreamGeometry x:Key="IconX">M18 6l-12 12 M6 6l12 12</StreamGeometry>
+    <StreamGeometry x:Key="IconDownload">M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2 M7 11l5 5l5 -5 M12 4l0 12</StreamGeometry>
+    <StreamGeometry x:Key="IconTrash">M4 7l16 0 M10 11l0 6 M14 11l0 6 M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12 M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3</StreamGeometry>
 </ResourceDictionary>
