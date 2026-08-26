@@ -29,6 +29,21 @@ public enum ContinuityQueueBuilder {
     ///   metadata (title, artist, artwork) is excluded, so re-fetching richer
     ///   metadata does not invalidate an otherwise identical queue.
     ///
+    /// The joining is unescaped, which means it ASSUMES no field ever contains
+    /// U+0001 or U+0002. Backend ids in practice do not — they are numeric,
+    /// UUIDs or paths — but the assumption is load-bearing and worth naming,
+    /// because the same shape of assumption already failed once here: album
+    /// group keys are built by joining with U+001F, page cursor tokens chose the
+    /// same character as their own separator, and album paging broke on the
+    /// second page for every non-Swift client. If a backend ever did emit one,
+    /// two genuinely different queues could produce identical bytes and a device
+    /// would decide it was already in sync when it was not.
+    ///
+    /// It is deliberately not fixed by changing the encoding. This hash is
+    /// compared between devices, so altering it is a breaking change that would
+    /// stop a new client agreeing with an old one — the fix has to arrive on
+    /// every platform at once, with a version bump, rather than quietly here.
+    ///
     /// Public so a reimplementation on another platform can compare its
     /// *intermediate* encoding, not just the final digest. When two platforms
     /// disagree on a hash, the bytes are where the difference actually is, and

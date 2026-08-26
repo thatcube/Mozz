@@ -10,9 +10,16 @@ import MozzHistory
 /// and remains buildable anywhere — it is one of the layers a Windows or Android
 /// client would reuse verbatim.
 ///
-/// The merge itself is a G-Set union (see `HistoryMerge`), so everything here is
-/// insert-only: nothing in this file updates or deletes a play event, and the
-/// import path is idempotent because `event_uid` is unique.
+/// The merge itself is a G-Set union (see `HistoryMerge`), so no play event is
+/// ever deleted and none is ever changed into a different listen: the import
+/// path is idempotent because `event_uid` is unique.
+///
+/// It is not, however, strictly insert-only, and it used to say that it was.
+/// `backfillEventUIDs` runs `UPDATE OR IGNORE play_event` to fill `event_uid`
+/// and `device` on rows written before those columns existed. That mutates
+/// metadata, never the identity of a listen — the track, the time and the kind
+/// are untouched — but code that reads "insert-only" and concludes a row is
+/// frozen once written would be wrong, and would be wrong in the silent way.
 public struct HistorySyncStore: Sendable {
     private let database: MusicDatabase
 
