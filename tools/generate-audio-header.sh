@@ -18,10 +18,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FFI="$ROOT/audio/ffi"
 HEADER="$FFI/include/mozz_audio.h"
-# The Swift package needs its own copy, because a SwiftPM C target publishes
-# headers from inside Sources/. Two copies is a risk, so --check compares both
-# and a drifted copy fails the build rather than being linked by accident.
-SWIFT_HEADER="$ROOT/Sources/CMozzAudio/include/mozz_audio.h"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -50,18 +46,10 @@ if [ "$CHECK" = "1" ]; then
     diff -u "$HEADER" "$TMP/mozz_audio.h" >&2 || true
     exit 1
   fi
-  if [ ! -f "$SWIFT_HEADER" ] || ! diff -u "$SWIFT_HEADER" "$TMP/mozz_audio.h" >/dev/null; then
-    echo "✗ Sources/CMozzAudio/include/mozz_audio.h is stale." >&2
-    echo "  Run tools/generate-audio-header.sh and commit the result." >&2
-    exit 1
-  fi
-  echo "✓ Both C headers match the Rust."
+  echo "✓ The C header matches the Rust."
   exit 0
 fi
 
 mkdir -p "$(dirname "$HEADER")"
 cp "$TMP/mozz_audio.h" "$HEADER"
-mkdir -p "$(dirname "$SWIFT_HEADER")"
-cp "$TMP/mozz_audio.h" "$SWIFT_HEADER"
 echo "✓ $HEADER"
-echo "✓ $SWIFT_HEADER"

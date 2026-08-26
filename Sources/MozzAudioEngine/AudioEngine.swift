@@ -1,4 +1,4 @@
-import CMozzAudio
+import MozzAudioFFI
 import Foundation
 
 /// The shared audio engine, as Swift sees it.

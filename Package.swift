@@ -35,8 +35,10 @@ import PackageDescription
 //
 // A Rust staticlib does not carry the system frameworks it needs, which is why
 // the CoreAudio family is named on this side rather than inside the engine.
+// A Rust staticlib does not carry the system frameworks it needs, so whatever
+// links it has to name them. The XCFramework supplies the library; these
+// supply what cpal reaches CoreAudio through.
 let audioEngineLinkage: [LinkerSetting] = [
-    .unsafeFlags(["-Laudio/target/swift", "-lmozz_audio_ffi"]),
     .linkedFramework("CoreAudio", .when(platforms: [.macOS, .iOS, .tvOS])),
     .linkedFramework("AudioToolbox", .when(platforms: [.macOS, .iOS, .tvOS])),
     .linkedFramework("AudioUnit", .when(platforms: [.macOS])),
@@ -222,8 +224,21 @@ let package = Package(
         // The library itself is built by tools/build-audio-staticlib.sh. SwiftPM
         // cannot run cargo, so that is a genuine prerequisite of building this
         // package rather than something hidden behind a flag.
-        .target(name: "CMozzAudio"),
-        .target(name: "MozzAudioEngine", dependencies: ["CMozzAudio"]),
+        // An XCFramework rather than a bare `.a` named with `-L`, because a
+        // single directory holds one architecture and Apple needs three: macOS
+        // universal, iOS device, and iOS simulator. SwiftPM cannot even tell
+        // device from simulator - both are `.iOS` - so per-platform linker
+        // flags could not express it either. Xcode picks the slice per
+        // destination, and using a binary target instead of `unsafeFlags`
+        // matters beyond tidiness: a package carrying unsafeFlags cannot be
+        // depended on by anything else.
+        //
+        // Built by tools/build-audio-xcframework.sh, which SwiftPM cannot run
+        // itself. That prerequisite is the honest cost of the engine being real.
+        .binaryTarget(name: "MozzAudioFFI", path: "audio/target/MozzAudioFFI.xcframework"),
+        .target(
+            name: "MozzAudioEngine", dependencies: ["MozzAudioFFI"],
+            linkerSettings: audioEngineLinkage),
 
         // MARK: Offline downloads
         //
@@ -322,9 +337,7 @@ let package = Package(
             resources: [.copy("Fixtures")]
         ),
         .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),
-        .testTarget(
-            name: "MozzPlaybackTests", dependencies: ["MozzPlayback"],
-            linkerSettings: audioEngineLinkage),
+        .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
 
         // Linking happens here rather than on the library target, so that
         // building the package needs only the header while *running* anything
@@ -332,8 +345,7 @@ let package = Package(
         // every build, and still proves the symbols exist.
         .testTarget(
             name: "MozzAudioEngineTests",
-            dependencies: ["MozzAudioEngine"],
-            linkerSettings: audioEngineLinkage
+            dependencies: ["MozzAudioEngine"]
         ),
         .testTarget(name: "MozzContinuityTests", dependencies: ["MozzContinuity"]),
         .testTarget(name: "MozzHistoryTests", dependencies: ["MozzHistory"]),
@@ -359,9 +371,7 @@ let package = Package(
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
-        .testTarget(
-            name: "MozzAppTests", dependencies: ["MozzApp"],
-            linkerSettings: audioEngineLinkage),
+        .testTarget(name: "MozzAppTests", dependencies: ["MozzApp"]),
     ],
     swiftLanguageModes: [.v5]
 )

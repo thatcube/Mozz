@@ -86,8 +86,11 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # --all builds every Apple slice, because this job also builds the iOS
+      # app. A macOS-only framework links on the Mac and then fails at the one
+      # step that matters, which is exactly the failure CI exists to catch.
       - name: Build the audio engine
-        run: tools/build-audio-staticlib.sh --release
+        run: tools/build-audio-xcframework.sh --all
 
       - name: Run the test suite
         run: swift test --parallel
