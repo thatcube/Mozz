@@ -1,0 +1,165 @@
+import Foundation
+
+/// The four things devices say to each other while pairing, and their encoding.
+///
+/// Kept separate from ``PairingSession`` because the codec is the part a second
+/// implementation has to match byte for byte, and mixing it with state
+/// transitions makes it harder to check that it does.
+///
+/// Every field is fixed-width except the seal, which is length-prefixed. That is
+/// the same discipline the transcript uses and for the same reason: a parser
+/// that cannot confuse one field with the next cannot be talked into confusing
+/// them.
+public enum PairingFrame: Sendable, Equatable {
+    /// Joiner opens. `commitment` is present on the digit path and absent on the
+    /// QR path, where the camera already carried the nonce.
+    case hello(version: UInt8, publicKey: Data, commitment: Data?)
+
+    /// Member answers with its own contribution.
+    case peer(publicKey: Data, nonce: Data)
+
+    /// Joiner opens its commitment. Digit path only.
+    case reveal(nonce: Data)
+
+    /// Member hands over the circle, sealed to the joiner's public key.
+    case sealed(encapsulated: Data, ciphertext: Data)
+
+    // MARK: - Sizes
+
+    public enum Size {
+        public static let publicKey = 32
+        public static let nonce = 16
+        public static let commitment = 32
+
+        /// A ceiling on the seal, so a peer cannot make us allocate arbitrarily
+        /// by claiming a large length. The plaintext is five short JSON fields;
+        /// 8 KiB is orders of magnitude more than it can legitimately need.
+        public static let maxCiphertext = 8 * 1024
+        /// X25519 encapsulated keys are 32 bytes. The allowance is for a future
+        /// suite, not for anything that should appear today.
+        public static let maxEncapsulated = 256
+    }
+
+    private enum Tag: UInt8 {
+        case hello = 0x01
+        case peer = 0x02
+        case reveal = 0x03
+        case sealed = 0x04
+    }
+
+    // MARK: - Encoding
+
+    public func encoded() -> Data {
+        var out = Data()
+        switch self {
+        case let .hello(version, publicKey, commitment):
+            out.append(Tag.hello.rawValue)
+            out.append(version)
+            out.append(publicKey)
+            out.append(commitment == nil ? 0x00 : 0x01)
+            if let commitment { out.append(commitment) }
+
+        case let .peer(publicKey, nonce):
+            out.append(Tag.peer.rawValue)
+            out.append(publicKey)
+            out.append(nonce)
+
+        case let .reveal(nonce):
+            out.append(Tag.reveal.rawValue)
+            out.append(nonce)
+
+        case let .sealed(encapsulated, ciphertext):
+            out.append(Tag.sealed.rawValue)
+            out.append(UInt8(encapsulated.count >> 8))
+            out.append(UInt8(encapsulated.count & 0xFF))
+            out.append(contentsOf: withUnsafeBytes(of: UInt32(ciphertext.count).bigEndian, Array.init))
+            out.append(encapsulated)
+            out.append(ciphertext)
+        }
+        return out
+    }
+
+    // MARK: - Decoding
+
+    /// Decode exactly one frame. Trailing bytes are an error rather than
+    /// something to ignore: a frame with something after it is not a frame we
+    /// understand, and quietly discarding the remainder is how parsers become
+    /// smuggling routes.
+    public static func decode(_ data: Data) throws -> PairingFrame {
+        var reader = Reader(data)
+        let tag = try reader.byte(field: "tag")
+        let frame: PairingFrame
+
+        switch Tag(rawValue: tag) {
+        case .hello:
+            let version = try reader.byte(field: "version")
+            let publicKey = try reader.take(Size.publicKey, field: "publicKey")
+            let hasCommitment = try reader.byte(field: "hasCommitment")
+            switch hasCommitment {
+            case 0x00:
+                frame = .hello(version: version, publicKey: publicKey, commitment: nil)
+            case 0x01:
+                frame = .hello(version: version, publicKey: publicKey,
+                               commitment: try reader.take(Size.commitment, field: "commitment"))
+            default:
+                throw PairingError.malformed("hasCommitment must be 0 or 1, got \(hasCommitment)")
+            }
+
+        case .peer:
+            frame = .peer(publicKey: try reader.take(Size.publicKey, field: "publicKey"),
+                          nonce: try reader.take(Size.nonce, field: "nonce"))
+
+        case .reveal:
+            frame = .reveal(nonce: try reader.take(Size.nonce, field: "nonce"))
+
+        case .sealed:
+            let encLength = Int(try reader.byte(field: "encapsulatedLength")) << 8
+                | Int(try reader.byte(field: "encapsulatedLength"))
+            var ciphertextLength = 0
+            for _ in 0..<4 {
+                ciphertextLength = ciphertextLength << 8 | Int(try reader.byte(field: "ciphertextLength"))
+            }
+            guard encLength <= Size.maxEncapsulated else {
+                throw PairingError.malformed("encapsulated key of \(encLength) bytes exceeds the limit")
+            }
+            guard ciphertextLength <= Size.maxCiphertext else {
+                throw PairingError.malformed("ciphertext of \(ciphertextLength) bytes exceeds the limit")
+            }
+            frame = .sealed(encapsulated: try reader.take(encLength, field: "encapsulated"),
+                            ciphertext: try reader.take(ciphertextLength, field: "ciphertext"))
+
+        case nil:
+            throw PairingError.malformed("unknown frame tag \(tag)")
+        }
+
+        guard reader.isExhausted else {
+            throw PairingError.malformed("\(reader.remaining) unexpected bytes after the frame")
+        }
+        return frame
+    }
+
+    private struct Reader {
+        private let data: Data
+        private var offset: Int
+
+        init(_ data: Data) {
+            self.data = data
+            self.offset = data.startIndex
+        }
+
+        var remaining: Int { data.endIndex - offset }
+        var isExhausted: Bool { remaining == 0 }
+
+        mutating func byte(field: String) throws -> UInt8 {
+            try take(1, field: field)[0]
+        }
+
+        mutating func take(_ count: Int, field: String) throws -> Data {
+            guard remaining >= count else {
+                throw PairingError.wrongLength(field: field, expected: count, got: remaining)
+            }
+            defer { offset += count }
+            return Data(data[offset..<(offset + count)])
+        }
+    }
+}
