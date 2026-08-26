@@ -184,13 +184,18 @@ echo "✓ $APP ($SIZE) — version $MOZZ_RESOLVED_DISPLAY_VERSION"
 if [ "$RUN" = "1" ]; then
   # Launch from /Applications, never from the build directory.
   #
-  # macOS only grants local network access to an app running from a normal
+  # macOS shows the local network permission prompt for an app in a normal
   # install location. Run the same signed bundle out of a worktree's build/
-  # folder and every connection to a LAN server fails with EHOSTUNREACH, while
-  # curl, nc and the child ffmpeg process all reach it fine - so music plays and
-  # album art silently does not, and the app never appears in the Local Network
-  # settings list to be granted. That cost a full evening to find. Copying first
-  # takes a second and removes the whole class of problem.
+  # folder and no prompt ever appears: connections to a LAN server just fail
+  # with EHOSTUNREACH, the app never appears in the Local Network settings list,
+  # and there is nothing to switch on. Meanwhile curl, nc and the child ffmpeg
+  # process all reach the server fine - so music plays and album art silently
+  # does not, which is a hard thing to read as a permissions problem.
+  #
+  # Once the prompt is answered the grant follows the signing identity rather
+  # than the path, so build/ works afterwards too. This copy exists to get the
+  # prompt asked in the first place, which is the part that only happens once
+  # and only from here.
   INSTALLED="/Applications/$(basename "$APP")"
   echo "▸ Installing to $INSTALLED…"
   rm -rf "$INSTALLED"
