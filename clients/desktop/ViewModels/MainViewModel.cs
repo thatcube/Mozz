@@ -2447,8 +2447,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var source = await Task.Run(() => ResolveSource(track));
         if (source is null) return; // ResolveSource reported why.
 
+        // Ask the engine BEFORE committing the UI to this track. Setting
+        // NowPlaying first meant a load that failed left the title, the artwork
+        // and the duration describing a song that was never started, while the
+        // previous one played on underneath - which reads as "it played the
+        // wrong song" rather than "it could not play that song".
+        if (!_engine.Play(source, track)) return;
+
         NowPlaying = track;
-        _ = LoadLyricsAsync(track, 0);
         _ = LoadLyricsAsync(track, 0);
         DurationSeconds = source.KnownDuration?.TotalSeconds
             ?? (track.DurationSeconds > 0 ? track.DurationSeconds : 0);
@@ -2456,7 +2462,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         PositionSeconds = Math.Max(0, initialPositionSeconds);
         _suppressSeek = false;
 
-        if (!_engine.Play(source, track)) return;
         StartHistoryFor(track);
         if (initialPositionSeconds > 0)
         {
