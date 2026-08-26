@@ -62,17 +62,19 @@ struct PairingView: View {
             Text("Use this on the device you are adding. Another device that is already set up scans the code.")
         }
 
-        if controller.isPaired {
-            Section {
-                Button {
-                    controller.beginScanning()
-                } label: {
-                    Label("Scan a code", mozz: "camera")
-                }
-            } footer: {
-                Text("Use this to add another device to your circle.")
+        Section {
+            Button {
+                controller.beginScanning()
+            } label: {
+                Label("Scan a code", mozz: "camera")
             }
+        } footer: {
+            Text(controller.isPaired
+                 ? "Use this to add another device to your circle."
+                 : "Use this on the device that already has your music. Pairing this way creates your circle.")
+        }
 
+        if controller.isPaired {
             Section {
                 Button(role: .destructive) {
                     controller.leaveCircle()

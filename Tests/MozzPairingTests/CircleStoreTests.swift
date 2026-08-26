@@ -81,6 +81,37 @@ final class CircleStoreTests: XCTestCase {
         XCTAssertNil(try plain.value(forKey: CircleStore.Key.rest))
     }
 
+    func testALoneDeviceFormsACircleWhenItNeedsOne() throws {
+        let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
+        XCTAssertNil(try store.load(), "nothing yet")
+
+        let formed = try store.loadOrCreate()
+        XCTAssertEqual(formed.epoch, 1)
+        XCTAssertEqual(formed.channelKey.count, 32)
+        XCTAssertEqual(formed.credentialsKey.count, 32)
+        XCTAssertNotEqual(formed.channelKey, formed.credentialsKey)
+        XCTAssertFalse(formed.channelId.isEmpty)
+        // The relay key cannot exist before the relay is provisioned, and an
+        // invented placeholder would be worse than an obviously absent one.
+        XCTAssertTrue(formed.relayKey.isEmpty)
+
+        XCTAssertEqual(try store.load(), formed, "and it was persisted, not just returned")
+    }
+
+    func testFormingACircleTwiceReturnsTheSameOne() throws {
+        let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
+        let first = try store.loadOrCreate()
+        let second = try store.loadOrCreate()
+        XCTAssertEqual(first, second, "a device must not silently replace the circle it is already in")
+    }
+
+    func testTwoCirclesDoNotCollide() throws {
+        let one = try CircleStore(secure: InMemoryStore(), plain: InMemoryStore()).loadOrCreate()
+        let two = try CircleStore(secure: InMemoryStore(), plain: InMemoryStore()).loadOrCreate()
+        XCTAssertNotEqual(one.channelId, two.channelId)
+        XCTAssertNotEqual(one.channelKey, two.channelKey)
+    }
+
     func testRejoiningReplacesRatherThanAccumulates() throws {
         let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
         try store.save(circle)

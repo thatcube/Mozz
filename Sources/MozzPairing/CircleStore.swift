@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 
 /// Storage backed by the platform's secure store — Keychain, Keystore, DPAPI.
@@ -75,6 +76,19 @@ public struct CircleStore: Sendable {
                              credentialsKey: credentialsKey,
                              epoch: record.epoch,
                              relayKey: record.relayKey)
+    }
+
+    /// The circle this device is in, creating one if it is not in any yet.
+    ///
+    /// Someone has to go first. `join` needs a member to seal a circle to it and
+    /// `admit` needs a circle to hand over, so without this every device waits
+    /// for a circle that never comes into existence. A device that is alone and
+    /// is asked to admit another simply forms one.
+    public func loadOrCreate() throws -> CircleSecrets {
+        if let existing = try load() { return existing }
+        let created = CircleSecrets.new()
+        try save(created)
+        return created
     }
 
     /// Leave the circle. Clears the secret first: a crash midway leaves a device
