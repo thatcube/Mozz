@@ -464,6 +464,49 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertEqual(Set(ids).count, 500, "a track came back on two pages")
     }
 
+    /// The same walk for albums, which is not redundant with the track walk
+    /// above and should have existed all along.
+    ///
+    /// Albums are the one listing keyed on `albumGroupKey`, which `AlbumGrouping`
+    /// builds by joining two parts with U+001F — the character `PageCursor` also
+    /// used as its own separator. So an album cursor came back split into two
+    /// keys, the seek clause was built for one key while its arguments were
+    /// bound for two, and SQLite rejected the statement outright. Every client
+    /// that carries a cursor as text failed on the second page of albums.
+    ///
+    /// The track walk could never have caught it: tracks are keyed on
+    /// `sortTitle`/`title`, which contain no separator. A listing was tested and
+    /// a different listing was broken.
+    func testAlbumCursorPagingWalksTheWholeListingThroughTheABI() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 20, albums: 40, tracks: 500))
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        var remoteIds: [String] = []
+        var cursor: String?
+        var pages = 0
+        repeat {
+            var request: [String: Any] = ["cmd": "albums", "serverId": serverId, "limit": 7]
+            if let cursor { request["cursor"] = cursor }
+            let response = try call(handle, request)
+            XCTAssertEqual(response["ok"] as? Bool, true, "page \(pages) failed: \(response)")
+            let rows = try XCTUnwrap(response["payload"] as? [[String: Any]])
+            remoteIds.append(contentsOf: rows.compactMap { $0["remoteId"] as? String })
+            cursor = response["nextCursor"] as? String
+            pages += 1
+            XCTAssertLessThan(pages, 50, "paging did not terminate")
+        } while cursor != nil
+
+        XCTAssertGreaterThan(pages, 1, "the catalog produced a single page, so nothing was paged")
+        XCTAssertFalse(remoteIds.isEmpty)
+        XCTAssertEqual(Set(remoteIds).count, remoteIds.count, "an album came back on two pages")
+    }
+
     /// A mangled cursor restarts the listing rather than failing. It can only
     /// come from a client that damaged a token we issued, and showing the first
     /// page beats showing an error.

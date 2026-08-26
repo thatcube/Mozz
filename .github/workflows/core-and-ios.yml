@@ -8,7 +8,7 @@ name: Core and iOS
 # Apple — that is a portability question. This one asks whether the code is
 # CORRECT, and whether the app that is actually in production still compiles.
 #
-# Those were both unchecked until this existed. `swift test` — 650 tests
+# Those were both unchecked until this existed. `swift test` — 651 tests
 # covering the database, the three server clients, sync, history, continuity and
 # the FFI boundary — ran only when someone remembered to run it locally. And
 # nothing built the iOS app at all, so the one platform with real users was the
