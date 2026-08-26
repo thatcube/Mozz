@@ -65,6 +65,20 @@ jobs:
           key: audio-${{ runner.os }}-${{ hashFiles('audio/Cargo.lock') }}
           restore-keys: audio-${{ runner.os }}-
 
+      # cpal reaches Linux audio through ALSA, and alsa-sys is a binding to a
+      # library that has to exist before it will build:
+      #
+      #     failed to run custom build command for `alsa-sys`
+      #
+      # The crate had no system dependencies when this workflow was written -
+      # the comment above still says so - and acquired one the moment it grew a
+      # real output device. Nothing here can build until it is installed.
+      - name: ALSA headers
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev
+
       - name: Test
         run: cargo test --workspace --all-features
 
