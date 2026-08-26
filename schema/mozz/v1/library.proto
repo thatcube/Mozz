@@ -1,0 +1,172 @@
+// The library-reading half of the Mozz command surface.
+//
+// This file is the source of truth for these commands. The Swift dispatch side,
+// the idiomatic Swift client, and the C#/Kotlin/TypeScript clients are all
+// generated from it — a command that is not declared here cannot be called from
+// anywhere, which is the point. See ADR-0016.
+//
+// Generated output is committed, not produced at build time. Run
+// `tools/generate-schema.sh` after editing; CI regenerates and fails if the
+// checked-in output has drifted.
+
+syntax = "proto3";
+
+package mozz.v1;
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+// An opaque resume position for a paged listing. Clients must not parse it;
+// they hand back whatever the previous page returned.
+message PageCursor {
+  string token = 1;
+}
+
+message Page {
+  // Absent when this is the last page.
+  optional PageCursor next = 1;
+}
+
+message AlbumSummary {
+  string remote_id = 1;
+  string title = 2;
+  string artist_name = 3;
+  optional int32 year = 4;
+  optional string artwork_key = 5;
+  int32 track_count = 6;
+}
+
+message Artist {
+  string remote_id = 1;
+  string name = 2;
+  optional string artwork_key = 3;
+  int32 album_count = 4;
+}
+
+message Library {
+  string id = 1;
+  string name = 2;
+  string server_id = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+//
+// Each command declares exactly the arguments it needs. Contrast the current
+// hand-written facade, where every command shares one SessionRequest struct of
+// 38 optional fields and checks the ones it wants at runtime — so `artist`
+// carries `guard let remoteId = request.remoteId, let serverId else { fail }`,
+// and a command that forgets to check simply misbehaves.
+// ---------------------------------------------------------------------------
+
+// Takes no arguments. The empty message is deliberate: it gives the command a
+// place to grow an argument later without changing its shape at every call site.
+message LibrariesRequest {}
+
+message LibrariesResponse {
+  repeated Library libraries = 1;
+}
+
+message AlbumsRequest {
+  string server_id = 1;
+  // Absent means "from the beginning".
+  optional PageCursor after = 2;
+  int32 limit = 3;
+}
+
+message AlbumsResponse {
+  repeated AlbumSummary albums = 1;
+  Page page = 2;
+}
+
+// Both fields are required. Today this is a runtime guard in the facade; here
+// it is the shape of the message, and every generated client enforces it.
+message ArtistRequest {
+  string server_id = 1;
+  string remote_id = 2;
+}
+
+message ArtistResponse {
+  Artist artist = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+//
+// The reason these are first-class rather than bolted on: SwiftUI views observe
+// GRDB's ValueObservation directly today, so the database changes and the view
+// redraws. A request/response-only surface cannot express that, and iOS would
+// silently lose live updates when it moves onto the generated client. The
+// desktop has the same need in the other direction — it currently has no way to
+// be told "the sync finished" without polling.
+// ---------------------------------------------------------------------------
+
+message SubscriptionToken {
+  uint64 id = 1;
+}
+
+message CancelRequest {
+  SubscriptionToken token = 1;
+}
+
+message CancelResponse {}
+
+// Fires whenever the locally-stored library changes for this server —
+// a sync landing, a favourite toggling, a download completing.
+message WatchLibraryRequest {
+  string server_id = 1;
+}
+
+message LibraryChanged {
+  // Which kinds of rows changed, so a client can refresh narrowly rather than
+  // reloading everything.
+  repeated string changed_entities = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch
+//
+// One envelope in, one envelope out. The oneof is what closes the loop: adding
+// a command means adding a variant here, and the generated Swift dispatcher
+// will not compile until the core implements it.
+// ---------------------------------------------------------------------------
+
+message Request {
+  // Echoed back on the matching Response so a client can pair them.
+  uint64 id = 1;
+
+  oneof command {
+    LibrariesRequest libraries = 10;
+    AlbumsRequest albums = 11;
+    ArtistRequest artist = 12;
+    WatchLibraryRequest watch_library = 13;
+    CancelRequest cancel = 14;
+  }
+}
+
+message Failure {
+  string message = 1;
+}
+
+message Response {
+  uint64 id = 1;
+
+  oneof result {
+    Failure failure = 2;
+    LibrariesResponse libraries = 10;
+    AlbumsResponse albums = 11;
+    ArtistResponse artist = 12;
+    SubscriptionToken watch_library = 13;
+    CancelResponse cancel = 14;
+  }
+}
+
+// Pushed from the core to the shell, unprompted, for an active subscription.
+message Event {
+  SubscriptionToken token = 1;
+
+  oneof payload {
+    LibraryChanged library_changed = 10;
+  }
+}
