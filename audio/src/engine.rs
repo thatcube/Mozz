@@ -25,6 +25,7 @@
 //! and the cost is a few extra function calls per second.
 
 use crate::decode::{AudioDecoder, DecodeError, StreamSpec};
+use crate::resample::Resampler;
 use crate::ring::{Consumer, Producer};
 use crate::{Equalizer, EqualizerProfile, ReplayGainSettings};
 
@@ -150,6 +151,21 @@ pub struct Engine {
     channels: usize,
     /// The identifier reported at the boundary when this track starts playing.
     pending_track: Option<u64>,
+    /// The rate the output device actually runs at.
+    ///
+    /// Everything after the decoder works at this rate, which is why the
+    /// equaliser is built once here rather than rebuilt per track: its
+    /// coefficients depend on the rate, and the rate no longer changes.
+    device_rate: u32,
+    /// Present only when the current track's rate differs from the device's.
+    ///
+    /// A device runs at the rate it runs at - 48 kHz on a phone, often 44.1 on
+    /// desktop hardware - and a file is whatever it was mastered at. Without
+    /// this the choice is shifting the pitch or refusing to play, and refusing
+    /// to play is what produced a moving progress bar with no sound.
+    resampler: Option<Resampler>,
+    /// Scratch for resampled frames, reused so a packet does not allocate.
+    resampled: Vec<f32>,
     /// Frames left over from a packet the ring could not take in full.
     ///
     /// Without this, a packet that half fits would be either truncated - losing
@@ -161,10 +177,18 @@ pub struct Engine {
 impl Engine {
     /// Build an engine writing into `ring`.
     pub fn new(ring: Producer, channels: usize) -> Self {
+        Self::with_device_rate(ring, channels, 44_100)
+    }
+
+    /// Build an engine that feeds a device running at `device_rate`.
+    pub fn with_device_rate(ring: Producer, channels: usize, device_rate: u32) -> Self {
         Self {
             decoder: None,
             next: None,
-            equalizer: Equalizer::new(44_100.0, channels),
+            equalizer: Equalizer::new(device_rate as f64, channels),
+            device_rate,
+            resampler: None,
+            resampled: Vec::new(),
             profile: EqualizerProfile::flat(),
             equalizer_enabled: false,
             replay_gain: ReplayGainSettings::default(),
@@ -283,6 +307,10 @@ impl Engine {
         let landed = decoder.seek(seconds)?;
         self.ring.reset();
         self.equalizer.reset();
+        if let Some(resampler) = self.resampler.as_mut() {
+            // Filter history describes audio that is no longer adjacent.
+            resampler.reset();
+        }
         self.carry.clear();
         Ok(landed)
     }
@@ -344,7 +372,25 @@ impl Engine {
         };
 
         self.carry.clear();
-        self.carry.extend_from_slice(decoded);
+        if let Some(resampler) = self.resampler.as_mut() {
+            // Resample before anything else, so every stage after this - gain,
+            // tone, volume - works at one rate that never changes.
+            let frames = decoded.len() / self.channels.max(1);
+            self.resampled.resize(
+                resampler.output_estimate(frames) * self.channels.max(1),
+                0.0,
+            );
+            let produced = resampler.process(decoded, &mut self.resampled);
+            self.carry
+                .extend_from_slice(&self.resampled[..produced * self.channels.max(1)]);
+            if self.carry.is_empty() {
+                // The filter has not produced anything yet, which happens only
+                // while it fills. Not the end of anything.
+                return Ok(Pumped::Wrote(0));
+            }
+        } else {
+            self.carry.extend_from_slice(decoded);
+        }
 
         // ReplayGain first, then the equaliser: normalisation describes the
         // recording, tone describes the listener, and doing it the other way
@@ -378,14 +424,28 @@ impl Engine {
     /// across a rate change moves every centre frequency, so a 48 kHz track
     /// following a 44.1 kHz one would be filtered at the wrong frequencies -
     /// audible, and easy to mistake for a bad master.
+    /// Set up for a track, resampling it to the device rate if it differs.
+    ///
+    /// The equaliser is deliberately NOT rebuilt per track any more. Its
+    /// coefficients are computed against a sample rate, and everything past the
+    /// resampler is at the device's rate, so rebuilding would only ever produce
+    /// the same filter - while the old per-track rebuild moved every centre
+    /// frequency whenever a 48 kHz track followed a 44.1 kHz one.
     fn configure_for(&mut self, spec: StreamSpec) {
+        let channels_changed = spec.channels != self.channels;
         self.channels = spec.channels;
-        self.equalizer = Equalizer::from_profile(
-            spec.sample_rate as f64,
-            spec.channels,
-            &self.profile,
-            self.equalizer_enabled,
-        );
+
+        self.resampler = Resampler::new(spec.sample_rate, self.device_rate, spec.channels);
+        self.resampled.clear();
+
+        if channels_changed {
+            self.equalizer = Equalizer::from_profile(
+                self.device_rate as f64,
+                spec.channels,
+                &self.profile,
+                self.equalizer_enabled,
+            );
+        }
     }
 }
 
@@ -446,6 +506,10 @@ mod tests {
         out
     }
 
+    /// The fixtures are 8 kHz, so the engines in these tests are built for an
+    /// 8 kHz device. Otherwise every one of them would be resampling to 44.1
+    /// and asserting frame counts that belong to a different test - resampling
+    /// has its own, in `resample`.
     fn decoder(samples: &[i16]) -> AudioDecoder {
         AudioDecoder::open(Cursor::new(wav(1, 8_000, samples)), Some("wav")).unwrap()
     }
@@ -453,7 +517,7 @@ mod tests {
     #[test]
     fn audio_reaches_the_ring() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.play_next(decoder(&[16_384; 100]), 1, None);
 
         fill(&mut engine).unwrap();
@@ -466,7 +530,7 @@ mod tests {
     #[test]
     fn an_idle_engine_says_so_rather_than_producing_silence() {
         let (tx, mut rx) = ring(64, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         assert_eq!(engine.pump().unwrap(), Pumped::Idle);
         assert!(drain(&mut rx, 1).is_empty());
@@ -475,7 +539,7 @@ mod tests {
     #[test]
     fn a_track_reports_its_end_exactly_once() {
         let (tx, _rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.play_next(decoder(&[1_000; 40]), 7, None);
 
         assert_eq!(fill(&mut engine).unwrap(), Pumped::TrackEnded);
@@ -487,7 +551,7 @@ mod tests {
     #[test]
     fn two_tracks_meet_with_nothing_between_them() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         engine.play_next(decoder(&[16_384; 50]), 1, None);
         assert_eq!(fill(&mut engine).unwrap(), Pumped::TrackEnded);
@@ -515,7 +579,7 @@ mod tests {
     #[test]
     fn queueing_while_a_track_is_playing_does_not_truncate_it() {
         let (tx, mut rx) = ring(8192, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         // Long enough that one pump decodes a small fraction of it. A short
         // track hides this bug completely: a single packet decodes the whole
@@ -558,7 +622,7 @@ mod tests {
     #[test]
     fn advancing_reports_the_track_that_took_over() {
         let (tx, _rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         engine.play_next(decoder(&[8_000; 20]), 11, None);
         engine.pump().unwrap();
@@ -579,7 +643,7 @@ mod tests {
     #[test]
     fn it_says_whether_something_is_already_waiting() {
         let (tx, _rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         assert!(engine.wants_next(), "nothing playing, nothing queued");
         engine.play_next(decoder(&[8_000; 40]), 1, None);
@@ -594,7 +658,7 @@ mod tests {
     #[test]
     fn playing_now_also_drops_whatever_was_queued_behind_it() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         engine.play_next(decoder(&[16_384; 80]), 1, None);
         engine.pump().unwrap();
@@ -612,7 +676,7 @@ mod tests {
     #[test]
     fn the_boundary_names_the_track_that_starts_at_it() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         engine.play_next(decoder(&[8_000; 20]), 111, None);
         fill(&mut engine).unwrap();
@@ -635,7 +699,7 @@ mod tests {
     #[test]
     fn playing_now_discards_what_was_queued() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
 
         engine.play_next(decoder(&[16_384; 200]), 1, None);
         fill(&mut engine).unwrap();
@@ -654,7 +718,7 @@ mod tests {
     #[test]
     fn replay_gain_is_actually_applied() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.set_replay_gain(ReplayGainSettings::new(crate::ReplayGainMode::Track));
         engine.play_next(decoder(&[8_192; 20]), 1, Some(-6.0));
 
@@ -662,7 +726,7 @@ mod tests {
         let attenuated = drain(&mut rx, 1);
 
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.set_replay_gain(ReplayGainSettings::new(crate::ReplayGainMode::Track));
         engine.play_next(decoder(&[8_192; 20]), 1, None);
         fill(&mut engine).unwrap();
@@ -683,7 +747,7 @@ mod tests {
     fn a_packet_that_does_not_fit_is_carried_rather_than_lost() {
         let samples: Vec<i16> = (0..500).map(|v| ((v % 100) * 300) as i16).collect();
         let (tx, mut rx) = ring(64, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.play_next(decoder(&samples), 1, None);
 
         // Fill, drain, refill until the track is done, which forces the carry
@@ -715,7 +779,7 @@ mod tests {
     #[test]
     fn the_off_mode_ignores_a_tag_rather_than_discarding_it() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.play_next(decoder(&[8_192; 20]), 1, Some(-6.0));
         fill(&mut engine).unwrap();
         let untouched = drain(&mut rx, 1);
@@ -730,7 +794,7 @@ mod tests {
     #[test]
     fn stopping_leaves_the_engine_idle_and_the_ring_empty() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.play_next(decoder(&[16_384; 100]), 1, None);
         fill(&mut engine).unwrap();
 
@@ -743,7 +807,7 @@ mod tests {
     #[test]
     fn volume_scales_the_signal_the_listener_hears() {
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         // Set volume before the track so the whole buffer is at the new level
         // rather than ramping up from unity.
         engine.set_volume(0.5);
@@ -795,7 +859,7 @@ mod tests {
         // Volume is the listener's setting, not the track's, so starting a new
         // track must not quietly reset it to unity.
         let (tx, mut rx) = ring(4096, 1);
-        let mut engine = Engine::new(tx, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
         engine.set_volume(0.5);
         engine.play_now(decoder(&[16_384; 20]), 1, None);
         fill(&mut engine).unwrap();

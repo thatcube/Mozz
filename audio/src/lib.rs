@@ -11,6 +11,7 @@
 pub mod decode;
 pub mod engine;
 pub mod player;
+pub mod resample;
 pub mod ring;
 pub mod sink;
 

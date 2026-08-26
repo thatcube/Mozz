@@ -77,6 +77,34 @@ impl std::fmt::Display for SinkError {
 
 impl std::error::Error for SinkError {}
 
+/// What the default output device would like to run at.
+///
+/// Asked rather than assumed. The engine used to demand a rate and the sink
+/// refused when the device could not meet it, which was right in the narrow
+/// sense - substituting a rate shifts the pitch - and produced silence with a
+/// moving progress bar, which is worse than either. A phone runs at 48 kHz and
+/// a lot of desktop hardware at 44.1; the fix is to take the device's answer
+/// and resample to it, not to argue.
+///
+/// Returns `None` when there is no usable device at all.
+pub fn preferred_rate(channels: u16) -> Option<u32> {
+    let host = cpal::default_host();
+    let device = host.default_output_device()?;
+    let config = device.default_output_config().ok()?;
+    if config.channels() >= channels {
+        return Some(config.sample_rate());
+    }
+    // The default config cannot carry the audio, so look for one that can and
+    // take its rate.
+    device
+        .supported_output_configs()
+        .ok()?
+        .filter(|range| range.sample_format() == SampleFormat::F32)
+        .filter(|range| range.channels() >= channels)
+        .map(|range| range.max_sample_rate())
+        .next()
+}
+
 /// Pick a stream configuration for `sample_rate` and `channels`.
 ///
 /// Pure and separately tested, because this is the one judgement the sink makes

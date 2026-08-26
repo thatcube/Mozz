@@ -217,6 +217,13 @@ impl Player {
     /// `capacity_frames` is how far ahead the decoder may run. Larger survives
     /// a slower network; smaller makes a skip discard less work.
     pub fn new(sample_rate: u32, channels: u16, capacity_frames: usize) -> Result<Self, String> {
+        // Ask the device what it runs at rather than insisting. The requested
+        // rate is only a fallback for a machine with no device at all, where
+        // nothing is going to be heard anyway. Demanding a rate is what made a
+        // 44.1 kHz engine silent on a 48 kHz phone: the sink correctly refused
+        // to shift the pitch, and correctly refusing produced no sound.
+        let sample_rate = crate::sink::preferred_rate(channels).unwrap_or(sample_rate);
+
         let (producer, consumer) = ring(capacity_frames, channels as usize);
         let observable = Arc::new(Observable {
             state: AtomicU64::new(State::Idle.code()),
@@ -229,7 +236,7 @@ impl Player {
         });
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let engine = Engine::new(producer, channels as usize);
+        let engine = Engine::with_device_rate(producer, channels as usize, sample_rate);
 
         let thread_observable = Arc::clone(&observable);
         let thread = std::thread::Builder::new()
@@ -330,6 +337,12 @@ impl Player {
     /// Counted from frames consumed rather than from a clock, so it describes
     /// what has been heard rather than what has been decoded. Those differ by
     /// the whole buffer, which is exactly the error a wall clock would make.
+    ///
+    /// Divided by the DEVICE rate, never the file's. Everything in the ring has
+    /// been resampled, so a 44.1 kHz file feeding a 48 kHz device puts 48,000
+    /// frames a second through it. Dividing by 44,100 there reports a position
+    /// running nine percent fast, and dividing by the requested rate rather
+    /// than the real one was worse - a test caught it running six times fast.
     pub fn position_seconds(&self) -> f64 {
         let rate = self.observable.sample_rate.load(Ordering::Relaxed).max(1);
         self.observable.frames_played.load(Ordering::Relaxed) as f64 / rate as f64
@@ -495,9 +508,6 @@ fn apply(
             observable.failure_kind.store(0, Ordering::Relaxed);
             match AudioDecoder::open(SourceBox(source), extension.as_deref()) {
                 Ok(decoder) => {
-                    observable
-                        .sample_rate
-                        .store(decoder.spec().sample_rate as u64, Ordering::Relaxed);
                     engine.play_now(decoder, track, gain_db);
                     observable.frames_played.store(0, Ordering::Relaxed);
                     observable.current_track.store(track, Ordering::Relaxed);
@@ -778,17 +788,21 @@ mod tests {
         );
     }
 
-    /// Every test in this module runs without a device: they use 8 kHz, and
-    /// ordinary output devices offer 44.1 and 48 kHz only, so the sink refuses
-    /// rather than shift the pitch. That makes the silent output the path under
-    /// test here, which is worth stating outright - it was written because the
-    /// alternative was a player that hangs. With nothing consuming the ring the
-    /// decoder fills it, stalls, and the track never ends.
+    /// Position must advance at roughly real time, whichever output is in use.
     ///
-    /// So: position must advance on its own, at roughly real time, with no
-    /// device present at all.
+    /// This used to be a test of the silent fallback, because an 8 kHz request
+    /// meant no ordinary device could be driven and the sink refused rather
+    /// than shift the pitch. Resampling removed that: the player now takes the
+    /// device's own rate and converts to it, so on a machine with a sound card
+    /// this exercises the real device and on one without it exercises the
+    /// silent output. Both must keep time.
+    ///
+    /// It earned its keep on the way through. Position was being divided by the
+    /// requested rate while frames accumulated at the device's, so it ran six
+    /// times fast - which on a real device is a progress bar that finishes a
+    /// three minute song in thirty seconds.
     #[test]
-    fn position_advances_even_with_no_usable_device() {
+    fn position_advances_at_about_real_time() {
         let player = Player::new(8_000, 1, 8192).expect("should start");
         player.play_now(source(&[8_000; 16_000]), Some("wav".into()), 1, None);
 

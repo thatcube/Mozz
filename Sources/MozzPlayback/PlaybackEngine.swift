@@ -252,6 +252,12 @@ public final class PlaybackEngine {
     /// buffer-relative "lead time" that decided when to inject the next track is
     /// gone: `playNext` now genuinely queues, so the next track is handed over as
     /// soon as it is known rather than timed against the current track's end.
+    /// Only a fallback for a machine with no output device.
+    ///
+    /// The engine asks the device what rate it runs at and resamples to that,
+    /// because a device runs at the rate it runs at - 48 kHz on a phone, often
+    /// 44.1 on desktop hardware - and demanding one meant refusing to play on
+    /// anything that disagreed. Refusing is what produced silence.
     private static let engineSampleRate: UInt32 = 44_100
     private static let engineChannels: UInt16 = 2
     private static let engineBufferFrames: Int = 65_536
@@ -260,7 +266,12 @@ public final class PlaybackEngine {
     /// fail if the decode thread can't start; every use is guarded. Created once
     /// and lives for the whole app session (closed in `deinit`).
     @ObservationIgnored
-    private let audio: AudioEngine?
+    /// Built on first play rather than in `init`.
+    ///
+    /// Opening the output device before iOS has activated the audio session
+    /// produces silence — a transport that says playing, a position that
+    /// advances, and nothing audible. See `ensureEngine()`.
+    private var audio: AudioEngine?
     private let resolver: TrackURLResolver
     private let session = AudioSessionController()
     private let nowPlaying = NowPlayingCenter()
@@ -340,11 +351,15 @@ public final class PlaybackEngine {
 
     public init(resolver: TrackURLResolver) {
         self.resolver = resolver
-        self.audio = AudioEngine(
-            sampleRate: Self.engineSampleRate,
-            channels: Self.engineChannels,
-            bufferFrames: Self.engineBufferFrames
-        )
+        // Deliberately NOT built here.
+        //
+        // Creating the engine opens the output device, and on iOS a device
+        // opened before the audio session is activated produces silence: the
+        // position advances, the transport says playing, and nothing comes out.
+        // `AVQueuePlayer` hid this by activating the session itself. Building it
+        // lazily, after the first `session.activate()`, is what makes the order
+        // right on every platform rather than only the one that forgives it.
+        self.audio = nil
         configureObservers()
         configureRemote()
         // Wire the EQ/ReplayGain state into the engine, and re-push it whenever
@@ -372,6 +387,7 @@ public final class PlaybackEngine {
         beginPlaybackRun()
         queue.setItems(tracks, startingAt: startIndex)
         try? session.activate()
+        ensureEngine()
         reload(autoplay: true)
     }
 
@@ -388,6 +404,7 @@ public final class PlaybackEngine {
         queue.setItems(tracks, startingAt: 0)
         onQueueNearEnd = onNearEnd
         try? session.activate()
+        ensureEngine()
         reload(autoplay: true)
         maybeExtendQueue()
     }
@@ -422,6 +439,7 @@ public final class PlaybackEngine {
         logTerminal(.skipped, position: snapshot.elapsed)
         queue.setItemsShuffled(tracks, recencyScores: recencyScores, tasteScores: tasteScores)
         try? session.activate()
+        ensureEngine()
         reload(autoplay: true)
     }
 
@@ -516,6 +534,7 @@ public final class PlaybackEngine {
     public func resume() {
         guard let track = currentTrack else { return }
         try? session.activate()
+        ensureEngine()
         audio?.resume()
         publish(status: .playing)
         report(.playing)
@@ -1190,6 +1209,25 @@ public final class PlaybackEngine {
         report(.playing)
         refillLookahead()
         maybeExtendQueue()
+    }
+
+    /// Build the audio engine if it does not exist yet.
+    ///
+    /// Called after the audio session is activated, never before. On iOS the
+    /// order matters and there is no error to observe when it is wrong: the
+    /// device opens, reports itself fine, and emits nothing. Every other
+    /// platform tolerates either order, which is precisely why doing it wrong
+    /// survives until someone listens on a phone.
+    private func ensureEngine() {
+        guard audio == nil else { return }
+        audio = AudioEngine(
+            sampleRate: Self.engineSampleRate,
+            channels: Self.engineChannels,
+            bufferFrames: Self.engineBufferFrames
+        )
+        // The settings were pushed into an engine that did not exist yet.
+        syncEqualizer()
+        syncReplayGain()
     }
 
     /// Refresh the snapshot now, instead of waiting for the timer.
