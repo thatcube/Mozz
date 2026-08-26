@@ -253,7 +253,13 @@ impl Engine {
         // into unrelated audio that is a transient at the join, so the filter
         // state has to go when the audio it describes does.
         self.equalizer.reset();
-        self.play_next(decoder, track, gain_db);
+        // Start, rather than play_next. play_next deliberately queues behind a
+        // live decoder instead of replacing it - that is what makes queueing
+        // ahead work - so delegating here meant "play now" became "play after"
+        // for every track but the first. The shell picks a song, the ring is
+        // emptied and refilled from the SAME decoder, and the chosen track waits
+        // in `next` forever while the original plays on.
+        self.start(decoder, track, gain_db);
     }
 
     /// Stop, discarding everything queued.
@@ -534,6 +540,40 @@ mod tests {
 
         assert_eq!(engine.pump().unwrap(), Pumped::Idle);
         assert!(drain(&mut rx, 1).is_empty());
+    }
+
+    /// Choosing a song while one is already playing must replace it.
+    ///
+    /// `play_now` used to delegate to `play_next`, which deliberately queues
+    /// behind a live decoder rather than replacing it. The ring was emptied and
+    /// then refilled from the SAME decoder, so the shell showed the new track
+    /// and the speakers carried on with the old one - for every track after the
+    /// first, forever.
+    ///
+    /// The first track here is longer than the ring on purpose: `fill` stops at
+    /// a full ring with the decoder still live, which is the state the bug
+    /// needed. A short first track ends, clears itself, and hides it.
+    #[test]
+    fn play_now_replaces_what_is_already_playing() {
+        let (tx, mut rx) = ring(4096, 1);
+        let mut engine = Engine::with_device_rate(tx, 1, 8_000);
+
+        engine.play_next(decoder(&[16_384; 10_000]), 1, None);
+        fill(&mut engine).unwrap();
+        let first = drain(&mut rx, 1);
+        assert!((first[0] - 0.5).abs() < 0.01, "fixture wrong: {}", first[0]);
+
+        engine.play_now(decoder(&[8_192; 100]), 2, None);
+        fill(&mut engine).unwrap();
+        let out = drain(&mut rx, 1);
+
+        assert!(!out.is_empty(), "play_now produced no audio at all");
+        assert!(
+            (out[0] - 0.25).abs() < 0.01,
+            "expected the chosen track (~0.25), heard ~{} - play_now queued \
+             behind the live decoder instead of replacing it",
+            out[0]
+        );
     }
 
     #[test]
