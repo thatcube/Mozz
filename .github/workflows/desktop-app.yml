@@ -233,7 +233,13 @@ jobs:
 
           # System DLLs are provided by Windows; copying them is both pointless
           # and, for the UCRT, actively wrong.
-          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool|authz|netapi32|mpr)'
+          #
+          # The audio names at the end arrived with the Rust engine: cpal reaches
+          # the output device through WASAPI, so MozzFFI.dll now imports
+          # mmdevapi (the multimedia device API itself), and the rest are what
+          # that family pulls in. They ship with Windows and live in System32 —
+          # there is nothing to bundle and nothing to find beside the app.
+          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool|authz|netapi32|mpr|mmdevapi|audioses|avrt|ksuser|mfplat)'
 
           $missing = New-Object System.Collections.Generic.List[string]
 
