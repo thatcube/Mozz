@@ -28,8 +28,13 @@ import SwiftProtobuf
         return LibraryRepository(db)
     }
 
-    private static func dispatcher(_ repository: LibraryRepository) -> CommandDispatcher {
-        CommandDispatcher(service: LibraryCommandService(repository: repository))
+    private static func dispatcher(_ repository: LibraryRepository) throws -> CommandDispatcher {
+        // Catalog tests never touch playback settings; an isolated in-memory
+        // store keeps them independent. The playback-settings tests below build
+        // their own dispatcher over a shared store so a write is visible to the
+        // next read.
+        let store = PlaybackSettingsStore(try MusicDatabase.inMemory())
+        return CommandDispatcher(service: LibraryCommandService(repository: repository, playbackSettings: store))
     }
 
     /// Round-trip a request the way a shell would: encode, hand over bytes,
@@ -50,7 +55,7 @@ import SwiftProtobuf
 
     @Test func albumsComeBackAsAPageWithACursor() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
         let expected = try await repository.albumsPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 10)
 
@@ -93,7 +98,7 @@ import SwiftProtobuf
 
     @Test func artistsComeBackAsAPageWithACursor() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
         let expected = try await repository.artistsPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 5)
 
@@ -127,7 +132,7 @@ import SwiftProtobuf
 
     @Test func tracksComeBackAsAPageWithACursor() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
         let expected = try await repository.tracksPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 12)
 
@@ -175,7 +180,7 @@ import SwiftProtobuf
     /// repository's own tests.
     @Test func walkingTheCursorVisitsEveryAlbumExactlyOnce() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         var seen: [String] = []
         var cursor: String?
@@ -210,7 +215,7 @@ import SwiftProtobuf
 
     @Test func anArtistComesBackByRemoteId() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let page = try await repository.artistsPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
@@ -247,7 +252,7 @@ import SwiftProtobuf
 
     @Test func artistAlbumsComeBackForAnArtist() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let page = try await repository.artistsPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
@@ -274,7 +279,7 @@ import SwiftProtobuf
 
     @Test func albumTracksComeBackForAnAlbumRemoteId() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let page = try await repository.albumsPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
@@ -301,7 +306,7 @@ import SwiftProtobuf
 
     @Test func albumTracksPreferTheAlbumGroupKeyWhenPresent() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let page = try await repository.albumsPage(
             serverId: SyntheticCatalog.defaultServerID, after: nil, limit: 1)
@@ -328,7 +333,7 @@ import SwiftProtobuf
 
     @Test func countsComeBackForTheServer() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let expectedArtists = try await repository.artistCount(serverId: SyntheticCatalog.defaultServerID)
         let expectedAlbums = try await repository.albumCount(serverId: SyntheticCatalog.defaultServerID)
@@ -353,7 +358,7 @@ import SwiftProtobuf
 
     @Test func anAbsentArtistIsAFailureRatherThanAnEmptyArtist() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let response = try await Self.send(dispatcher) {
             var artist = Mozz_V1_ArtistRequest()
@@ -376,7 +381,7 @@ import SwiftProtobuf
     /// forever, because the bad cursor would keep being handed back.
     @Test func anUnreadableCursorFailsRatherThanRestartingTheList() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let response = try await Self.send(dispatcher) {
             var albums = Mozz_V1_AlbumsRequest()
@@ -397,7 +402,7 @@ import SwiftProtobuf
 
     @Test func albumTracksWithoutAnAlbumIdentifierFailsUsefully() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let response = try await Self.send(dispatcher) {
             var albumTracks = Mozz_V1_AlbumTracksRequest()
@@ -418,7 +423,7 @@ import SwiftProtobuf
     /// crash rather than an exception the caller can catch.
     @Test func garbageBytesProduceAFailureRatherThanACrash() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let bytes = await dispatcher.handle(Data([0xFF, 0xFE, 0xFD, 0xFC]))
         let response = try Mozz_V1_Response(serializedBytes: bytes)
@@ -436,7 +441,7 @@ import SwiftProtobuf
     /// arrangement exists to remove.
     @Test func aDeclaredButUnimplementedCommandSaysSo() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         let response = try await Self.send(dispatcher) {
             var watch = Mozz_V1_WatchLibraryRequest()
@@ -455,7 +460,7 @@ import SwiftProtobuf
     /// Losing it would make concurrent requests indistinguishable.
     @Test func theRequestIdComesBackOnEveryPath() async throws {
         let repository = try await Self.makeLibrary()
-        let dispatcher = Self.dispatcher(repository)
+        let dispatcher = try Self.dispatcher(repository)
 
         var request = Mozz_V1_Request()
         request.id = 99_001
@@ -470,5 +475,153 @@ import SwiftProtobuf
         let response = try Mozz_V1_Response(serializedBytes: bytes)
 
         #expect(response.id == 99_001, "the id must survive even a failure")
+    }
+
+    // MARK: Playback settings
+
+    /// A shell that has never written settings gets the core's defaults, not an
+    /// empty message. This is the contract that lets a fresh device behave
+    /// identically to one that has synced: EQ off, a flat curve, track-mode
+    /// normalization, no preamp.
+    @Test func playbackSettingsDefaultToTheCoreDefaultsWhenNothingStored() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = try Self.dispatcher(repository)
+
+        let response = try await Self.send(dispatcher) {
+            $0.getPlaybackSettings = Mozz_V1_GetPlaybackSettingsRequest()
+        }
+
+        guard case .getPlaybackSettings(let payload) = response.result else {
+            Issue.record("expected getPlaybackSettings, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.settings.equalizerEnabled == false)
+        #expect(payload.settings.equalizerBandGainsDb == Array(repeating: 0, count: EqualizerSettings.bandCount))
+        #expect(payload.settings.equalizerPreampDb == 0)
+        #expect(payload.settings.replayGainMode == .track)
+        #expect(payload.settings.replayGainPreampDb == 0)
+    }
+
+    /// The whole point of moving these into the core: a write from one shell is
+    /// stored and readable by the next reader, byte-for-byte, through the same
+    /// Facade. Set, then Get on the same core, and confirm every field survives.
+    @Test func playbackSettingsRoundTripThroughTheFacade() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = try Self.dispatcher(repository)
+
+        let gains: [Double] = [6, 5, 4, 2, 0.5, 0, -1, -2, -3, -4]
+        let setResponse = try await Self.send(dispatcher) {
+            var settings = Mozz_V1_PlaybackSettings()
+            settings.equalizerEnabled = true
+            settings.equalizerBandGainsDb = gains
+            settings.equalizerPreampDb = -3
+            settings.replayGainMode = .album
+            settings.replayGainPreampDb = 2.5
+            var request = Mozz_V1_SetPlaybackSettingsRequest()
+            request.settings = settings
+            $0.setPlaybackSettings = request
+        }
+
+        guard case .setPlaybackSettings(let stored) = setResponse.result else {
+            Issue.record("expected setPlaybackSettings, got \(String(describing: setResponse.result))")
+            return
+        }
+        // The response echoes exactly what was stored, after normalization.
+        #expect(stored.settings.equalizerEnabled == true)
+        #expect(stored.settings.equalizerBandGainsDb == gains)
+        #expect(stored.settings.equalizerPreampDb == -3)
+        #expect(stored.settings.replayGainMode == .album)
+        #expect(stored.settings.replayGainPreampDb == 2.5)
+
+        // A subsequent read on the same core returns the same values.
+        let getResponse = try await Self.send(dispatcher) {
+            $0.getPlaybackSettings = Mozz_V1_GetPlaybackSettingsRequest()
+        }
+        guard case .getPlaybackSettings(let reloaded) = getResponse.result else {
+            Issue.record("expected getPlaybackSettings, got \(String(describing: getResponse.result))")
+            return
+        }
+        #expect(reloaded.settings == stored.settings)
+    }
+
+    /// A caller cannot smuggle an invalid EQ or an extreme preamp past the core:
+    /// out-of-range gains are clamped to ±12 dB and a wrong-length band array is
+    /// padded/truncated to exactly 10, and the response reports the clamped form.
+    @Test func settingPlaybackSettingsClampsOutOfRangeValues() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = try Self.dispatcher(repository)
+
+        let response = try await Self.send(dispatcher) {
+            var settings = Mozz_V1_PlaybackSettings()
+            settings.equalizerEnabled = true
+            // Too many bands, wildly out of range, plus an extreme preamp.
+            settings.equalizerBandGainsDb = [99, -99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            settings.equalizerPreampDb = 500
+            settings.replayGainMode = .track
+            settings.replayGainPreampDb = -500
+            var request = Mozz_V1_SetPlaybackSettingsRequest()
+            request.settings = settings
+            $0.setPlaybackSettings = request
+        }
+
+        guard case .setPlaybackSettings(let stored) = response.result else {
+            Issue.record("expected setPlaybackSettings, got \(String(describing: response.result))")
+            return
+        }
+        #expect(stored.settings.equalizerBandGainsDb.count == EqualizerSettings.bandCount)
+        #expect(stored.settings.equalizerBandGainsDb[0] == EqualizerSettings.gainRange.upperBound)   // 99 → +12
+        #expect(stored.settings.equalizerBandGainsDb[1] == EqualizerSettings.gainRange.lowerBound)   // -99 → -12
+        #expect(stored.settings.equalizerPreampDb == EqualizerSettings.gainRange.upperBound)         // 500 → +12
+        #expect(stored.settings.replayGainPreampDb == PlaybackSettings.preampRange.lowerBound)       // -500 → -12
+    }
+
+    /// A client that omits the mode (proto3 zero = UNSPECIFIED) gets the core's
+    /// default rather than a spurious "off": omission means "I don't care", and
+    /// the core answers with its considered default (track).
+    @Test func unspecifiedReplayGainModeTakesTheCoreDefault() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = try Self.dispatcher(repository)
+
+        let response = try await Self.send(dispatcher) {
+            var settings = Mozz_V1_PlaybackSettings()
+            settings.replayGainMode = .unspecified
+            var request = Mozz_V1_SetPlaybackSettingsRequest()
+            request.settings = settings
+            $0.setPlaybackSettings = request
+        }
+
+        guard case .setPlaybackSettings(let stored) = response.result else {
+            Issue.record("expected setPlaybackSettings, got \(String(describing: response.result))")
+            return
+        }
+        #expect(stored.settings.replayGainMode == .track)
+    }
+
+    /// Pins the resolved divergence. The C# desktop modelled Off/Track/Album;
+    /// the Swift shell had only an on/off bool. The core keeps the richer
+    /// superset, so `album` is preserved through a round trip rather than being
+    /// collapsed to `track` — even though, with today's single-gain core, the
+    /// two currently *sound* the same. This test fails if a later change quietly
+    /// drops the distinction.
+    @Test func albumReplayGainModeIsPreservedNotCollapsedToTrack() async throws {
+        let repository = try await Self.makeLibrary()
+        let dispatcher = try Self.dispatcher(repository)
+
+        _ = try await Self.send(dispatcher) {
+            var settings = Mozz_V1_PlaybackSettings()
+            settings.replayGainMode = .album
+            var request = Mozz_V1_SetPlaybackSettingsRequest()
+            request.settings = settings
+            $0.setPlaybackSettings = request
+        }
+
+        let response = try await Self.send(dispatcher) {
+            $0.getPlaybackSettings = Mozz_V1_GetPlaybackSettingsRequest()
+        }
+        guard case .getPlaybackSettings(let payload) = response.result else {
+            Issue.record("expected getPlaybackSettings, got \(String(describing: response.result))")
+            return
+        }
+        #expect(payload.settings.replayGainMode == .album)
     }
 }

@@ -45,7 +45,9 @@ public func mozz_session_invoke(
 
     let bytes = Data(UnsafeBufferPointer(start: request, count: Int(requestLength)))
     let dispatcher = CommandDispatcher(
-        service: LibraryCommandService(repository: session.repository))
+        service: LibraryCommandService(
+            repository: session.repository,
+            playbackSettings: PlaybackSettingsStore(session.database)))
 
     // `handle` is synchronous by design — see the note on `mozz_session_call`.
     // A host calling across a C ABI has no async to await into, so the bridge

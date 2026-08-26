@@ -22,6 +22,7 @@ final class SchemaAndWriteTests: XCTestCase {
             "server", "artist", "album", "track", "playlist", "playlistItem",
             "download", "play_event", "track_fts", "album_fts", "artist_fts",
             "catalogSyncRun", "catalogSyncProgress",
+            "playback_settings",
         ] {
             XCTAssertTrue(tables.contains(expected), "missing table \(expected)")
         }
@@ -1110,4 +1111,66 @@ final class JellyfinArtworkRepairMigrationTests: XCTestCase {
 func XCTUnwrapAsync<T>(_ expression: @autoclosure () async throws -> T?, file: StaticString = #filePath, line: UInt = #line) async throws -> T {
     let value = try await expression()
     return try XCTUnwrap(value, file: file, line: line)
+}
+
+final class PlaybackSettingsStoreTests: XCTestCase {
+    func testLoadReturnsDefaultsWhenNothingStored() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded, .defaults)
+    }
+
+    func testSaveThenLoadRoundTripsEveryField() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        let settings = PlaybackSettings(equalizerEnabled: true,
+                                        equalizer: EqualizerPreset.vocal.settings,
+                                        replayGainMode: .album,
+                                        replayGainPreampDB: 3.5)
+        let returned = try await store.save(settings)
+        XCTAssertEqual(returned, settings)
+        let reloaded = try await store.load()
+        XCTAssertEqual(reloaded, settings)
+    }
+
+    func testSaveIsASingleRowUpsertNotAnAppend() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        _ = try await store.save(PlaybackSettings(replayGainMode: .off))
+        _ = try await store.save(PlaybackSettings(replayGainMode: .album))
+        let rowCount = try await db.read { database in
+            try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM playback_settings") ?? -1
+        }
+        XCTAssertEqual(rowCount, 1, "settings are one row, replaced in place")
+        let reloaded = try await store.load()
+        XCTAssertEqual(reloaded.replayGainMode, .album, "the newest write wins")
+    }
+
+    func testSaveNormalizesBeforePersisting() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        // Build an out-of-range value; save must persist the clamped form so a
+        // later reader — on any platform — never sees an invalid setting.
+        let returned = try await store.save(
+            PlaybackSettings(equalizer: EqualizerSettings(gains: Array(repeating: 99, count: 10)),
+                             replayGainPreampDB: 99))
+        XCTAssertTrue(returned.equalizer.gains.allSatisfy { $0 == EqualizerSettings.gainRange.upperBound })
+        XCTAssertEqual(returned.replayGainPreampDB, PlaybackSettings.preampRange.upperBound)
+        let reloaded = try await store.load()
+        XCTAssertEqual(reloaded, returned)
+    }
+
+    func testCorruptEqualizerBlobDegradesToFlatRatherThanThrowing() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        _ = try await store.save(.defaults)
+        // Simulate a tampered/rolled-back row: overwrite the EQ JSON with garbage.
+        try await db.write { database in
+            try database.execute(sql: "UPDATE playback_settings SET equalizer = ? WHERE id = 1",
+                                 arguments: ["not json"])
+        }
+        let reloaded = try await store.load()
+        XCTAssertTrue(reloaded.equalizer.isFlat, "a corrupt curve must read as flat, not crash")
+    }
 }

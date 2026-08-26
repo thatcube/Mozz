@@ -78,6 +78,18 @@ public protocol CommandService: Sendable {
 
     /// Library totals for one server.
     func counts(serverId: ServerID) async throws -> (artists: Int, albums: Int, tracks: Int)
+
+    /// The current playback settings (EQ + loudness normalization), or the
+    /// core's defaults when nothing has been stored yet. These are core, not
+    /// shell, state — the sound is one definition, reached the same way from
+    /// every platform, so it can sync and cannot drift.
+    func playbackSettings() async throws -> PlaybackSettings
+
+    /// Replace the playback settings, returning exactly what was stored after
+    /// the core normalizes/clamps it — so the caller sees the effective result
+    /// rather than assuming its input survived unchanged.
+    @discardableResult
+    func setPlaybackSettings(_ settings: PlaybackSettings) async throws -> PlaybackSettings
 }
 
 /// The core's implementation, over the source-of-truth database.
@@ -87,9 +99,11 @@ public protocol CommandService: Sendable {
 /// shell cannot get a different answer by asking differently.
 public struct LibraryCommandService: CommandService {
     private let repository: LibraryRepository
+    private let playbackSettingsStore: PlaybackSettingsStore
 
-    public init(repository: LibraryRepository) {
+    public init(repository: LibraryRepository, playbackSettings: PlaybackSettingsStore) {
         self.repository = repository
+        self.playbackSettingsStore = playbackSettings
     }
 
     public func libraries() async throws -> [ServerConnection] {
@@ -142,5 +156,14 @@ public struct LibraryCommandService: CommandService {
             albums: try await repository.albumCount(serverId: serverId),
             tracks: try await repository.trackCount(serverId: serverId)
         )
+    }
+
+    public func playbackSettings() async throws -> PlaybackSettings {
+        try await playbackSettingsStore.load()
+    }
+
+    @discardableResult
+    public func setPlaybackSettings(_ settings: PlaybackSettings) async throws -> PlaybackSettings {
+        try await playbackSettingsStore.save(settings)
     }
 }

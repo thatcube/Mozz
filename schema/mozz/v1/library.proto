@@ -206,6 +206,55 @@ message CountsResponse {
   int32 tracks = 3;
 }
 
+// Playback settings — everything that shapes the *sound* of playback. These are
+// core behaviour, not shell behaviour ("presentation may differ between
+// platforms, sound may not"), so they live in the core and travel over this one
+// surface instead of per-platform preference stores that could never sync.
+
+// How loudness normalization picks a gain. The core keeps the richer superset
+// (the C# desktop already modelled Off/Track/Album while the Swift shell only
+// had an on/off bool); UNSPECIFIED lets a client omit the field and take the
+// core's default (Track). ALBUM currently behaves like TRACK because the core
+// stores a single collapsed gain per track — see the Swift ReplayGainMode doc.
+enum ReplayGainMode {
+  REPLAY_GAIN_MODE_UNSPECIFIED = 0;
+  REPLAY_GAIN_MODE_OFF = 1;
+  REPLAY_GAIN_MODE_TRACK = 2;
+  REPLAY_GAIN_MODE_ALBUM = 3;
+}
+
+// The EQ curve travels as explicit band gains + preamp (not an opaque blob) so
+// every generated client can render it without agreeing on a JSON shape. The
+// core clamps every value; a client sending out-of-range or wrong-length gains
+// gets the normalized result back on the response.
+message PlaybackSettings {
+  bool equalizer_enabled = 1;
+  // The 10 ISO band gains in dB, low → high (31 Hz … 16 kHz). The core pads or
+  // truncates to exactly 10 and clamps each to ±12 dB.
+  repeated double equalizer_band_gains_db = 2;
+  double equalizer_preamp_db = 3;
+  ReplayGainMode replay_gain_mode = 4;
+  double replay_gain_preamp_db = 5;
+}
+
+// Read the current playback settings. Returns the core's defaults when nothing
+// has been stored yet.
+message GetPlaybackSettingsRequest {}
+
+message GetPlaybackSettingsResponse {
+  PlaybackSettings settings = 1;
+}
+
+// Replace the playback settings. The response echoes exactly what was stored
+// after normalization/clamping, so the caller sees the effective result.
+message SetPlaybackSettingsRequest {
+  PlaybackSettings settings = 1;
+}
+
+message SetPlaybackSettingsResponse {
+  PlaybackSettings settings = 1;
+}
+
 // ---------------------------------------------------------------------------
 // Subscriptions
 //
@@ -262,6 +311,8 @@ message Request {
     AlbumTracksRequest album_tracks = 17;
     ArtistAlbumsRequest artist_albums = 18;
     CountsRequest counts = 19;
+    GetPlaybackSettingsRequest get_playback_settings = 20;
+    SetPlaybackSettingsRequest set_playback_settings = 21;
   }
 }
 
@@ -284,6 +335,8 @@ message Response {
     AlbumTracksResponse album_tracks = 17;
     ArtistAlbumsResponse artist_albums = 18;
     CountsResponse counts = 19;
+    GetPlaybackSettingsResponse get_playback_settings = 20;
+    SetPlaybackSettingsResponse set_playback_settings = 21;
   }
 }
 

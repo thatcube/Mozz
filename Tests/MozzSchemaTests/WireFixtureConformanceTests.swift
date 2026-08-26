@@ -157,6 +157,8 @@ import SwiftProtobuf
         case .albumTracks: name = "albumTracks"
         case .artistAlbums: name = "artistAlbums"
         case .counts: name = "counts"
+        case .getPlaybackSettings: name = "getPlaybackSettings"
+        case .setPlaybackSettings: name = "setPlaybackSettings"
         case .watchLibrary: name = "watchLibrary"
         case .cancel: name = "cancel"
         case .none: name = "none"

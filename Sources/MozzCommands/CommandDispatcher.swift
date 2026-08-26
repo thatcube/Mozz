@@ -176,6 +176,18 @@ public struct CommandDispatcher: Sendable {
             payload.tracks = Int32(counts.tracks)
             return Self.response(id: request.id) { $0.counts = payload }
 
+        case .getPlaybackSettings:
+            let settings = try await service.playbackSettings()
+            var payload = Mozz_V1_GetPlaybackSettingsResponse()
+            payload.settings = Self.wire(settings)
+            return Self.response(id: request.id) { $0.getPlaybackSettings = payload }
+
+        case .setPlaybackSettings(let arguments):
+            let stored = try await service.setPlaybackSettings(Self.playbackSettings(arguments.settings))
+            var payload = Mozz_V1_SetPlaybackSettingsResponse()
+            payload.settings = Self.wire(stored)
+            return Self.response(id: request.id) { $0.setPlaybackSettings = payload }
+
         case .watchLibrary:
             // Declared in the schema before it is implemented, deliberately: the
             // shape of a subscription had to be settled while the wire format
@@ -283,6 +295,51 @@ public struct CommandDispatcher: Sendable {
         if let addedAt = track.addedAt { summary.addedAt = addedAt }
         if let gain = track.normalizationGainDB { summary.normalizationGainDb = gain }
         return summary
+    }
+
+    // MARK: Playback settings mapping
+
+    /// Core → wire. The EQ curve is expanded to explicit band gains + preamp so
+    /// no client needs to agree on a JSON shape to render it.
+    private static func wire(_ settings: PlaybackSettings) -> Mozz_V1_PlaybackSettings {
+        var wired = Mozz_V1_PlaybackSettings()
+        wired.equalizerEnabled = settings.equalizerEnabled
+        wired.equalizerBandGainsDb = settings.equalizer.gains
+        wired.equalizerPreampDb = settings.equalizer.preampDB
+        wired.replayGainMode = wire(settings.replayGainMode)
+        wired.replayGainPreampDb = settings.replayGainPreampDB
+        return wired
+    }
+
+    /// Wire → core. Every value passes through the value type's clamping
+    /// initializers, so an out-of-range or wrong-length request is normalized
+    /// rather than rejected. An unset/UNSPECIFIED mode takes the core default.
+    private static func playbackSettings(_ wire: Mozz_V1_PlaybackSettings) -> PlaybackSettings {
+        PlaybackSettings(
+            equalizerEnabled: wire.equalizerEnabled,
+            equalizer: EqualizerSettings(gains: wire.equalizerBandGainsDb, preampDB: wire.equalizerPreampDb),
+            replayGainMode: replayGainMode(wire.replayGainMode),
+            replayGainPreampDB: wire.replayGainPreampDb
+        )
+    }
+
+    private static func wire(_ mode: ReplayGainMode) -> Mozz_V1_ReplayGainMode {
+        switch mode {
+        case .off: return .off
+        case .track: return .track
+        case .album: return .album
+        }
+    }
+
+    private static func replayGainMode(_ wire: Mozz_V1_ReplayGainMode) -> ReplayGainMode {
+        switch wire {
+        case .off: return .off
+        case .track: return .track
+        case .album: return .album
+        // A client that omitted the field, or a build newer than this one, takes
+        // the core's default rather than an invented value.
+        case .unspecified, .UNRECOGNIZED: return .default
+        }
     }
 
     // MARK: Envelopes

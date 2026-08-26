@@ -413,3 +413,63 @@ final class PlexAuthURLTests: XCTestCase {
                       "context param name must be single-encoded")
     }
 }
+
+final class PlaybackSettingsTests: XCTestCase {
+    func testDefaultsMatchTheDocumentedContract() {
+        let d = PlaybackSettings.defaults
+        XCTAssertFalse(d.equalizerEnabled)
+        XCTAssertTrue(d.equalizer.isFlat)
+        XCTAssertEqual(d.replayGainMode, .track)   // C# default; == old Swift "on"
+        XCTAssertEqual(d.replayGainPreampDB, 0)
+    }
+
+    func testReplayGainPreampIsClampedToTwelveDB() {
+        XCTAssertEqual(PlaybackSettings(replayGainPreampDB: 500).replayGainPreampDB,
+                       PlaybackSettings.preampRange.upperBound)   // +12
+        XCTAssertEqual(PlaybackSettings(replayGainPreampDB: -500).replayGainPreampDB,
+                       PlaybackSettings.preampRange.lowerBound)   // -12
+    }
+
+    func testNonFinitePreampFallsBackToZero() {
+        XCTAssertEqual(PlaybackSettings(replayGainPreampDB: .nan).replayGainPreampDB, 0)
+        XCTAssertEqual(PlaybackSettings(replayGainPreampDB: .infinity).replayGainPreampDB, 0)
+    }
+
+    func testEqualizerCurveIsNormalizedThroughItsOwnClamping() {
+        // A wrong-length, out-of-range curve is padded/truncated to 10 bands and
+        // clamped, because PlaybackSettings composes EqualizerSettings.
+        let s = PlaybackSettings(equalizer: EqualizerSettings(gains: [99, -99], preampDB: 99))
+        XCTAssertEqual(s.equalizer.gains.count, EqualizerSettings.bandCount)
+        XCTAssertEqual(s.equalizer.gains[0], EqualizerSettings.gainRange.upperBound)
+        XCTAssertEqual(s.equalizer.gains[1], EqualizerSettings.gainRange.lowerBound)
+        XCTAssertEqual(s.equalizer.preampDB, EqualizerSettings.gainRange.upperBound)
+    }
+
+    func testReplayGainModeParseToleratesUnknownStrings() {
+        XCTAssertEqual(ReplayGainMode.parse("album"), .album)
+        XCTAssertEqual(ReplayGainMode.parse("off"), .off)
+        XCTAssertEqual(ReplayGainMode.parse("nonsense"), ReplayGainMode.default)
+        XCTAssertEqual(ReplayGainMode.parse(nil), ReplayGainMode.default)
+    }
+
+    func testCodableRoundTripPreservesEveryField() throws {
+        let original = PlaybackSettings(equalizerEnabled: true,
+                                        equalizer: EqualizerPreset.bassBoost.settings,
+                                        replayGainMode: .album,
+                                        replayGainPreampDB: 4.5)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PlaybackSettings.self, from: data)
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testDecodeToleratesAMissingOrCorruptBlob() throws {
+        // An empty object yields defaults; a corrupt mode degrades to default
+        // rather than throwing — a persisted row can never crash a read.
+        let empty = try JSONDecoder().decode(PlaybackSettings.self, from: Data("{}".utf8))
+        XCTAssertEqual(empty, .defaults)
+        let badMode = try JSONDecoder().decode(
+            PlaybackSettings.self,
+            from: Data(#"{"replayGainMode":"whatever"}"#.utf8))
+        XCTAssertEqual(badMode.replayGainMode, ReplayGainMode.default)
+    }
+}

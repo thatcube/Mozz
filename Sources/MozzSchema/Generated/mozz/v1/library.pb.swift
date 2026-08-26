@@ -31,6 +31,53 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
+/// How loudness normalization picks a gain. The core keeps the richer superset
+/// (the C# desktop already modelled Off/Track/Album while the Swift shell only
+/// had an on/off bool); UNSPECIFIED lets a client omit the field and take the
+/// core's default (Track). ALBUM currently behaves like TRACK because the core
+/// stores a single collapsed gain per track — see the Swift ReplayGainMode doc.
+public nonisolated enum Mozz_V1_ReplayGainMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case off // = 1
+  case track // = 2
+  case album // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .off
+    case 2: self = .track
+    case 3: self = .album
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .off: return 1
+    case .track: return 2
+    case .album: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Mozz_V1_ReplayGainMode] = [
+    .unspecified,
+    .off,
+    .track,
+    .album,
+  ]
+
+}
+
 /// An opaque resume position for a paged listing. Clients must not parse it;
 /// they hand back whatever the previous page returned.
 public nonisolated struct Mozz_V1_PageCursor: Sendable {
@@ -677,6 +724,109 @@ public nonisolated struct Mozz_V1_CountsResponse: Sendable {
   public init() {}
 }
 
+/// The EQ curve travels as explicit band gains + preamp (not an opaque blob) so
+/// every generated client can render it without agreeing on a JSON shape. The
+/// core clamps every value; a client sending out-of-range or wrong-length gains
+/// gets the normalized result back on the response.
+public nonisolated struct Mozz_V1_PlaybackSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var equalizerEnabled: Bool = false
+
+  /// The 10 ISO band gains in dB, low → high (31 Hz … 16 kHz). The core pads or
+  /// truncates to exactly 10 and clamps each to ±12 dB.
+  public var equalizerBandGainsDb: [Double] = []
+
+  public var equalizerPreampDb: Double = 0
+
+  public var replayGainMode: Mozz_V1_ReplayGainMode = .unspecified
+
+  public var replayGainPreampDb: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Read the current playback settings. Returns the core's defaults when nothing
+/// has been stored yet.
+public nonisolated struct Mozz_V1_GetPlaybackSettingsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Mozz_V1_GetPlaybackSettingsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var settings: Mozz_V1_PlaybackSettings {
+    get {_settings ?? Mozz_V1_PlaybackSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: Mozz_V1_PlaybackSettings? = nil
+}
+
+/// Replace the playback settings. The response echoes exactly what was stored
+/// after normalization/clamping, so the caller sees the effective result.
+public nonisolated struct Mozz_V1_SetPlaybackSettingsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var settings: Mozz_V1_PlaybackSettings {
+    get {_settings ?? Mozz_V1_PlaybackSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: Mozz_V1_PlaybackSettings? = nil
+}
+
+public nonisolated struct Mozz_V1_SetPlaybackSettingsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var settings: Mozz_V1_PlaybackSettings {
+    get {_settings ?? Mozz_V1_PlaybackSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: Mozz_V1_PlaybackSettings? = nil
+}
+
 public nonisolated struct Mozz_V1_SubscriptionToken: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -838,6 +988,22 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     set {command = .counts(newValue)}
   }
 
+  public var getPlaybackSettings: Mozz_V1_GetPlaybackSettingsRequest {
+    get {
+      if case .getPlaybackSettings(let v)? = command {return v}
+      return Mozz_V1_GetPlaybackSettingsRequest()
+    }
+    set {command = .getPlaybackSettings(newValue)}
+  }
+
+  public var setPlaybackSettings: Mozz_V1_SetPlaybackSettingsRequest {
+    get {
+      if case .setPlaybackSettings(let v)? = command {return v}
+      return Mozz_V1_SetPlaybackSettingsRequest()
+    }
+    set {command = .setPlaybackSettings(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Command: Equatable, Sendable {
@@ -851,6 +1017,8 @@ public nonisolated struct Mozz_V1_Request: Sendable {
     case albumTracks(Mozz_V1_AlbumTracksRequest)
     case artistAlbums(Mozz_V1_ArtistAlbumsRequest)
     case counts(Mozz_V1_CountsRequest)
+    case getPlaybackSettings(Mozz_V1_GetPlaybackSettingsRequest)
+    case setPlaybackSettings(Mozz_V1_SetPlaybackSettingsRequest)
 
   }
 
@@ -966,6 +1134,22 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     set {result = .counts(newValue)}
   }
 
+  public var getPlaybackSettings: Mozz_V1_GetPlaybackSettingsResponse {
+    get {
+      if case .getPlaybackSettings(let v)? = result {return v}
+      return Mozz_V1_GetPlaybackSettingsResponse()
+    }
+    set {result = .getPlaybackSettings(newValue)}
+  }
+
+  public var setPlaybackSettings: Mozz_V1_SetPlaybackSettingsResponse {
+    get {
+      if case .setPlaybackSettings(let v)? = result {return v}
+      return Mozz_V1_SetPlaybackSettingsResponse()
+    }
+    set {result = .setPlaybackSettings(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -980,6 +1164,8 @@ public nonisolated struct Mozz_V1_Response: Sendable {
     case albumTracks(Mozz_V1_AlbumTracksResponse)
     case artistAlbums(Mozz_V1_ArtistAlbumsResponse)
     case counts(Mozz_V1_CountsResponse)
+    case getPlaybackSettings(Mozz_V1_GetPlaybackSettingsResponse)
+    case setPlaybackSettings(Mozz_V1_SetPlaybackSettingsResponse)
 
   }
 
@@ -1026,6 +1212,10 @@ public nonisolated struct Mozz_V1_Event: Sendable {
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "mozz.v1"
+
+nonisolated extension Mozz_V1_ReplayGainMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REPLAY_GAIN_MODE_UNSPECIFIED\0\u{1}REPLAY_GAIN_MODE_OFF\0\u{1}REPLAY_GAIN_MODE_TRACK\0\u{1}REPLAY_GAIN_MODE_ALBUM\0")
+}
 
 nonisolated extension Mozz_V1_PageCursor: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PageCursor"
@@ -1999,6 +2189,177 @@ nonisolated extension Mozz_V1_CountsResponse: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
+nonisolated extension Mozz_V1_PlaybackSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlaybackSettings"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}equalizer_enabled\0\u{3}equalizer_band_gains_db\0\u{3}equalizer_preamp_db\0\u{3}replay_gain_mode\0\u{3}replay_gain_preamp_db\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.equalizerEnabled) }()
+      case 2: try { try decoder.decodeRepeatedDoubleField(value: &self.equalizerBandGainsDb) }()
+      case 3: try { try decoder.decodeSingularDoubleField(value: &self.equalizerPreampDb) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.replayGainMode) }()
+      case 5: try { try decoder.decodeSingularDoubleField(value: &self.replayGainPreampDb) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.equalizerEnabled != false {
+      try visitor.visitSingularBoolField(value: self.equalizerEnabled, fieldNumber: 1)
+    }
+    if !self.equalizerBandGainsDb.isEmpty {
+      try visitor.visitPackedDoubleField(value: self.equalizerBandGainsDb, fieldNumber: 2)
+    }
+    if self.equalizerPreampDb.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.equalizerPreampDb, fieldNumber: 3)
+    }
+    if self.replayGainMode != .unspecified {
+      try visitor.visitSingularEnumField(value: self.replayGainMode, fieldNumber: 4)
+    }
+    if self.replayGainPreampDb.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.replayGainPreampDb, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_PlaybackSettings, rhs: Mozz_V1_PlaybackSettings) -> Bool {
+    if lhs.equalizerEnabled != rhs.equalizerEnabled {return false}
+    if lhs.equalizerBandGainsDb != rhs.equalizerBandGainsDb {return false}
+    if lhs.equalizerPreampDb != rhs.equalizerPreampDb {return false}
+    if lhs.replayGainMode != rhs.replayGainMode {return false}
+    if lhs.replayGainPreampDb != rhs.replayGainPreampDb {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_GetPlaybackSettingsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetPlaybackSettingsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_GetPlaybackSettingsRequest, rhs: Mozz_V1_GetPlaybackSettingsRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_GetPlaybackSettingsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetPlaybackSettingsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}settings\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_GetPlaybackSettingsResponse, rhs: Mozz_V1_GetPlaybackSettingsResponse) -> Bool {
+    if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_SetPlaybackSettingsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetPlaybackSettingsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}settings\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_SetPlaybackSettingsRequest, rhs: Mozz_V1_SetPlaybackSettingsRequest) -> Bool {
+    if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Mozz_V1_SetPlaybackSettingsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetPlaybackSettingsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}settings\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Mozz_V1_SetPlaybackSettingsResponse, rhs: Mozz_V1_SetPlaybackSettingsResponse) -> Bool {
+    if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Mozz_V1_SubscriptionToken: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SubscriptionToken"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0")
@@ -2144,7 +2505,7 @@ nonisolated extension Mozz_V1_LibraryChanged: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Request"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{2}\u{9}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2283,6 +2644,32 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
           self.command = .counts(v)
         }
       }()
+      case 20: try {
+        var v: Mozz_V1_GetPlaybackSettingsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .getPlaybackSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .getPlaybackSettings(v)
+        }
+      }()
+      case 21: try {
+        var v: Mozz_V1_SetPlaybackSettingsRequest?
+        var hadOneofValue = false
+        if let current = self.command {
+          hadOneofValue = true
+          if case .setPlaybackSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.command = .setPlaybackSettings(v)
+        }
+      }()
       default: break
       }
     }
@@ -2337,6 +2724,14 @@ nonisolated extension Mozz_V1_Request: SwiftProtobuf.Message, SwiftProtobuf._Mes
       guard case .counts(let v)? = self.command else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
     }()
+    case .getPlaybackSettings?: try {
+      guard case .getPlaybackSettings(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+    }()
+    case .setPlaybackSettings?: try {
+      guard case .setPlaybackSettings(let v)? = self.command else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -2382,7 +2777,7 @@ nonisolated extension Mozz_V1_Failure: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}failure\0\u{2}\u{8}libraries\0\u{1}albums\0\u{1}artist\0\u{3}watch_library\0\u{1}cancel\0\u{1}artists\0\u{1}tracks\0\u{3}album_tracks\0\u{3}artist_albums\0\u{1}counts\0\u{3}get_playback_settings\0\u{3}set_playback_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2534,6 +2929,32 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
           self.result = .counts(v)
         }
       }()
+      case 20: try {
+        var v: Mozz_V1_GetPlaybackSettingsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getPlaybackSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getPlaybackSettings(v)
+        }
+      }()
+      case 21: try {
+        var v: Mozz_V1_SetPlaybackSettingsResponse?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .setPlaybackSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .setPlaybackSettings(v)
+        }
+      }()
       default: break
       }
     }
@@ -2591,6 +3012,14 @@ nonisolated extension Mozz_V1_Response: SwiftProtobuf.Message, SwiftProtobuf._Me
     case .counts?: try {
       guard case .counts(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+    }()
+    case .getPlaybackSettings?: try {
+      guard case .getPlaybackSettings(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+    }()
+    case .setPlaybackSettings?: try {
+      guard case .setPlaybackSettings(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
     }()
     case nil: break
     }

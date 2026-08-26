@@ -24,6 +24,7 @@ enum Schema {
         registerV16(&migrator)
         registerV17(&migrator)
         registerV18(&migrator)
+        registerV19(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -639,6 +640,30 @@ enum Schema {
     private static func registerV18(_ migrator: inout DatabaseMigrator) {
         migrator.registerMigration("v18.plexMachineServerIdentity") { db in
             try repairPlexServerIdentities(db)
+        }
+    }
+
+    /// v19 — playback settings live in the core, not per-platform preference
+    /// stores. Everything that shapes the *sound* (the graphic EQ, loudness
+    /// normalization) is one definition persisted here, reachable through the
+    /// command Facade, so it can sync between devices and the shells can no
+    /// longer drift in which settings exist or what they mean.
+    ///
+    /// A single-row table (the CHECK pins `id = 1`) rather than key/value rows:
+    /// the settings are one cohesive record with typed columns, and a single-row
+    /// upsert is simpler and atomic. The EQ curve is stored as the exact
+    /// `{gains, preampDB}` JSON both shells already persisted, so no re-encoding
+    /// semantics change. No rows are seeded — an absent row means "defaults",
+    /// which the store materializes in Swift so the defaults have one home.
+    private static func registerV19(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v19.playbackSettings") { db in
+            try db.create(table: "playback_settings") { t in
+                t.primaryKey("id", .integer).check { $0 == 1 }
+                t.column("equalizerEnabled", .boolean).notNull()
+                t.column("equalizer", .text).notNull()
+                t.column("replayGainMode", .text).notNull()
+                t.column("replayGainPreampDB", .double).notNull()
+            }
         }
     }
 
