@@ -136,6 +136,12 @@ let package = Package(
                 "MozzDatabase",
                 "MozzEnrichment",
                 "MozzSchema",
+                // ADR-0016: audio reaches the engine through the Facade rather
+                // than each shell linking it directly. A shell that links the
+                // engine itself is a shell that can decide how music sounds,
+                // and two of those drift - which is the whole reason there is
+                // one engine now.
+                "MozzAudioEngine",
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
