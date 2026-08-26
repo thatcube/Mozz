@@ -77,6 +77,24 @@ jobs:
       - name: Formatting
         run: cargo fmt --all --check
 
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.29.4 --locked
+
+      # The header is generated, so a committed copy that has drifted from the
+      # Rust it describes is a build failure rather than something a user finds.
+      # A mismatched signature is not a compile error on either side - it is a
+      # corrupted argument at run time, inside an audio callback, on whichever
+      # platform happened to link the stale copy.
+      - name: C header matches the Rust
+        run: ../tools/generate-audio-header.sh --check
+
+      # Linking is the only thing that proves the boundary is usable rather than
+      # merely well-formed. cbindgen will emit a header for a crate whose
+      # staticlib does not build, and a Rust test will pass while exporting a
+      # symbol C cannot name.
+      - name: C ABI links and runs
+        run: ../tools/run-audio-abi-test.sh
+
       # The engine has to reach every platform Mozz targets, and a crate that
       # only ever builds on the machine that wrote it proves nothing about that.
       # Checking a Windows and an Android triple compiles is cheap here and
