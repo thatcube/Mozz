@@ -80,6 +80,37 @@ storage tier is real.
 It merges like any other state object: newest write per server id wins, and a
 device that has not seen a server simply learns about it.
 
+### On Plex, a token is a person as well as a server
+
+Plex Home lets one account hold several users, and **managed users have no
+plex.tv login at all** — no email, no password. They exist only as profiles
+under the admin account. So the PIN flow Mozz uses today cannot sign them in;
+there is nothing for them to type. Today Mozz is not merely inconvenient for a
+managed user, it is unusable by them, and every play it records lands on the
+account owner's Plex history instead of theirs.
+
+The way in is `GET /api/v2/home/users`, then
+`POST /api/v2/home/users/{uuid}/switch`, which returns *that user's* token
+derived from the admin one. Protected users need their PIN to switch.
+
+`servers/` therefore stores **the switched token, not the admin token plus a
+uuid.** Syncing the admin token would mean every device in the circle could
+assume any profile in the Home, which hands a phone the keys to a household.
+The switched token can do exactly what its user can do and nothing more.
+
+The uuid and display name ride alongside it, for two reasons that are not
+cosmetic: play state has to be attributed to the right Plex user, and a device
+needs to be able to notice that a token belongs to someone other than who the
+channel says it does.
+
+The price of least privilege, stated plainly: a switched token that is revoked
+cannot be re-derived, because no device holds the admin token any more. That
+costs one re-authentication on one device. Holding the admin token everywhere
+to avoid it would be a worse trade.
+
+Jellyfin and Subsonic have no equivalent — their users are separate accounts
+with their own credentials, so choosing one *is* logging in. This is Plex-only.
+
 ## Mutable things, and the honest limit
 
 Likes and playback settings are state rather than events — there is one current
