@@ -419,10 +419,19 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             audio/target
           key: cargo-macos-arm64-${{ hashFiles('audio/Cargo.lock') }}
           restore-keys: |
             cargo-macos-arm64-
+
+      # The XCFramework script regenerates the C header first, and that needs
+      # cbindgen. Pinned to the version audio-engine.yml uses, because the
+      # header it emits is compared against the committed copy — two versions
+      # formatting the same declarations differently would read as drift.
+      # `--locked` and a fixed version make this a no-op once cached.
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.29.4 --locked
 
       - name: Build the audio engine
         run: tools/build-audio-xcframework.sh

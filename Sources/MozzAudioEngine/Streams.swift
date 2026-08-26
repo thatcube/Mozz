@@ -1,4 +1,11 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// Off Apple, URLSession and the rest of the URL loading system live in their
+// own module rather than in Foundation. The HTTP stream below is portable
+// logic — it is the desktop shells that reach it — so it has to import them
+// where they actually are.
+import FoundationNetworking
+#endif
 import MozzAudioEngine
 
 /// Reads a track from a file on disk.
