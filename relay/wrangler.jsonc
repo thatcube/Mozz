@@ -12,7 +12,7 @@
   ],
   "vars": {
     "B2_BUCKET_NAME": "mozz-relay",
-    "B2_READ_ENDPOINT": "https://f005.backblazeb2.com/file/mozz-relay",
+    "B2_READ_ENDPOINT": "https://sync.mozzmusic.com/file/mozz-relay",
     "KEY_LIFETIME_SECONDS": "7776000"
   },
   "ratelimits": [

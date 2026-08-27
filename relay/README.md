@@ -16,11 +16,10 @@ The master key needs `writeKeys` and should have no file capabilities. Set
 secrets with `wrangler secret put`; never put them in this file or
 `wrangler.jsonc`.
 
-`B2_READ_ENDPOINT` currently uses B2's verified public download host so a
-deployment is functional before DNS exists. Replace it with
-`https://sync.mozzmusic.com/file/mozz-relay` after that hostname is proxied
-through Cloudflare; keys minted before the change keep the direct endpoint
-until their next renewal.
+`B2_READ_ENDPOINT` is
+`https://sync.mozzmusic.com/file/mozz-relay`, a proxied Cloudflare CNAME to
+B2's public download host. This keeps reads on the Bandwidth Alliance path.
+Keys minted before an endpoint change retain the endpoint until renewal.
 
 `CHANNEL_RATE_LIMITER` is required in production. The Worker fails closed if
 the binding is absent. `ALLOW_UNLIMITED_DEV=true` exists only for local tests.
