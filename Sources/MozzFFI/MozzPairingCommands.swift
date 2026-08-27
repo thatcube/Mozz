@@ -94,6 +94,10 @@ struct WirePairingBegan: Encodable {
 
 struct WirePairingSteps: Encodable {
     let steps: [WirePairingStep]
+    /// Learned from the peer's authenticated transcript. The host uses it only
+    /// as a human-readable roster label; the circle key, not this string, is the
+    /// authority.
+    var peerName: String?
 }
 
 struct WireCircleSecrets: Codable {
@@ -202,10 +206,13 @@ private func pairingCommand(
             throw PairingCommandError.missing("frame")
         }
         let frame = try PairingFrame.decode(bytes)
-        let steps = try await PairingRegistry.shared.withSession(id) { session in
-            try session.receive(frame).map(WirePairingStep.init)
+        let result = try await PairingRegistry.shared.withSession(id) { session in
+            let steps = try session.receive(frame).map(WirePairingStep.init)
+            return (steps, session.peerName)
         }
-        return sessionSuccess(request, WirePairingSteps(steps: steps))
+        return sessionSuccess(
+            request,
+            WirePairingSteps(steps: result.0, peerName: result.1))
 
     case "pairingConfirm":
         guard let id = request.pairingId else { throw PairingCommandError.missing("pairingId") }
@@ -214,10 +221,13 @@ private func pairingCommand(
             return sessionFailure(request.id, request.cmd,
                                   "The numbers did not match, so nothing was shared.")
         }
-        let steps = try await PairingRegistry.shared.withSession(id) { session in
-            try session.confirmDigits().map(WirePairingStep.init)
+        let result = try await PairingRegistry.shared.withSession(id) { session in
+            let steps = try session.confirmDigits().map(WirePairingStep.init)
+            return (steps, session.peerName)
         }
-        return sessionSuccess(request, WirePairingSteps(steps: steps))
+        return sessionSuccess(
+            request,
+            WirePairingSteps(steps: result.0, peerName: result.1))
 
     case "pairingSeal":
         guard let id = request.pairingId else { throw PairingCommandError.missing("pairingId") }
@@ -229,11 +239,15 @@ private func pairingCommand(
         let seal = try Pairing.sealCircle(try wire.decoded(),
                                           toJoiner: joinerKey,
                                           transcriptHash: transcript)
-        let steps = try await PairingRegistry.shared.withSession(id) { session in
-            try session.provideSeal(encapsulated: seal.encapsulated,
-                                    ciphertext: seal.ciphertext).map(WirePairingStep.init)
+        let result = try await PairingRegistry.shared.withSession(id) { session in
+            let steps = try session.provideSeal(
+                encapsulated: seal.encapsulated,
+                ciphertext: seal.ciphertext).map(WirePairingStep.init)
+            return (steps, session.peerName)
         }
-        return sessionSuccess(request, WirePairingSteps(steps: steps))
+        return sessionSuccess(
+            request,
+            WirePairingSteps(steps: result.0, peerName: result.1))
 
     case "pairingOpen":
         guard let id = request.pairingId else { throw PairingCommandError.missing("pairingId") }
@@ -261,7 +275,7 @@ private func pairingCommand(
     case "pairingEnd":
         guard let id = request.pairingId else { throw PairingCommandError.missing("pairingId") }
         await PairingRegistry.shared.end(id)
-        return sessionSuccess(request, WirePairingSteps(steps: []))
+        return sessionSuccess(request, WirePairingSteps(steps: [], peerName: nil))
 
     default:
         return nil

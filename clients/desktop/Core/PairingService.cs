@@ -22,7 +22,7 @@ public sealed record PairingBegan(
     string? QrText,
     PairingStepDto[] Steps);
 
-public sealed record PairingSteps(PairingStepDto[] Steps);
+public sealed record PairingSteps(PairingStepDto[] Steps, string? PeerName = null);
 
 /// <summary>The circle this device belongs to, as the core reports it.</summary>
 public sealed record CircleDto(
@@ -48,6 +48,52 @@ public sealed class PairingService
     private readonly MozzCore _core;
 
     public PairingService(MozzCore core) => _core = core;
+
+    public static bool HasCircle =>
+        SecretStore.ForCurrentPlatform().Get("circle.channelId") is not null;
+
+    /// <summary>
+    /// Join a circle from a fresh desktop. The desktop advertises and waits;
+    /// an established device discovers it from Devices and hands over the
+    /// circle after both screens confirm the digits.
+    /// </summary>
+    public async Task JoinAsync(
+        Func<string, Task<bool>> confirmDigits,
+        CancellationToken token = default)
+    {
+        var began = await Call<PairingBegan>(new
+        {
+            cmd = "pairingBegin",
+            role = "joiner",
+            pairingPath = "digits",
+            deviceName = CircleRoster.DeviceName,
+        }, token).ConfigureAwait(false);
+
+        using var host = PairingHost.Start(CircleRoster.DeviceName);
+        using var link = await host.AcceptAsync(token).ConfigureAwait(false);
+
+        try
+        {
+            foreach (var step in began.Steps.Where(s => s.Kind == "send"))
+            {
+                await link.SendAsync(Convert.FromBase64String(step.Frame!), token)
+                    .ConfigureAwait(false);
+            }
+
+            var peerName = await PumpAsync(
+                began.PairingId, link, confirmDigits, isJoiner: true, token)
+                .ConfigureAwait(false);
+            CircleRoster.Remember(CircleRoster.DeviceName, isSelf: true);
+            if (!string.IsNullOrWhiteSpace(peerName))
+            {
+                CircleRoster.Remember(peerName, isSelf: false);
+            }
+        }
+        finally
+        {
+            await SafeEndAsync(began.PairingId).ConfigureAwait(false);
+        }
+    }
 
     /// <summary>
     /// Admit a device that is showing a code. The desktop is the member: it
@@ -103,7 +149,7 @@ public sealed class PairingService
     /// core decides what each side does, so the loop does not need to know
     /// which one it is driving beyond where the circle ends up.
     /// </summary>
-    private async Task PumpAsync(
+    private async Task<string?> PumpAsync(
         string pairingId,
         PairingLink link,
         Func<string, Task<bool>> confirmDigits,
@@ -111,6 +157,7 @@ public sealed class PairingService
         CancellationToken token)
     {
         var pending = new Queue<PairingStepDto>();
+        string? peerName = null;
 
         while (true)
         {
@@ -124,6 +171,7 @@ public sealed class PairingService
                     frame = Convert.ToBase64String(frame),
                 }, token).ConfigureAwait(false);
 
+                peerName ??= steps.PeerName;
                 foreach (var step in steps.Steps) pending.Enqueue(step);
                 if (pending.Count == 0) continue;
             }
@@ -142,6 +190,7 @@ public sealed class PairingService
                     {
                         cmd = "pairingConfirm", pairingId, matched,
                     }, token).ConfigureAwait(false);
+                    peerName ??= after.PeerName;
                     foreach (var step in after.Steps) pending.Enqueue(step);
                     break;
 
@@ -154,6 +203,7 @@ public sealed class PairingService
                         transcript = next.Transcript,
                         joinerPublicKey = next.JoinerPublicKey,
                     }, token).ConfigureAwait(false);
+                    peerName ??= sealed_.PeerName;
                     foreach (var step in sealed_.Steps) pending.Enqueue(step);
                     break;
 
@@ -168,10 +218,10 @@ public sealed class PairingService
                         transcript = next.Transcript,
                     }, token).ConfigureAwait(false);
                     StoreCircle(circle);
-                    return;
+                    return peerName;
 
                 case "finished":
-                    return;
+                    return peerName;
             }
         }
     }

@@ -18,6 +18,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>The open core, for windows that drive it directly (pairing).</summary>
     public MozzCore Core => _core;
 
+    /// <summary>Completes after the local library and saved accounts are ready.</summary>
+    public Task Initialization { get; private set; } = Task.CompletedTask;
+
     /// <summary>
     /// The running version, for About.
     ///
@@ -393,7 +396,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         };
         _continuityReconcileTimer.Start();
 
-        _ = InitializeAsync();
+        Initialization = InitializeAsync();
     }
 
     partial void OnActiveAccountProfileChanged(ServerAccountProfile? value)

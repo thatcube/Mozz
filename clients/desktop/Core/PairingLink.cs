@@ -43,6 +43,9 @@ public sealed class PairingLink : IDisposable
         return new PairingLink(client);
     }
 
+    internal static PairingLink FromAcceptedClient(TcpClient client) =>
+        new(client);
+
     public async Task SendAsync(byte[] frame, CancellationToken token = default)
     {
         var framed = PairingWire.Frame(frame);

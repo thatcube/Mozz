@@ -103,17 +103,35 @@ final class MozzSessionPairingTests: XCTestCase {
     }
 
     func testTheDigitPathShowsBothHostsTheSameNumber() async throws {
-        let joinerBegan = try payload(try await call(["cmd": "pairingBegin", "role": "joiner", "pairingPath": "digits"]))
+        let joinerBegan = try payload(try await call([
+            "cmd": "pairingBegin",
+            "role": "joiner",
+            "pairingPath": "digits",
+            "deviceName": "Fresh Windows PC",
+        ]))
         let joinerId = try XCTUnwrap(joinerBegan["pairingId"] as? String)
         let hello = try XCTUnwrap((joinerBegan["steps"] as? [[String: Any]])?.first?["frame"] as? String)
 
-        let memberBegan = try payload(try await call(["cmd": "pairingBegin", "role": "member", "pairingPath": "digits"]))
+        let memberBegan = try payload(try await call([
+            "cmd": "pairingBegin",
+            "role": "member",
+            "pairingPath": "digits",
+            "deviceName": "Brandon's iPhone",
+        ]))
         let memberId = try XCTUnwrap(memberBegan["pairingId"] as? String)
 
-        let memberSteps = try steps(try await call(["cmd": "pairingReceive", "pairingId": memberId, "frame": hello]))
+        let memberResponse = try payload(try await call([
+            "cmd": "pairingReceive", "pairingId": memberId, "frame": hello,
+        ]))
+        let memberSteps = try XCTUnwrap(memberResponse["steps"] as? [[String: Any]])
+        XCTAssertEqual(memberResponse["peerName"] as? String, "Fresh Windows PC")
         let answer = try XCTUnwrap(memberSteps.first { $0["kind"] as? String == "send" }?["frame"] as? String)
 
-        let joinerSteps = try steps(try await call(["cmd": "pairingReceive", "pairingId": joinerId, "frame": answer]))
+        let joinerResponse = try payload(try await call([
+            "cmd": "pairingReceive", "pairingId": joinerId, "frame": answer,
+        ]))
+        let joinerSteps = try XCTUnwrap(joinerResponse["steps"] as? [[String: Any]])
+        XCTAssertEqual(joinerResponse["peerName"] as? String, "Brandon's iPhone")
         let joinerDigits = try XCTUnwrap(joinerSteps.first { $0["kind"] as? String == "digits" }?["digits"] as? String)
         let reveal = try XCTUnwrap(joinerSteps.first { $0["kind"] as? String == "send" }?["frame"] as? String)
 

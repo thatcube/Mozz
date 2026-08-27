@@ -29,9 +29,25 @@ public partial class App : Application
             {
                 DataContext = viewModel,
             };
+            _ = OfferCircleSetupWhenReadyAsync(viewModel);
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// A desktop with no circle advertises during first-run setup, just like a
+    /// phone. This makes setup order irrelevant across macOS, Windows and Linux:
+    /// whichever device is new waits; whichever already has the circle opens
+    /// Devices and admits it.
+    /// </summary>
+    private async Task OfferCircleSetupWhenReadyAsync(MainViewModel viewModel)
+    {
+        await viewModel.Initialization;
+        if (!PairingService.HasCircle)
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(ShowPairingWindow);
+        }
     }
 
     /// <summary>
