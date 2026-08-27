@@ -119,18 +119,30 @@ The naive pattern — every device fetches every peer's blob on every check —
 costs ~337 MB per user per month, of which 270 MB is re-downloading blobs that
 have not changed. That is absurd for syncing a play history.
 
-Instead each device holds a small **manifest** under its own prefix (~1 KB)
-listing that device's current objects and hashes. Readers list the channel's
-manifest paths, compare hashes, and fetch only what actually changed.
+Instead each device writes immutable generations of a small **manifest** in a
+manifest-only prefix
+(`manifests/{epoch}/{deviceId}/{generation}-{hash}`, ~1 KB) listing that
+device's current objects and hashes. Readers list that prefix, choose the
+greatest generation per device, compare hashes, and fetch only what actually
+changed. Old manifest generations expire through bucket lifecycle.
 Conditional `GET` (`If-None-Match`) covers the rest.
 
 The per-device qualifier is load-bearing. An earlier draft said "the channel
 holds a manifest", which created exactly the shared writable object
 `spec/channel` forbids: two devices could read it, each update its own entry,
 and the second write would erase the first. A device manifest has one writer,
-like every other channel object. The authenticated B2 key can list its scoped
-channel prefix (Class C, free), while object bodies still read through
-Cloudflare.
+like every other channel object. Keeping manifests together also avoids an S3
+pagination trap: manifests nested below `d/{deviceId}/` cannot be selected with
+one prefix, so years of immutable data objects would eventually bury them past
+a 1,000-key page. The authenticated B2 key can list the manifest prefix (Class
+C, free), while object bodies still read through Cloudflare.
+
+Immutable generations also remove a provider assumption the first
+implementation accidentally introduced. S3 offers conditional writes; B2's
+native API does not. A read-then-write check is not compare-and-swap. With
+content-addressed data and immutable manifests, concurrent processes may leave
+two valid generations, and readers deterministically choose one; neither can
+leave a manifest pointing at the other's body.
 
 Roughly 3× fewer reads and ~6× less bandwidth, and it removes any dependence on
 CDN cache-hit rates — which would be poor here anyway, since each object has only

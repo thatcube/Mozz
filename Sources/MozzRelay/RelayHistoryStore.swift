@@ -58,17 +58,20 @@ public struct RelayDeviceManifest: Codable, Sendable, Equatable {
     public var version: Int
     public var deviceID: String
     public var epoch: Int
+    public var generation: Int64
     public var objects: [String: RelayManifestEntry]
 
     public init(
         version: Int = currentVersion,
         deviceID: String,
         epoch: Int,
+        generation: Int64 = 0,
         objects: [String: RelayManifestEntry] = [:]
     ) {
         self.version = version
         self.deviceID = deviceID
         self.epoch = epoch
+        self.generation = generation
         self.objects = objects
     }
 }
@@ -215,8 +218,7 @@ public actor RelayHistoryStore: HistoryStore {
         // manifest/hash mismatch for every reader.
         let path = "\(pathPrefix)/\(hash)"
 
-        let manifestPath = localManifestPath
-        var manifest = try await readManifest(path: manifestPath)
+        var manifest = try await latestManifest(for: localDeviceID)
             ?? RelayDeviceManifest(deviceID: localDeviceID, epoch: epoch)
 
         // The primary cost and retry guard: a device that played nothing writes
@@ -234,17 +236,17 @@ public actor RelayHistoryStore: HistoryStore {
             plaintextSHA256: hash,
             plaintextBytes: plaintext.count,
             writtenAtMS: writtenAtMS)
+        manifest.generation += 1
         let manifestPlaintext = try Self.encode(manifest)
+        let manifestHash = Self.sha256(manifestPlaintext)
+        let manifestPath = "\(manifestPrefix)\(localDeviceID)/" +
+            "\(manifest.generation)-\(manifestHash)"
         let manifestCiphertext = try Self.seal(
             manifestPlaintext, path: manifestPath, key: key)
-
-        let condition: RelayWriteCondition = cache[manifestPath]
-            .map { .ifMatch($0.etag) }
-            ?? .ifAbsent
         let etag = try await objects.put(
             path: manifestPath,
             data: manifestCiphertext,
-            condition: condition)
+            condition: .none)
         cache[manifestPath] = CachedObject(
             etag: etag, plaintext: manifestPlaintext)
     }
@@ -252,17 +254,37 @@ public actor RelayHistoryStore: HistoryStore {
     // MARK: Read
 
     private func manifests() async throws -> [(String, RelayDeviceManifest)] {
-        let suffix = "/manifest/\(epoch)"
-        let paths = try await objects.list(prefix: devicePrefix)
-            .filter { $0.hasSuffix(suffix) }
-            .sorted()
-        var result: [(String, RelayDeviceManifest)] = []
+        let paths = try await objects.list(prefix: manifestPrefix).sorted()
+        var newest: [String: (String, RelayDeviceManifest)] = [:]
         for path in paths {
             if let manifest = try await readManifest(path: path) {
-                result.append((path, manifest))
+                if let current = newest[manifest.deviceID],
+                   (current.1.generation, current.0)
+                    >= (manifest.generation, path) {
+                    continue
+                }
+                newest[manifest.deviceID] = (path, manifest)
             }
         }
-        return result
+        return newest.values.sorted { $0.0 < $1.0 }
+    }
+
+    private func latestManifest(
+        for deviceID: String
+    ) async throws -> RelayDeviceManifest? {
+        let prefix = "\(manifestPrefix)\(try Self.pathComponent(deviceID))/"
+        let paths = try await objects.list(prefix: prefix).sorted()
+        var latest: (String, RelayDeviceManifest)?
+        for path in paths {
+            guard let manifest = try await readManifest(path: path) else { continue }
+            if let current = latest,
+               (current.1.generation, current.0)
+                >= (manifest.generation, path) {
+                continue
+            }
+            latest = (path, manifest)
+        }
+        return latest?.1
     }
 
     private func readManifest(path: String) async throws -> RelayDeviceManifest? {
@@ -272,8 +294,12 @@ public actor RelayHistoryStore: HistoryStore {
         guard manifest.version == RelayDeviceManifest.currentVersion else {
             throw RelayStoreError.unsupportedManifestVersion(manifest.version)
         }
+        let expectedPrefix = "\(manifestPrefix)" +
+            "\(try Self.pathComponent(manifest.deviceID))/"
         guard manifest.epoch == epoch,
-              path == manifestPath(for: manifest.deviceID) else {
+              path.hasPrefix(expectedPrefix),
+              path.dropFirst(expectedPrefix.count)
+                .hasPrefix("\(manifest.generation)-") else {
             throw RelayStoreError.manifestPathMismatch(path)
         }
         return manifest
@@ -310,7 +336,9 @@ public actor RelayHistoryStore: HistoryStore {
         manifest: RelayDeviceManifest
     ) throws {
         let expectedPrefix = "\(devicePrefix)\(try Self.pathComponent(manifest.deviceID))/"
-        guard manifestObjectPath == manifestPath(for: manifest.deviceID),
+        let expectedManifestPrefix = "\(manifestPrefix)" +
+            "\(try Self.pathComponent(manifest.deviceID))/"
+        guard manifestObjectPath.hasPrefix(expectedManifestPrefix),
               entry.path.hasPrefix(expectedPrefix) else {
             throw RelayStoreError.manifestPathMismatch(entry.path)
         }
@@ -329,14 +357,7 @@ public actor RelayHistoryStore: HistoryStore {
     // MARK: Layout and crypto
 
     private var devicePrefix: String { "c/\(channelID)/d/" }
-
-    private var localManifestPath: String {
-        manifestPath(for: localDeviceID)
-    }
-
-    private func manifestPath(for deviceID: String) -> String {
-        "c/\(channelID)/d/\(deviceID)/manifest/\(epoch)"
-    }
+    private var manifestPrefix: String { "c/\(channelID)/manifests/\(epoch)/" }
 
     private static func pathComponent(_ value: String) throws -> String {
         guard !value.isEmpty, value.count <= 128,

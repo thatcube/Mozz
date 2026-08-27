@@ -21,7 +21,8 @@ c/{channelId}/d/{deviceId}/history/{epoch}/compact  this device's rolled-up past
 c/{channelId}/d/{deviceId}/state/{epoch}            likes, settings — latest wins
 c/{channelId}/d/{deviceId}/library/{epoch}          library snapshot, if made here
 c/{channelId}/d/{deviceId}/servers/{epoch}          server connections and tokens
-c/{channelId}/d/{deviceId}/manifest/{epoch}         this device's object hashes
+c/{channelId}/manifests/{epoch}/{deviceId}/{gen}-{hash}
+                                                    immutable object hashes
 c/{channelId}/now/{epoch}                           see "Now playing" below
 ```
 
@@ -33,9 +34,16 @@ Reading is: list every `d/*` prefix, read what is there, merge. Writing is:
 append under your own prefix. A device asleep for a month reads everyone else's
 log and catches up, and nobody had to coordinate.
 
-The manifest follows the same rule: there is one per device, never one for the
-channel. A channel-wide manifest would make every device its writer and
-reintroduce the overwrite race this layout exists to eliminate.
+The manifest follows the same rule: generations are immutable and grouped per
+device, never one mutable record for the channel. Readers choose the greatest
+generation (breaking an impossible same-device tie by path). They sit together
+under a manifest-only prefix so a list never has to walk years of
+content-addressed history objects. Old generations expire by bucket lifecycle.
+
+This avoids requiring compare-and-swap from the provider. B2's native API has
+none, and pretending a read-then-write is atomic would be worse than admitting
+it. A channel-wide manifest would make every device its writer and reintroduce
+the overwrite race this layout exists to eliminate.
 
 ## Why history merges trivially
 

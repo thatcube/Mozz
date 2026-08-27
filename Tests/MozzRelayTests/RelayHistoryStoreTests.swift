@@ -109,8 +109,9 @@ final class RelayHistoryStoreTests: XCTestCase {
 
         let paths = await objects.paths()
         XCTAssertEqual(paths.count, 4, "one data object and one manifest per device")
-        XCTAssertEqual(paths.filter { $0.contains("/phone-id/") }.count, 2)
-        XCTAssertEqual(paths.filter { $0.contains("/pc-id/") }.count, 2)
+        XCTAssertEqual(paths.filter { $0.contains("/d/phone-id/") }.count, 1)
+        XCTAssertEqual(paths.filter { $0.contains("/d/pc-id/") }.count, 1)
+        XCTAssertEqual(paths.filter { $0.contains("/manifests/1/") }.count, 2)
 
         let loaded = try await phone.loadBatches()
         XCTAssertEqual(Set(loaded.map(\.deviceID)), Set(["phone-id", "pc-id"]))
@@ -169,7 +170,7 @@ final class RelayHistoryStoreTests: XCTestCase {
         try await pc.save(batch(device: "pc-id", uid: "pc"))
 
         let allPaths = await objects.paths()
-        let paths = allPaths.filter { !$0.contains("/manifest/") }
+        let paths = allPaths.filter { !$0.contains("/manifests/") }
         XCTAssertEqual(paths.count, 2)
         await objects.swapBodies(paths[0], paths[1])
 
@@ -305,7 +306,7 @@ private extension Array {
     }
 }
 
-private func XCTAssertThrowsErrorAsync(
+func XCTAssertThrowsErrorAsync(
     _ expression: () async throws -> Void,
     file: StaticString = #filePath,
     line: UInt = #line
