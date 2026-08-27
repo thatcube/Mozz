@@ -336,6 +336,47 @@ public struct RelayFavoriteSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+public struct RelayMemberRecord: Codable, Sendable, Equatable {
+        public var id: String
+        public var name: String
+        public var joinedAtMS: Int64
+        public var removedAtMS: Int64?
+
+        public init(
+            id: String,
+            name: String,
+            joinedAtMS: Int64,
+            removedAtMS: Int64? = nil
+        ) {
+            self.id = id
+            self.name = name
+            self.joinedAtMS = joinedAtMS
+            self.removedAtMS = removedAtMS
+        }
+
+        public var mutationAtMS: Int64 {
+            max(joinedAtMS, removedAtMS ?? .min)
+        }
+        public var isRemoved: Bool { removedAtMS != nil }
+}
+
+public struct RelayMembershipSnapshot: Codable, Sendable, Equatable {
+        public static let currentVersion = 1
+        public var version: Int
+        public var deviceID: String
+        public var records: [RelayMemberRecord]
+
+        public init(
+            version: Int = currentVersion,
+            deviceID: String,
+            records: [RelayMemberRecord]
+        ) {
+            self.version = version
+            self.deviceID = deviceID
+            self.records = records
+    }
+}
+
 // MARK: - Encrypted history store
 
 /// Listening history over the zero-knowledge relay.
@@ -658,6 +699,61 @@ public actor RelayHistoryStore: HistoryStore {
             }
         }
         return selected.values.sorted { $0.remoteID < $1.remoteID }
+    }
+
+    public func loadMembershipSnapshots() async throws
+        -> [RelayMembershipSnapshot] {
+        var snapshots: [RelayMembershipSnapshot] = []
+        for (manifestPath, manifest) in try await manifests() {
+            guard let entry = manifest.objects["membership"] else { continue }
+            try validate(entry: entry, manifestPath: manifestPath, manifest: manifest)
+            guard let plaintext = try await readPlaintext(path: entry.path) else { continue }
+            try validate(plaintext: plaintext, against: entry)
+            let snapshot = try JSONDecoder().decode(
+                RelayMembershipSnapshot.self, from: plaintext)
+            guard snapshot.version == RelayMembershipSnapshot.currentVersion,
+                  snapshot.deviceID == manifest.deviceID else {
+                throw RelayStoreError.invalidPlaybackSettings(
+                    "membership snapshot identity is invalid")
+            }
+            snapshots.append(snapshot)
+        }
+        return snapshots
+    }
+
+    public func save(_ snapshot: RelayMembershipSnapshot) async throws {
+        guard snapshot.deviceID == localDeviceID else {
+            throw RelayStoreError.payloadDeviceMismatch(
+                expected: localDeviceID, actual: snapshot.deviceID)
+        }
+        try await save(
+            snapshot,
+            objectKey: "membership",
+            pathPrefix: "\(devicePrefix)\(localDeviceID)/state/\(epoch)/membership",
+            maximumBytes: 128 * 1024,
+            writtenAtMS: snapshot.records.map(\.mutationAtMS).max() ?? 0)
+    }
+
+    public static func mergedMembership(
+        _ snapshots: [RelayMembershipSnapshot]
+    ) -> [RelayMemberRecord] {
+        var selected: [String: (RelayMemberRecord, String)] = [:]
+        for snapshot in snapshots {
+            for record in snapshot.records {
+                guard let current = selected[record.id] else {
+                    selected[record.id] = (record, snapshot.deviceID)
+                    continue
+                }
+                let wins = record.mutationAtMS > current.0.mutationAtMS
+                    || (record.mutationAtMS == current.0.mutationAtMS
+                        && record.isRemoved && !current.0.isRemoved)
+                    || (record.mutationAtMS == current.0.mutationAtMS
+                        && record.isRemoved == current.0.isRemoved
+                        && snapshot.deviceID > current.1)
+                if wins { selected[record.id] = (record, snapshot.deviceID) }
+            }
+        }
+        return selected.values.map(\.0).sorted { $0.id < $1.id }
     }
 
     private static func validFavorite(_ record: FavoriteMutationState) -> Bool {

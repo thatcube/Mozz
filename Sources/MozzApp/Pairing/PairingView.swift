@@ -8,6 +8,7 @@ import SwiftUI
 /// underneath them loses the thread; the stage changing in place does not.
 struct PairingView: View {
     @StateObject private var controller = PairingController()
+    @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var ambientJoin: AmbientJoinController
     @AppStorage(RelayBootstrapper.enabledKey) private var deviceSyncEnabled = true
@@ -205,8 +206,11 @@ struct PairingView: View {
             Section {
                 Button(role: .destructive) {
                     ambientJoin.setDevicesScreenActive(false)
-                    controller.leaveCircle()
-                    didLeaveCircle = true
+                    Task { @MainActor in
+                        await env.leaveSyncedDevices()
+                        controller.leaveCircle()
+                        didLeaveCircle = true
+                    }
                 } label: {
                     Label("Stop syncing this device", mozz: "person.badge.minus")
                 }

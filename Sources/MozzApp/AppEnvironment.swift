@@ -2083,6 +2083,7 @@ public final class AppEnvironment: ObservableObject {
             localDeviceID: Self.continuityDeviceID(
                 from: clientIdentifier))
         await syncCatalog(through: relay)
+        await syncMembership(through: relay)
         if let active,
            let stored = SessionPersistence.load(credentials),
            let scope = CatalogSnapshotScope(
@@ -2163,6 +2164,7 @@ public final class AppEnvironment: ObservableObject {
                     backend: active.backend)) else {
             return
         }
+
         let catalog = CatalogRelayCoordinator(
             database: database,
             relay: relay,
@@ -2176,6 +2178,59 @@ public final class AppEnvironment: ObservableObject {
         if publish {
             _ = try? await catalog.publishLatestComplete(scope: scope)
         }
+    }
+
+    private func syncMembership(through relay: RelayHistoryStore) async {
+        let deviceID = Self.continuityDeviceID(from: clientIdentifier)
+        let local = ((try? CircleStore.live.members()) ?? [])
+            .filter { !$0.isSelf || $0.id == deviceID }
+            .map {
+                RelayMemberRecord(
+                    id: $0.id,
+                    name: $0.name,
+                    joinedAtMS: Int64($0.joinedAt.timeIntervalSince1970 * 1_000))
+            }
+        var records = local.filter { $0.id != deviceID }
+        records.append(RelayMemberRecord(
+            id: deviceID,
+            name: PairingController.deviceName,
+            joinedAtMS: local.first(where: { $0.id == deviceID })?.joinedAtMS
+                ?? Int64(Date().timeIntervalSince1970 * 1_000)))
+        try? await relay.save(RelayMembershipSnapshot(
+            deviceID: deviceID, records: records))
+        guard let snapshots = try? await relay.loadMembershipSnapshots() else { return }
+        let members = RelayHistoryStore.mergedMembership(snapshots)
+            .filter { !$0.isRemoved }
+            .map {
+                CircleMember(
+                    id: $0.id, name: $0.name,
+                    joinedAt: Date(timeIntervalSince1970:
+                        Double($0.joinedAtMS) / 1_000),
+                    isSelf: $0.id == deviceID)
+            }
+        try? CircleStore.live.replaceMembers(members)
+    }
+
+    public func leaveSyncedDevices() async {
+        let store = CircleStore.live
+        guard let circle = try? store.load() else { return }
+        let deviceID = Self.continuityDeviceID(from: clientIdentifier)
+        if let configured = try? await RelayBootstrapper.historyStore(
+            circle: circle, circleStore: store, localDeviceID: deviceID) {
+            var records = RelayHistoryStore.mergedMembership(
+                (try? await configured.store.loadMembershipSnapshots()) ?? [])
+            records.removeAll { $0.id == deviceID }
+            let now = Int64(Date().timeIntervalSince1970 * 1_000)
+            records.append(RelayMemberRecord(
+                id: deviceID, name: PairingController.deviceName,
+                joinedAtMS: now, removedAtMS: now))
+            try? await configured.store.save(RelayMembershipSnapshot(
+                deviceID: deviceID, records: records))
+        }
+        try? store.clear()
+        relayHistoryStore = nil
+        relayHistoryChannelID = nil
+        relayHistoryExpiresAtMS = nil
     }
 
     private func prepareCatalogScopeForActiveServer() async {

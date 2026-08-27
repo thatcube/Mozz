@@ -498,6 +498,20 @@ final class RelayHistoryStoreTests: XCTestCase {
         let writes = await objects.putCount
         XCTAssertEqual(writes, 0)
     }
+
+    func testMembershipTombstoneRemovesADeviceAcrossSnapshots() {
+        let joined = RelayMemberRecord(
+            id: "phone", name: "Phone", joinedAtMS: 100)
+        let removed = RelayMemberRecord(
+            id: "phone", name: "Phone", joinedAtMS: 100, removedAtMS: 200)
+        let merged = RelayHistoryStore.mergedMembership([
+            RelayMembershipSnapshot(deviceID: "desktop", records: [joined]),
+            RelayMembershipSnapshot(deviceID: "phone", records: [removed]),
+        ])
+
+        XCTAssertEqual(merged, [removed])
+        XCTAssertTrue(merged[0].isRemoved)
+    }
 }
 
 private extension Array {
