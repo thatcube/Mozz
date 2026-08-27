@@ -68,6 +68,7 @@ public sealed class RelayHistoryService
     private readonly MozzServer _server;
 
     public event Action? CatalogChanged;
+    public event Action? MembershipChanged;
     public event Action<Exception>? BackgroundSyncFailed;
 
     public RelayHistoryService(
@@ -150,6 +151,7 @@ public sealed class RelayHistoryService
             circle,
             deviceId = _deviceID,
             servers = localServers,
+            members = CircleRoster.Export(_deviceID),
             relayEndpoint = DefaultEndpoint,
         }, token).ConfigureAwait(false);
         var importedServerCount = 0;
@@ -164,6 +166,8 @@ public sealed class RelayHistoryService
         {
             var imported = _server.ImportSyncedServers(
                 serverResult.Servers);
+            CircleRoster.Replace(serverResult.Members, _deviceID);
+            MembershipChanged?.Invoke();
             importedServerCount = imported.Added.Count;
             addedIDs = imported.Added
                 .Select(account => account.ServerId)

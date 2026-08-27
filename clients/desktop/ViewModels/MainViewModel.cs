@@ -356,6 +356,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _playbackSettingsCommands = new PlaybackSettingsCommands(_core);
         _relayHistory.CatalogChanged += () =>
             Dispatcher.UIThread.Post(() => _ = ReloadAfterBackgroundSyncAsync());
+        _relayHistory.MembershipChanged += () =>
+            Dispatcher.UIThread.Post(RefreshCircle);
         _relayHistory.BackgroundSyncFailed += error =>
             Dispatcher.UIThread.Post(() =>
                 RelaySyncStatus =

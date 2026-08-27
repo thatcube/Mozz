@@ -76,6 +76,14 @@ public struct CircleStore: Sendable {
         try plain.setValue(try encoder.encode(known), forKey: Key.members)
     }
 
+    public func replaceMembers(_ members: [CircleMember]) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try plain.setValue(
+            try encoder.encode(members.sorted { $0.joinedAt > $1.joinedAt }),
+            forKey: Key.members)
+    }
+
     public func save(_ secrets: CircleSecrets) throws {
         try secure.setSecret(secrets.credentialsKey, forKey: Key.credentials)
         let encoder = JSONEncoder()

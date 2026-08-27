@@ -119,6 +119,7 @@ struct SessionRequest: Decodable {
     var batches: [HistoryExchangeBatch]?
     var relayEndpoint: String?
     var servers: [RelayServerRecord]?
+    var members: [RelayMemberRecord]?
     var musicSectionIDs: [String]?
     var allMusicLibraries: Bool?
     var playbackSettings: PlaybackSettings?
@@ -433,6 +434,7 @@ private struct WireRelayHistorySync: Encodable {
 
 private struct WireRelayServerSync: Encodable {
     var servers: [RelayServerRecord]
+    var members: [RelayMemberRecord]
     var relayKey: String
     var expiresAtMS: Int64
 }
@@ -1459,8 +1461,14 @@ private func dispatch(
             servers: localServers))
         let merged = RelayHistoryStore.mergedServerRecords(
             try await relay.loadServerSnapshots())
+        let localMembers = request.members ?? []
+        try await relay.save(RelayMembershipSnapshot(
+            deviceID: deviceID, records: localMembers))
+        let members = RelayHistoryStore.mergedMembership(
+            try await relay.loadMembershipSnapshots())
         return sessionSuccess(request, WireRelayServerSync(
             servers: merged,
+            members: members,
             relayKey: try configuration.encoded()
                 .base64EncodedString(),
             expiresAtMS: configuration.expiresAtMS))

@@ -55,6 +55,41 @@ public static class CircleRoster
         SecretStore.ForCurrentPlatform().Set(Key, JsonSerializer.Serialize(known));
     }
 
+    public static RelayMemberDto[] Export(string localDeviceID) =>
+        Load()
+            .Where(member => !member.IsSelf || member.ID == localDeviceID)
+            .Select(member => new RelayMemberDto(
+                member.ID ?? $"legacy:{member.Name}",
+                member.Name,
+                member.JoinedAt.ToUnixTimeMilliseconds(),
+                null))
+            .Append(new RelayMemberDto(
+                localDeviceID,
+                DeviceName,
+                Load().FirstOrDefault(member => member.ID == localDeviceID)?
+                    .JoinedAt.ToUnixTimeMilliseconds()
+                    ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                null))
+            .GroupBy(member => member.Id, StringComparer.Ordinal)
+            .Select(group => group.Last())
+            .ToArray();
+
+    public static void Replace(
+        IEnumerable<RelayMemberDto> records,
+        string localDeviceID)
+    {
+        var members = records
+            .Where(record => record.RemovedAtMS is null)
+            .Select(record => new CircleMemberRow(
+                record.Name,
+                DateTimeOffset.FromUnixTimeMilliseconds(record.JoinedAtMS),
+                record.Id == localDeviceID,
+                record.Id))
+            .OrderByDescending(member => member.JoinedAt)
+            .ToArray();
+        SecretStore.ForCurrentPlatform().Set(Key, JsonSerializer.Serialize(members));
+    }
+
     public static void Clear() => SecretStore.ForCurrentPlatform().Set(Key, null);
 
     /// <summary>

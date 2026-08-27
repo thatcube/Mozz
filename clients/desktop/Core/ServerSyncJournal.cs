@@ -28,8 +28,15 @@ public sealed record RelayServerRecordDto
 
 public sealed record RelayServerSyncResult(
     RelayServerRecordDto[] Servers,
+    RelayMemberDto[] Members,
     string RelayKey,
     long ExpiresAtMS);
+
+public sealed record RelayMemberDto(
+    string Id,
+    string Name,
+    long JoinedAtMS,
+    long? RemovedAtMS);
 
 public sealed record SyncedServerImport(
     IReadOnlyList<ServerAccount> Changed,
