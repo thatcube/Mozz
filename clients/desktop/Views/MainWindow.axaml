@@ -83,7 +83,7 @@
       works: a sidebar that never moves, content that scrolls, and transport
       pinned to the bottom so it stays reachable however deep you've browsed.
     -->
-    <Grid RowDefinitions="*,Auto">
+    <Grid x:Name="RootGrid" RowDefinitions="*,Auto">
 
         <Grid x:Name="MainContentGrid" Grid.Row="0">
             <Grid.ColumnDefinitions>
@@ -1715,14 +1715,20 @@
         </Border>
 
 
-        <!-- Settings dialog. The same categories mirror iOS's pushed settings list; desktop presents them as a rail. -->
-        <Grid Grid.RowSpan="2" IsVisible="{Binding IsSettingsDialogOpen}">
+        <!--
+          Parking place for the settings surface while its native window is
+          closed. App moves SettingsSurface into one real, movable Window when
+          requested, then returns it here on close. Keeping one control tree
+          avoids a second copy of five hundred lines of settings UI.
+        -->
+        <Grid x:Name="SettingsParkingLot" Grid.RowSpan="2" IsVisible="False">
             <Border Background="{DynamicResource AppBackground}" Opacity="0.86" />
-            <Border Margin="56,46"
+            <Border x:Name="SettingsSurface"
+                    Margin="0"
                     Background="{DynamicResource SurfaceRaised}"
                     BorderBrush="{DynamicResource Divider}"
-                    BorderThickness="1"
-                    CornerRadius="18"
+                    BorderThickness="0"
+                    CornerRadius="0"
                     Padding="0"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch">
@@ -1760,6 +1766,11 @@
                                         CommandParameter="{x:Static vm:SettingsCategory.Recommendations}">
                                     <TextBlock Text="Recommendations" />
                                 </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsDevicesSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Devices}">
+                                    <TextBlock Text="Devices" />
+                                </Button>
                                 <Button Classes="nav" Classes.selected="{Binding IsSettingsAppearanceSelected}"
                                         Command="{Binding SelectSettingsCategoryCommand}"
                                         CommandParameter="{x:Static vm:SettingsCategory.Appearance}">
@@ -1769,11 +1780,6 @@
                                         Command="{Binding SelectSettingsCategoryCommand}"
                                         CommandParameter="{x:Static vm:SettingsCategory.Diagnostics}">
                                     <TextBlock Text="Diagnostics" />
-                                </Button>
-                                <Button Classes="nav" Classes.selected="{Binding IsSettingsDevicesSelected}"
-                                        Command="{Binding SelectSettingsCategoryCommand}"
-                                        CommandParameter="{x:Static vm:SettingsCategory.Devices}">
-                                    <TextBlock Text="Devices" />
                                 </Button>
                                 <Button Classes="nav" Classes.selected="{Binding IsSettingsAboutSelected}"
                                         Command="{Binding SelectSettingsCategoryCommand}"
@@ -1791,15 +1797,11 @@
                     </Border>
 
                     <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="28,24,28,24">
-                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,20">
-                            <StackPanel Grid.Column="0" Spacing="4">
+                        <Grid Grid.Row="0" Margin="0,0,0,20">
+                            <StackPanel Spacing="4">
                                 <TextBlock Text="{Binding SettingsCategoryTitle}" Classes="pageTitle" />
                                 <TextBlock Text="{Binding SettingsCategorySubtitle}" Classes="secondary" />
                             </StackPanel>
-                            <Button Grid.Column="1" Classes="ghost" Command="{Binding CloseSettingsCommand}">
-                                <controls:TablerIcon Size="20" Data="{StaticResource IconX}"
-                                                     Brush="{Binding $parent[Button].Foreground}" />
-                            </Button>
                         </Grid>
 
                         <ScrollViewer Grid.Row="1" Padding="0,0,8,0">
@@ -2208,7 +2210,83 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                            <Button Content="Add a device…" Command="{Binding AddDeviceCommand}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!--
+                                      Discovery and approval live in Settings,
+                                      not in a second window on top of it.
+                                    -->
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18"
+                                            DataContext="{Binding Pairing}">
+                                        <StackPanel Spacing="14">
+                                            <TextBlock Text="Add a device" Classes="sectionTitle" />
+                                            <TextBlock Text="{Binding Status}" Classes="secondary"
+                                                       TextWrapping="Wrap" />
+
+                                            <StackPanel Spacing="7" IsVisible="{Binding !IsJoiningCircle}">
+                                                <TextBlock Text="Waiting to join" Classes="primary"
+                                                           FontWeight="SemiBold" />
+                                                <ListBox ItemsSource="{Binding Devices}"
+                                                         SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                                                         SelectionMode="Single"
+                                                         MaxHeight="150">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid ColumnDefinitions="*,Auto" Margin="4">
+                                                                <TextBlock Grid.Column="0" Text="{Binding Name}"
+                                                                           Classes="primary"
+                                                                           FontWeight="SemiBold" />
+                                                                <TextBlock Grid.Column="1" Classes="secondary">
+                                                                    <Run Text="{Binding Address}" /><Run Text=":" /><Run Text="{Binding Port}" />
+                                                                </TextBlock>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
+                                            </StackPanel>
+
+                                            <Expander Header="Have a code to paste? (optional)"
+                                                      IsVisible="{Binding !IsJoiningCircle}">
+                                                <TextBox Text="{Binding Code}"
+                                                         PlaceholderText="MOZZ1:…"
+                                                         AcceptsReturn="False"
+                                                         Margin="0,8,0,0"
+                                                         FontFamily="monospace" />
+                                            </Expander>
+
+                                            <Border IsVisible="{Binding IsComparing}"
+                                                    Background="{DynamicResource SurfaceRaised}"
+                                                    CornerRadius="12"
+                                                    Padding="16">
+                                                <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                                    <TextBlock Text="{Binding Digits}"
+                                                               FontSize="30"
+                                                               FontFamily="monospace"
+                                                               HorizontalAlignment="Center" />
+                                                    <TextBlock Text="Confirm the same number appears on the other device."
+                                                               Classes="secondary"
+                                                               HorizontalAlignment="Center" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="10"
+                                                                HorizontalAlignment="Center">
+                                                        <Button Content="They match" Classes="primary"
+                                                                Command="{Binding MatchesCommand}" />
+                                                        <Button Content="They do not match" Classes="destructive"
+                                                                Command="{Binding DoesNotMatchCommand}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                                <Button Content="Add" Classes="primary"
+                                                        Command="{Binding PairCommand}"
+                                                        IsEnabled="{Binding CanPair}"
+                                                        IsVisible="{Binding !IsJoiningCircle}" />
+                                                <ProgressBar IsIndeterminate="True"
+                                                             IsVisible="{Binding IsBusy}"
+                                                             Width="120"
+                                                             VerticalAlignment="Center" />
+                                            </StackPanel>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>

@@ -36,6 +36,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public bool IsInCircle => CircleMembers.Count > 0;
 
+    /// <summary>
+    /// Discovery and ceremony state rendered directly by Settings → Devices.
+    /// One instance per app keeps a pending confirmation alive while settings
+    /// content moves between windows.
+    /// </summary>
+    public PairingViewModel Pairing { get; }
+
     /// <summary>Re-read the roster, so About/Devices reflect reality.</summary>
     public void RefreshCircle()
     {
@@ -319,6 +326,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             report => _ = ReportPlaybackAsync(report));
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
+        Pairing = new PairingViewModel(_core);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
         Connect.Accounts.CollectionChanged += (_, _) =>
         {
@@ -1044,17 +1052,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsSettingsSelected));
         RefreshCircle();
         await RefreshSettingsAsync();
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Raised when Settings asks to add a device; App owns the window.</summary>
-    public event EventHandler? AddDeviceRequested;
-
-    [RelayCommand]
-    private void AddDevice() => AddDeviceRequested?.Invoke(this, EventArgs.Empty);
+    /// <summary>The app owns windows; the view model only requests one.</summary>
+    public event EventHandler? SettingsRequested;
+    public event EventHandler? SettingsCloseRequested;
 
     [RelayCommand]
     private void CloseSettings()
     {
+        Pairing.StopWatching();
+        IsSettingsDialogOpen = false;
+        OnPropertyChanged(nameof(IsSettingsSelected));
+        SettingsCloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Called when the system title-bar closes Settings.</summary>
+    public void SettingsWindowClosed()
+    {
+        Pairing.StopWatching();
         IsSettingsDialogOpen = false;
         OnPropertyChanged(nameof(IsSettingsSelected));
     }
@@ -1066,10 +1083,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         RaiseSettingsCategoryDerived();
         if (category == SettingsCategory.Devices)
         {
-            // Opening Devices is the request to look. The pairing window starts
-            // discovery immediately and only interrupts again if a device is
-            // actually waiting to join.
-            AddDeviceRequested?.Invoke(this, EventArgs.Empty);
+            // Opening Devices is the request to look; the page owns discovery
+            // directly, so there is no second dialog and no extra Add click.
+            Pairing.StartWatching();
+        }
+        else
+        {
+            Pairing.StopWatching();
         }
     }
 

@@ -22,9 +22,8 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var viewModel = new MainViewModel();
-            // Settings → Devices asks for the pairing window; the app owns
-            // windows, so the view model raises rather than constructs one.
-            viewModel.AddDeviceRequested += (_, _) => ShowPairingWindow();
+            viewModel.SettingsRequested += (_, _) => ShowSettingsWindow();
+            viewModel.SettingsCloseRequested += (_, _) => _settingsWindow?.Close();
             desktop.MainWindow = new MainWindow
             {
                 DataContext = viewModel,
@@ -46,7 +45,11 @@ public partial class App : Application
         await viewModel.Initialization;
         if (!PairingService.HasCircle)
         {
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(ShowPairingWindow);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                viewModel.SelectSettingsCategoryCommand.Execute(SettingsCategory.Devices);
+                _ = viewModel.OpenSettingsCommand.ExecuteAsync(null);
+            });
         }
     }
 
