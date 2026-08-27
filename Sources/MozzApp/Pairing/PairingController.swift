@@ -79,7 +79,7 @@ final class PairingController: ObservableObject {
         case scanning
         case connecting
         /// Both, digit path: do these match?
-        case comparing(String)
+        case comparing(digits: String, peerName: String?)
         case joined
         case failed(String)
     }
@@ -196,8 +196,8 @@ final class PairingController: ObservableObject {
                             self?.stage = path == .digits ? .waitingForComputer : .showingCode(text)
                         }
                     },
-                    confirmDigits: { digits in
-                        await self?.ask(digits) ?? false
+                    confirmDigits: { digits, peerName in
+                        await self?.ask(digits, peerName: peerName) ?? false
                     })
                 await MainActor.run {
                     self?.circle = joined
@@ -214,6 +214,43 @@ final class PairingController: ObservableObject {
     }
 
     // MARK: - Admitting
+
+    /// An established device starts looking as soon as its Devices screen opens.
+    ///
+    /// The joining device is already advertising during setup. Requiring this
+    /// side to press "Add" after deliberately opening Devices is another
+    /// question with only one answer, so discovery begins immediately and the
+    /// first thing the human sees is the security decision: do the digits match?
+    func listenForJoiners() {
+        guard isPaired, work == nil else { return }
+        let store = self.store
+        work = Task { [weak self] in
+            do {
+                try await PairingCeremony.admit(
+                    from: store,
+                    path: .digits,
+                    scanned: nil,
+                    deviceName: Self.deviceName,
+                    confirmDigits: { digits, peerName in
+                        await self?.ask(digits, peerName: peerName) ?? false
+                    })
+                await MainActor.run {
+                    self?.circle = try? store.load()
+                    self?.members = (try? store.members()) ?? []
+                    self?.stage = .joined
+                    self?.work = nil
+                }
+            } catch is CancellationError {
+                await MainActor.run { self?.work = nil }
+            } catch {
+                let message = Self.explain(error)
+                await MainActor.run {
+                    self?.stage = .failed(message)
+                    self?.work = nil
+                }
+            }
+        }
+    }
 
     func beginScanning() {
         cancel()
@@ -240,8 +277,8 @@ final class PairingController: ObservableObject {
                 try await PairingCeremony.admit(
                     from: store, path: path, scanned: payload,
                     deviceName: Self.deviceName,
-                    confirmDigits: { digits in
-                        await self?.ask(digits) ?? false
+                    confirmDigits: { digits, peerName in
+                        await self?.ask(digits, peerName: peerName) ?? false
                     })
                 await MainActor.run {
                     self?.circle = try? store.load()
@@ -269,8 +306,8 @@ final class PairingController: ObservableObject {
         continuation.resume(returning: matched)
     }
 
-    private func ask(_ digits: String) async -> Bool {
-        stage = .comparing(digits)
+    private func ask(_ digits: String, peerName: String?) async -> Bool {
+        stage = .comparing(digits: digits, peerName: peerName)
         return await withCheckedContinuation { continuation in
             awaitingAnswer = continuation
         }

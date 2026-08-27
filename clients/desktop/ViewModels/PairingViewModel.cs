@@ -23,6 +23,7 @@ public sealed partial class PairingViewModel : ObservableObject
     private readonly PairingDiscovery _discovery = new();
     private CancellationTokenSource? _watching;
     private TaskCompletionSource<bool>? _awaitingAnswer;
+    private bool _startedAutomatically;
 
     public PairingViewModel(MozzCore core)
     {
@@ -64,7 +65,17 @@ public sealed partial class PairingViewModel : ObservableObject
                     {
                         Devices.Add(device);
                         SelectedDevice ??= device;
-                        Status = $"{device.Name} is waiting to join. Select it and choose Add.";
+                        Status = $"{device.Name} is asking to join.";
+
+                        // Opening Devices is the intent. Once exactly one device
+                        // answers, making the person select it and press Add asks
+                        // the same question twice; go straight to the decision
+                        // that matters, which is whether the six digits match.
+                        if (!_startedAutomatically)
+                        {
+                            _startedAutomatically = true;
+                            _ = PairAsync();
+                        }
                     });
                 }
             }
