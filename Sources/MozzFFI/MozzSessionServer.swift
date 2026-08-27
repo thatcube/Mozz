@@ -398,6 +398,14 @@ func dispatchServerCommand(
         let backend = try makeBackend(request)
         session.backends.set(backend, for: backend.connection.id)
         try await CatalogWriter(session.database).saveServer(backend.connection)
+        if let scope = CatalogSnapshotScope(
+            connection: backend.connection,
+            libraryIDs: request.allMusicLibraries == true
+                ? ["*"]
+                : request.musicSectionIDs) {
+            _ = try await CatalogSnapshotDatabase(session.database)
+                .prepare(scope: scope)
+        }
         return session.success(request, ["serverId": backend.connection.id])
 
     case "libraries":
@@ -550,6 +558,10 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
         throw MozzError.unsupported("attach needs token")
     }
     let identifier = request.clientIdentifier ?? fallbackClientIdentifier()
+    let requestedSectionIDs = Array(Set(
+        (request.musicSectionIDs ?? request.musicSectionID.map { [$0] } ?? [])
+            .filter { !$0.isEmpty }
+    )).sorted()
     var connection = ServerConnection(
         id: ServerIdentity.id(
             kind: kind,
@@ -563,17 +575,19 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
         userID: request.userID ?? (kind == .subsonic ? request.username : nil),
         clientIdentifier: identifier
     )
-    connection.musicSectionID = request.musicSectionID
+    connection.musicSectionID = requestedSectionIDs.first
 
     switch kind {
     case .jellyfin:
         return JellyfinBackend(
             connection: connection, token: token, clientInfo: clientInfo(),
-            musicLibraryId: request.musicSectionID)
+            musicLibraryId: requestedSectionIDs.first)
     case .plex:
         return PlexBackend(
             connection: connection, token: token, clientInfo: clientInfo(),
-            musicSectionIDs: request.musicSectionID.map { [$0] },
+            musicSectionIDs: requestedSectionIDs.isEmpty
+                ? nil
+                : requestedSectionIDs,
             accountToken: request.accountToken)
     case .subsonic:
         guard let credential = SubsonicCredential.decode(token) else {

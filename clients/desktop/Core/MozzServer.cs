@@ -159,6 +159,8 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             clientIdentifier = account.ClientIdentifier,
             serverMachineIdentifier = account.ServerMachineIdentifier,
             musicSectionID = account.MusicSectionId,
+            musicSectionIDs = EffectiveMusicSectionIds(account),
+            allMusicLibraries = account.AllMusicLibraries,
         }, token).ConfigureAwait(false);
         ServerSyncJournal.Upsert(
             secrets,
@@ -183,7 +185,12 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     {
         await AttachAsync(account, token).ConfigureAwait(false);
 
-        if (account.Kind != BackendKind.Plex || account.MusicSectionId is { Length: > 0 })
+        if (account.Kind != BackendKind.Plex)
+        {
+            return account;
+        }
+        if (!account.AllMusicLibraries
+            && EffectiveMusicSectionIds(account).Length > 0)
         {
             return account;
         }
@@ -198,7 +205,13 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 $"{account.ServerName} has no music library for Mozz to sync.");
         }
 
-        var resolved = account with { MusicSectionId = libraries[0].Id };
+        var sectionIDs = libraries.Select(library => library.Id).ToArray();
+        var resolved = account with
+        {
+            MusicSectionId = sectionIDs[0],
+            MusicSectionIds = sectionIDs,
+            AllMusicLibraries = true,
+        };
         SaveAccount(resolved);
         await AttachAsync(resolved, token).ConfigureAwait(false);
         return resolved;
@@ -214,7 +227,12 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(libraryId)) return account;
-        var updated = account with { MusicSectionId = libraryId };
+        var updated = account with
+        {
+            MusicSectionId = libraryId,
+            MusicSectionIds = [libraryId],
+            AllMusicLibraries = false,
+        };
         SaveAccount(updated);
         await AttachAsync(updated, token).ConfigureAwait(false);
         return updated;
@@ -483,6 +501,8 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 ClientIdentifier = ClientIdentifier,
                 ServerMachineIdentifier = record.ServerMachineIdentifier,
                 MusicSectionId = record.MusicSectionIds?.FirstOrDefault(),
+                MusicSectionIds = record.MusicSectionIds,
+                AllMusicLibraries = record.AllMusicLibraries ?? false,
             };
             accounts.Add(account);
             secrets.Set(SecretKey(account.ServerId), token);
@@ -565,6 +585,12 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 ServerId = $"plex-{machine}",
                 ServerMachineIdentifier = machine,
                 MusicSectionId = chosen.MusicSectionId ?? group.Select(a => a.MusicSectionId).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+                MusicSectionIds = group
+                    .SelectMany(EffectiveMusicSectionIds)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order()
+                    .ToArray(),
+                AllMusicLibraries = group.Any(a => a.AllMusicLibraries),
             };
             normalized.Add(canonical);
 
@@ -627,6 +653,16 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             yield return $"plex-{machine}";
         }
     }
+
+    internal static string[] EffectiveMusicSectionIds(ServerAccount account) =>
+        account.MusicSectionIds is { Length: > 0 } ids
+            ? ids.Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .Order()
+                .ToArray()
+            : account.MusicSectionId is { Length: > 0 } section
+                ? [section]
+                : [];
 
     private bool HasCredential(ServerAccount account)
         => LegacyServerIds(account).Any(id => secrets.Get(SecretKey(id)) is not null);
@@ -744,6 +780,8 @@ public sealed record ServerAccount
     public required string ClientIdentifier { get; init; }
     public string? ServerMachineIdentifier { get; init; }
     public string? MusicSectionId { get; init; }
+    public string[]? MusicSectionIds { get; init; }
+    public bool AllMusicLibraries { get; init; }
 }
 
 public sealed record ServerAccountProfile(

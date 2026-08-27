@@ -80,6 +80,34 @@ public sealed class MozzServerSyncTests
     }
 
     [Fact]
+    public void ImportedServerPreservesEverySelectedMusicLibrary()
+    {
+        var (server, _, _) = MakeServer();
+        var remote = new RelayServerRecordDto
+        {
+            Id = "plex-machine",
+            Kind = "plex",
+            Name = "Home Plex",
+            BaseUrl = "https://plex.example.test",
+            Token = "remote-token",
+            UserId = "managed-user",
+            ServerMachineIdentifier = "machine",
+            MusicSectionIds = ["music-2", "music-1"],
+            AllMusicLibraries = true,
+            UpdatedAtMS = 100,
+        };
+
+        server.ImportSyncedServers([remote]);
+        var account = server.SavedAccounts().Single();
+
+        Assert.Equal("music-2", account.MusicSectionId);
+        Assert.Equal(
+            ["music-1", "music-2"],
+            MozzServer.EffectiveMusicSectionIds(account));
+        Assert.True(account.AllMusicLibraries);
+    }
+
+    [Fact]
     public void RemoteTombstoneRemovesAccountAndCredential()
     {
         var (server, secrets, _) = MakeServer();

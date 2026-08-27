@@ -29,10 +29,17 @@ enum ServerSyncJournal {
         _ session: StoredSession,
         serverID: String,
         in store: any CredentialStore,
+        resolvedMusicSectionIDs: [String]? = nil,
         now: Date = Date()
     ) {
         guard !session.isDemo else { return }
         var records = records(in: store)
+        let sectionIDs = Array(Set(
+            resolvedMusicSectionIDs
+                ?? session.selectedMusicSectionIDs
+                ?? session.musicSectionID.map { [$0] }
+                ?? []
+        )).sorted()
         let candidate = RelayServerRecord(
             id: serverID,
             kind: session.kind.rawValue,
@@ -42,8 +49,10 @@ enum ServerSyncJournal {
             accountToken: session.accountToken,
             userID: session.userID,
             serverMachineIdentifier: session.serverMachineIdentifier,
-            musicSectionIDs: session.selectedMusicSectionIDs
-                ?? session.musicSectionID.map { [$0] },
+            musicSectionIDs: sectionIDs,
+            allMusicLibraries: session.kind == .plex
+                ? session.selectedMusicSectionIDs == nil
+                : nil,
             updatedAtMS: Int64(now.timeIntervalSince1970 * 1000))
 
         if let old = records.first(where: { $0.id == serverID }),

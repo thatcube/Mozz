@@ -14,6 +14,7 @@ import MozzJellyfin
 import MozzRecommend
 import MozzRelay
 import MozzSubsonic
+import MozzSync
 
 // MARK: - The session facade
 //
@@ -118,6 +119,8 @@ struct SessionRequest: Decodable {
     var batches: [HistoryExchangeBatch]?
     var relayEndpoint: String?
     var servers: [RelayServerRecord]?
+    var musicSectionIDs: [String]?
+    var allMusicLibraries: Bool?
 
     // Lyrics.
     var useLRCLIB: Bool?
@@ -429,6 +432,14 @@ private struct WireRelayHistorySync: Encodable {
 
 private struct WireRelayServerSync: Encodable {
     var servers: [RelayServerRecord]
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireRelayCatalogSync: Encodable {
+    var status: String
+    var counts: CatalogSnapshotCounts
+    var published: Bool
     var relayKey: String
     var expiresAtMS: Int64
 }
@@ -1445,6 +1456,89 @@ private func dispatch(
                 .base64EncodedString(),
             expiresAtMS: configuration.expiresAtMS))
 
+    case "relaySyncCatalog":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs deviceID")
+        }
+        guard let wireCircle = request.circle else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs circle")
+        }
+        guard let serverId = request.serverId,
+              let backend = session.backends.backend(serverId) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs an attached serverId")
+        }
+        guard let scope = CatalogSnapshotScope(
+            connection: backend.connection,
+            libraryIDs: request.allMusicLibraries == true
+                ? ["*"]
+                : request.musicSectionIDs) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs a stable server account identity")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs a valid relayEndpoint")
+        }
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+        let relay = try RelayHistoryStore(
+            objects: B2NativeRelayObjectStore(
+                configuration: configuration),
+            channelID: circle.channelId,
+            localDeviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey)
+        let catalog = CatalogRelayCoordinator(
+            database: session.database,
+            relay: relay,
+            localDeviceID: deviceID)
+        let hydration = try await catalog.hydrateIfEmpty(scope: scope)
+        let published: Bool
+        if hydration.status == .imported {
+            published = false
+        } else {
+            published = try await catalog.publishLatestComplete(
+                scope: scope) != nil
+        }
+        return sessionSuccess(request, WireRelayCatalogSync(
+            status: {
+                switch hydration.status {
+                case .notNeeded: "notNeeded"
+                case .unavailable: "unavailable"
+                case .imported: "imported"
+                }
+            }(),
+            counts: hydration.counts,
+            published: published,
+            relayKey: try configuration.encoded()
+                .base64EncodedString(),
+            expiresAtMS: configuration.expiresAtMS))
+
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
@@ -1885,7 +1979,7 @@ let mozzSessionCommands = [
     "setFavorite", "setRating", "flushFavoriteOutbox",
     "recordPlayEvent", "playHistory", "historyExportBatch",
     "historyImportBatches", "historyYearRollup",
-    "relaySyncHistory", "relaySyncServers",
+    "relaySyncHistory", "relaySyncServers", "relaySyncCatalog",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",

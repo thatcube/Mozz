@@ -101,6 +101,8 @@ public final class AppEnvironment: ObservableObject {
     private var serverHistoryStores: [any HistoryStore] = []
     private var relayHistoryChannelID: String?
     private var relayHistoryExpiresAtMS: Int64?
+    private var relayHistoryStore: RelayHistoryStore?
+    private var lastRelayStateSyncAt: Date?
     private var isConfiguringRelayHistory = false
     public let playEvents: PlayEventStore
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
@@ -335,6 +337,7 @@ public final class AppEnvironment: ObservableObject {
         do {
             try await activate(saved)
             restoreLastPlaybackSession()
+            syncHistoryIfDue()
         } catch {
             SessionPersistence.clear(credentials)
         }
@@ -393,6 +396,7 @@ public final class AppEnvironment: ObservableObject {
             guard generation == self.activationGeneration else { return }
             self.setupError = nil
             self.isSettingUp = false
+            self.syncHistoryIfDue(forceRelayState: true)
         }
     }
 
@@ -431,6 +435,7 @@ public final class AppEnvironment: ObservableObject {
             guard generation == activationGeneration else { return }  // superseded
             setupError = nil
             isSettingUp = false                 // success → enter the app
+            syncHistoryIfDue(forceRelayState: true)
         } catch is CancellationError {
             // Don't clobber a newer activation's freshly-saved session/state.
             guard generation == activationGeneration else { return }
@@ -453,7 +458,13 @@ public final class AppEnvironment: ObservableObject {
     /// into the app while the full sync continues under the persistent bar.
     private func gateInitialSync() async {
         guard let serverId = active?.connection.id else { return }
-        let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        await prepareCatalogScopeForActiveServer()
+        var existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        if existing == 0 {
+            await hydrateCatalogFromCircleIfAvailable()
+            existing = (try? await repository.trackCount(
+                serverId: serverId)) ?? 0
+        }
         if existing > 0 {
             // Re-login to a server we already have a catalog for: don't block —
             // enter instantly on the cached library, but kick off a background
@@ -568,7 +579,9 @@ public final class AppEnvironment: ObservableObject {
             ServerSyncJournal.upsert(
                 stored,
                 serverID: connection.id,
-                in: credentials)
+                in: credentials,
+                resolvedMusicSectionIDs:
+                    (backend as? PlexBackend)?.musicSectionIDs)
         }
         // Point cross-device continuity (ADR-0010) at the new server and read
         // back whatever another device left behind.
@@ -1001,6 +1014,7 @@ public final class AppEnvironment: ObservableObject {
         // activation didn't (self-healing), so a plain "Sync Now" recovers without
         // a re-login — and surfaces a clear error if the server has no music.
         try await ensurePlexMusicSection()
+        await prepareCatalogScopeForActiveServer()
         guard let active else { throw MozzError.unsupported("No active server") }
         // Catalog sync uses a bulk-timeout backend (a single large page can take
         // ~60s to generate on a slow self-hosted server). See LibrarySyncEngine
@@ -1053,6 +1067,9 @@ public final class AppEnvironment: ObservableObject {
             await enrichment.enrich(serverId: active.connection.id)
             // Playlist and artist names have just changed; teach Siri the new ones.
             await refreshSiriMediaContext()
+            Task { @MainActor in
+                await self.publishCatalogToCircleIfPossible()
+            }
         }
         return summary
     }
@@ -1823,9 +1840,10 @@ public final class AppEnvironment: ObservableObject {
     ///
     /// Called on the same foreground hook as continuity, but rate-limited inside
     /// the coordinator: a resume point goes stale in seconds, a play does not.
-    public func syncHistoryIfDue() {
+    public func syncHistoryIfDue(forceRelayState: Bool = false) {
         Task { @MainActor in
-            await self.configureRelayHistoryIfNeeded()
+            await self.configureRelayHistoryIfNeeded(
+                forceRelayState: forceRelayState)
             await self.history.syncIfDue()
         }
     }
@@ -1835,19 +1853,27 @@ public final class AppEnvironment: ObservableObject {
     ///
     /// Failures degrade to local/Jellyfin history exactly as before. Playback,
     /// setup, and the local durable log never wait on first-party infrastructure.
-    private func configureRelayHistoryIfNeeded() async {
+    private func configureRelayHistoryIfNeeded(
+        forceRelayState: Bool = false
+    ) async {
         guard !isConfiguringRelayHistory else { return }
         guard UserDefaults.standard.object(
             forKey: RelayBootstrapper.enabledKey) as? Bool ?? true else {
             history.setStores(serverHistoryStores)
             relayHistoryChannelID = nil
             relayHistoryExpiresAtMS = nil
+            relayHistoryStore = nil
+            lastRelayStateSyncAt = nil
             return
         }
         guard let circle = try? CircleStore.live.load() else { return }
         if relayHistoryChannelID == circle.channelId,
            let expiry = relayHistoryExpiresAtMS,
-           !RelayBootstrapper.expiresSoon(expiry) {
+           !RelayBootstrapper.expiresSoon(expiry),
+           let relayHistoryStore {
+            await syncRelayStateIfDue(
+                through: relayHistoryStore,
+                force: forceRelayState)
             return
         }
 
@@ -1860,10 +1886,10 @@ public final class AppEnvironment: ObservableObject {
                 localDeviceID: Self.continuityDeviceID(
                     from: clientIdentifier))
             history.setStores(serverHistoryStores + [configured.store])
-            await syncServerConnections(
+            relayHistoryStore = configured.store
+            await syncRelayStateIfDue(
                 through: configured.store,
-                localDeviceID: Self.continuityDeviceID(
-                    from: clientIdentifier))
+                force: true)
             relayHistoryChannelID = circle.channelId
             relayHistoryExpiresAtMS = configured.expiresAtMS
         } catch {
@@ -1931,6 +1957,118 @@ public final class AppEnvironment: ObservableObject {
             into: credentials)
     }
 
+    private func syncRelayStateIfDue(
+        through relay: RelayHistoryStore,
+        force: Bool,
+        now: Date = Date()
+    ) async {
+        if !force, let lastRelayStateSyncAt,
+           now.timeIntervalSince(lastRelayStateSyncAt) < 30 * 60 {
+            return
+        }
+        lastRelayStateSyncAt = now
+        await syncServerConnections(
+            through: relay,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier))
+        await syncCatalog(through: relay)
+    }
+
+    /// Warm an empty database from the newest complete circle snapshot before
+    /// starting the normal authoritative server refresh.
+    private func hydrateCatalogFromCircleIfAvailable() async {
+        guard UserDefaults.standard.object(
+            forKey: RelayBootstrapper.enabledKey) as? Bool ?? true,
+              let circle = try? CircleStore.live.load(),
+              // A newly joined device receives the existing capability in the
+              // pairing seal. Do not make first-time setup wait on provisioning
+              // when no snapshot can exist yet.
+              !circle.relayKey.isEmpty else {
+            return
+        }
+        guard let configured = try? await RelayBootstrapper.historyStore(
+            circle: circle,
+            circleStore: .live,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier)) else {
+            return
+        }
+        await syncCatalog(through: configured.store, publish: false)
+    }
+
+    private func publishCatalogToCircleIfPossible() async {
+        guard UserDefaults.standard.object(
+            forKey: RelayBootstrapper.enabledKey) as? Bool ?? true,
+              let circle = try? CircleStore.live.load(),
+              !circle.relayKey.isEmpty else {
+            return
+        }
+        if relayHistoryChannelID == circle.channelId,
+           let relayHistoryStore {
+            await syncCatalog(
+                through: relayHistoryStore,
+                hydrate: false)
+            return
+        }
+        await configureRelayHistoryIfNeeded(forceRelayState: true)
+    }
+
+    private func syncCatalog(
+        through relay: RelayHistoryStore,
+        hydrate: Bool = true,
+        publish: Bool = true
+    ) async {
+        guard let active,
+              let stored = SessionPersistence.load(credentials),
+              let scope = CatalogSnapshotScope(
+                connection: active.connection,
+                libraryIDs: Self.catalogScopeLibraryIDs(
+                    stored: stored,
+                    backend: active.backend)) else {
+            return
+        }
+        let catalog = CatalogRelayCoordinator(
+            database: database,
+            relay: relay,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier))
+        if hydrate,
+           let result = try? await catalog.hydrateIfEmpty(scope: scope),
+           result.status == .imported {
+            return
+        }
+        if publish {
+            _ = try? await catalog.publishLatestComplete(scope: scope)
+        }
+    }
+
+    private func prepareCatalogScopeForActiveServer() async {
+        guard let active,
+              let stored = SessionPersistence.load(credentials),
+              let scope = CatalogSnapshotScope(
+                connection: active.connection,
+                libraryIDs: Self.catalogScopeLibraryIDs(
+                    stored: stored,
+                    backend: active.backend)) else {
+            return
+        }
+        _ = try? await CatalogSnapshotDatabase(database)
+            .prepare(scope: scope)
+    }
+
+    private static func catalogScopeLibraryIDs(
+        stored: StoredSession,
+        backend: any MusicBackend
+    ) -> [String] {
+        if stored.kind == .plex, stored.selectedMusicSectionIDs == nil {
+            return ["*"]
+        }
+        return stored.selectedMusicSectionIDs
+            ?? (backend as? PlexBackend)?.musicSectionIDs
+            ?? stored.musicSectionID.map { [$0] }
+            ?? []
+    }
+
     private static func storedSession(
         from record: RelayServerRecord,
         clientIdentifier: String
@@ -1952,7 +2090,9 @@ public final class AppEnvironment: ObservableObject {
             serverMachineIdentifier: record.serverMachineIdentifier,
             musicSectionID: record.musicSectionIDs?.first,
             accountToken: record.accountToken,
-            selectedMusicSectionIDs: record.musicSectionIDs)
+            selectedMusicSectionIDs: record.allMusicLibraries == true
+                ? nil
+                : record.musicSectionIDs)
     }
 
     /// Flush any pending checkpoint — the app may not run again.

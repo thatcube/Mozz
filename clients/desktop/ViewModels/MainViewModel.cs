@@ -348,6 +348,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _server = new MozzServer(_core, _secrets);
         _relayHistory = new RelayHistoryService(
             _core, _deviceId, _server);
+        _relayHistory.CatalogChanged += () =>
+            Dispatcher.UIThread.Post(() => _ = ReloadAfterBackgroundSyncAsync());
+        _relayHistory.BackgroundSyncFailed += error =>
+            Dispatcher.UIThread.Post(() =>
+                RelaySyncStatus =
+                    $"Library refresh is waiting: {error.Message}");
         Pairing = new PairingViewModel(_core, _deviceId);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
         Connect.Accounts.CollectionChanged += (_, _) =>
@@ -551,6 +557,19 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await RefreshCountsAsync();
         await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Settings : Section, clearBackStack: true);
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
+        _ = SyncRelayHistoryAsync();
+    }
+
+    private async Task ReloadAfterBackgroundSyncAsync()
+    {
+        try
+        {
+            await ReloadAfterSyncAsync();
+        }
+        catch (Exception error)
+        {
+            StatusMessage = $"Library refresh finished, but the view could not reload: {error.Message}";
+        }
     }
 
     private async Task SyncRelayHistoryAsync()
@@ -562,8 +581,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             var outcome = await _relayHistory.SyncAsync();
             Connect.ReloadSavedAccounts();
+            if (outcome?.ImportedCatalogTracks > 0)
+            {
+                await ReloadAfterSyncAsync();
+            }
             RelaySyncStatus = outcome is null
                 ? "This device is not in a circle yet."
+                : outcome.ImportedCatalogTracks > 0
+                    ? $"Restored {outcome.ImportedCatalogTracks:N0} songs from your circle · refreshing from the server"
                 : outcome.ImportedHistoryEvents == 0
                     ? $"Up to date · {DateTime.Now:t}"
                     : $"Imported {outcome.ImportedHistoryEvents} new listening events · {DateTime.Now:t}";
@@ -574,7 +599,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // not turn app startup or playback into a failure, but Devices
             // should say it is waiting rather than falsely claim success.
             RelaySyncStatus =
-                "Relay unavailable; listening remains safe on this device and will retry.";
+                "Relay unavailable; local music and listening remain safe and will retry.";
         }
         finally
         {

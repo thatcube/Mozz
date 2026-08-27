@@ -1,5 +1,6 @@
 import Crypto
 import Foundation
+import MozzCore
 import MozzHistory
 
 // MARK: - Provider boundary
@@ -89,6 +90,8 @@ public enum RelayStoreError: Error, Equatable {
     case unsupportedCiphertextVersion(Int)
     case missingCredentialsKey
     case invalidServerRecord(String)
+    case invalidCatalogSnapshot(String)
+    case manifestContention(String)
 }
 
 // MARK: - Server credentials
@@ -110,6 +113,7 @@ public struct RelayServerRecord: Codable, Sendable, Equatable {
     public var username: String?
     public var serverMachineIdentifier: String?
     public var musicSectionIDs: [String]?
+    public var allMusicLibraries: Bool?
     public var updatedAtMS: Int64
     public var removedAtMS: Int64?
 
@@ -124,6 +128,7 @@ public struct RelayServerRecord: Codable, Sendable, Equatable {
         username: String? = nil,
         serverMachineIdentifier: String? = nil,
         musicSectionIDs: [String]? = nil,
+        allMusicLibraries: Bool? = nil,
         updatedAtMS: Int64,
         removedAtMS: Int64? = nil
     ) {
@@ -137,6 +142,7 @@ public struct RelayServerRecord: Codable, Sendable, Equatable {
         self.username = username
         self.serverMachineIdentifier = serverMachineIdentifier
         self.musicSectionIDs = musicSectionIDs
+        self.allMusicLibraries = allMusicLibraries
         self.updatedAtMS = updatedAtMS
         self.removedAtMS = removedAtMS
     }
@@ -194,6 +200,62 @@ public struct RelayServerSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Catalog snapshots
+
+public struct RelayCatalogChunkReference: Codable, Sendable, Equatable {
+    public var kind: CatalogSnapshotChunkKind
+    public var path: String
+    public var plaintextSHA256: String
+    public var plaintextBytes: Int
+    public var counts: CatalogSnapshotCounts
+
+    public init(
+        kind: CatalogSnapshotChunkKind,
+        path: String,
+        plaintextSHA256: String,
+        plaintextBytes: Int,
+        counts: CatalogSnapshotCounts
+    ) {
+        self.kind = kind
+        self.path = path
+        self.plaintextSHA256 = plaintextSHA256
+        self.plaintextBytes = plaintextBytes
+        self.counts = counts
+    }
+}
+
+/// The atomic pointer to one complete catalog export.
+///
+/// Chunks are uploaded first and remain invisible until this index is published
+/// through the device manifest. A failed export can leave harmless orphaned
+/// chunks, but can never expose half a snapshot as current.
+public struct RelayCatalogSnapshotIndex: Codable, Sendable, Equatable {
+    public static let currentVersion = 1
+
+    public var version: Int
+    public var sourceDeviceID: String
+    public var scope: CatalogSnapshotScope
+    public var writtenAtMS: Int64
+    public var counts: CatalogSnapshotCounts
+    public var chunks: [RelayCatalogChunkReference]
+
+    public init(
+        version: Int = currentVersion,
+        sourceDeviceID: String,
+        scope: CatalogSnapshotScope,
+        writtenAtMS: Int64,
+        counts: CatalogSnapshotCounts,
+        chunks: [RelayCatalogChunkReference]
+    ) {
+        self.version = version
+        self.sourceDeviceID = sourceDeviceID
+        self.scope = scope
+        self.writtenAtMS = writtenAtMS
+        self.counts = counts
+        self.chunks = chunks
+    }
+}
+
 // MARK: - Encrypted history store
 
 /// Listening history over the zero-knowledge relay.
@@ -204,6 +266,7 @@ public struct RelayServerSnapshot: Codable, Sendable, Equatable {
 public actor RelayHistoryStore: HistoryStore {
     public nonisolated let maximumBatchBytes = 256 * 1024
     public static let maximumPlaintextBytes = 512 * 1024
+    public static let maximumCatalogChunkBytes = 2 * 1024 * 1024
 
     private struct CachedObject {
         let etag: String
@@ -217,6 +280,7 @@ public actor RelayHistoryStore: HistoryStore {
     private let key: SymmetricKey
     private let credentialsKey: SymmetricKey?
     private var cache: [String: CachedObject] = [:]
+    private var catalogPathsByScope: [String: Set<String>] = [:]
 
     public init(
         objects: any RelayObjectStore,
@@ -387,6 +451,147 @@ public actor RelayHistoryStore: HistoryStore {
         return selected.values.map(\.0).sorted { $0.id < $1.id }
     }
 
+    // MARK: Catalog snapshots
+
+    public static func catalogScopeID(
+        _ scope: CatalogSnapshotScope
+    ) throws -> String {
+        sha256(try encode(scope))
+    }
+
+    /// Upload one immutable chunk without changing the visible snapshot.
+    public func saveCatalogChunk(
+        _ chunk: CatalogSnapshotChunk,
+        scope: CatalogSnapshotScope
+    ) async throws -> RelayCatalogChunkReference {
+        let scopeID = try Self.catalogScopeID(scope)
+        try validateCatalogChunk(
+            chunk,
+            expectedDeviceID: localDeviceID,
+            expectedScopeID: scopeID)
+        let plaintext = try Self.encode(chunk)
+        guard plaintext.count <= Self.maximumCatalogChunkBytes else {
+            throw RelayStoreError.objectTooLarge(
+                actual: plaintext.count,
+                maximum: Self.maximumCatalogChunkBytes)
+        }
+        let hash = Self.sha256(plaintext)
+        let scopePrefix = "\(devicePrefix)\(localDeviceID)/catalog/\(epoch)/" +
+            "\(scopeID)/"
+        let path = "\(scopePrefix)\(chunk.kind.rawValue)/\(hash)"
+        if catalogPathsByScope[scopeID] == nil {
+            catalogPathsByScope[scopeID] = Set(
+                try await objects.list(prefix: scopePrefix))
+        }
+        if catalogPathsByScope[scopeID]?.contains(path) != true {
+            let ciphertext = try Self.seal(plaintext, path: path, key: key)
+            _ = try await objects.put(
+                path: path,
+                data: ciphertext,
+                condition: .none)
+            catalogPathsByScope[scopeID, default: []].insert(path)
+        }
+        return RelayCatalogChunkReference(
+            kind: chunk.kind,
+            path: path,
+            plaintextSHA256: hash,
+            plaintextBytes: plaintext.count,
+            counts: chunk.counts)
+    }
+
+    /// Make a fully-uploaded snapshot visible in one manifest generation.
+    public func saveCatalogSnapshot(
+        _ snapshot: RelayCatalogSnapshotIndex
+    ) async throws {
+        let scopeID = try Self.catalogScopeID(snapshot.scope)
+        try validateCatalogSnapshot(
+            snapshot,
+            expectedDeviceID: localDeviceID,
+            expectedScopeID: scopeID)
+        try await save(
+            snapshot,
+            objectKey: "catalog:\(scopeID)",
+            pathPrefix: "\(devicePrefix)\(localDeviceID)/catalog/\(epoch)/" +
+                "\(scopeID)/index",
+            maximumBytes: Self.maximumPlaintextBytes,
+            writtenAtMS: snapshot.writtenAtMS)
+    }
+
+    /// Select the newest whole snapshot for an exact server/account/library
+    /// scope. Catalogs are caches, not mergeable event logs: combining entities
+    /// from two points in time can resurrect items deleted on the server.
+    public func latestCatalogSnapshot(
+        scope: CatalogSnapshotScope
+    ) async throws -> RelayCatalogSnapshotIndex? {
+        let scopeID = try Self.catalogScopeID(scope)
+        let objectKey = "catalog:\(scopeID)"
+        var selected: RelayCatalogSnapshotIndex?
+        for (manifestPath, manifest) in try await manifests() {
+            guard let entry = manifest.objects[objectKey] else { continue }
+            try validate(
+                entry: entry,
+                manifestPath: manifestPath,
+                manifest: manifest)
+            guard let plaintext = try await readPlaintext(path: entry.path) else {
+                continue
+            }
+            try validate(plaintext: plaintext, against: entry)
+            let candidate = try JSONDecoder().decode(
+                RelayCatalogSnapshotIndex.self,
+                from: plaintext)
+            try validateCatalogSnapshot(
+                candidate,
+                expectedDeviceID: manifest.deviceID,
+                expectedScopeID: scopeID)
+            guard candidate.scope == scope else {
+                throw RelayStoreError.invalidCatalogSnapshot(
+                    "scope hash does not match the encrypted scope")
+            }
+            if let current = selected {
+                let newer = candidate.writtenAtMS > current.writtenAtMS
+                    || (candidate.writtenAtMS == current.writtenAtMS
+                        && candidate.sourceDeviceID > current.sourceDeviceID)
+                if newer { selected = candidate }
+            } else {
+                selected = candidate
+            }
+        }
+        return selected
+    }
+
+    public func loadCatalogChunk(
+        _ reference: RelayCatalogChunkReference,
+        from snapshot: RelayCatalogSnapshotIndex
+    ) async throws -> CatalogSnapshotChunk {
+        let scopeID = try Self.catalogScopeID(snapshot.scope)
+        let expectedPrefix = "\(devicePrefix)" +
+            "\(try Self.pathComponent(snapshot.sourceDeviceID))/catalog/" +
+            "\(epoch)/\(scopeID)/"
+        guard reference.path.hasPrefix(expectedPrefix) else {
+            throw RelayStoreError.manifestPathMismatch(reference.path)
+        }
+        guard let plaintext = try await readPlaintext(
+            path: reference.path,
+            maximumBytes: Self.maximumCatalogChunkBytes) else {
+            throw RelayStoreError.invalidCatalogSnapshot(
+                "catalog chunk is missing")
+        }
+        try validate(plaintext: plaintext, against: reference)
+        let chunk = try JSONDecoder().decode(
+            CatalogSnapshotChunk.self,
+            from: plaintext)
+        try validateCatalogChunk(
+            chunk,
+            expectedDeviceID: snapshot.sourceDeviceID,
+            expectedScopeID: scopeID)
+        guard chunk.kind == reference.kind,
+              chunk.counts == reference.counts else {
+            throw RelayStoreError.invalidCatalogSnapshot(
+                "catalog chunk metadata does not match its index")
+        }
+        return chunk
+    }
+
     // MARK: Write
 
     private func save<Value: Encodable>(
@@ -410,13 +615,13 @@ public actor RelayHistoryStore: HistoryStore {
         // manifest/hash mismatch for every reader.
         let path = "\(pathPrefix)/\(hash)"
 
-        var manifest = try await latestManifest(for: localDeviceID)
+        let initialManifest = try await latestManifest(for: localDeviceID)
             ?? RelayDeviceManifest(deviceID: localDeviceID, epoch: epoch)
 
         // The primary cost and retry guard: a device that played nothing writes
         // nothing. Encryption is randomized, so comparing ciphertext can never
         // answer this; the manifest's plaintext hash can.
-        if manifest.objects[objectKey]?.plaintextSHA256 == hash {
+        if initialManifest.objects[objectKey]?.plaintextSHA256 == hash {
             return
         }
 
@@ -426,24 +631,46 @@ public actor RelayHistoryStore: HistoryStore {
             key: objectKeyEncryption ?? key)
         _ = try await objects.put(path: path, data: ciphertext, condition: .none)
 
-        manifest.objects[objectKey] = RelayManifestEntry(
+        let entry = RelayManifestEntry(
             path: path,
             plaintextSHA256: hash,
             plaintextBytes: plaintext.count,
             writtenAtMS: writtenAtMS)
-        manifest.generation += 1
-        let manifestPlaintext = try Self.encode(manifest)
-        let manifestHash = Self.sha256(manifestPlaintext)
-        let manifestPath = "\(manifestPrefix)\(localDeviceID)/" +
-            "\(manifest.generation)-\(manifestHash)"
-        let manifestCiphertext = try Self.seal(
-            manifestPlaintext, path: manifestPath, key: key)
-        let etag = try await objects.put(
-            path: manifestPath,
-            data: manifestCiphertext,
-            condition: .none)
-        cache[manifestPath] = CachedObject(
-            etag: etag, plaintext: manifestPlaintext)
+        var manifest = initialManifest
+        for _ in 0..<3 {
+            if manifest.objects[objectKey]?.plaintextSHA256 == hash {
+                return
+            }
+            manifest.objects[objectKey] = entry
+            manifest.generation += 1
+            let manifestPlaintext = try Self.encode(manifest)
+            let manifestHash = Self.sha256(manifestPlaintext)
+            let manifestPath = "\(manifestPrefix)\(localDeviceID)/" +
+                "\(manifest.generation)-\(manifestHash)"
+            let manifestCiphertext = try Self.seal(
+                manifestPlaintext,
+                path: manifestPath,
+                key: key)
+            let etag = try await objects.put(
+                path: manifestPath,
+                data: manifestCiphertext,
+                condition: .none)
+            cache[manifestPath] = CachedObject(
+                etag: etag,
+                plaintext: manifestPlaintext)
+
+            // Another process may have written the same generation and won the
+            // deterministic path tie. If so, merge its manifest and publish the
+            // missing pointer at the next generation before returning.
+            let visible = try await latestManifest(for: localDeviceID)
+            if visible?.objects[objectKey]?.plaintextSHA256 == hash {
+                return
+            }
+            manifest = visible ?? RelayDeviceManifest(
+                deviceID: localDeviceID,
+                epoch: epoch)
+        }
+        throw RelayStoreError.manifestContention(objectKey)
     }
 
     // MARK: Read
@@ -502,8 +729,10 @@ public actor RelayHistoryStore: HistoryStore {
 
     private func readPlaintext(
         path: String,
-        using decryptionKey: SymmetricKey? = nil
+        using decryptionKey: SymmetricKey? = nil,
+        maximumBytes: Int? = nil
     ) async throws -> Data? {
+        let maximumBytes = maximumBytes ?? Self.maximumPlaintextBytes
         let cached = cache[path]
         switch try await objects.read(path: path, ifNoneMatch: cached?.etag) {
         case .missing:
@@ -515,10 +744,10 @@ public actor RelayHistoryStore: HistoryStore {
             }
             return cached.plaintext
         case let .object(object):
-            guard object.data.count <= Self.maximumPlaintextBytes + 64 else {
+            guard object.data.count <= maximumBytes + 64 else {
                 throw RelayStoreError.objectTooLarge(
                     actual: object.data.count,
-                    maximum: Self.maximumPlaintextBytes + 64)
+                    maximum: maximumBytes + 64)
             }
             let plaintext = try Self.open(
                 object.data,
@@ -551,6 +780,85 @@ public actor RelayHistoryStore: HistoryStore {
         guard plaintext.count == entry.plaintextBytes,
               Self.sha256(plaintext) == entry.plaintextSHA256 else {
             throw RelayStoreError.plaintextHashMismatch(entry.path)
+        }
+    }
+
+    private func validate(
+        plaintext: Data,
+        against reference: RelayCatalogChunkReference
+    ) throws {
+        guard plaintext.count == reference.plaintextBytes,
+              Self.sha256(plaintext) == reference.plaintextSHA256 else {
+            throw RelayStoreError.plaintextHashMismatch(reference.path)
+        }
+    }
+
+    private func validateCatalogSnapshot(
+        _ snapshot: RelayCatalogSnapshotIndex,
+        expectedDeviceID: String,
+        expectedScopeID: String
+    ) throws {
+        guard snapshot.version == RelayCatalogSnapshotIndex.currentVersion,
+              snapshot.sourceDeviceID == expectedDeviceID,
+              !snapshot.scope.serverID.isEmpty,
+              !snapshot.scope.accountID.isEmpty else {
+            throw RelayStoreError.invalidCatalogSnapshot(
+                "catalog index identity is invalid")
+        }
+        let expectedPrefix = "\(devicePrefix)" +
+            "\(try Self.pathComponent(expectedDeviceID))/catalog/" +
+            "\(epoch)/\(expectedScopeID)/"
+        var summed = CatalogSnapshotCounts()
+        var paths = Set<String>()
+        for reference in snapshot.chunks {
+            guard reference.path.hasPrefix(expectedPrefix),
+                  reference.plaintextBytes > 0,
+                  reference.plaintextBytes <= Self.maximumCatalogChunkBytes,
+                  paths.insert(reference.path).inserted else {
+                throw RelayStoreError.invalidCatalogSnapshot(
+                    "catalog index contains an invalid chunk reference")
+            }
+            summed = summed + reference.counts
+        }
+        guard summed == snapshot.counts else {
+            throw RelayStoreError.invalidCatalogSnapshot(
+                "catalog index counts do not match its chunks")
+        }
+    }
+
+    private func validateCatalogChunk(
+        _ chunk: CatalogSnapshotChunk,
+        expectedDeviceID: String,
+        expectedScopeID: String
+    ) throws {
+        let populatedKinds = [
+            !chunk.artists.isEmpty,
+            !chunk.albums.isEmpty,
+            !chunk.tracks.isEmpty,
+            !chunk.playlists.isEmpty,
+            !chunk.playlistItems.isEmpty,
+        ].filter { $0 }.count
+        let kindMatches =
+            (chunk.kind == .artists && !chunk.artists.isEmpty)
+            || (chunk.kind == .albums && !chunk.albums.isEmpty)
+            || (chunk.kind == .tracks && !chunk.tracks.isEmpty)
+            || (chunk.kind == .playlists && !chunk.playlists.isEmpty)
+            || (chunk.kind == .playlistItems
+                && !chunk.playlistItems.isEmpty)
+        let playlistItemsAreValid = chunk.playlistItems.allSatisfy {
+            !$0.playlistRemoteID.isEmpty
+                && $0.startPosition >= 0
+                && !$0.trackRemoteIDs.isEmpty
+        }
+        guard chunk.version == CatalogSnapshotChunk.currentVersion,
+              chunk.sourceDeviceID == expectedDeviceID,
+              chunk.scopeID == expectedScopeID,
+              populatedKinds == 1,
+              kindMatches,
+              playlistItemsAreValid,
+              chunk.recordCount > 0 else {
+            throw RelayStoreError.invalidCatalogSnapshot(
+                "catalog chunk shape is invalid")
         }
     }
 

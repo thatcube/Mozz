@@ -19,7 +19,9 @@ are not resolved; they are unrepresentable.
 c/{channelId}/d/{deviceId}/history/{epoch}/{seq}    append-only play events
 c/{channelId}/d/{deviceId}/history/{epoch}/compact  this device's rolled-up past
 c/{channelId}/d/{deviceId}/state/{epoch}            likes, settings — latest wins
-c/{channelId}/d/{deviceId}/library/{epoch}          library snapshot, if made here
+c/{channelId}/d/{deviceId}/catalog/{epoch}/{scope}/
+    {kind}/{hash}                                   bounded catalog chunks
+    index/{hash}                                    one complete snapshot index
 c/{channelId}/d/{deviceId}/servers/{epoch}          server connections and tokens
 c/{channelId}/manifests/{epoch}/{deviceId}/{gen}-{hash}
                                                     immutable object hashes
@@ -55,6 +57,35 @@ twice or arriving out of order.
 
 It is also why a skip is worth recording as its own event rather than a mutation
 of an existing one.
+
+## Catalog snapshots warm a device; they never become authority
+
+A newly joined PC should not spend minutes showing an empty library when another
+circle member already mirrored the same server. After a complete server sync, a
+device publishes a catalog snapshot under `channelKey`. Another device with an
+empty local catalog may hydrate it, render immediately, and then run the normal
+full server sync in the background.
+
+The scope is exact: backend, stable server id, account/profile id, and selected
+music-library ids. A Plex Home child's snapshot must never warm the owner's
+database, and changing the selected libraries creates a different scope rather
+than silently mixing the two catalogs. Plex's default "all music libraries" is
+recorded as that intent (and scoped as `*`), not collapsed to whichever section
+happened to be listed first; every desktop shell preserves the same meaning and
+the full resolved section list.
+
+Large libraries are split into bounded, content-addressed chunks for artists,
+albums, tracks, playlists, and ordered playlist membership. Chunks are uploaded
+first. Only after every chunk exists does the device publish an encrypted index
+through its manifest, so a failed upload leaves unreachable garbage rather than
+half a current snapshot. Re-publishing an unchanged catalog writes no chunk
+bodies.
+
+Catalogs do **not** merge entity-by-entity. They are coherent caches taken at one
+point in time; combining two can resurrect a track one device saw before it was
+deleted. Readers choose the newest complete snapshot for the exact scope,
+breaking a timestamp tie by device id, and reject it as a whole if any chunk is
+missing or fails authentication. The media server then reconciles everything.
 
 ## Clocks are a hint, not an order
 

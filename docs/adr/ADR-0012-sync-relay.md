@@ -151,10 +151,18 @@ two or three readers and is rewritten several times a day.
 ### 5. Payloads are typed and split by change rate
 
 The relay carries whatever a device needs to hand to its peers — history batches,
-yearly rollups, and later settings, EQ presets, ratings, playlists. Each is a
-**separate object**, because they change at wildly different rates: history moves
-whenever music plays, EQ presets essentially never. One combined blob would
-rewrite everything on every listen.
+yearly rollups, server credentials, warm-start catalog snapshots, and later
+settings, EQ presets, and ratings. Each is a **separate object**, because they
+change at wildly different rates: history moves whenever music plays, a catalog
+snapshot only after a complete mirror, and EQ presets essentially never. One
+combined blob would rewrite everything on every listen.
+
+Catalog snapshots are chunked and content-addressed. An encrypted per-device
+index becomes visible only after every bounded chunk is uploaded, so interruption
+cannot publish a partial catalog. They are scoped to server, account/profile, and
+selected music libraries; readers select one newest complete snapshot rather
+than merging caches from different points in time. The originating media server
+remains authoritative and every hydrated device reconciles in the background.
 
 This is what makes "what else should sync?" a payload question rather than an
 infrastructure question.
