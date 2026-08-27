@@ -22,6 +22,35 @@ nothing, applies no gain and makes no choices, because every decision it was
 allowed to make would be a way for two platforms to sound different.
 _Avoid_: audio backend, output layer, driver, audio engine
 
+**Circle**:
+The set of devices that trust each other and sync as one. It has no owner and
+no centre: any member can admit a new device, and any member can remove one.
+Size is not two — a circle is however many devices someone owns, and the word
+was chosen because every alternative implied a pair.
+_Avoid_: pair, pairing group, linked devices, trusted pair
+
+**Joining**:
+What a device does when it enters a circle. The user-facing act, and the one to
+name in an interface: someone adds a device to their circle, they do not pair
+two of them.
+_Avoid_: pairing (as a user-facing word), linking, connecting
+
+**Pairing ceremony**:
+The two-party protocol that performs a join: a commitment, an exchange, six
+digits or a scanned code, and a sealed handover. This one *is* between exactly
+two devices — the joiner and one member already inside — so "pairing" is right
+here and wrong everywhere else. The distinction is the point: the ceremony is
+between two, what it achieves is membership of many.
+_Avoid_: handshake, pairing (unqualified), key exchange
+
+**Joiner** / **Member**:
+The two sides of a ceremony. The joiner is the device asking to be let in and
+has nothing yet, so it advertises and displays. The member is already in the
+circle and has secrets to give, so it looks and scans. Which is which follows
+from whether a device is already in a circle, never from which button someone
+pressed.
+_Avoid_: client/server, host/guest, primary/secondary
+
 **Boundary**:
 The point where one track gives way to the next. Not an event — a *label on a
 sample position*. Gapless playback makes the last sample of one track and the

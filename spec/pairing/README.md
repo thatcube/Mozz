@@ -15,8 +15,15 @@ ADR-0013 owns the reasoning; this owns the bytes.
 ## The shape
 
 A **circle** is a set of devices that trust each other. It has one `channelId`
-and one `channelKey`. Joining a circle is pairing; there is no per-pair
-relationship. Any member can admit a new device, and any member can remove one.
+and one `channelKey`. Any member can admit a new device, and any member can
+remove one; there is no per-pair relationship and no centre.
+
+The words matter and an earlier draft of this document got them wrong. What a
+user does is *join* a circle, or *add a device* to one — a circle is however
+many devices someone owns, and calling that "pairing" imports an assumption of
+two that is false everywhere it counts. The two-party protocol below is
+genuinely a *pairing ceremony*, because it runs between the joiner and exactly
+one member; it is the only place the word belongs.
 
 That is the iCloud Keychain / Tailscale model, chosen for a reason about people
 rather than cryptography: mesh pairing costs *N(N−1)/2* ceremonies, so a fourth

@@ -3,14 +3,14 @@
         xmlns:vm="using:Mozz.Desktop.ViewModels"
         x:Class="Mozz.Desktop.Views.PairingWindow"
         x:DataType="vm:PairingViewModel"
-        Title="Pair a Device"
+        Title="Your Devices"
         Width="520" Height="480"
         WindowStartupLocation="CenterOwner">
 
   <Border Padding="24">
     <StackPanel Spacing="16">
 
-      <TextBlock Text="Pair a Device"
+      <TextBlock Text="Add a Device to Your Circle"
                  FontSize="22" FontWeight="SemiBold" />
 
       <TextBlock Text="{Binding Status}"
@@ -19,7 +19,7 @@
 
       <!-- Devices found advertising _mozz._tcp -->
       <StackPanel Spacing="6">
-        <TextBlock Text="Devices nearby" FontWeight="SemiBold" />
+        <TextBlock Text="Waiting to join" FontWeight="SemiBold" />
         <ListBox ItemsSource="{Binding Devices}"
                  SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                  SelectionMode="Single"
@@ -69,7 +69,7 @@
       </Border>
 
       <StackPanel Orientation="Horizontal" Spacing="10">
-        <Button Content="Pair"
+        <Button Content="Add"
                 Command="{Binding PairCommand}"
                 IsEnabled="{Binding CanPair}"
                 IsDefault="True" />

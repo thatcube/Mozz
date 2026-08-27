@@ -33,7 +33,7 @@ public sealed partial class PairingViewModel : ObservableObject
 
     [ObservableProperty] private string _code = string.Empty;
     [ObservableProperty] private PairingCandidate? _selectedDevice;
-    [ObservableProperty] private string _status = "On your phone: Settings → Devices → Pair with a computer.";
+    [ObservableProperty] private string _status = "Open Mozz on the other device and go to Settings → Your Devices.";
     [ObservableProperty] private string _digits = string.Empty;
     [ObservableProperty] private bool _isComparing;
     [ObservableProperty] private bool _isBusy;
@@ -64,7 +64,7 @@ public sealed partial class PairingViewModel : ObservableObject
                     {
                         Devices.Add(device);
                         SelectedDevice ??= device;
-                        Status = $"Found {device.Name}. Select it and choose Pair.";
+                        Status = $"{device.Name} is waiting to join. Select it and choose Add.";
                     });
                 }
             }
@@ -99,7 +99,7 @@ public sealed partial class PairingViewModel : ObservableObject
             var code = string.IsNullOrWhiteSpace(Code) ? null : Code.Trim();
             await _pairing.AdmitAsync(code, SelectedDevice, AskAsync).ConfigureAwait(true);
             IsDone = true;
-            Status = "Paired. These devices now share listening, library and servers.";
+            Status = "Added. These devices now share listening, library and servers.";
         }
         catch (Exception ex)
         {
