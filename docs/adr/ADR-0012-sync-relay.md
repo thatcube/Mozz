@@ -113,16 +113,24 @@ requests a day at 50,000 users, against a free tier of 100,000 per day. Workers
 paid ($5/month for 10M requests) exists as a fallback but is not expected to be
 needed.
 
-### 4. A manifest, so a check costs almost nothing
+### 4. One manifest per device, so a check costs almost nothing without creating a shared writer
 
 The naive pattern — every device fetches every peer's blob on every check —
 costs ~337 MB per user per month, of which 270 MB is re-downloading blobs that
 have not changed. That is absurd for syncing a play history.
 
-Instead each channel holds a small **manifest** (~1 KB) listing each device's
-current object and its hash. A device reads the manifest, compares hashes, and
-fetches only what actually changed. Conditional `GET` (`If-None-Match`) covers
-the rest.
+Instead each device holds a small **manifest** under its own prefix (~1 KB)
+listing that device's current objects and hashes. Readers list the channel's
+manifest paths, compare hashes, and fetch only what actually changed.
+Conditional `GET` (`If-None-Match`) covers the rest.
+
+The per-device qualifier is load-bearing. An earlier draft said "the channel
+holds a manifest", which created exactly the shared writable object
+`spec/channel` forbids: two devices could read it, each update its own entry,
+and the second write would erase the first. A device manifest has one writer,
+like every other channel object. The authenticated B2 key can list its scoped
+channel prefix (Class C, free), while object bodies still read through
+Cloudflare.
 
 Roughly 3× fewer reads and ~6× less bandwidth, and it removes any dependence on
 CDN cache-hit rates — which would be poor here anyway, since each object has only
