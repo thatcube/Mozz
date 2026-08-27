@@ -103,6 +103,7 @@ let package = Package(
         .library(name: "MozzPlayback", targets: ["MozzPlayback"]),
         .library(name: "MozzContinuity", targets: ["MozzContinuity"]),
         .library(name: "MozzHistory", targets: ["MozzHistory"]),
+        .library(name: "MozzRelay", targets: ["MozzRelay"]),
         .library(name: "MozzDownloads", targets: ["MozzDownloads"]),
         .library(name: "MozzRecommend", targets: ["MozzRecommend"]),
         .library(name: "MozzEnrichment", targets: ["MozzEnrichment"]),
@@ -259,6 +260,20 @@ let package = Package(
             dependencies: ["MozzCore", .product(name: "Crypto", package: "swift-crypto")]
         ),
 
+        // MARK: Zero-knowledge relay
+        //
+        // Encrypted typed objects over a provider-neutral object store. B2,
+        // Cloudflare, R2 or a self-hosted S3 endpoint belongs in the transport
+        // adapter; channel layout, authenticated encryption, manifests and
+        // unchanged-write suppression belong here and run on every platform.
+        .target(
+            name: "MozzRelay",
+            dependencies: [
+                "MozzHistory",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
+
         // MARK: Catalog sync engine (backend -> DB, off-main)
         .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
 
@@ -385,6 +400,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(name: "MozzCoreTests", dependencies: ["MozzCore"]),
         .testTarget(name: "MozzPairingTests", dependencies: ["MozzPairing"]),
+        .testTarget(name: "MozzRelayTests", dependencies: ["MozzRelay", "MozzHistory"]),
         .testTarget(name: "MozzNetworkingTests", dependencies: ["MozzNetworking"]),
         .testTarget(name: "MozzDatabaseTests", dependencies: ["MozzDatabase", "MozzHistory", .product(name: "GRDB", package: "GRDB.swift")]),
         .testTarget(

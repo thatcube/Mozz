@@ -21,6 +21,7 @@ c/{channelId}/d/{deviceId}/history/{epoch}/compact  this device's rolled-up past
 c/{channelId}/d/{deviceId}/state/{epoch}            likes, settings — latest wins
 c/{channelId}/d/{deviceId}/library/{epoch}          library snapshot, if made here
 c/{channelId}/d/{deviceId}/servers/{epoch}          server connections and tokens
+c/{channelId}/d/{deviceId}/manifest/{epoch}         this device's object hashes
 c/{channelId}/now/{epoch}                           see "Now playing" below
 ```
 
@@ -31,6 +32,10 @@ device's objects become unreadable rather than merely ignored.
 Reading is: list every `d/*` prefix, read what is there, merge. Writing is:
 append under your own prefix. A device asleep for a month reads everyone else's
 log and catches up, and nobody had to coordinate.
+
+The manifest follows the same rule: there is one per device, never one for the
+channel. A channel-wide manifest would make every device its writer and
+reintroduce the overwrite race this layout exists to eliminate.
 
 ## Why history merges trivially
 
