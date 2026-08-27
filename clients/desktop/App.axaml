@@ -16,6 +16,7 @@
         <NativeMenu>
             <NativeMenuItem Header="About Mozz" Click="OnAboutMozz" />
             <NativeMenuItem Header="Settings…" Gesture="Cmd+," Click="OnSettingsMozz" />
+            <NativeMenuItem Header="Pair a Device…" Click="OnPairDevice" />
         </NativeMenu>
     </NativeMenu.Menu>
 
