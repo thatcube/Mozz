@@ -10,6 +10,8 @@ import MozzPlayback
 import MozzNetworking
 import MozzRecommend
 import MozzEnrichment
+import MozzPairing
+import MozzRelay
 import MozzSync
 import MozzPlex
 import MozzJellyfin
@@ -96,6 +98,10 @@ public final class AppEnvironment: ObservableObject {
     /// Cross-device listening history — the log behind the taste profile, which
     /// no backend records (skips and partial plays exist only locally).
     public let history = HistoryCoordinator()
+    private var serverHistoryStores: [any HistoryStore] = []
+    private var relayHistoryChannelID: String?
+    private var relayHistoryExpiresAtMS: Int64?
+    private var isConfiguringRelayHistory = false
     public let playEvents: PlayEventStore
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
@@ -1765,17 +1771,21 @@ public final class AppEnvironment: ObservableObject {
         // buys asynchrony where a real KV store happens to exist. A nil store
         // here costs other devices' contributions, never the feature: the
         // coordinator still maintains the local log and builds the year.
-        var historyStore: (any HistoryStore)?
+        var historyStores: [any HistoryStore] = []
         if let jellyfin = backend as? JellyfinBackend {
-            historyStore = jellyfin.makeHistoryStore()
+            historyStores.append(jellyfin.makeHistoryStore())
         }
+        serverHistoryStores = historyStores
         history.activate(
-            store: historyStore,
+            stores: historyStores,
             database: database,
             deviceID: Self.continuityDeviceID(from: clientIdentifier),
             deviceName: Self.localDeviceName
         )
-        Task { @MainActor in await self.history.syncIfDue() }
+        Task { @MainActor in
+            await self.configureRelayHistoryIfNeeded()
+            await self.history.syncIfDue()
+        }
         Task { @MainActor in
             await self.continuity.reconcile(
                 isPlayingLocally: self.playback.snapshot.status == .playing
@@ -1801,7 +1811,48 @@ public final class AppEnvironment: ObservableObject {
     /// Called on the same foreground hook as continuity, but rate-limited inside
     /// the coordinator: a resume point goes stale in seconds, a play does not.
     public func syncHistoryIfDue() {
-        Task { @MainActor in await self.history.syncIfDue() }
+        Task { @MainActor in
+            await self.configureRelayHistoryIfNeeded()
+            await self.history.syncIfDue()
+        }
+    }
+
+    /// Provision or renew the universal relay and add it alongside any
+    /// server-specific availability path.
+    ///
+    /// Failures degrade to local/Jellyfin history exactly as before. Playback,
+    /// setup, and the local durable log never wait on first-party infrastructure.
+    private func configureRelayHistoryIfNeeded() async {
+        guard !isConfiguringRelayHistory else { return }
+        guard UserDefaults.standard.object(
+            forKey: RelayBootstrapper.enabledKey) as? Bool ?? true else {
+            history.setStores(serverHistoryStores)
+            relayHistoryChannelID = nil
+            relayHistoryExpiresAtMS = nil
+            return
+        }
+        guard let circle = try? CircleStore.live.load() else { return }
+        if relayHistoryChannelID == circle.channelId,
+           let expiry = relayHistoryExpiresAtMS,
+           !RelayBootstrapper.expiresSoon(expiry) {
+            return
+        }
+
+        isConfiguringRelayHistory = true
+        defer { isConfiguringRelayHistory = false }
+        do {
+            let configured = try await RelayBootstrapper.historyStore(
+                circle: circle,
+                circleStore: .live,
+                localDeviceID: Self.continuityDeviceID(
+                    from: clientIdentifier))
+            history.setStores(serverHistoryStores + [configured.store])
+            relayHistoryChannelID = circle.channelId
+            relayHistoryExpiresAtMS = configured.expiresAtMS
+        } catch {
+            // Background availability only. The local log remains authoritative
+            // and the next foreground/scheduled pass tries again.
+        }
     }
 
     /// Flush any pending checkpoint — the app may not run again.

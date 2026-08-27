@@ -9,6 +9,7 @@ import SwiftUI
 struct PairingView: View {
     @StateObject private var controller = PairingController()
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(RelayBootstrapper.enabledKey) private var deviceSyncEnabled = true
 
     var body: some View {
         Form {
@@ -51,6 +52,9 @@ struct PairingView: View {
             }
         }
         .onDisappear { controller.cancel() }
+        .onChange(of: deviceSyncEnabled) { _, _ in
+            SharedEnvironment.shared.syncHistoryIfDue()
+        }
     }
 
     // MARK: - Stages
@@ -61,7 +65,7 @@ struct PairingView: View {
                 // The answer to "how do I know it worked". Saying "you are in a
                 // circle" while naming nothing in it is a claim with nothing
                 // behind it.
-                ForEach(controller.members, id: \.name) { member in
+                ForEach(controller.members, id: \.id) { member in
                     HStack {
                         Label(member.name, mozz: member.isSelf ? "iphone" : "checkmark.seal.fill")
                         Spacer()
@@ -110,10 +114,22 @@ struct PairingView: View {
         } footer: {
             Text(controller.isPaired
                  ? "Use this to add another device to your circle."
-                 : "Use this on the device that already has your music. Pairing this way creates your circle.")
+                 : "Use this on the device that already has your music. Scanning this way creates your circle.")
         }
 
         if controller.isPaired {
+            Section {
+                Toggle(
+                    "Sync between your devices",
+                    isOn: $deviceSyncEnabled)
+            } footer: {
+                Text(
+                    deviceSyncEnabled
+                    ? "Encrypted before it leaves this device; the relay cannot read it."
+                    : "Off: devices exchange updates only when another supported local path is available."
+                )
+            }
+
             Section {
                 Button(role: .destructive) {
                     controller.leaveCircle()
