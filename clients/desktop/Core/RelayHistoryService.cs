@@ -11,10 +11,26 @@ public sealed record RelayHistorySyncResult(
 
 public sealed record RelaySyncOutcome(
     int ImportedHistoryEvents,
-    int ImportedServers);
+    int ImportedServers,
+    int ImportedCatalogTracks);
+
+public sealed record RelayCatalogCounts(
+    int Artists,
+    int Albums,
+    int Tracks,
+    int Playlists,
+    int PlaylistItems);
+
+public sealed record RelayCatalogSyncResult(
+    string Status,
+    RelayCatalogCounts Counts,
+    bool Published,
+    string RelayKey,
+    long ExpiresAtMS);
 
 /// <summary>
-/// Schedules one universal history exchange through the shared Swift core.
+/// Schedules universal history, server, and catalog exchange through the shared
+/// Swift core.
 /// </summary>
 /// <remarks>
 /// The desktop owns only cadence and secure persistence. B2 authorization,
@@ -29,6 +45,9 @@ public sealed class RelayHistoryService
     private readonly MozzCore _core;
     private readonly string _deviceID;
     private readonly MozzServer _server;
+
+    public event Action? CatalogChanged;
+    public event Action<Exception>? BackgroundSyncFailed;
 
     public RelayHistoryService(
         MozzCore core,
@@ -78,24 +97,25 @@ public sealed class RelayHistoryService
             relayEndpoint = DefaultEndpoint,
         }, token).ConfigureAwait(false);
         var importedServerCount = 0;
+        var importedCatalogTracks = 0;
+        var addedIDs = new HashSet<string>(StringComparer.Ordinal);
+        var preparedAccounts = new Dictionary<string, ServerAccount>(
+            StringComparer.Ordinal);
+        var accountsToReconcile = new Dictionary<string, ServerAccount>(
+            StringComparer.Ordinal);
         if (serverResult is not null)
         {
             var imported = _server.ImportSyncedServers(
                 serverResult.Servers);
             importedServerCount = imported.Added.Count;
-            var addedIDs = imported.Added
+            addedIDs = imported.Added
                 .Select(account => account.ServerId)
                 .ToHashSet(StringComparer.Ordinal);
             foreach (var account in imported.Changed)
             {
                 var prepared = await _server.AttachForSyncAsync(
                     account, token).ConfigureAwait(false);
-                if (addedIDs.Contains(account.ServerId))
-                {
-                    await _server.SyncAsync(
-                        prepared.ServerId,
-                        token: token).ConfigureAwait(false);
-                }
+                preparedAccounts[account.ServerId] = prepared;
             }
             if (!string.Equals(
                     circle.RelayKey,
@@ -106,10 +126,84 @@ public sealed class RelayHistoryService
                 {
                     RelayKey = serverResult.RelayKey,
                 });
+                circle = circle with { RelayKey = serverResult.RelayKey };
+            }
+
+            foreach (var account in _server.SavedAccounts())
+            {
+                var prepared = preparedAccounts.GetValueOrDefault(
+                    account.ServerId, account);
+                try
+                {
+                    var catalogResult = await _core.CallAsync<RelayCatalogSyncResult>(
+                        new
+                        {
+                            cmd = "relaySyncCatalog",
+                            circle,
+                            deviceId = _deviceID,
+                            serverId = prepared.ServerId,
+                            musicSectionIDs = MozzServer.EffectiveMusicSectionIds(
+                                prepared),
+                            allMusicLibraries = prepared.AllMusicLibraries,
+                            relayEndpoint = DefaultEndpoint,
+                        },
+                        token).ConfigureAwait(false);
+                    if (catalogResult is null) continue;
+                    if (string.Equals(
+                            catalogResult.Status,
+                            "imported",
+                            StringComparison.Ordinal))
+                    {
+                        importedCatalogTracks += catalogResult.Counts.Tracks;
+                        accountsToReconcile[prepared.ServerId] = prepared;
+                    }
+                    if (!string.Equals(
+                            circle.RelayKey,
+                            catalogResult.RelayKey,
+                            StringComparison.Ordinal))
+                    {
+                        PairingService.StoreCircle(circle with
+                        {
+                            RelayKey = catalogResult.RelayKey,
+                        });
+                        circle = circle with
+                        {
+                            RelayKey = catalogResult.RelayKey,
+                        };
+                    }
+                }
+                catch (Exception error)
+                {
+                    BackgroundSyncFailed?.Invoke(error);
+                }
+            }
+
+            foreach (var account in preparedAccounts.Values
+                         .Where(account => addedIDs.Contains(account.ServerId)))
+            {
+                accountsToReconcile[account.ServerId] = account;
+            }
+            foreach (var account in accountsToReconcile.Values)
+            {
+                _ = ReconcileImportedCatalogAsync(account);
             }
         }
         return new RelaySyncOutcome(
             result.Imported,
-            importedServerCount);
+            importedServerCount,
+            importedCatalogTracks);
+    }
+
+    private async Task ReconcileImportedCatalogAsync(ServerAccount account)
+    {
+        try
+        {
+            await _server.SyncAsync(account.ServerId).ConfigureAwait(false);
+            CatalogChanged?.Invoke();
+        }
+        catch (Exception error)
+        {
+            BackgroundSyncFailed?.Invoke(error);
+        }
     }
 }

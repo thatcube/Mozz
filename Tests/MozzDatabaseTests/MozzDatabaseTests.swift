@@ -262,6 +262,29 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertNil(deliberateCheckpoint)
     }
 
+    func testCatalogSyncStoreExposesOnlyACompletedRunTimestamp() async throws {
+        let database = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(database)
+        let store = CatalogSyncStore(database)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        let started = Date(timeIntervalSince1970: 10_000)
+        let finished = started.addingTimeInterval(42)
+
+        _ = try await store.beginRun(
+            serverId: server.id,
+            sourceFingerprint: "source",
+            resumeIfPossible: false,
+            maximumAge: 60,
+            now: started)
+        let duringRun = try await store.completedRunAt(serverId: server.id)
+        XCTAssertNil(duringRun)
+
+        try await store.finishRun(serverId: server.id, now: finished)
+        let completed = try await store.completedRunAt(serverId: server.id)
+        XCTAssertEqual(completed, finished)
+    }
+
     func testUpsertAndReadBack() async throws {
         let db = try MusicDatabase.inMemory()
         let writer = CatalogWriter(db)

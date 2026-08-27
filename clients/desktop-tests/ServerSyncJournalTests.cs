@@ -56,6 +56,30 @@ public sealed class ServerSyncJournalTests
     }
 
     [Fact]
+    public void EverySelectedLibraryEntersTheEncryptedJournal()
+    {
+        var store = new FileSecretStore(
+            System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+        var account = Account() with
+        {
+            MusicSectionIds = ["music-2", "music-1"],
+            AllMusicLibraries = true,
+        };
+
+        ServerSyncJournal.Upsert(
+            store, account, "token", "profile-token",
+            DateTimeOffset.FromUnixTimeMilliseconds(100));
+
+        var libraries = ServerSyncJournal.Load(store).Single().MusicSectionIds;
+        Assert.NotNull(libraries);
+        Assert.Equal(
+            ["music-1", "music-2"],
+            libraries);
+        Assert.True(ServerSyncJournal.Load(store).Single().AllMusicLibraries);
+    }
+
+    [Fact]
     public void LocalClientIdentifierNeverEntersTheRecord()
     {
         var store = new FileSecretStore(

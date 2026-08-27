@@ -269,13 +269,13 @@ let package = Package(
         .target(
             name: "MozzRelay",
             dependencies: [
-                "MozzHistory",
+                "MozzCore", "MozzHistory",
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
 
         // MARK: Catalog sync engine (backend -> DB, off-main)
-        .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase"]),
+        .target(name: "MozzSync", dependencies: ["MozzCore", "MozzDatabase", "MozzRelay"]),
 
         // MARK: Playback (AVFoundation-only)
         //
@@ -418,7 +418,9 @@ let package = Package(
             dependencies: ["MozzSubsonic", "MozzNetworking", "MozzSync", "MozzDatabase"],
             resources: [.copy("Fixtures")]
         ),
-        .testTarget(name: "MozzSyncTests", dependencies: ["MozzSync", "MozzDatabase", "MozzCore"]),
+        .testTarget(
+            name: "MozzSyncTests",
+            dependencies: ["MozzSync", "MozzDatabase", "MozzCore", "MozzRelay"]),
         .testTarget(name: "MozzPlaybackTests", dependencies: ["MozzPlayback"]),
 
         // Linking happens here rather than on the library target, so that

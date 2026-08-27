@@ -70,6 +70,19 @@ final class ServerSyncJournalTests: XCTestCase {
         XCTAssertNil(encoded.range(of: Data("must-not-sync".utf8)))
     }
 
+    func testDefaultAllLibrariesKeepsItsMeaningAndResolvedIDs() {
+        let store = InMemoryCredentialStore()
+        ServerSyncJournal.upsert(
+            session(sections: nil),
+            serverID: "plex:machine-id",
+            in: store,
+            resolvedMusicSectionIDs: ["music-2", "music-1"])
+
+        let record = ServerSyncJournal.records(in: store)[0]
+        XCTAssertEqual(record.musicSectionIDs, ["music-1", "music-2"])
+        XCTAssertEqual(record.allMusicLibraries, true)
+    }
+
     func testSignOutWritesATombstoneThatBeatsAStaleDevice() {
         let store = InMemoryCredentialStore()
         ServerSyncJournal.upsert(

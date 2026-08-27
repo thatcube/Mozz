@@ -243,6 +243,46 @@ public struct CatalogWriter: Sendable {
         }
     }
 
+    /// Append one ordered page while restoring a relay snapshot. Position zero
+    /// starts a replacement; later pages continue it without materializing a
+    /// huge playlist in memory.
+    public func upsertPlaylistItemPage(
+        playlistRemoteId: String,
+        startPosition: Int,
+        trackRemoteIds: [String],
+        serverId: ServerID
+    ) async throws {
+        guard startPosition >= 0 else {
+            throw CatalogSnapshotDatabaseError.invalidPlaylistPosition(
+                startPosition)
+        }
+        try await database.write { db in
+            guard let playlistPK = try Int64.fetchOne(db, sql: """
+                SELECT id FROM playlist WHERE serverId = ? AND remoteId = ?
+                """, arguments: [serverId, playlistRemoteId]) else {
+                return
+            }
+            try db.execute(
+                sql: """
+                    DELETE FROM playlistItem
+                    WHERE playlistId = ? AND position >= ?
+                    """,
+                arguments: [playlistPK, startPosition])
+            let insert = try db.makeStatement(sql: """
+                INSERT INTO playlistItem
+                    (playlistId, trackRemoteId, position)
+                VALUES (?, ?, ?)
+                """)
+            for (offset, remoteID) in trackRemoteIds.enumerated() {
+                try insert.execute(arguments: [
+                    playlistPK,
+                    remoteID,
+                    startPosition + offset,
+                ])
+            }
+        }
+    }
+
     // MARK: Pruning (delete rows a full sync no longer saw)
 
     /// Delete rows for `serverId` whose `remoteId` is not in `keeping`. UPSERT

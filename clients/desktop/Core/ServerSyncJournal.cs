@@ -18,6 +18,7 @@ public sealed record RelayServerRecordDto
     public string? Username { get; init; }
     public string? ServerMachineIdentifier { get; init; }
     [JsonPropertyName("musicSectionIDs")] public string[]? MusicSectionIds { get; init; }
+    public bool? AllMusicLibraries { get; init; }
     public long UpdatedAtMS { get; init; }
     public long? RemovedAtMS { get; init; }
 
@@ -74,8 +75,10 @@ public static class ServerSyncJournal
             UserId = account.UserId,
             Username = account.Username,
             ServerMachineIdentifier = account.ServerMachineIdentifier,
-            MusicSectionIds = account.MusicSectionId is { Length: > 0 } section
-                ? [section] : null,
+            MusicSectionIds = MozzServer.EffectiveMusicSectionIds(account),
+            AllMusicLibraries = account.Kind == BackendKind.Plex
+                ? account.AllMusicLibraries
+                : null,
             UpdatedAtMS = (now ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds(),
         };
         var records = Load(store).ToList();
@@ -154,5 +157,6 @@ public static class ServerSyncJournal
         && first.ServerMachineIdentifier == second.ServerMachineIdentifier
         && (first.MusicSectionIds ?? []).SequenceEqual(
             second.MusicSectionIds ?? [])
+        && first.AllMusicLibraries == second.AllMusicLibraries
         && first.RemovedAtMS == second.RemovedAtMS;
 }

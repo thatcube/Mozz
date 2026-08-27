@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import MozzCore
 
 /// Owns the schema. All schema changes are additive migrations so an installed
 /// catalog survives app updates (we never want to force a full re-sync).
@@ -25,6 +26,7 @@ enum Schema {
         registerV17(&migrator)
         registerV18(&migrator)
         registerV19(&migrator)
+        registerV20(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -663,6 +665,61 @@ enum Schema {
                 t.column("equalizer", .text).notNull()
                 t.column("replayGainMode", .text).notNull()
                 t.column("replayGainPreampDB", .double).notNull()
+            }
+        }
+    }
+
+    /// v20 — records which server account and library selection owns each local
+    /// catalog. Catalog rows are keyed by server id for fast browsing, so this
+    /// marker prevents a profile switch from briefly displaying another Plex
+    /// Home user's library or accepting that user's relay snapshot.
+    private static func registerV20(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v20.catalogScope") { db in
+            try db.create(table: "catalogScope") { t in
+                t.primaryKey("serverId", .text)
+                    .references("server", onDelete: .cascade)
+                t.column("scope", .text).notNull()
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [
+                .sortedKeys,
+                .withoutEscapingSlashes,
+            ]
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, kind, userID, musicSectionID
+                    FROM server
+                    """) {
+                let serverID: String = row["id"]
+                let rawKind: String = row["kind"]
+                guard let kind = BackendKind(rawValue: rawKind) else {
+                    continue
+                }
+                let storedUserID: String? = row["userID"]
+                let accountID: String
+                if let storedUserID, !storedUserID.isEmpty {
+                    accountID = storedUserID
+                } else if kind == .plex {
+                    accountID = "owner"
+                } else {
+                    continue
+                }
+                let sectionID: String? = row["musicSectionID"]
+                let scope = CatalogSnapshotScope(
+                    backend: kind,
+                    serverID: serverID,
+                    accountID: accountID,
+                    libraryIDs: sectionID.map { [$0] } ?? [])
+                let encoded = try String(
+                    decoding: encoder.encode(scope),
+                    as: UTF8.self)
+                try db.execute(
+                    sql: """
+                        INSERT INTO catalogScope (serverId, scope)
+                        VALUES (?, ?)
+                        """,
+                    arguments: [serverID, encoded])
             }
         }
     }
