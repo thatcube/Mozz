@@ -25,8 +25,8 @@ struct PairingView: View {
                 scanning
             case .connecting:
                 waiting("Connecting…")
-            case let .comparing(digits):
-                comparing(digits)
+            case let .comparing(digits, peerName):
+                comparing(digits, peerName: peerName)
             case .joined:
                 joined
             case let .failed(message):
@@ -46,6 +46,8 @@ struct PairingView: View {
             // question with one answer.
             if !controller.isPaired, controller.stage == .idle {
                 controller.join(path: .digits)
+            } else if controller.isPaired, controller.stage == .idle {
+                controller.listenForJoiners()
             }
         }
         .onDisappear { controller.cancel() }
@@ -175,14 +177,14 @@ struct PairingView: View {
         cancelSection
     }
 
-    @ViewBuilder private func comparing(_ digits: String) -> some View {
+    @ViewBuilder private func comparing(_ digits: String, peerName: String?) -> some View {
         Section {
             VStack(spacing: 12) {
                 Text(spaced(digits))
                     .font(.system(.largeTitle, design: .monospaced))
                     .fontWeight(.semibold)
                     .accessibilityLabel(digits.map(String.init).joined(separator: " "))
-                Text("Both devices should be showing this number.")
+                Text("\(peerName ?? "The other device") should be showing this number.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

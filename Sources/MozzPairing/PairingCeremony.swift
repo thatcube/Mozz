@@ -26,7 +26,7 @@ public enum PairingCeremony {
         deviceName: String = "Mozz",
         host: PairingHost? = nil,
         showCode: @Sendable (String, Pairing.QRPayload) -> Void,
-        confirmDigits: @Sendable (String) async -> Bool = { _ in true }
+        confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
     ) async throws -> CircleSecrets {
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         var nonce = Data(count: 16)
@@ -56,7 +56,9 @@ public enum PairingCeremony {
                 case .send:
                     try await send(step, over: link)
                 case let .compareDigits(digits):
-                    guard await confirmDigits(digits) else { throw CeremonyError.declined }
+                    guard await confirmDigits(digits, session.peerName) else {
+                        throw CeremonyError.declined
+                    }
                     for confirmed in try session.confirmDigits() where isSend(confirmed) {
                         try await send(confirmed, over: link)
                     }
@@ -95,7 +97,7 @@ public enum PairingCeremony {
         scanned: Pairing.QRPayload?,
         deviceName: String = "Mozz",
         endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
-        confirmDigits: @Sendable (String) async -> Bool = { _ in true }
+        confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
     ) async throws {
         try await admit(try store.loadOrCreate(), path: path, scanned: scanned,
                         deviceName: deviceName, store: store,
@@ -109,7 +111,7 @@ public enum PairingCeremony {
         deviceName: String = "Mozz",
         store: CircleStore? = nil,
         endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
-        confirmDigits: @Sendable (String) async -> Bool = { _ in true }
+        confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
     ) async throws {
         for await endpoint in endpoints {
             let link: PairingLink
@@ -149,7 +151,7 @@ public enum PairingCeremony {
         scanned: Pairing.QRPayload?,
         link: PairingLink,
         deviceName: String = "Mozz",
-        confirmDigits: @Sendable (String) async -> Bool = { _ in true }
+        confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
     ) async throws -> String? {
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         var nonce = Data(count: 16)
@@ -167,7 +169,9 @@ public enum PairingCeremony {
                 case .send:
                     try await send(step, over: link)
                 case let .compareDigits(digits):
-                    guard await confirmDigits(digits) else { throw CeremonyError.declined }
+                    guard await confirmDigits(digits, session.peerName) else {
+                        throw CeremonyError.declined
+                    }
                     for confirmed in try session.confirmDigits() {
                         if case let .sealCircle(transcript, joinerKey) = confirmed {
                             try await seal(circle, to: joinerKey, transcript: transcript,

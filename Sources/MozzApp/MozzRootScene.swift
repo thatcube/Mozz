@@ -54,6 +54,11 @@ public struct MozzRootScene: Scene {
 /// Switches between the restore splash, onboarding, and the main tabbed UI.
 struct RootView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @StateObject private var ambientJoin = AmbientJoinController()
+
+    private var isInSetup: Bool {
+        env.isSettingUp || env.active == nil
+    }
 
     var body: some View {
         Group {
@@ -74,6 +79,33 @@ struct RootView: View {
         .animation(.default, value: env.active == nil)
         .animation(.default, value: env.isRestoring)
         .animation(.default, value: env.isSettingUp)
+        .onAppear {
+            ambientJoin.update(enabled: isInSetup)
+        }
+        .onChange(of: isInSetup) { _, enabled in
+            ambientJoin.update(enabled: enabled)
+        }
+        .alert(
+            "Add this device to your circle?",
+            isPresented: Binding(
+                get: { ambientJoin.request != nil },
+                // The buttons below own the answer. SwiftUI is allowed to set
+                // presentation false before invoking a button action; treating
+                // that setter as "No" races the explicit Add tap and can make
+                // acceptance lose nondeterministically.
+                set: { _ in }
+            ),
+            presenting: ambientJoin.request
+        ) { _ in
+            Button("Add Device") { ambientJoin.answer(true) }
+            Button("Not Now", role: .cancel) { ambientJoin.answer(false) }
+        } message: { request in
+            Text(
+                "\(request.peerName) is asking to add this device.\n\n" +
+                "Confirm \(request.spacedDigits) appears there too. Adding shares " +
+                "your media servers, listening history, and library across the circle."
+            )
+        }
         .onOpenURL { url in
             env.handle(url: url)
         }

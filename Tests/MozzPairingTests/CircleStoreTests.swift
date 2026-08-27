@@ -81,6 +81,31 @@ final class CircleStoreTests: XCTestCase {
         XCTAssertNil(try plain.value(forKey: CircleStore.Key.rest))
     }
 
+    func testTheRosterSurvivesAndIdentifiesThisDevice() throws {
+        let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
+        try store.remember(CircleMember(
+            name: "Brandon's iPhone",
+            joinedAt: Date(timeIntervalSince1970: 100),
+            isSelf: true))
+        try store.remember(CircleMember(
+            name: "Gaming PC",
+            joinedAt: Date(timeIntervalSince1970: 200)))
+
+        let members = try store.members()
+        XCTAssertEqual(members.map(\.name), ["Gaming PC", "Brandon's iPhone"])
+        XCTAssertEqual(members.filter(\.isSelf).map(\.name), ["Brandon's iPhone"])
+    }
+
+    func testRememberingADeviceUpdatesInsteadOfDuplicatingIt() throws {
+        let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
+        try store.remember(CircleMember(name: "Gaming PC", joinedAt: .distantPast))
+        try store.remember(CircleMember(name: "Gaming PC", joinedAt: .distantFuture))
+
+        let members = try store.members()
+        XCTAssertEqual(members.count, 1)
+        XCTAssertEqual(members[0].joinedAt, .distantFuture)
+    }
+
     func testALoneDeviceFormsACircleWhenItNeedsOne() throws {
         let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
         XCTAssertNil(try store.load(), "nothing yet")

@@ -59,7 +59,7 @@ final class PairingCeremonyFlowTests: XCTestCase {
         try await PairingCeremony.runMember(circle, path: path,
                                             scanned: path == .qr ? scanned : nil,
                                             link: link,
-                                            confirmDigits: { _ in memberConfirms })
+                                            confirmDigits: { _, _ in memberConfirms })
 
         let result = try await joined
         // The circle must be on disk, not merely returned. A caller that forgot
@@ -95,18 +95,29 @@ final class PairingCeremonyFlowTests: XCTestCase {
             into: store,
             host: host,
             showCode: { _, payload in Task { await box.put(payload) } },
-            confirmDigits: { digits in await seen.add(digits); return true })
+            confirmDigits: { digits, peerName in
+                await seen.add(digits, peerName: peerName)
+                return true
+            })
 
         _ = await box.take()
         let link = try await PairingLink.connect(to: endpoint)
         try await PairingCeremony.runMember(circle, path: .digits, scanned: nil, link: link,
-                                            confirmDigits: { digits in await seen.add(digits); return true })
+                                            deviceName: "Established Mac",
+                                            confirmDigits: { digits, peerName in
+                                                await seen.add(digits, peerName: peerName)
+                                                return true
+                                            })
         _ = try await joined
 
-        let digits = await seen.all
-        XCTAssertEqual(digits.count, 2, "both people should have been shown a number")
-        XCTAssertEqual(digits.first, digits.last, "and it must be the same number")
-        XCTAssertEqual(digits.first?.count, 6)
+        let observations = await seen.all
+        XCTAssertEqual(observations.count, 2, "both people should have been shown a number")
+        XCTAssertEqual(observations.first?.digits, observations.last?.digits,
+                       "and it must be the same number")
+        XCTAssertEqual(observations.first?.digits.count, 6)
+        XCTAssertEqual(Set(observations.compactMap(\.peerName)),
+                       Set(["Established Mac", "Mozz"]),
+                       "each side must name the device on its other screen")
     }
 
     func testSayingTheDigitsDoNotMatchStopsTheCeremony() async throws {
@@ -119,8 +130,15 @@ final class PairingCeremonyFlowTests: XCTestCase {
     }
 
     private actor DigitCollector {
-        private(set) var all: [String] = []
-        func add(_ digits: String) { all.append(digits) }
+        struct Observation {
+            let digits: String
+            let peerName: String?
+        }
+
+        private(set) var all: [Observation] = []
+        func add(_ digits: String, peerName: String?) {
+            all.append(Observation(digits: digits, peerName: peerName))
+        }
     }
 }
 #endif

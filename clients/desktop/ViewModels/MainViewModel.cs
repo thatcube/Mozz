@@ -1061,6 +1061,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (!_settingsCategorySelection.Select(category)) return;
         RaiseSettingsCategoryDerived();
+        if (category == SettingsCategory.Devices)
+        {
+            // Opening Devices is the request to look. The pairing window starts
+            // discovery immediately and only interrupts again if a device is
+            // actually waiting to join.
+            AddDeviceRequested?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void RaiseSettingsCategoryDerived()
