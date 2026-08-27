@@ -9,6 +9,7 @@ import SwiftUI
 struct PairingView: View {
     @StateObject private var controller = PairingController()
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var ambientJoin: AmbientJoinController
     @AppStorage(RelayBootstrapper.enabledKey) private var deviceSyncEnabled = true
 
     var body: some View {
@@ -41,17 +42,25 @@ struct PairingView: View {
             // A circle may have arrived from another Apple device through
             // iCloud Keychain since this object was made.
             controller.refresh()
-            // A device that is not in a circle yet has exactly one thing it
-            // could want here, so it does not need to be asked. Opening the
-            // screen IS the intent; a button that says "start looking" is a
-            // question with one answer.
-            if !controller.isPaired, controller.stage == .idle {
-                controller.join(path: .digits)
-            } else if controller.isPaired, controller.stage == .idle {
+            ambientJoin.setDevicesScreenActive(true)
+            if controller.isPaired, controller.stage == .idle {
                 controller.listenForJoiners()
             }
         }
-        .onDisappear { controller.cancel() }
+        .onDisappear {
+            controller.cancel()
+            ambientJoin.setDevicesScreenActive(false)
+            ambientJoin.setPairingScreenRunsCeremony(false)
+        }
+        .onChange(of: ambientJoin.completedCircleID) { _, circleID in
+            guard circleID != nil else { return }
+            controller.refresh()
+        }
+        .onChange(of: controller.stage) { _, stage in
+            if stage == .joined {
+                ambientJoin.setPairingScreenRunsCeremony(false)
+            }
+        }
         .onChange(of: deviceSyncEnabled) { _, _ in
             SharedEnvironment.shared.syncHistoryIfDue()
         }
@@ -97,7 +106,9 @@ struct PairingView: View {
 
         Section {
             Button {
-                controller.join()
+                beginScreenCeremony {
+                    controller.join()
+                }
             } label: {
                 Label("Show a code instead", mozz: "qrcode")
             }
@@ -107,7 +118,9 @@ struct PairingView: View {
 
         Section {
             Button {
-                controller.beginScanning()
+                beginScreenCeremony {
+                    controller.beginScanning()
+                }
             } label: {
                 Label("Scan a code", mozz: "camera")
             }
@@ -133,6 +146,7 @@ struct PairingView: View {
             Section {
                 Button(role: .destructive) {
                     controller.leaveCircle()
+                    ambientJoin.setDevicesScreenActive(true)
                 } label: {
                     Label("Leave circle", mozz: "person.badge.minus")
                 }
@@ -240,14 +254,14 @@ struct PairingView: View {
             Text(message)
         }
         Section {
-            Button("Try again") { controller.reset() }
+            Button("Try again") { resetToAutomaticJoining() }
         }
     }
 
     @ViewBuilder private var cancelSection: some View {
         Section {
             Button(role: .cancel) {
-                controller.reset()
+                resetToAutomaticJoining()
             } label: {
                 Text("Cancel")
             }
@@ -260,5 +274,18 @@ struct PairingView: View {
         guard digits.count == 6 else { return digits }
         let middle = digits.index(digits.startIndex, offsetBy: 3)
         return "\(digits[digits.startIndex..<middle]) \(digits[middle...])"
+    }
+
+    private func beginScreenCeremony(_ action: () -> Void) {
+        ambientJoin.setPairingScreenRunsCeremony(true)
+        action()
+    }
+
+    private func resetToAutomaticJoining() {
+        controller.reset()
+        ambientJoin.setPairingScreenRunsCeremony(false)
+        if controller.isPaired {
+            controller.listenForJoiners()
+        }
     }
 }

@@ -112,6 +112,12 @@ public enum PairingFrame: Sendable, Equatable {
         switch Tag(rawValue: tag) {
         case .hello:
             let version = try reader.byte(field: "version")
+            // The rest of hello changed in v2 when authenticated device ids were
+            // added. Refuse an old shape before trying to parse it as the current
+            // one, so an update mismatch is not reported as corrupt framing.
+            guard version == Pairing.version else {
+                throw PairingError.unsupportedVersion(version)
+            }
             let publicKey = try reader.take(Size.publicKey, field: "publicKey")
             let hasCommitment = try reader.byte(field: "hasCommitment")
             let commitment: Data?

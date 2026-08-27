@@ -88,7 +88,7 @@ final class PairingWireTests: XCTestCase {
     func testRealPairingFramesSurviveTheWire() throws {
         var wire = PairingWire()
         let sent: [PairingFrame] = [
-            .hello(version: 1, publicKey: payload(0x11, 32),
+            .hello(version: Pairing.version, publicKey: payload(0x11, 32),
                    commitment: payload(0x22, 32), name: "iPhone", deviceID: "phone-id"),
             .peer(publicKey: payload(0x33, 32), nonce: payload(0x44, 16),
                   name: "MacBook", deviceID: "mac-id"),

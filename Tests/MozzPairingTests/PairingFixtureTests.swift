@@ -171,13 +171,25 @@ final class PairingFixtureTests: XCTestCase {
     /// A newer version must be refused clearly rather than misparsed, so an old
     /// build tells the user to update instead of failing strangely.
     func testAFutureVersionIsRefusedByVersion() throws {
-        var body = Data([0x02, Pairing.Role.joiner.rawValue])
+        let futureVersion = Pairing.version + 1
+        var body = Data([futureVersion, Pairing.Role.joiner.rawValue])
         body.append(Data(repeating: 1, count: 32))
         body.append(Data(repeating: 2, count: 16))
         let text = "MOZZ1:" + Pairing.base64URLNoPadding(body)
 
         XCTAssertThrowsError(try Pairing.decodeQR(text)) { error in
-            XCTAssertEqual(error as? PairingError, .unsupportedVersion(0x02))
+            XCTAssertEqual(error as? PairingError, .unsupportedVersion(futureVersion))
+        }
+    }
+
+    func testAV1CodeIsRefusedAsAnUpdateMismatch() throws {
+        var body = Data([0x01, Pairing.Role.joiner.rawValue])
+        body.append(Data(repeating: 1, count: 32))
+        body.append(Data(repeating: 2, count: 16))
+        let text = "MOZZ1:" + Pairing.base64URLNoPadding(body)
+
+        XCTAssertThrowsError(try Pairing.decodeQR(text)) { error in
+            XCTAssertEqual(error as? PairingError, .unsupportedVersion(0x01))
         }
     }
 

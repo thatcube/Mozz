@@ -29,14 +29,36 @@ final class AmbientJoinController: ObservableObject {
 
     private let store: CircleStore
     private var work: Task<Void, Never>?
+    private var workGeneration: UUID?
     private var awaitingAnswer: CheckedContinuation<Bool, Never>?
+    private var setupActive = false
+    private var devicesScreenActive = false
+    private var pairingScreenRunsCeremony = false
 
     init(store: CircleStore = .live) {
         self.store = store
     }
 
-    func update(enabled: Bool) {
-        if enabled {
+    func setSetupActive(_ active: Bool) {
+        setupActive = active
+        reconcileListener()
+    }
+
+    func setDevicesScreenActive(_ active: Bool) {
+        devicesScreenActive = active
+        reconcileListener()
+    }
+
+    /// QR display and scanning use `PairingController`, but automatic digit
+    /// joining always stays here. Suspend this listener while the screen runs an
+    /// explicit ceremony so there is never a second advertised endpoint.
+    func setPairingScreenRunsCeremony(_ active: Bool) {
+        pairingScreenRunsCeremony = active
+        reconcileListener()
+    }
+
+    private func reconcileListener() {
+        if (setupActive || devicesScreenActive) && !pairingScreenRunsCeremony {
             startIfNeeded()
         } else {
             stop()
@@ -46,6 +68,9 @@ final class AmbientJoinController: ObservableObject {
     private func startIfNeeded() {
         guard work == nil, (try? store.load()) == nil else { return }
         let store = self.store
+        let generation = UUID()
+        workGeneration = generation
+        completedCircleID = nil
 
         work = Task { [weak self] in
             guard let self else { return }
@@ -84,19 +109,25 @@ final class AmbientJoinController: ObservableObject {
                 // Whether it arrived through iCloud or a ceremony, setup now
                 // has a circle and this device no longer advertises.
                 _ = circle
-                completedCircleID = circle.channelId
-                request = nil
-                work = nil
+                finish(generation, joined: circle)
             } catch is CancellationError {
-                request = nil
-                work = nil
+                finish(generation)
             } catch {
                 // Setup must remain usable if discovery fails. The Devices
                 // screen exposes the same path and can report a detailed error.
-                request = nil
-                work = nil
+                finish(generation)
             }
         }
+    }
+
+    private func finish(_ generation: UUID, joined circle: CircleSecrets? = nil) {
+        guard workGeneration == generation else { return }
+        if let circle {
+            completedCircleID = circle.channelId
+        }
+        request = nil
+        work = nil
+        workGeneration = nil
     }
 
     private func ask(_ digits: String, peerName: String?) async -> Bool {
@@ -114,6 +145,7 @@ final class AmbientJoinController: ObservableObject {
     func stop() {
         work?.cancel()
         work = nil
+        workGeneration = nil
         request = nil
         awaitingAnswer?.resume(returning: false)
         awaitingAnswer = nil

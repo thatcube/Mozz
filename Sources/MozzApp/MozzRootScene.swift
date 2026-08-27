@@ -77,14 +77,15 @@ struct RootView: View {
                 MainTabsView()
             }
         }
+        .environmentObject(ambientJoin)
         .animation(.default, value: env.active == nil)
         .animation(.default, value: env.isRestoring)
         .animation(.default, value: env.isSettingUp)
         .onAppear {
-            ambientJoin.update(enabled: isInSetup)
+            ambientJoin.setSetupActive(isInSetup)
         }
         .onChange(of: isInSetup) { _, enabled in
-            ambientJoin.update(enabled: enabled)
+            ambientJoin.setSetupActive(enabled)
         }
         .onChange(of: ambientJoin.completedCircleID) { _, circleID in
             guard circleID != nil else { return }

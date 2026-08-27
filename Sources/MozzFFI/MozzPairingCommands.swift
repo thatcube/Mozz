@@ -146,8 +146,23 @@ func dispatchPairingCommand(
                               error.errorDescription ?? "pairing failed")
     } catch let error as PairingSessionError {
         return sessionFailure(request.id, request.cmd, describe(error))
+    } catch let error as PairingError {
+        return sessionFailure(request.id, request.cmd, describe(error))
     } catch {
         return sessionFailure(request.id, request.cmd, "\(error)")
+    }
+}
+
+private func describe(_ error: PairingError) -> String {
+    switch error {
+    case let .unsupportedVersion(version):
+        return "That device is running pairing version \(version). Update Mozz on both devices and try again."
+    case .notAMozzCode:
+        return "That is not a Mozz pairing code."
+    case let .malformed(reason):
+        return "The pairing message is malformed: \(reason)"
+    case let .wrongLength(field, expected, got):
+        return "The pairing message has the wrong \(field) length (expected \(expected), got \(got))."
     }
 }
 
@@ -158,7 +173,7 @@ private func describe(_ error: PairingSessionError) -> String {
     case .commitmentMismatch:
         return "The other device answered incorrectly. Start again."
     case let .unsupportedVersion(version):
-        return "That device is running a different version of pairing (\(version))."
+        return "That device is running pairing version \(version). Update Mozz on both devices and try again."
     case let .pathMismatch(reason):
         return reason
     case let .outOfOrder(expected, got):

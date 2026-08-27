@@ -10,9 +10,9 @@ final class PairingFrameTests: XCTestCase {
 
     func testEveryFrameSurvivesARoundTrip() throws {
         let cases: [PairingFrame] = [
-            .hello(version: 1, publicKey: data(0x11, 32), commitment: nil,
+            .hello(version: Pairing.version, publicKey: data(0x11, 32), commitment: nil,
                    name: "iPhone", deviceID: "phone-id"),
-            .hello(version: 1, publicKey: data(0x11, 32), commitment: data(0x22, 32),
+            .hello(version: Pairing.version, publicKey: data(0x11, 32), commitment: data(0x22, 32),
                    name: "iPhone", deviceID: "phone-id"),
             .peer(publicKey: data(0x33, 32), nonce: data(0x44, 16),
                   name: "MacBook", deviceID: "mac-id"),
@@ -48,6 +48,12 @@ final class PairingFrameTests: XCTestCase {
         XCTAssertThrowsError(try PairingFrame.decode(encoded.dropLast()))
     }
 
+    func testALegacyHelloIsRefusedBeforeParsingItsOldShape() {
+        XCTAssertThrowsError(try PairingFrame.decode(Data([0x01, 0x01]))) { error in
+            XCTAssertEqual(error as? PairingError, .unsupportedVersion(0x01))
+        }
+    }
+
     func testAnUnknownTagIsRefused() {
         XCTAssertThrowsError(try PairingFrame.decode(Data([0x7F])))
     }
@@ -73,7 +79,7 @@ final class PairingFrameTests: XCTestCase {
     }
 
     func testTheCommitmentFlagMustBeZeroOrOne() {
-        var encoded = Data([0x01, 0x01])
+        var encoded = Data([0x01, Pairing.version])
         encoded.append(data(0x11, 32))
         encoded.append(0x02)
         encoded.append(0x00)
@@ -82,10 +88,10 @@ final class PairingFrameTests: XCTestCase {
 
     func testHelloWithAndWithoutACommitmentDifferInLength() {
         let bare = PairingFrame.hello(
-            version: 1, publicKey: data(0x11, 32), commitment: nil,
+            version: Pairing.version, publicKey: data(0x11, 32), commitment: nil,
             name: "iPhone", deviceID: "phone-id").encoded()
         let full = PairingFrame.hello(
-            version: 1, publicKey: data(0x11, 32), commitment: data(0x22, 32),
+            version: Pairing.version, publicKey: data(0x11, 32), commitment: data(0x22, 32),
             name: "iPhone", deviceID: "phone-id").encoded()
         // Previous fixed fields, then length-prefixed name and id.
         XCTAssertEqual(bare.count, 35 + 7 + 9)
