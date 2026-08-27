@@ -34,7 +34,20 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Devices known to be in this circle.</summary>
     public ObservableCollection<Mozz.Desktop.Core.CircleMemberRow> CircleMembers { get; } = new();
 
-    public bool IsInCircle => CircleMembers.Count > 0;
+    /// <summary>
+    /// Membership comes from possessing the circle keys, not from having names
+    /// in a local roster. Older circles legitimately have no roster yet.
+    /// </summary>
+    public bool IsInCircle => PairingService.HasCircle;
+
+    public string CircleSummary => IsInCircle
+        ? CircleMembers.Count switch
+        {
+            0 => "This device is in a circle. Device names will appear as they join or sync.",
+            1 => "1 known device in this circle.",
+            _ => $"{CircleMembers.Count} known devices in this circle.",
+        }
+        : "This device is not in a circle yet. Add another device and they will share listening, library and servers.";
 
     /// <summary>
     /// Discovery and ceremony state rendered directly by Settings → Devices.
@@ -52,6 +65,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             CircleMembers.Add(member);
         }
         OnPropertyChanged(nameof(IsInCircle));
+        OnPropertyChanged(nameof(CircleSummary));
     }
     private readonly AppPreferences _preferences = new();
     private readonly ISecretStore _secrets;

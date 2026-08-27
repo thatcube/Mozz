@@ -2197,9 +2197,9 @@
                                     <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
                                         <StackPanel Spacing="12">
                                             <TextBlock Text="Your circle" Classes="sectionTitle" />
-                                            <TextBlock Text="This device is not in a circle yet. Add another device and they will share listening, library and servers."
-                                                       Classes="secondary" TextWrapping="Wrap"
-                                                       IsVisible="{Binding !IsInCircle}" />
+                                            <TextBlock Text="{Binding CircleSummary}"
+                                                       Classes="secondary"
+                                                       TextWrapping="Wrap" />
                                             <ItemsControl ItemsSource="{Binding CircleMembers}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
