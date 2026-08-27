@@ -151,8 +151,8 @@ two or three readers and is rewritten several times a day.
 ### 5. Payloads are typed and split by change rate
 
 The relay carries whatever a device needs to hand to its peers — history batches,
-yearly rollups, server credentials, warm-start catalog snapshots, and later
-settings, EQ presets, and ratings. Each is a **separate object**, because they
+yearly rollups, server credentials, warm-start catalog snapshots, playback
+settings, and later ratings. Each is a **separate object**, because they
 change at wildly different rates: history moves whenever music plays, a catalog
 snapshot only after a complete mirror, and EQ presets essentially never. One
 combined blob would rewrite everything on every listen.

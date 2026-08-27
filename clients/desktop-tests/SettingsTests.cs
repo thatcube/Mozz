@@ -42,11 +42,19 @@ public sealed class SettingsTests : IDisposable
         var prefs = new AppPreferences(Path.Combine(_root, "preferences.json"));
         prefs.SetBool(AppPreferences.NormalizationEnabledKey, false);
         prefs.SetString(AppPreferences.DarkStyleKey, "black");
+        prefs.SetString(AppPreferences.ReplayGainModeKey, "album");
+        prefs.SetDouble(AppPreferences.ReplayGainPreampKey, 1.5);
         prefs.SetEqualizerProfile(new DesktopEqualizerProfile([99, 1], -99));
 
         var reloaded = new AppPreferences(Path.Combine(_root, "preferences.json"));
         Assert.False(reloaded.GetBool(AppPreferences.NormalizationEnabledKey, true));
         Assert.Equal("black", reloaded.GetString(AppPreferences.DarkStyleKey, "dim"));
+        Assert.Equal(
+            "album",
+            reloaded.GetString(AppPreferences.ReplayGainModeKey, "track"));
+        Assert.Equal(
+            1.5,
+            reloaded.GetDouble(AppPreferences.ReplayGainPreampKey, 0));
         Assert.Equal(12, reloaded.GetEqualizerProfile().Gains[0]);
         Assert.Equal(-12, reloaded.GetEqualizerProfile().PreampDB);
         Assert.Equal(10, reloaded.GetEqualizerProfile().Gains.Count);

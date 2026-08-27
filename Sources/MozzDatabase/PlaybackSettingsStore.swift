@@ -2,6 +2,16 @@ import Foundation
 import GRDB
 import MozzCore
 
+public struct StoredPlaybackSettings: Codable, Sendable, Equatable {
+    public var settings: PlaybackSettings
+    public var updatedAtMS: Int64
+
+    public init(settings: PlaybackSettings, updatedAtMS: Int64) {
+        self.settings = settings
+        self.updatedAtMS = updatedAtMS
+    }
+}
+
 /// The core's home for playback settings — the graphic EQ and loudness
 /// normalization. A single row (`id = 1`) holds the one shared definition that
 /// every shell reads and writes through the command Facade, replacing the
@@ -19,18 +29,30 @@ public struct PlaybackSettingsStore: Sendable {
     /// been persisted yet. A corrupt EQ blob degrades to the default curve via
     /// ``EqualizerSettings`` decoding rather than throwing.
     public func load() async throws -> PlaybackSettings {
+        try await loadStored()?.settings ?? .defaults
+    }
+
+    public func loadStored() async throws -> StoredPlaybackSettings? {
         try await database.read { db in
-            guard let record = try PlaybackSettingsRecord.fetchOne(db, key: PlaybackSettingsRecord.singletonID) else {
-                return .defaults
+            try PlaybackSettingsRecord.fetchOne(
+                db,
+                key: PlaybackSettingsRecord.singletonID
+            ).map {
+                StoredPlaybackSettings(
+                    settings: $0.settings,
+                    updatedAtMS: $0.updatedAtMS)
             }
-            return record.settings
         }
     }
 
     /// Persist `settings` (normalized on the way in) and return exactly what was
     /// stored, so a caller sees the clamped/normalized result of its write.
     @discardableResult
-    public func save(_ settings: PlaybackSettings) async throws -> PlaybackSettings {
+    public func save(
+        _ settings: PlaybackSettings,
+        updatedAtMS: Int64 = Int64(
+            Date().timeIntervalSince1970 * 1_000)
+    ) async throws -> PlaybackSettings {
         // Re-construct through the value type's initializer so the persisted row
         // is always the normalized form, regardless of how the caller built it.
         let normalized = PlaybackSettings(equalizerEnabled: settings.equalizerEnabled,
@@ -38,7 +60,10 @@ public struct PlaybackSettingsStore: Sendable {
                                           replayGainMode: settings.replayGainMode,
                                           replayGainPreampDB: settings.replayGainPreampDB)
         try await database.write { db in
-            try PlaybackSettingsRecord(normalized).save(db)
+            try PlaybackSettingsRecord(
+                normalized,
+                updatedAtMS: max(0, updatedAtMS)
+            ).save(db)
         }
         return normalized
     }
@@ -56,13 +81,15 @@ struct PlaybackSettingsRecord: Codable, FetchableRecord, PersistableRecord {
     var equalizer: String
     var replayGainMode: String
     var replayGainPreampDB: Double
+    var updatedAtMS: Int64
 
-    init(_ settings: PlaybackSettings) {
+    init(_ settings: PlaybackSettings, updatedAtMS: Int64) {
         self.id = Self.singletonID
         self.equalizerEnabled = settings.equalizerEnabled
         self.equalizer = Self.encodeEqualizer(settings.equalizer)
         self.replayGainMode = settings.replayGainMode.rawValue
         self.replayGainPreampDB = settings.replayGainPreampDB
+        self.updatedAtMS = updatedAtMS
     }
 
     /// Rebuild the value type, decoding through its validating initializers so a

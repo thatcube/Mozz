@@ -30,6 +30,9 @@ import Intents
 /// Failures while activating the screenshot fixture. Its own category so a
 /// headless capture run can be diagnosed from the simulator log.
 private let screenshotLog = Logger(subsystem: "com.thatcube.Mozz", category: "screenshots")
+private let playbackSettingsLog = Logger(
+    subsystem: "com.thatcube.Mozz",
+    category: "playback-settings")
 
 /// A resolver whose delegate can be swapped at runtime. The ``PlaybackEngine``
 /// is created once at launch, but the active server (and therefore the offline/
@@ -124,8 +127,11 @@ public final class AppEnvironment: ObservableObject {
     public static let equalizerEnabledKey = "mozz.equalizerEnabled"
     /// UserDefaults key for the persisted EQ curve (JSON `EqualizerSettings`).
     public static let equalizerSettingsKey = "mozz.equalizerSettings"
+    public static let replayGainModeKey = "mozz.replayGainMode"
+    public static let replayGainPreampKey = "mozz.replayGainPreampDB"
     /// Debounces EQ persistence so a slider drag doesn't hammer UserDefaults.
     private var equalizerPersistTask: Task<Void, Never>?
+    private var replayGainMode: MozzCore.ReplayGainMode = .track
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -672,6 +678,7 @@ public final class AppEnvironment: ObservableObject {
     public func setEqualizerEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: Self.equalizerEnabledKey)
         playback.setEqualizerEnabled(enabled)
+        persistPlaybackSettings()
     }
 
     /// Apply a new EQ curve immediately (live, glitch-free while playing) and
@@ -679,13 +686,21 @@ public final class AppEnvironment: ObservableObject {
     /// UserDefaults on every frame.
     public func updateEqualizerSettings(_ settings: EqualizerSettings) {
         playback.updateEqualizer(settings)
-        equalizerPersistTask?.cancel()
-        equalizerPersistTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled, let self else { return }
-            if let data = try? JSONEncoder().encode(settings) {
-                UserDefaults.standard.set(data, forKey: Self.equalizerSettingsKey)
-            }
+        persistPlaybackSettings()
+    }
+
+    public func setNormalizationEnabled(_ enabled: Bool) {
+        let changed = playback.normalizationEnabled != enabled
+        UserDefaults.standard.set(
+            enabled,
+            forKey: "mozz.normalizationEnabled")
+        playback.normalizationEnabled = enabled
+        if changed {
+            replayGainMode = enabled ? .track : .off
+            UserDefaults.standard.set(
+                replayGainMode.rawValue,
+                forKey: Self.replayGainModeKey)
+            persistPlaybackSettings()
         }
     }
 
@@ -703,6 +718,91 @@ public final class AppEnvironment: ObservableObject {
         // Default OFF when unset — EQ is opt-in and playback is byte-identical
         // to before EQ existed until the user turns it on.
         playback.equalizer.isEnabled = UserDefaults.standard.bool(forKey: Self.equalizerEnabledKey)
+        let normalization = UserDefaults.standard.object(
+            forKey: "mozz.normalizationEnabled") as? Bool ?? true
+        playback.normalizationEnabled = normalization
+        let storedMode = MozzCore.ReplayGainMode.parse(
+            UserDefaults.standard.string(
+                forKey: Self.replayGainModeKey))
+        replayGainMode = normalization
+            ? (storedMode == .off ? .track : storedMode)
+            : .off
+        playback.normalizationPreampDB = UserDefaults.standard.object(
+            forKey: Self.replayGainPreampKey) as? Double ?? 0
+    }
+
+    private var currentPlaybackSettings: PlaybackSettings {
+        PlaybackSettings(
+            equalizerEnabled: playback.equalizerEnabled,
+            equalizer: playback.equalizerSettings,
+            replayGainMode: replayGainMode,
+            replayGainPreampDB: playback.normalizationPreampDB)
+    }
+
+    private func persistPlaybackSettings() {
+        equalizerPersistTask?.cancel()
+        equalizerPersistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, let self else { return }
+            UserDefaults.standard.set(
+                self.playback.equalizerEnabled,
+                forKey: Self.equalizerEnabledKey)
+            UserDefaults.standard.set(
+                self.playback.normalizationEnabled,
+                forKey: "mozz.normalizationEnabled")
+            UserDefaults.standard.set(
+                self.replayGainMode.rawValue,
+                forKey: Self.replayGainModeKey)
+            UserDefaults.standard.set(
+                self.playback.normalizationPreampDB,
+                forKey: Self.replayGainPreampKey)
+            if let data = try? JSONEncoder().encode(
+                self.playback.equalizerSettings) {
+                UserDefaults.standard.set(
+                    data,
+                    forKey: Self.equalizerSettingsKey)
+            }
+            await self.savePlaybackSettings()
+        }
+    }
+
+    private func savePlaybackSettings() async {
+        do {
+            _ = try await PlaybackSettingsStore(database).save(
+                currentPlaybackSettings)
+            syncHistoryIfDue(forceRelayState: true)
+        } catch {
+            // Playback already reflects the edit. A later edit or relay pass
+            // retries persistence without interrupting the listener.
+            playbackSettingsLog.error(
+                "could not persist playback settings: \(error.localizedDescription)")
+        }
+    }
+
+    private func applySyncedPlaybackSettings(_ settings: PlaybackSettings) {
+        replayGainMode = settings.replayGainMode
+        let normalization = settings.replayGainMode != .off
+        playback.normalizationEnabled = normalization
+        playback.normalizationPreampDB = settings.replayGainPreampDB
+        playback.setEqualizerEnabled(settings.equalizerEnabled)
+        playback.updateEqualizer(settings.equalizer)
+        UserDefaults.standard.set(
+            normalization,
+            forKey: "mozz.normalizationEnabled")
+        UserDefaults.standard.set(
+            settings.equalizerEnabled,
+            forKey: Self.equalizerEnabledKey)
+        UserDefaults.standard.set(
+            settings.replayGainMode.rawValue,
+            forKey: Self.replayGainModeKey)
+        UserDefaults.standard.set(
+            settings.replayGainPreampDB,
+            forKey: Self.replayGainPreampKey)
+        if let data = try? JSONEncoder().encode(settings.equalizer) {
+            UserDefaults.standard.set(
+                data,
+                forKey: Self.equalizerSettingsKey)
+        }
     }
 
     public func signOut() {
@@ -1972,6 +2072,16 @@ public final class AppEnvironment: ObservableObject {
             localDeviceID: Self.continuityDeviceID(
                 from: clientIdentifier))
         await syncCatalog(through: relay)
+        let playbackSettings = try? await PlaybackSettingsRelayCoordinator(
+            database: database,
+            relay: relay,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier)
+        ).sync(seed: currentPlaybackSettings)
+        if playbackSettings?.changedLocally == true,
+           let settings = playbackSettings?.stored.settings {
+            applySyncedPlaybackSettings(settings)
+        }
     }
 
     /// Warm an empty database from the newest complete circle snapshot before

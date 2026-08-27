@@ -27,6 +27,7 @@ enum Schema {
         registerV18(&migrator)
         registerV19(&migrator)
         registerV20(&migrator)
+        registerV21(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -720,6 +721,19 @@ enum Schema {
                         VALUES (?, ?)
                         """,
                     arguments: [serverID, encoded])
+            }
+        }
+    }
+
+    /// v21 — mutable playback settings need a mutation timestamp so devices can
+    /// converge without treating every launch as a new edit.
+    private static func registerV21(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v21.playbackSettingsTimestamp") { db in
+            try db.alter(table: "playback_settings") { t in
+                t.add(
+                    column: "updatedAtMS",
+                    .integer
+                ).notNull().defaults(to: 0)
             }
         }
     }

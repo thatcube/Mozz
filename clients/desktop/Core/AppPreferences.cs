@@ -11,6 +11,8 @@ public sealed class AppPreferences
     public const string EnrichmentEnabledKey = "mozz.enrichmentEnabled";
     public const string EqualizerEnabledKey = "mozz.equalizerEnabled";
     public const string EqualizerSettingsKey = "mozz.equalizerSettings";
+    public const string ReplayGainModeKey = "mozz.replayGainMode";
+    public const string ReplayGainPreampKey = "mozz.replayGainPreampDB";
     public const string LyricsOnlineLookupKey = "mozz.lyricsOnlineLookup";
     public const string LyricsOfflineCaptureKey = "mozz.lyricsOfflineCapture";
     public const string AppearanceKey = MozzTheme.AppearanceStorageKey;
@@ -53,6 +55,20 @@ public sealed class AppPreferences
     }
 
     public void SetString(string key, string value) => Set(key, value);
+
+    public double GetDouble(string key, double defaultValue)
+    {
+        lock (_gate)
+        {
+            return _values.TryGetValue(key, out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out var number)
+                    ? number
+                    : defaultValue;
+        }
+    }
+
+    public void SetDouble(string key, double value) => Set(key, value);
 
     public string GetOrCreateDeviceId()
     {

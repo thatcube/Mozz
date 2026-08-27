@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json.Serialization;
 
 namespace Mozz.Desktop.Core;
 
@@ -12,7 +13,25 @@ public sealed record RelayHistorySyncResult(
 public sealed record RelaySyncOutcome(
     int ImportedHistoryEvents,
     int ImportedServers,
-    int ImportedCatalogTracks);
+    int ImportedCatalogTracks,
+    RelayPlaybackSettingsDto? PlaybackSettings,
+    bool PlaybackSettingsChanged);
+
+public sealed record RelayEqualizerSettingsDto(
+    [property: JsonPropertyName("gains")] double[] Gains,
+    [property: JsonPropertyName("preampDB")] double PreampDB);
+
+public sealed record RelayPlaybackSettingsDto(
+    [property: JsonPropertyName("equalizerEnabled")] bool EqualizerEnabled,
+    [property: JsonPropertyName("equalizer")] RelayEqualizerSettingsDto Equalizer,
+    [property: JsonPropertyName("replayGainMode")] string ReplayGainMode,
+    [property: JsonPropertyName("replayGainPreampDB")] double ReplayGainPreampDB);
+
+public sealed record RelayPlaybackSettingsSyncResult(
+    RelayPlaybackSettingsDto Settings,
+    bool Changed,
+    string RelayKey,
+    long ExpiresAtMS);
 
 public sealed record RelayCatalogCounts(
     int Artists,
@@ -60,6 +79,7 @@ public sealed class RelayHistoryService
     }
 
     public async Task<RelaySyncOutcome?> SyncAsync(
+        RelayPlaybackSettingsDto playbackSettings,
         CancellationToken token = default)
     {
         var circle = PairingService.LoadCircle();
@@ -85,6 +105,40 @@ public sealed class RelayHistoryService
                 RelayKey = result.RelayKey,
             });
             circle = circle with { RelayKey = result.RelayKey };
+        }
+
+        RelayPlaybackSettingsSyncResult? playbackResult = null;
+        try
+        {
+            playbackResult = await _core.CallAsync<RelayPlaybackSettingsSyncResult>(
+                new
+                {
+                    cmd = "relaySyncPlaybackSettings",
+                    circle,
+                    deviceId = _deviceID,
+                    playbackSettings,
+                    relayEndpoint = DefaultEndpoint,
+                },
+                token).ConfigureAwait(false);
+            if (playbackResult is not null
+                && !string.Equals(
+                    circle.RelayKey,
+                    playbackResult.RelayKey,
+                    StringComparison.Ordinal))
+            {
+                PairingService.StoreCircle(circle with
+                {
+                    RelayKey = playbackResult.RelayKey,
+                });
+                circle = circle with
+                {
+                    RelayKey = playbackResult.RelayKey,
+                };
+            }
+        }
+        catch (Exception error)
+        {
+            BackgroundSyncFailed?.Invoke(error);
         }
 
         var localServers = _server.ExportSyncedServers();
@@ -191,7 +245,9 @@ public sealed class RelayHistoryService
         return new RelaySyncOutcome(
             result.Imported,
             importedServerCount,
-            importedCatalogTracks);
+            importedCatalogTracks,
+            playbackResult?.Settings,
+            playbackResult?.Changed ?? false);
     }
 
     private async Task ReconcileImportedCatalogAsync(ServerAccount account)
