@@ -39,6 +39,7 @@ public sealed partial class PairingViewModel : ObservableObject
     [ObservableProperty] private bool _isComparing;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isDone;
+    [ObservableProperty] private bool _isJoiningCircle;
 
     // A code is optional. Without one this uses the digit path, which is the
     // normal way to pair a desktop.
@@ -54,6 +55,12 @@ public sealed partial class PairingViewModel : ObservableObject
         _watching?.Cancel();
         _watching = new CancellationTokenSource();
         var token = _watching.Token;
+
+        if (!PairingService.HasCircle)
+        {
+            StartHosting(token);
+            return;
+        }
 
         _ = Task.Run(async () =>
         {
@@ -84,6 +91,50 @@ public sealed partial class PairingViewModel : ObservableObject
             {
                 await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                     Status = $"Could not look for devices: {ex.Message}");
+            }
+        }, token);
+    }
+
+    /// <summary>
+    /// A fresh desktop is the joiner, regardless of OS. It advertises during
+    /// setup and waits for any established device to open Devices and respond.
+    /// </summary>
+    private void StartHosting(CancellationToken token)
+    {
+        IsJoiningCircle = true;
+        IsBusy = true;
+        Status = $"Waiting for another device to add {CircleRoster.DeviceName}…";
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _pairing.JoinAsync(AskAsync, token).ConfigureAwait(false);
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IsDone = true;
+                    IsBusy = false;
+                    IsJoiningCircle = false;
+                    Status = "Added. This device now shares listening, library and servers with your circle.";
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IsBusy = false;
+                    IsJoiningCircle = false;
+                    Status = "Joining stopped.";
+                });
+            }
+            catch (Exception ex)
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IsBusy = false;
+                    IsJoiningCircle = false;
+                    Status = Explain(ex);
+                });
             }
         }, token);
     }

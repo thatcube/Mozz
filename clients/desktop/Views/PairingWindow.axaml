@@ -17,8 +17,9 @@
                  TextWrapping="Wrap"
                  Opacity="0.75" />
 
-      <!-- Devices found advertising _mozz._tcp -->
-      <StackPanel Spacing="6">
+      <!-- Devices found advertising _mozz._tcp. Hidden when this fresh
+           desktop is itself the device waiting to join. -->
+      <StackPanel Spacing="6" IsVisible="{Binding !IsJoiningCircle}">
         <TextBlock Text="Waiting to join" FontWeight="SemiBold" />
         <ListBox ItemsSource="{Binding Devices}"
                  SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
@@ -41,7 +42,8 @@
            entirely, but the digit path is the normal way to pair a desktop:
            the QR payload is sixty characters of base64 and asking anyone to
            retype it would be absurd. -->
-      <Expander Header="Have a code to paste? (optional)">
+      <Expander Header="Have a code to paste? (optional)"
+                IsVisible="{Binding !IsJoiningCircle}">
         <TextBox Text="{Binding Code}"
                  PlaceholderText="MOZZ1:…"
                  AcceptsReturn="False"
@@ -72,6 +74,7 @@
         <Button Content="Add"
                 Command="{Binding PairCommand}"
                 IsEnabled="{Binding CanPair}"
+                IsVisible="{Binding !IsJoiningCircle}"
                 IsDefault="True" />
         <ProgressBar IsIndeterminate="True"
                      IsVisible="{Binding IsBusy}"

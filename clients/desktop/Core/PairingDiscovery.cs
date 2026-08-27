@@ -93,13 +93,51 @@ public sealed class PairingDiscovery : IDisposable
             .FirstOrDefault();
         if (srv is null) return null;
 
-        var address = message.AdditionalRecords.OfType<ARecord>().Select(a => a.Address)
-            .Concat(message.AdditionalRecords.OfType<AAAARecord>().Select(a => a.Address))
-            .FirstOrDefault();
+        var address = SelectBestAddress(
+            message.AdditionalRecords.OfType<ARecord>().Select(a => a.Address)
+                .Concat(message.AdditionalRecords.OfType<AAAARecord>().Select(a => a.Address)));
         if (address is null) return null;
 
         var label = instanceName.Split('.').FirstOrDefault() ?? "Mozz device";
         return new PairingCandidate(label.Replace("\\032", " "), address, srv.Port);
+    }
+
+    /// <summary>
+    /// Prefer the route that works because the devices share a LAN, not because
+    /// they happen to share a VPN.
+    /// </summary>
+    /// <remarks>
+    /// mDNS answers can contain every interface. On Brandon's Mac the first A
+    /// record was Tailscale's 100.81.x address, so blindly taking the first made
+    /// local pairing depend on both devices running Tailscale. RFC1918 IPv4 and
+    /// link-local IPv6 are the routes most likely to reach a peer that answered
+    /// a multicast query; CGNAT/Tailscale remains a useful fallback.
+    /// </remarks>
+    internal static IPAddress? SelectBestAddress(IEnumerable<IPAddress> addresses) =>
+        addresses
+            .Where(a => !IPAddress.IsLoopback(a))
+            .OrderBy(AddressRank)
+            .FirstOrDefault();
+
+    private static int AddressRank(IPAddress address)
+    {
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            var bytes = address.GetAddressBytes();
+            if (bytes[0] == 10
+                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168))
+            {
+                return 0; // ordinary private LAN
+            }
+            if (bytes[0] == 169 && bytes[1] == 254) return 1; // IPv4 link-local
+            if (bytes[0] == 100 && bytes[1] is >= 64 and <= 127) return 4; // CGNAT / Tailscale
+            return 3;
+        }
+
+        if (address.IsIPv6LinkLocal) return 1;
+        if (address.IsIPv6SiteLocal || address.IsIPv6UniqueLocal) return 2;
+        return 3;
     }
 
     public void Dispose() => _discovery.Dispose();
