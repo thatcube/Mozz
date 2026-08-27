@@ -1932,6 +1932,74 @@
                                                         </StackPanel>
                                                     </Border>
 
+                                                    <Border IsVisible="{Binding Connect.HasPlexHomeUsers}"
+                                                            Background="{DynamicResource Surface}"
+                                                            CornerRadius="10"
+                                                            Padding="15,14">
+                                                        <StackPanel Spacing="11">
+                                                            <TextBlock Text="Who’s listening?"
+                                                                       Classes="primary"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Text="Choose the Plex profile whose history and restrictions Mozz should use."
+                                                                       Classes="secondary"
+                                                                       TextWrapping="Wrap" />
+                                                            <ItemsControl ItemsSource="{Binding Connect.PlexHomeUsers}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Button Classes="tile"
+                                                                                Margin="0,0,0,7"
+                                                                                Command="{Binding $parent[Window].DataContext.Connect.SelectPlexHomeUserCommand}"
+                                                                                CommandParameter="{Binding}">
+                                                                            <Border Background="{DynamicResource SurfaceRaised}"
+                                                                                    CornerRadius="10"
+                                                                                    Padding="12">
+                                                                                <Grid ColumnDefinitions="*,Auto">
+                                                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                                                        <TextBlock Text="{Binding Name}"
+                                                                                                   Classes="primary"
+                                                                                                   FontWeight="SemiBold" />
+                                                                                        <TextBlock Text="Home owner"
+                                                                                                   Classes="secondary"
+                                                                                                   IsVisible="{Binding IsAdmin}" />
+                                                                                        <TextBlock Text="Managed profile"
+                                                                                                   Classes="secondary"
+                                                                                                   IsVisible="{Binding IsRestricted}" />
+                                                                                    </StackPanel>
+                                                                                    <TextBlock Grid.Column="1"
+                                                                                               Text="PIN"
+                                                                                               Classes="secondary"
+                                                                                               IsVisible="{Binding RequiresPIN}"
+                                                                                               VerticalAlignment="Center" />
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </Button>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Border>
+
+                                                    <Border IsVisible="{Binding Connect.NeedsPlexProfilePIN}"
+                                                            Background="{DynamicResource Surface}"
+                                                            CornerRadius="10"
+                                                            Padding="15,14">
+                                                        <StackPanel Spacing="10">
+                                                            <TextBlock Text="Protected Plex profile"
+                                                                       Classes="primary"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBox Text="{Binding Connect.PlexProfilePIN}"
+                                                                     PasswordChar="•"
+                                                                     PlaceholderText="Profile PIN"
+                                                                     MaxLength="16" />
+                                                            <TextBlock Text="The PIN goes directly to Plex and is never stored."
+                                                                       Classes="secondary" />
+                                                            <Button Content="Continue"
+                                                                    Classes="primary"
+                                                                    HorizontalAlignment="Left"
+                                                                    Command="{Binding Connect.ConfirmPlexProfilePINCommand}" />
+                                                        </StackPanel>
+                                                    </Border>
+
                                                     <Button Content="Sign in" Classes="primary" HorizontalAlignment="Left"
                                                             IsEnabled="{Binding !Connect.IsBusy}"
                                                             Command="{Binding Connect.SignInCommand}" />

@@ -65,10 +65,20 @@ struct PlexLoginView: View {
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var webAuth = PlexWebAuthSession()
 
-    private enum Phase { case idle, authorizing, completing }
+    private enum Phase {
+        case idle
+        case authorizing
+        case choosingUser
+        case enteringPIN
+        case completing
+    }
     @State private var phase: Phase = .idle
     @State private var status: String?
     @State private var task: Task<Void, Never>?
+    @State private var accountToken: String?
+    @State private var homeUsers: [PlexHomeUser] = []
+    @State private var selectedUser: PlexHomeUser?
+    @State private var profilePIN = ""
 
     // Display-only scheme for ASWebAuthenticationSession; Plex never redirects to
     // it and it needs no Info.plist registration.
@@ -94,11 +104,69 @@ struct PlexLoginView: View {
                     case .authorizing:
                         Text("Complete sign-in in the Plex window. Mozz returns here automatically once you're authorized.")
                             .font(.footnote).foregroundStyle(.secondary)
+                    case .choosingUser:
+                        Text("Choose the Plex profile whose music history and restrictions Mozz should use.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    case .enteringPIN:
+                        Text("This Plex profile is protected.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     case .completing:
                         Label("Signed in", mozz: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                             .font(.headline)
                     }
+                }
+            }
+
+            if phase == .choosingUser {
+                Section("Who’s listening?") {
+                    ForEach(homeUsers) { user in
+                        Button {
+                            select(user)
+                        } label: {
+                            HStack(spacing: 12) {
+                                AsyncImage(url: user.avatarURL) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    Image(mozz: "person.crop.circle")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(width: 42, height: 42)
+                                .clipShape(Circle())
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(user.name)
+                                    if user.isAdmin {
+                                        Text("Home owner")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else if user.isRestricted {
+                                        Text("Managed profile")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if user.requiresPIN && !user.isAdmin {
+                                    Image(mozz: "lock.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if phase == .enteringPIN, let selectedUser {
+                Section {
+                    SecureField("Profile PIN", text: $profilePIN)
+                    Button("Continue") { submitPIN() }
+                        .disabled(profilePIN.isEmpty)
+                } header: {
+                    Text("PIN for \(selectedUser.name)")
+                } footer: {
+                    Text("The PIN goes directly to Plex for this switch and is never stored.")
                 }
             }
 
@@ -149,16 +217,24 @@ struct PlexLoginView: View {
                 webAuth.start(url: url, callbackScheme: callbackScheme)
                 status = "Waiting for you to authorize in Plex…"
                 let token = try await pollForToken(auth: auth, pin: pin)
-                // Authorized — dismiss the browser (auto-return) and hand off to
-                // the environment, which owns the setup task so backing out of
-                // this screen can't cancel it.
                 webAuth.dismiss()
-                phase = .completing
-                status = "Finding your servers…"
-                let session = try await auth.completeLogin(accountToken: token)
-                env.activate(session: session)
-                // No dismiss needed: RootView switches to the setup screen / app
-                // as soon as `isSettingUp`/`active` flips.
+                accountToken = token
+                // Do not silently fall back to the owner if profile discovery
+                // fails. That would attribute a managed user's listening to the
+                // wrong person—the exact bug this step exists to prevent.
+                let users = try await auth.homeUsers(accountToken: token)
+                if users.count > 1 {
+                    homeUsers = users
+                    phase = .choosingUser
+                    status = nil
+                    return
+                }
+                // One profile means no choice and no extra tap. The OAuth token
+                // already represents that user.
+                await finish(
+                    auth: auth,
+                    token: token,
+                    user: users.first)
             } catch is CancellationError {
                 webAuth.dismiss()
                 phase = .idle
@@ -170,6 +246,71 @@ struct PlexLoginView: View {
             }
         }
     }
+
+    private func select(_ user: PlexHomeUser) {
+            selectedUser = user
+            if user.requiresPIN && !user.isAdmin {
+                profilePIN = ""
+                phase = .enteringPIN
+                status = nil
+                return
+            }
+            switchTo(user, pin: nil)
+        }
+
+    private func submitPIN() {
+            guard let user = selectedUser else { return }
+            switchTo(user, pin: profilePIN)
+        }
+
+    private func switchTo(_ user: PlexHomeUser, pin: String?) {
+            guard let accountToken else { return }
+            let auth = PlexAuthenticator(
+                clientInfo: env.clientInfo,
+                clientIdentifier: env.clientIdentifier)
+            phase = .completing
+            status = "Switching to \(user.name)…"
+            task = Task {
+                do {
+                    let switched = try await auth.token(
+                        for: user,
+                        accountToken: accountToken,
+                        pin: pin)
+                    // From here on, only the switched token survives. The owner
+                    // token remains a local variable and is never persisted.
+                    self.accountToken = nil
+                    profilePIN = ""
+                    await finish(auth: auth, token: switched, user: user)
+                } catch is CancellationError {
+                    phase = .choosingUser
+                    status = nil
+                } catch {
+                    phase = user.requiresPIN ? .enteringPIN : .choosingUser
+                    status = user.requiresPIN
+                        ? "That PIN was not accepted."
+                        : "Could not switch Plex profiles."
+                }
+            }
+        }
+
+    private func finish(
+            auth: PlexAuthenticator,
+            token: String,
+            user: PlexHomeUser?
+        ) async {
+            do {
+                phase = .completing
+                status = "Finding your servers…"
+                let session = try await auth.completeLogin(
+                    accountToken: token,
+                    plexUserID: user?.id)
+                env.activate(session: session)
+                // RootView switches into setup/the app when activation changes.
+            } catch {
+                phase = .idle
+                status = "Plex sign-in failed: \(error.localizedDescription)"
+            }
+        }
 
     /// Poll the PIN until it's claimed. If the user closes the browser without
     /// authorizing, a short grace period lets a just-issued token still win before

@@ -114,6 +114,62 @@ public struct PlexAuthenticator: Sendable {
         )
     }
 
+    // MARK: Plex Home profiles
+
+    public func homeUsers(accountToken: String) async throws -> [PlexHomeUser] {
+        let authedClient = client.withDefaultHeaders([
+            "X-Plex-Token": accountToken,
+        ])
+        let response = try await authedClient.send(
+            Endpoint(path: "api/v2/home/users"),
+            as: PlexHomeUsersResponse.self)
+        return response.users.compactMap { user in
+            guard let id = user.uuid ?? user.id.map(String.init) else {
+                return nil
+            }
+            return PlexHomeUser(
+                id: id,
+                name: user.title.nonEmpty
+                    ?? user.username.nonEmpty
+                    ?? "Plex User",
+                requiresPIN: user.protected
+                    ?? user.hasPassword
+                    ?? false,
+                isAdmin: user.admin ?? false,
+                isRestricted: user.restricted ?? false,
+                avatarURL: user.thumb.nonEmpty.flatMap(URL.init(string:)))
+        }
+    }
+
+    /// Return the token belonging to the selected profile.
+    ///
+    /// The owner already holds the account token. Every other Home user gets a
+    /// switched token, with a PIN supplied only for protected profiles. The PIN
+    /// is never returned or stored.
+    public func token(
+        for user: PlexHomeUser,
+        accountToken: String,
+        pin: String? = nil
+    ) async throws -> String {
+        if user.isAdmin { return accountToken }
+        let authedClient = client.withDefaultHeaders([
+            "X-Plex-Token": accountToken,
+        ])
+        let response = try await authedClient.send(
+            Endpoint(
+                method: .post,
+                path: "api/v2/home/users/\(user.id)/switch",
+                query: pin.flatMap { $0.isEmpty ? nil : [
+                    URLQueryItem(name: "pin", value: $0),
+                ] } ?? []),
+            as: PlexHomeSwitchResponse.self)
+        guard let switched = response.authToken.nonEmpty
+                ?? response.authenticationToken.nonEmpty else {
+            throw MozzError.unauthorized
+        }
+        return switched
+    }
+
     /// Discover the account's servers. Plex returns resources (servers), each
     /// with several connection addresses; keep one reachable address per machine
     /// id rather than registering every address as a separate server.
@@ -219,7 +275,10 @@ public struct PlexAuthenticator: Sendable {
 
     /// One-call convenience: discover connections, pick one, and produce the
     /// session to persist. The UI can instead call the steps individually.
-    public func completeLogin(accountToken: String) async throws -> AuthenticatedSession {
+    public func completeLogin(
+        accountToken: String,
+        plexUserID: String? = nil
+    ) async throws -> AuthenticatedSession {
         let connections = try await discoverConnections(accountToken: accountToken)
         // Prefer a server that has music (the account may have several servers).
         guard let chosen = await firstMusicConnection(connections) else {
@@ -229,7 +288,7 @@ public struct PlexAuthenticator: Sendable {
             kind: .plex,
             baseURL: chosen.uri,
             token: chosen.accessToken,
-            userID: nil,
+            userID: plexUserID,
             serverName: chosen.serverName,
             clientIdentifier: clientIdentifier,
             serverMachineIdentifier: chosen.serverMachineIdentifier,
