@@ -1769,7 +1769,7 @@
                                 <Button Classes="nav" Classes.selected="{Binding IsSettingsDevicesSelected}"
                                         Command="{Binding SelectSettingsCategoryCommand}"
                                         CommandParameter="{x:Static vm:SettingsCategory.Devices}">
-                                    <TextBlock Text="Devices" />
+                                    <TextBlock Text="Sync" />
                                 </Button>
                                 <Button Classes="nav" Classes.selected="{Binding IsSettingsAppearanceSelected}"
                                         Command="{Binding SelectSettingsCategoryCommand}"

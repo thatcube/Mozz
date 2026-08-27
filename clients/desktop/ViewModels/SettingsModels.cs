@@ -48,7 +48,7 @@ public static class SettingsCategories
         new(SettingsCategory.Playback, "Playback", "Normalization and equalizer"),
         new(SettingsCategory.Lyrics, "Lyrics", "Lookup and offline lyrics"),
         new(SettingsCategory.Recommendations, "Recommendations", "Enrichment and hidden items"),
-        new(SettingsCategory.Devices, "Devices", "Your circle and syncing"),
+        new(SettingsCategory.Devices, "Sync", "Music, history and settings across devices"),
         new(SettingsCategory.Appearance, "Appearance", "Theme"),
         new(SettingsCategory.Diagnostics, "Diagnostics", "Storage and sync details"),
         new(SettingsCategory.About, "About", "Version and source"),
