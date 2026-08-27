@@ -90,17 +90,56 @@ final class PairingController: ObservableObject {
 
     /// What this device calls itself to the others.
     ///
-    /// iOS returns the model name rather than "Brandon's iPhone" unless the app
-    /// carries an entitlement Apple grants sparingly, so this is honest about
-    /// being a model rather than pretending to a personal name. It still beats
-    /// three entries called Mozz, which is what a hardcoded name produced.
+    /// Tried in order, because each rung is better than the next and none is
+    /// guaranteed:
+    ///
+    /// 1. The local hostname. On iOS this is derived from the name someone gave
+    ///    the device in Settings, so it is usually "Brandons-iPhone" — and it is
+    ///    NOT behind the entitlement that made `UIDevice.name` return a model.
+    ///    On macOS it is the sharing name.
+    /// 2. `Host.current().localizedName` on macOS, which is the properly
+    ///    punctuated "Brandon's MacBook Pro".
+    /// 3. `UIDevice.current.name`, which on modern iOS is just the model.
+    /// 4. The model and system name, so the worst case is still "iPhone · iOS"
+    ///    rather than three devices all called Mozz.
+    ///
+    /// This is a label for a human to recognise, never a fact: it crosses the
+    /// wire unauthenticated, and the six digits are what establish anything.
     static var deviceName: String {
+        if let friendly = hostNameDerived { return friendly }
         #if canImport(UIKit)
-        return UIDevice.current.name
+        let device = UIDevice.current
+        let name = device.name
+        // On iOS 16+ this is the model unless the app is entitled, so pair it
+        // with the system name rather than presenting a model as a name.
+        return name.isEmpty ? "\(device.model) · \(device.systemName)" : name
         #else
         return Host.current().localizedName ?? "Mac"
         #endif
     }
+
+    /// The local hostname, cleaned up, when it says something a person chose.
+    private static var hostNameDerived: String? {
+        var host = ProcessInfo.processInfo.hostName
+        for suffix in [".local.", ".local", ".lan"] where host.hasSuffix(suffix) {
+            host = String(host.dropLast(suffix.count))
+            break
+        }
+        // Hostnames cannot hold spaces or apostrophes, so "Brandons-iPhone" is
+        // what a device called "Brandon's iPhone" becomes. Reading the hyphens
+        // back as spaces is a guess, but a good one, and far better than a
+        // model name for telling two of someone's devices apart.
+        let readable = host.replacingOccurrences(of: "-", with: " ")
+        let trimmed = readable.trimmingCharacters(in: .whitespaces)
+
+        // Reject the generic ones. A hostname of "localhost" or "iPhone" tells
+        // nobody anything, which is the problem this is meant to solve.
+        let useless: Set<String> = ["localhost", "iphone", "ipad", "mac", "computer", ""]
+        guard !useless.contains(trimmed.lowercased()) else { return nil }
+        guard trimmed.count <= 64 else { return String(trimmed.prefix(64)) }
+        return trimmed
+    }
+
 
     private let store: CircleStore
     private var work: Task<Void, Never>?

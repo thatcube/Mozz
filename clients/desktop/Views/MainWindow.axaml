@@ -2178,6 +2178,28 @@
                                                        Classes="primary" TextWrapping="Wrap" />
                                             <TextBlock Text="GPL-3.0 · Source on GitHub: https://github.com/thatcube/Mozz"
                                                        Classes="secondary" TextWrapping="Wrap" />
+                                            <TextBlock Classes="secondary">
+                                                <Run Text="Version" /><Run Text=" " /><Run Text="{Binding AppVersionDisplay}" />
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="Your circle" Classes="sectionTitle" />
+                                            <TextBlock Text="This device is not in a circle yet."
+                                                       Classes="secondary" TextWrapping="Wrap"
+                                                       IsVisible="{Binding !IsInCircle}" />
+                                            <ItemsControl ItemsSource="{Binding CircleMembers}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                                                            <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="primary" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding JoinedDescription}" Classes="secondary" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>

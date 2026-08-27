@@ -180,7 +180,8 @@ private func pairingCommand(
         for index in 0..<16 { nonce[index] = UInt8.random(in: 0...255) }
 
         var session = try PairingSession(role: role, path: path,
-                                         privateKey: privateKey, nonce: nonce, scanned: scanned)
+                                         privateKey: privateKey, nonce: nonce, scanned: scanned,
+                                         name: request.deviceName ?? "Mozz")
         var steps: [WirePairingStep] = []
         var qrText: String?
         if role == .joiner {
