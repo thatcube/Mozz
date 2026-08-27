@@ -41,7 +41,7 @@
       <StackPanel Spacing="6">
         <TextBlock Text="Code from that device" FontWeight="SemiBold" />
         <TextBox Text="{Binding Code}"
-                 Watermark="MOZZ1:…"
+                 PlaceholderText="MOZZ1:…"
                  AcceptsReturn="False"
                  FontFamily="monospace" />
       </StackPanel>
