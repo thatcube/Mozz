@@ -62,9 +62,13 @@ public struct CircleStore: Sendable {
         return (try? JSONDecoder().decode([CircleMember].self, from: encoded)) ?? []
     }
 
-    /// Records a device, replacing any earlier entry for the same name.
+    /// Records a device, replacing any earlier entry for the same stable id.
+    ///
+    /// Names are labels and can collide or change. Using one as identity made
+    /// two iPhones called "iPhone" overwrite each other in the roster and would
+    /// do the same to relay ownership if allowed to escape this type.
     public func remember(_ member: CircleMember) throws {
-        var known = try members().filter { $0.name != member.name }
+        var known = try members().filter { $0.id != member.id }
         known.append(member)
         known.sort { $0.joinedAt > $1.joinedAt }
         let encoder = JSONEncoder()
@@ -125,15 +129,38 @@ public struct CircleStore: Sendable {
 
 /// A device known to be in the circle.
 public struct CircleMember: Codable, Equatable, Sendable {
+    public let id: String
     public let name: String
     public let joinedAt: Date
     /// True for the device reading this, so a list can say "this device".
     public let isSelf: Bool
 
-    public init(name: String, joinedAt: Date = Date(), isSelf: Bool = false) {
+    public init(
+        id: String,
+        name: String,
+        joinedAt: Date = Date(),
+        isSelf: Bool = false
+    ) {
+        self.id = id
         self.name = name
         self.joinedAt = joinedAt
         self.isSelf = isSelf
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, joinedAt, isSelf
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        // Builds before stable relay ownership stored names only. Preserve those
+        // rows in the UI under a migration id; the next successful ceremony
+        // replaces them with the authenticated device id.
+        id = try values.decodeIfPresent(String.self, forKey: .id)
+            ?? "legacy:\(name)"
+        joinedAt = try values.decode(Date.self, forKey: .joinedAt)
+        isSelf = try values.decode(Bool.self, forKey: .isSelf)
     }
 }
 

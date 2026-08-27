@@ -10,9 +10,12 @@ final class PairingFrameTests: XCTestCase {
 
     func testEveryFrameSurvivesARoundTrip() throws {
         let cases: [PairingFrame] = [
-            .hello(version: 1, publicKey: data(0x11, 32), commitment: nil, name: "iPhone"),
-            .hello(version: 1, publicKey: data(0x11, 32), commitment: data(0x22, 32), name: "iPhone"),
-            .peer(publicKey: data(0x33, 32), nonce: data(0x44, 16), name: "MacBook"),
+            .hello(version: 1, publicKey: data(0x11, 32), commitment: nil,
+                   name: "iPhone", deviceID: "phone-id"),
+            .hello(version: 1, publicKey: data(0x11, 32), commitment: data(0x22, 32),
+                   name: "iPhone", deviceID: "phone-id"),
+            .peer(publicKey: data(0x33, 32), nonce: data(0x44, 16),
+                  name: "MacBook", deviceID: "mac-id"),
             .reveal(nonce: data(0x55, 16)),
             .sealed(encapsulated: data(0x66, 32), ciphertext: data(0x77, 91)),
         ]
@@ -37,7 +40,11 @@ final class PairingFrameTests: XCTestCase {
     }
 
     func testATruncatedFrameIsRefused() {
-        let encoded = PairingFrame.peer(publicKey: data(0x33, 32), nonce: data(0x44, 16), name: "MacBook").encoded()
+        let encoded = PairingFrame.peer(
+            publicKey: data(0x33, 32),
+            nonce: data(0x44, 16),
+            name: "MacBook",
+            deviceID: "mac-id").encoded()
         XCTAssertThrowsError(try PairingFrame.decode(encoded.dropLast()))
     }
 
@@ -74,10 +81,14 @@ final class PairingFrameTests: XCTestCase {
     }
 
     func testHelloWithAndWithoutACommitmentDifferInLength() {
-        let bare = PairingFrame.hello(version: 1, publicKey: data(0x11, 32), commitment: nil, name: "iPhone").encoded()
-        let full = PairingFrame.hello(version: 1, publicKey: data(0x11, 32), commitment: data(0x22, 32), name: "iPhone").encoded()
-        // 35 and 67 before, plus a length byte and six bytes of "iPhone".
-        XCTAssertEqual(bare.count, 35 + 7)
-        XCTAssertEqual(full.count, 67 + 7)
+        let bare = PairingFrame.hello(
+            version: 1, publicKey: data(0x11, 32), commitment: nil,
+            name: "iPhone", deviceID: "phone-id").encoded()
+        let full = PairingFrame.hello(
+            version: 1, publicKey: data(0x11, 32), commitment: data(0x22, 32),
+            name: "iPhone", deviceID: "phone-id").encoded()
+        // Previous fixed fields, then length-prefixed name and id.
+        XCTAssertEqual(bare.count, 35 + 7 + 9)
+        XCTAssertEqual(full.count, 67 + 7 + 9)
     }
 }

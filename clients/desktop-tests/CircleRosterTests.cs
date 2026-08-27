@@ -39,8 +39,10 @@ public class CircleRosterTests
     [Fact]
     public void AMemberRowSaysWhichDeviceYouAreHolding()
     {
-        var self = new CircleMemberRow("This Mac", DateTimeOffset.UtcNow, IsSelf: true);
-        var other = new CircleMemberRow("iPhone", DateTimeOffset.UtcNow, IsSelf: false);
+        var self = new CircleMemberRow(
+            "This Mac", DateTimeOffset.UtcNow, IsSelf: true, ID: "mac-id");
+        var other = new CircleMemberRow(
+            "iPhone", DateTimeOffset.UtcNow, IsSelf: false, ID: "phone-id");
 
         Assert.Equal("This device", self.JoinedDescription);
         Assert.NotEqual("This device", other.JoinedDescription);

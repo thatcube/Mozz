@@ -84,10 +84,12 @@ final class CircleStoreTests: XCTestCase {
     func testTheRosterSurvivesAndIdentifiesThisDevice() throws {
         let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
         try store.remember(CircleMember(
+            id: "phone-id",
             name: "Brandon's iPhone",
             joinedAt: Date(timeIntervalSince1970: 100),
             isSelf: true))
         try store.remember(CircleMember(
+            id: "pc-id",
             name: "Gaming PC",
             joinedAt: Date(timeIntervalSince1970: 200)))
 
@@ -98,12 +100,29 @@ final class CircleStoreTests: XCTestCase {
 
     func testRememberingADeviceUpdatesInsteadOfDuplicatingIt() throws {
         let store = CircleStore(secure: InMemoryStore(), plain: InMemoryStore())
-        try store.remember(CircleMember(name: "Gaming PC", joinedAt: .distantPast))
-        try store.remember(CircleMember(name: "Gaming PC", joinedAt: .distantFuture))
+        try store.remember(CircleMember(
+            id: "pc-id", name: "Gaming PC", joinedAt: .distantPast))
+        try store.remember(CircleMember(
+            id: "pc-id", name: "Renamed PC", joinedAt: .distantFuture))
 
         let members = try store.members()
         XCTAssertEqual(members.count, 1)
         XCTAssertEqual(members[0].joinedAt, .distantFuture)
+        XCTAssertEqual(members[0].name, "Renamed PC")
+    }
+
+    func testARosterFromBeforeDeviceIDsIsPreserved() throws {
+        let plain = InMemoryStore()
+        let oldJSON = Data(
+            #"[{"name":"Old iPhone","joinedAt":0,"isSelf":true}]"#.utf8)
+        try plain.setValue(oldJSON, forKey: CircleStore.Key.members)
+
+        let members = try CircleStore(
+            secure: InMemoryStore(), plain: plain).members()
+
+        XCTAssertEqual(members.count, 1)
+        XCTAssertEqual(members[0].name, "Old iPhone")
+        XCTAssertEqual(members[0].id, "legacy:Old iPhone")
     }
 
     func testALoneDeviceFormsACircleWhenItNeedsOne() throws {

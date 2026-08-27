@@ -24,6 +24,7 @@ public enum PairingCeremony {
         path: PairingPath,
         into store: CircleStore,
         deviceName: String = "Mozz",
+        deviceID: String = UUID().uuidString,
         host: PairingHost? = nil,
         showCode: @Sendable (String, Pairing.QRPayload) -> Void,
         confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
@@ -43,7 +44,7 @@ public enum PairingCeremony {
 
         let link = try await host.nextLink()
         var session = try PairingSession(role: .joiner, path: path, privateKey: privateKey,
-                                         nonce: nonce, name: deviceName)
+                                         nonce: nonce, name: deviceName, deviceID: deviceID)
 
         for step in try session.start() where isSend(step) {
             try await send(step, over: link)
@@ -68,9 +69,10 @@ public enum PairingCeremony {
                                                         privateKey: privateKey,
                                                         transcriptHash: transcript)
                     try store.save(circle)
-                    try store.remember(CircleMember(name: deviceName, isSelf: true))
-                    if let peer = session.peerName {
-                        try store.remember(CircleMember(name: peer))
+                    try store.remember(CircleMember(
+                        id: deviceID, name: deviceName, isSelf: true))
+                    if let peerID = session.peerDeviceID, let peer = session.peerName {
+                        try store.remember(CircleMember(id: peerID, name: peer))
                     }
                     await link.close()
                     return circle
@@ -96,11 +98,12 @@ public enum PairingCeremony {
         path: PairingPath,
         scanned: Pairing.QRPayload?,
         deviceName: String = "Mozz",
+        deviceID: String = UUID().uuidString,
         endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
         confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
     ) async throws {
         try await admit(try store.loadOrCreate(), path: path, scanned: scanned,
-                        deviceName: deviceName, store: store,
+                        deviceName: deviceName, deviceID: deviceID, store: store,
                         endpoints: endpoints, confirmDigits: confirmDigits)
     }
 
@@ -109,6 +112,7 @@ public enum PairingCeremony {
         path: PairingPath,
         scanned: Pairing.QRPayload?,
         deviceName: String = "Mozz",
+        deviceID: String = UUID().uuidString,
         store: CircleStore? = nil,
         endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
         confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
@@ -123,10 +127,15 @@ public enum PairingCeremony {
             do {
                 let admitted = try await runMember(circle, path: path, scanned: scanned,
                                                    link: link, deviceName: deviceName,
+                                                   deviceID: deviceID,
                                                    confirmDigits: confirmDigits)
                 if let store {
-                    try store.remember(CircleMember(name: deviceName, isSelf: true))
-                    if let admitted { try store.remember(CircleMember(name: admitted)) }
+                    try store.remember(CircleMember(
+                        id: deviceID, name: deviceName, isSelf: true))
+                    if let admitted {
+                        try store.remember(CircleMember(
+                            id: admitted.id, name: admitted.name))
+                    }
                 }
                 await link.close()
                 return
@@ -151,15 +160,17 @@ public enum PairingCeremony {
         scanned: Pairing.QRPayload?,
         link: PairingLink,
         deviceName: String = "Mozz",
+        deviceID: String = UUID().uuidString,
         confirmDigits: (_ digits: String, _ peerName: String?) async -> Bool = { _, _ in true }
-    ) async throws -> String? {
+    ) async throws -> (id: String, name: String)? {
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         var nonce = Data(count: 16)
         for index in 0..<16 { nonce[index] = UInt8.random(in: 0...255) }
 
         var session = try PairingSession(role: .member, path: path,
                                          privateKey: privateKey, nonce: nonce,
-                                         scanned: scanned, name: deviceName)
+                                         scanned: scanned, name: deviceName,
+                                         deviceID: deviceID)
 
         while true {
             let steps = try session.receive(try await link.receive())
@@ -187,7 +198,12 @@ public enum PairingCeremony {
                     break
                 }
             }
-            if sealed { return session.peerName }
+            if sealed {
+                guard let id = session.peerDeviceID, let name = session.peerName else {
+                    return nil
+                }
+                return (id, name)
+            }
         }
     }
 

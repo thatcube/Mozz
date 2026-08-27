@@ -118,6 +118,11 @@ final class PairingController: ObservableObject {
         #endif
     }
 
+    /// Stable per-install identity used for relay ownership, never for display.
+    static var deviceID: String {
+        (try? KeychainCredentialStore().clientIdentifier()) ?? UUID().uuidString
+    }
+
     /// The local hostname, cleaned up, when it says something a person chose.
     private static var hostNameDerived: String? {
         var host = ProcessInfo.processInfo.hostName
@@ -188,6 +193,7 @@ final class PairingController: ObservableObject {
                     path: path,
                     into: store,
                     deviceName: Self.deviceName,
+                    deviceID: Self.deviceID,
                     showCode: { text, _ in
                         // On the digit path there is nothing to hold up to a
                         // camera — a code appearing and then being replaced by
@@ -231,6 +237,7 @@ final class PairingController: ObservableObject {
                     path: .digits,
                     scanned: nil,
                     deviceName: Self.deviceName,
+                    deviceID: Self.deviceID,
                     confirmDigits: { digits, peerName in
                         await self?.ask(digits, peerName: peerName) ?? false
                     })
@@ -277,6 +284,7 @@ final class PairingController: ObservableObject {
                 try await PairingCeremony.admit(
                     from: store, path: path, scanned: payload,
                     deviceName: Self.deviceName,
+                    deviceID: Self.deviceID,
                     confirmDigits: { digits, peerName in
                         await self?.ask(digits, peerName: peerName) ?? false
                     })

@@ -340,7 +340,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             report => _ = ReportPlaybackAsync(report));
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
-        Pairing = new PairingViewModel(_core);
+        Pairing = new PairingViewModel(_core, _deviceId);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
         Connect.Accounts.CollectionChanged += (_, _) =>
         {

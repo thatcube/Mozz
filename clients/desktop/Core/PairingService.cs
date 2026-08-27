@@ -22,7 +22,12 @@ public sealed record PairingBegan(
     string? QrText,
     PairingStepDto[] Steps);
 
-public sealed record PairingSteps(PairingStepDto[] Steps, string? PeerName = null);
+public sealed record PairingSteps(
+    PairingStepDto[] Steps,
+    string? PeerName = null,
+    string? PeerDeviceID = null);
+
+public sealed record PairingPeer(string? Name, string? DeviceID);
 
 /// <summary>The circle this device belongs to, as the core reports it.</summary>
 public sealed record CircleDto(
@@ -46,8 +51,13 @@ public sealed record CircleDto(
 public sealed class PairingService
 {
     private readonly MozzCore _core;
+    private readonly string _deviceID;
 
-    public PairingService(MozzCore core) => _core = core;
+    public PairingService(MozzCore core, string deviceID)
+    {
+        _core = core;
+        _deviceID = deviceID;
+    }
 
     public static bool HasCircle =>
         SecretStore.ForCurrentPlatform().Get("circle.channelId") is not null;
@@ -67,6 +77,7 @@ public sealed class PairingService
             role = "joiner",
             pairingPath = "digits",
             deviceName = CircleRoster.DeviceName,
+            deviceId = _deviceID,
         }, token).ConfigureAwait(false);
 
         using var host = PairingHost.Start(CircleRoster.DeviceName);
@@ -80,13 +91,14 @@ public sealed class PairingService
                     .ConfigureAwait(false);
             }
 
-            var peerName = await PumpAsync(
+            var peer = await PumpAsync(
                 began.PairingId, link, confirmDigits, isJoiner: true, token)
                 .ConfigureAwait(false);
-            CircleRoster.Remember(CircleRoster.DeviceName, isSelf: true);
-            if (!string.IsNullOrWhiteSpace(peerName))
+            CircleRoster.Remember(_deviceID, CircleRoster.DeviceName, isSelf: true);
+            if (!string.IsNullOrWhiteSpace(peer.Name)
+                && !string.IsNullOrWhiteSpace(peer.DeviceID))
             {
-                CircleRoster.Remember(peerName, isSelf: false);
+                CircleRoster.Remember(peer.DeviceID, peer.Name, isSelf: false);
             }
         }
         finally
@@ -121,6 +133,7 @@ public sealed class PairingService
             pairingPath = usingCode ? "qr" : "digits",
             scannedCode = usingCode ? scannedQrText : null,
             deviceName = CircleRoster.DeviceName,
+            deviceId = _deviceID,
         }, token).ConfigureAwait(false);
 
         using var link = await PairingLink.ConnectAsync(device.Address, device.Port, token)
@@ -128,13 +141,17 @@ public sealed class PairingService
 
         try
         {
-            await PumpAsync(began.PairingId, link, confirmDigits, isJoiner: false, token)
+            var peer = await PumpAsync(
+                began.PairingId, link, confirmDigits, isJoiner: false, token)
                 .ConfigureAwait(false);
 
             // Both sides go in the roster, so "it worked" is something the
             // screen can show rather than something the user has to trust.
-            CircleRoster.Remember(CircleRoster.DeviceName, isSelf: true);
-            CircleRoster.Remember(device.Name, isSelf: false);
+            CircleRoster.Remember(_deviceID, CircleRoster.DeviceName, isSelf: true);
+            CircleRoster.Remember(
+                peer.DeviceID ?? $"{device.Address}:{device.Port}",
+                peer.Name ?? device.Name,
+                isSelf: false);
         }
         finally
         {
@@ -149,7 +166,7 @@ public sealed class PairingService
     /// core decides what each side does, so the loop does not need to know
     /// which one it is driving beyond where the circle ends up.
     /// </summary>
-    private async Task<string?> PumpAsync(
+    private async Task<PairingPeer> PumpAsync(
         string pairingId,
         PairingLink link,
         Func<string, Task<bool>> confirmDigits,
@@ -158,6 +175,7 @@ public sealed class PairingService
     {
         var pending = new Queue<PairingStepDto>();
         string? peerName = null;
+        string? peerDeviceID = null;
 
         while (true)
         {
@@ -172,6 +190,7 @@ public sealed class PairingService
                 }, token).ConfigureAwait(false);
 
                 peerName ??= steps.PeerName;
+                peerDeviceID ??= steps.PeerDeviceID;
                 foreach (var step in steps.Steps) pending.Enqueue(step);
                 if (pending.Count == 0) continue;
             }
@@ -191,6 +210,7 @@ public sealed class PairingService
                         cmd = "pairingConfirm", pairingId, matched,
                     }, token).ConfigureAwait(false);
                     peerName ??= after.PeerName;
+                    peerDeviceID ??= after.PeerDeviceID;
                     foreach (var step in after.Steps) pending.Enqueue(step);
                     break;
 
@@ -204,6 +224,7 @@ public sealed class PairingService
                         joinerPublicKey = next.JoinerPublicKey,
                     }, token).ConfigureAwait(false);
                     peerName ??= sealed_.PeerName;
+                    peerDeviceID ??= sealed_.PeerDeviceID;
                     foreach (var step in sealed_.Steps) pending.Enqueue(step);
                     break;
 
@@ -218,10 +239,10 @@ public sealed class PairingService
                         transcript = next.Transcript,
                     }, token).ConfigureAwait(false);
                     StoreCircle(circle);
-                    return peerName;
+                    return new PairingPeer(peerName, peerDeviceID);
 
                 case "finished":
-                    return peerName;
+                    return new PairingPeer(peerName, peerDeviceID);
             }
         }
     }
