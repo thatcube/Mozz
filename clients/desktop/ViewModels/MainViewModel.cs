@@ -72,6 +72,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly MozzServer _server;
     private readonly string _deviceId;
     private readonly PlayHistoryRecorder _playHistory;
+    private readonly RelayHistoryService _relayHistory;
     private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
     private readonly NavigationStack<LibraryPage> _navigation =
@@ -87,6 +88,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer? _positionTimer;
     private readonly DispatcherTimer? _seekDebounce;
     private readonly DispatcherTimer? _continuityReconcileTimer;
+    private readonly DispatcherTimer? _relayHistoryTimer;
     private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
     private readonly PlaybackQueue _queue = new();
@@ -101,6 +103,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _continuityFlushCts;
     private long _continuityGeneration;
     private readonly SemaphoreSlim _continuityFlushGate = new(1, 1);
+    private readonly SemaphoreSlim _relaySyncGate = new(1, 1);
 
     [ObservableProperty] private LibrarySection _section = LibrarySection.Home;
     [ObservableProperty] private string _pageTitle = "Home";
@@ -315,6 +318,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty] private bool _normalizationEnabled;
     [ObservableProperty] private bool _enrichmentEnabled;
+    [ObservableProperty] private bool _deviceSyncEnabled = true;
+    [ObservableProperty] private string _relaySyncStatus =
+        "Encrypted relay sync has not run yet.";
     [ObservableProperty] private string _appearance = "system";
     [ObservableProperty] private string _darkStyle = "dim";
     [ObservableProperty] private bool _equalizerEnabled;
@@ -338,6 +344,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _playHistory = new PlayHistoryRecorder(
             evt => _ = RecordPlayEventAsync(evt),
             report => _ = ReportPlaybackAsync(report));
+        _relayHistory = new RelayHistoryService(_core, _deviceId);
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
         Pairing = new PairingViewModel(_core, _deviceId);
@@ -418,6 +425,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         };
         _continuityReconcileTimer.Start();
 
+        _relayHistoryTimer = new DispatcherTimer {
+            Interval = TimeSpan.FromMinutes(30),
+        };
+        _relayHistoryTimer.Tick += (_, _) => _ = SyncRelayHistoryAsync();
+        _relayHistoryTimer.Start();
+
         Initialization = InitializeAsync();
     }
 
@@ -435,6 +448,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         NormalizationEnabled = _preferences.GetBool(AppPreferences.NormalizationEnabledKey, true);
         EnrichmentEnabled = _preferences.GetBool(AppPreferences.EnrichmentEnabledKey, true);
+        DeviceSyncEnabled = _preferences.GetBool(
+            AppPreferences.DeviceSyncEnabledKey, true);
         Appearance = _preferences.GetString(AppPreferences.AppearanceKey, "system");
         DarkStyle = _preferences.GetString(AppPreferences.DarkStyleKey, "dim");
         EqualizerEnabled = _preferences.GetBool(AppPreferences.EqualizerEnabledKey, false);
@@ -460,6 +475,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     partial void OnEnrichmentEnabledChanged(bool value) =>
         _preferences.SetBool(AppPreferences.EnrichmentEnabledKey, value);
+
+    partial void OnDeviceSyncEnabledChanged(bool value)
+    {
+        _preferences.SetBool(AppPreferences.DeviceSyncEnabledKey, value);
+        if (value) _ = SyncRelayHistoryAsync();
+    }
 
     partial void OnAppearanceChanged(string value)
     {
@@ -531,6 +552,34 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
     }
 
+    private async Task SyncRelayHistoryAsync()
+    {
+        if (!DeviceSyncEnabled || !_core.IsOpen || !PairingService.HasCircle)
+            return;
+        if (!await _relaySyncGate.WaitAsync(0)) return;
+        try
+        {
+            var imported = await _relayHistory.SyncAsync();
+            RelaySyncStatus = imported is null
+                ? "This device is not in a circle yet."
+                : imported == 0
+                    ? $"Up to date · {DateTime.Now:t}"
+                    : $"Imported {imported} new listening events · {DateTime.Now:t}";
+        }
+        catch
+        {
+            // The local log is the durable copy. A failed background pass must
+            // not turn app startup or playback into a failure, but Devices
+            // should say it is waiting rather than falsely claim success.
+            RelaySyncStatus =
+                "Relay unavailable; listening remains safe on this device and will retry.";
+        }
+        finally
+        {
+            _relaySyncGate.Release();
+        }
+    }
+
     private async Task InitializeAsync()
     {
         try
@@ -559,6 +608,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             await RefreshCountsAsync();
             await LoadSectionAsync(LibrarySection.Home, clearBackStack: true);
+            await SyncRelayHistoryAsync();
 
             StatusMessage = TrackCount > 0
                 ? null
@@ -2936,6 +2986,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _positionTimer?.Stop();
         _seekDebounce?.Stop();
         _continuityReconcileTimer?.Stop();
+        _relayHistoryTimer?.Stop();
         _downloadPollTimer?.Stop();
         _continuityFlushCts?.Cancel();
         _continuityFlushCts?.Dispose();

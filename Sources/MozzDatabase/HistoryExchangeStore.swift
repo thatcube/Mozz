@@ -329,7 +329,7 @@ public struct HistoryExchangeBatch: Codable, Sendable, Hashable {
     public var windowStartMS: Int64
     public var events: [HistoryExchangeEvent]
 
-    init(_ batch: HistoryBatch) {
+    public init(_ batch: HistoryBatch) {
         version = batch.version
         deviceID = batch.deviceID
         deviceName = batch.deviceName
@@ -338,7 +338,7 @@ public struct HistoryExchangeBatch: Codable, Sendable, Hashable {
         events = batch.events.map(HistoryExchangeEvent.init)
     }
 
-    var historyBatch: HistoryBatch {
+    public var historyBatch: HistoryBatch {
         HistoryBatch(
             version: version,
             deviceID: deviceID,
@@ -361,7 +361,7 @@ public struct HistoryExchangeRollup: Codable, Sendable, Hashable {
     public var topTracks: [HistoryExchangeRollupEntry]
     public var updatedAtMS: Int64
 
-    init(_ rollup: HistoryRollup) {
+    public init(_ rollup: HistoryRollup) {
         version = rollup.version
         deviceID = rollup.deviceID
         year = rollup.year
@@ -371,6 +371,19 @@ public struct HistoryExchangeRollup: Codable, Sendable, Hashable {
         topAlbums = rollup.topAlbums.map(HistoryExchangeRollupEntry.init)
         topTracks = rollup.topTracks.map(HistoryExchangeRollupEntry.init)
         updatedAtMS = rollup.updatedAtMS
+    }
+
+    public var historyRollup: HistoryRollup {
+        HistoryRollup(
+            version: version,
+            deviceID: deviceID,
+            year: year,
+            monthlyMS: monthlyMS,
+            monthlyPlays: monthlyPlays,
+            topArtists: topArtists.map(\.rollupEntry),
+            topAlbums: topAlbums.map(\.rollupEntry),
+            topTracks: topTracks.map(\.rollupEntry),
+            updatedAtMS: updatedAtMS)
     }
 }
 
@@ -387,5 +400,14 @@ public struct HistoryExchangeRollupEntry: Codable, Sendable, Hashable {
         secondaryName = entry.secondaryName
         plays = entry.plays
         totalMS = entry.totalMS
+    }
+
+    public var rollupEntry: RollupEntry {
+        RollupEntry(
+            key: key,
+            name: name,
+            secondaryName: secondaryName,
+            plays: plays,
+            totalMS: totalMS)
     }
 }
