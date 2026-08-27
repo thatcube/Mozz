@@ -21,9 +21,13 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            var viewModel = new MainViewModel();
+            // Settings → Devices asks for the pairing window; the app owns
+            // windows, so the view model raises rather than constructs one.
+            viewModel.AddDeviceRequested += (_, _) => ShowPairingWindow();
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainViewModel(),
+                DataContext = viewModel,
             };
         }
 

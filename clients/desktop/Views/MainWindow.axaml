@@ -1770,6 +1770,11 @@
                                         CommandParameter="{x:Static vm:SettingsCategory.Diagnostics}">
                                     <TextBlock Text="Diagnostics" />
                                 </Button>
+                                <Button Classes="nav" Classes.selected="{Binding IsSettingsDevicesSelected}"
+                                        Command="{Binding SelectSettingsCategoryCommand}"
+                                        CommandParameter="{x:Static vm:SettingsCategory.Devices}">
+                                    <TextBlock Text="Devices" />
+                                </Button>
                                 <Button Classes="nav" Classes.selected="{Binding IsSettingsAboutSelected}"
                                         Command="{Binding SelectSettingsCategoryCommand}"
                                         CommandParameter="{x:Static vm:SettingsCategory.About}">
@@ -2184,10 +2189,13 @@
                                         </StackPanel>
                                     </Border>
 
+                                </StackPanel>
+
+                                <StackPanel Spacing="16" IsVisible="{Binding IsSettingsDevicesSelected}">
                                     <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
                                         <StackPanel Spacing="12">
                                             <TextBlock Text="Your circle" Classes="sectionTitle" />
-                                            <TextBlock Text="This device is not in a circle yet."
+                                            <TextBlock Text="This device is not in a circle yet. Add another device and they will share listening, library and servers."
                                                        Classes="secondary" TextWrapping="Wrap"
                                                        IsVisible="{Binding !IsInCircle}" />
                                             <ItemsControl ItemsSource="{Binding CircleMembers}">
@@ -2200,6 +2208,7 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
+                                            <Button Content="Add a device…" Command="{Binding AddDeviceCommand}" />
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
