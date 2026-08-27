@@ -403,8 +403,9 @@ public final class AppEnvironment: ObservableObject {
             userID: session.userID, serverName: session.serverName,
             clientIdentifier: session.clientIdentifier,
             serverMachineIdentifier: session.serverMachineIdentifier,
-            musicSectionID: nil,
-            accountToken: session.accountToken, selectedMusicSectionIDs: nil
+            musicSectionID: session.musicSectionID,
+            accountToken: session.accountToken,
+            selectedMusicSectionIDs: session.selectedMusicSectionIDs
         )
         // Persist before activation so buildBackend's Plex section resolution can
         // load + update it. On failure/cancel we CLEAR it, so a half-saved session
@@ -563,6 +564,12 @@ public final class AppEnvironment: ObservableObject {
             invalidateRadio()
         }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
+        if let stored = SessionPersistence.load(credentials) {
+            ServerSyncJournal.upsert(
+                stored,
+                serverID: connection.id,
+                in: credentials)
+        }
         // Point cross-device continuity (ADR-0010) at the new server and read
         // back whatever another device left behind.
         activateContinuity(backend: backend, capabilities: capabilities)
@@ -686,6 +693,12 @@ public final class AppEnvironment: ObservableObject {
     }
 
     public func signOut() {
+        if let connection = active?.connection {
+            ServerSyncJournal.tombstone(
+                serverID: connection.id,
+                kind: connection.kind,
+                in: credentials)
+        }
         activationTask?.cancel()
         // A parked library choice belongs to the account being left.
         libraryChoice = []
@@ -1847,12 +1860,99 @@ public final class AppEnvironment: ObservableObject {
                 localDeviceID: Self.continuityDeviceID(
                     from: clientIdentifier))
             history.setStores(serverHistoryStores + [configured.store])
+            await syncServerConnections(
+                through: configured.store,
+                localDeviceID: Self.continuityDeviceID(
+                    from: clientIdentifier))
             relayHistoryChannelID = circle.channelId
             relayHistoryExpiresAtMS = configured.expiresAtMS
         } catch {
             // Background availability only. The local log remains authoritative
             // and the next foreground/scheduled pass tries again.
         }
+    }
+
+    /// Fetch server credentials after a circle arrives on a device that has
+    /// never signed in. Called during first-run and after an ambient join.
+    public func bootstrapServerFromCircleIfNeeded() async {
+        guard active == nil, SessionPersistence.load(credentials) == nil else {
+            return
+        }
+        guard let circle = try? CircleStore.live.load() else { return }
+        do {
+            let configured = try await RelayBootstrapper.historyStore(
+                circle: circle,
+                circleStore: .live,
+                localDeviceID: Self.continuityDeviceID(
+                    from: clientIdentifier))
+            let snapshots = try await configured.store.loadServerSnapshots()
+            let merged = RelayHistoryStore.mergedServerRecords(snapshots)
+            ServerSyncJournal.merge(merged, into: credentials)
+            guard let record = merged
+                .filter({ !$0.isRemoved })
+                .max(by: { $0.mutationAtMS < $1.mutationAtMS }),
+                  let stored = Self.storedSession(
+                      from: record,
+                      clientIdentifier: clientIdentifier) else {
+                return
+            }
+            activate(session: AuthenticatedSession(
+                kind: stored.kind,
+                baseURL: stored.baseURL,
+                token: stored.token,
+                userID: stored.userID,
+                serverName: stored.serverName,
+                clientIdentifier: clientIdentifier,
+                serverMachineIdentifier: stored.serverMachineIdentifier,
+                accountToken: stored.accountToken,
+                musicSectionID: stored.musicSectionID,
+                selectedMusicSectionIDs: stored.selectedMusicSectionIDs))
+        } catch {
+            // Setup remains available. The next foreground or Devices visit
+            // retries after the Worker/network is available.
+        }
+    }
+
+    private func syncServerConnections(
+        through relay: RelayHistoryStore,
+        localDeviceID: String
+    ) async {
+        let local = ServerSyncJournal.records(in: credentials)
+        let snapshot = RelayServerSnapshot(
+            deviceID: localDeviceID,
+            writtenAtMS: local.map(\.mutationAtMS).max() ?? 0,
+            servers: local)
+        try? await relay.save(snapshot)
+        guard let snapshots = try? await relay.loadServerSnapshots() else {
+            return
+        }
+        ServerSyncJournal.merge(
+            RelayHistoryStore.mergedServerRecords(snapshots),
+            into: credentials)
+    }
+
+    private static func storedSession(
+        from record: RelayServerRecord,
+        clientIdentifier: String
+    ) -> StoredSession? {
+        guard !record.isRemoved,
+              let kind = BackendKind(rawValue: record.kind),
+              let baseURL = record.baseURL.flatMap(URL.init(string:)),
+              let token = record.token,
+              let serverName = record.name else {
+            return nil
+        }
+        return StoredSession(
+            kind: kind,
+            baseURL: baseURL,
+            token: token,
+            userID: record.userID,
+            serverName: serverName,
+            clientIdentifier: clientIdentifier,
+            serverMachineIdentifier: record.serverMachineIdentifier,
+            musicSectionID: record.musicSectionIDs?.first,
+            accountToken: record.accountToken,
+            selectedMusicSectionIDs: record.musicSectionIDs)
     }
 
     /// Flush any pending checkpoint — the app may not run again.

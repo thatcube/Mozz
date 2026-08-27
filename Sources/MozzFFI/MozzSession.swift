@@ -117,6 +117,7 @@ struct SessionRequest: Decodable {
     var batch: HistoryExchangeBatch?
     var batches: [HistoryExchangeBatch]?
     var relayEndpoint: String?
+    var servers: [RelayServerRecord]?
 
     // Lyrics.
     var useLRCLIB: Bool?
@@ -422,6 +423,12 @@ private struct WireRelayHistorySync: Encodable {
     var imported: Int
     /// Replacement capability after initial provisioning or renewal. The host
     /// persists it in its platform secure store.
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireRelayServerSync: Encodable {
+    var servers: [RelayServerRecord]
     var relayKey: String
     var expiresAtMS: Int64
 }
@@ -1379,6 +1386,65 @@ private func dispatch(
                 .base64EncodedString(),
             expiresAtMS: configuration.expiresAtMS))
 
+    case "relaySyncServers":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs deviceID")
+        }
+        guard let wireCircle = request.circle else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs circle")
+        }
+        guard let localServers = request.servers else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs servers")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs a valid relayEndpoint")
+        }
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+        let relay = try RelayHistoryStore(
+            objects: B2NativeRelayObjectStore(
+                configuration: configuration),
+            channelID: circle.channelId,
+            localDeviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey)
+        try await relay.save(RelayServerSnapshot(
+            deviceID: deviceID,
+            writtenAtMS: localServers.map(\.mutationAtMS).max() ?? 0,
+            servers: localServers))
+        let merged = RelayHistoryStore.mergedServerRecords(
+            try await relay.loadServerSnapshots())
+        return sessionSuccess(request, WireRelayServerSync(
+            servers: merged,
+            relayKey: try configuration.encoded()
+                .base64EncodedString(),
+            expiresAtMS: configuration.expiresAtMS))
+
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
@@ -1818,7 +1884,8 @@ let mozzSessionCommands = [
     "likedTracks", "likedTracksCount",
     "setFavorite", "setRating", "flushFavoriteOutbox",
     "recordPlayEvent", "playHistory", "historyExportBatch",
-    "historyImportBatches", "historyYearRollup", "relaySyncHistory",
+    "historyImportBatches", "historyYearRollup",
+    "relaySyncHistory", "relaySyncServers",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",

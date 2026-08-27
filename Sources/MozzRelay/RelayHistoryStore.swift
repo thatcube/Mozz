@@ -87,6 +87,111 @@ public enum RelayStoreError: Error, Equatable {
     case plaintextHashMismatch(String)
     case unsupportedManifestVersion(Int)
     case unsupportedCiphertextVersion(Int)
+    case missingCredentialsKey
+    case invalidServerRecord(String)
+}
+
+// MARK: - Server credentials
+
+/// One server connection as synchronized between devices.
+///
+/// `clientIdentifier` is deliberately absent. It identifies one app
+/// installation to the media server; sharing it makes two devices register as
+/// one and fight over sessions. Everything required to authenticate the chosen
+/// server/profile is here, encrypted under `credentialsKey`.
+public struct RelayServerRecord: Codable, Sendable, Equatable {
+    public var id: String
+    public var kind: String
+    public var name: String?
+    public var baseURL: String?
+    public var token: String?
+    public var accountToken: String?
+    public var userID: String?
+    public var username: String?
+    public var serverMachineIdentifier: String?
+    public var musicSectionIDs: [String]?
+    public var updatedAtMS: Int64
+    public var removedAtMS: Int64?
+
+    public init(
+        id: String,
+        kind: String,
+        name: String? = nil,
+        baseURL: String? = nil,
+        token: String? = nil,
+        accountToken: String? = nil,
+        userID: String? = nil,
+        username: String? = nil,
+        serverMachineIdentifier: String? = nil,
+        musicSectionIDs: [String]? = nil,
+        updatedAtMS: Int64,
+        removedAtMS: Int64? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.baseURL = baseURL
+        self.token = token
+        self.accountToken = accountToken
+        self.userID = userID
+        self.username = username
+        self.serverMachineIdentifier = serverMachineIdentifier
+        self.musicSectionIDs = musicSectionIDs
+        self.updatedAtMS = updatedAtMS
+        self.removedAtMS = removedAtMS
+    }
+
+    public var mutationAtMS: Int64 {
+        max(updatedAtMS, removedAtMS ?? .min)
+    }
+
+    public var isRemoved: Bool { removedAtMS != nil }
+
+    public static func tombstone(
+        id: String,
+        kind: String,
+        removedAtMS: Int64
+    ) -> RelayServerRecord {
+        RelayServerRecord(
+            id: id,
+            kind: kind,
+            updatedAtMS: removedAtMS,
+            removedAtMS: removedAtMS)
+    }
+
+    func validated() throws -> RelayServerRecord {
+        guard !id.isEmpty, ["plex", "jellyfin", "subsonic"].contains(kind) else {
+            throw RelayStoreError.invalidServerRecord(id)
+        }
+        if !isRemoved {
+            guard let baseURL, URL(string: baseURL) != nil,
+                  token?.isEmpty == false else {
+                throw RelayStoreError.invalidServerRecord(id)
+            }
+        }
+        return self
+    }
+}
+
+public struct RelayServerSnapshot: Codable, Sendable, Equatable {
+    public static let currentVersion = 1
+
+    public var version: Int
+    public var deviceID: String
+    public var writtenAtMS: Int64
+    public var servers: [RelayServerRecord]
+
+    public init(
+        version: Int = currentVersion,
+        deviceID: String,
+        writtenAtMS: Int64,
+        servers: [RelayServerRecord]
+    ) {
+        self.version = version
+        self.deviceID = deviceID
+        self.writtenAtMS = writtenAtMS
+        self.servers = servers
+    }
 }
 
 // MARK: - Encrypted history store
@@ -110,6 +215,7 @@ public actor RelayHistoryStore: HistoryStore {
     private let localDeviceID: String
     private let epoch: Int
     private let key: SymmetricKey
+    private let credentialsKey: SymmetricKey?
     private var cache: [String: CachedObject] = [:]
 
     public init(
@@ -117,7 +223,8 @@ public actor RelayHistoryStore: HistoryStore {
         channelID: String,
         localDeviceID: String,
         epoch: Int,
-        channelKey: Data
+        channelKey: Data,
+        credentialsKey: Data? = nil
     ) throws {
         guard channelKey.count == 32 else {
             throw RelayStoreError.invalidKeyLength(channelKey.count)
@@ -128,6 +235,14 @@ public actor RelayHistoryStore: HistoryStore {
         self.localDeviceID = try Self.pathComponent(localDeviceID)
         self.epoch = epoch
         self.key = SymmetricKey(data: channelKey)
+        if let credentialsKey {
+            guard credentialsKey.count == 32 else {
+                throw RelayStoreError.invalidKeyLength(credentialsKey.count)
+            }
+            self.credentialsKey = SymmetricKey(data: credentialsKey)
+        } else {
+            self.credentialsKey = nil
+        }
     }
 
     public func loadBatches() async throws -> [HistoryBatch] {
@@ -196,6 +311,82 @@ public actor RelayHistoryStore: HistoryStore {
             writtenAtMS: rollup.updatedAtMS)
     }
 
+    // MARK: Server credentials
+
+    public func loadServerSnapshots() async throws -> [RelayServerSnapshot] {
+        guard let credentialsKey else {
+            throw RelayStoreError.missingCredentialsKey
+        }
+        var snapshots: [RelayServerSnapshot] = []
+        for (path, manifest) in try await manifests() {
+            guard let entry = manifest.objects["servers"] else { continue }
+            try validate(entry: entry, manifestPath: path, manifest: manifest)
+            guard let plaintext = try await readPlaintext(
+                path: entry.path, using: credentialsKey) else {
+                continue
+            }
+            try validate(plaintext: plaintext, against: entry)
+            let snapshot = try JSONDecoder().decode(
+                RelayServerSnapshot.self, from: plaintext)
+            guard snapshot.version == RelayServerSnapshot.currentVersion else {
+                continue
+            }
+            guard snapshot.deviceID == manifest.deviceID else {
+                throw RelayStoreError.payloadDeviceMismatch(
+                    expected: manifest.deviceID, actual: snapshot.deviceID)
+            }
+            _ = try snapshot.servers.map { try $0.validated() }
+            snapshots.append(snapshot)
+        }
+        return snapshots
+    }
+
+    public func save(_ snapshot: RelayServerSnapshot) async throws {
+        guard let credentialsKey else {
+            throw RelayStoreError.missingCredentialsKey
+        }
+        guard snapshot.deviceID == localDeviceID else {
+            throw RelayStoreError.payloadDeviceMismatch(
+                expected: localDeviceID, actual: snapshot.deviceID)
+        }
+        _ = try snapshot.servers.map { try $0.validated() }
+        try await save(
+            snapshot,
+            objectKey: "servers",
+            pathPrefix: "\(devicePrefix)\(localDeviceID)/servers/\(epoch)/snapshot",
+            maximumBytes: 128 * 1024,
+            writtenAtMS: snapshot.writtenAtMS,
+            using: credentialsKey)
+    }
+
+    /// Merge snapshots by stable server id. A tombstone is a write, not an
+    /// absence, and wins an exact timestamp tie so deletion cannot be undone by
+    /// a stale active record from another device.
+    public static func mergedServerRecords(
+        _ snapshots: [RelayServerSnapshot]
+    ) -> [RelayServerRecord] {
+        var selected: [String: (RelayServerRecord, String)] = [:]
+        for snapshot in snapshots {
+            for record in snapshot.servers {
+                guard let current = selected[record.id] else {
+                    selected[record.id] = (record, snapshot.deviceID)
+                    continue
+                }
+                let shouldReplace =
+                    record.mutationAtMS > current.0.mutationAtMS
+                    || (record.mutationAtMS == current.0.mutationAtMS
+                        && record.isRemoved && !current.0.isRemoved)
+                    || (record.mutationAtMS == current.0.mutationAtMS
+                        && record.isRemoved == current.0.isRemoved
+                        && snapshot.deviceID > current.1)
+                if shouldReplace {
+                    selected[record.id] = (record, snapshot.deviceID)
+                }
+            }
+        }
+        return selected.values.map(\.0).sorted { $0.id < $1.id }
+    }
+
     // MARK: Write
 
     private func save<Value: Encodable>(
@@ -203,7 +394,8 @@ public actor RelayHistoryStore: HistoryStore {
         objectKey: String,
         pathPrefix: String,
         maximumBytes: Int,
-        writtenAtMS: Int64
+        writtenAtMS: Int64,
+        using objectKeyEncryption: SymmetricKey? = nil
     ) async throws {
         let plaintext = try Self.encode(value)
         guard plaintext.count <= maximumBytes else {
@@ -228,7 +420,10 @@ public actor RelayHistoryStore: HistoryStore {
             return
         }
 
-        let ciphertext = try Self.seal(plaintext, path: path, key: key)
+        let ciphertext = try Self.seal(
+            plaintext,
+            path: path,
+            key: objectKeyEncryption ?? key)
         _ = try await objects.put(path: path, data: ciphertext, condition: .none)
 
         manifest.objects[objectKey] = RelayManifestEntry(
@@ -305,7 +500,10 @@ public actor RelayHistoryStore: HistoryStore {
         return manifest
     }
 
-    private func readPlaintext(path: String) async throws -> Data? {
+    private func readPlaintext(
+        path: String,
+        using decryptionKey: SymmetricKey? = nil
+    ) async throws -> Data? {
         let cached = cache[path]
         switch try await objects.read(path: path, ifNoneMatch: cached?.etag) {
         case .missing:
@@ -323,7 +521,9 @@ public actor RelayHistoryStore: HistoryStore {
                     maximum: Self.maximumPlaintextBytes + 64)
             }
             let plaintext = try Self.open(
-                object.data, path: path, key: key)
+                object.data,
+                path: path,
+                key: decryptionKey ?? key)
             cache[path] = CachedObject(
                 etag: object.etag, plaintext: plaintext)
             return plaintext

@@ -294,6 +294,13 @@ public sealed partial class ConnectViewModel : ViewModelBase
         }
     }
 
+    public void ReloadSavedAccounts()
+    {
+        Accounts.Clear();
+        foreach (var saved in _server.SavedAccounts()) Accounts.Add(saved);
+        OnPropertyChanged(nameof(HasAccounts));
+    }
+
     // MARK: Sync
 
     [RelayCommand]

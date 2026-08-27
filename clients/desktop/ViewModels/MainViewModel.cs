@@ -344,9 +344,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _playHistory = new PlayHistoryRecorder(
             evt => _ = RecordPlayEventAsync(evt),
             report => _ = ReportPlaybackAsync(report));
-        _relayHistory = new RelayHistoryService(_core, _deviceId);
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
+        _relayHistory = new RelayHistoryService(
+            _core, _deviceId, _server);
         Pairing = new PairingViewModel(_core, _deviceId);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
         Connect.Accounts.CollectionChanged += (_, _) =>
@@ -559,12 +560,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (!await _relaySyncGate.WaitAsync(0)) return;
         try
         {
-            var imported = await _relayHistory.SyncAsync();
-            RelaySyncStatus = imported is null
+            var outcome = await _relayHistory.SyncAsync();
+            Connect.ReloadSavedAccounts();
+            RelaySyncStatus = outcome is null
                 ? "This device is not in a circle yet."
-                : imported == 0
+                : outcome.ImportedHistoryEvents == 0
                     ? $"Up to date · {DateTime.Now:t}"
-                    : $"Imported {imported} new listening events · {DateTime.Now:t}";
+                    : $"Imported {outcome.ImportedHistoryEvents} new listening events · {DateTime.Now:t}";
         }
         catch
         {

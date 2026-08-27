@@ -41,6 +41,8 @@ public struct AuthenticatedSession: Sendable, Hashable {
     /// retained so the app can re-discover the account's servers later for the
     /// server picker. Nil for Jellyfin.
     public var accountToken: String?
+    public var musicSectionID: String?
+    public var selectedMusicSectionIDs: [String]?
 
     public init(
         kind: BackendKind,
@@ -50,7 +52,9 @@ public struct AuthenticatedSession: Sendable, Hashable {
         serverName: String,
         clientIdentifier: String,
         serverMachineIdentifier: String? = nil,
-        accountToken: String? = nil
+        accountToken: String? = nil,
+        musicSectionID: String? = nil,
+        selectedMusicSectionIDs: [String]? = nil
     ) {
         self.kind = kind
         self.baseURL = baseURL
@@ -60,6 +64,8 @@ public struct AuthenticatedSession: Sendable, Hashable {
         self.clientIdentifier = clientIdentifier
         self.serverMachineIdentifier = serverMachineIdentifier
         self.accountToken = accountToken
+        self.musicSectionID = musicSectionID
+        self.selectedMusicSectionIDs = selectedMusicSectionIDs
     }
 }
 

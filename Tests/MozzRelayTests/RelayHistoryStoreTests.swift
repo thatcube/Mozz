@@ -55,6 +55,8 @@ final actor MemoryRelayObjectStore: RelayObjectStore {
 
     func paths() -> [String] { values.keys.sorted() }
 
+    func bodies() -> [Data] { values.values.map(\.data) }
+
     func swapBodies(_ first: String, _ second: String) {
         let left = values[first]?.data
         let right = values[second]?.data
@@ -291,6 +293,188 @@ final class RelayHistoryStoreTests: XCTestCase {
         let loadedBatches = try await pc.loadBatches()
         XCTAssertEqual(loadedRollups, [rollup])
         XCTAssertTrue(loadedBatches.isEmpty)
+    }
+
+    // MARK: Server credentials
+
+    private func serverStore(
+        _ objects: MemoryRelayObjectStore,
+        device: String,
+        credentialsByte: UInt8 = 0xD2
+    ) throws -> RelayHistoryStore {
+        try RelayHistoryStore(
+            objects: objects,
+            channelID: "channel_123",
+            localDeviceID: device,
+            epoch: 1,
+            channelKey: key,
+            credentialsKey: Data(repeating: credentialsByte, count: 32))
+    }
+
+    private func server(
+        id: String,
+        name: String,
+        token: String,
+        updatedAtMS: Int64
+    ) -> RelayServerRecord {
+        RelayServerRecord(
+            id: id,
+            kind: "jellyfin",
+            name: name,
+            baseURL: "https://music.example.test",
+            token: token,
+            userID: "user",
+            username: "listener",
+            musicSectionIDs: ["music"],
+            updatedAtMS: updatedAtMS)
+    }
+
+    func testServerCredentialsRoundTripBetweenDevices() async throws {
+        let objects = MemoryRelayObjectStore()
+        let phone = try serverStore(objects, device: "phone-id")
+        let pc = try serverStore(objects, device: "pc-id")
+        let record = server(
+            id: "jellyfin-1",
+            name: "Home Music",
+            token: "secret-token",
+            updatedAtMS: 100)
+
+        try await phone.save(RelayServerSnapshot(
+            deviceID: "phone-id",
+            writtenAtMS: 100,
+            servers: [record]))
+
+        let snapshots = try await pc.loadServerSnapshots()
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(
+            RelayHistoryStore.mergedServerRecords(snapshots),
+            [record])
+    }
+
+    func testADeletedServerCannotBeResurrectedByAStaleDevice() {
+        let active = server(
+            id: "jellyfin-1",
+            name: "Home Music",
+            token: "secret-token",
+            updatedAtMS: 100)
+        let removed = RelayServerRecord.tombstone(
+            id: "jellyfin-1",
+            kind: "jellyfin",
+            removedAtMS: 200)
+        let snapshots = [
+            RelayServerSnapshot(
+                deviceID: "sleeping-pc",
+                writtenAtMS: 100,
+                servers: [active]),
+            RelayServerSnapshot(
+                deviceID: "phone",
+                writtenAtMS: 200,
+                servers: [removed]),
+        ]
+
+        XCTAssertEqual(
+            RelayHistoryStore.mergedServerRecords(snapshots),
+            [removed])
+    }
+
+    func testDeletionWinsAnExactTimestampTie() {
+        let active = server(
+            id: "jellyfin-1",
+            name: "Home Music",
+            token: "secret-token",
+            updatedAtMS: 200)
+        let removed = RelayServerRecord.tombstone(
+            id: "jellyfin-1",
+            kind: "jellyfin",
+            removedAtMS: 200)
+
+        let merged = RelayHistoryStore.mergedServerRecords([
+            RelayServerSnapshot(
+                deviceID: "zzz-active",
+                writtenAtMS: 200,
+                servers: [active]),
+            RelayServerSnapshot(
+                deviceID: "aaa-delete",
+                writtenAtMS: 200,
+                servers: [removed]),
+        ])
+
+        XCTAssertEqual(merged, [removed])
+    }
+
+    func testTwoServersWithTheSameNameDoNotOverwriteEachOther() {
+        let first = server(
+            id: "one", name: "Music", token: "a", updatedAtMS: 1)
+        let second = server(
+            id: "two", name: "Music", token: "b", updatedAtMS: 1)
+        let merged = RelayHistoryStore.mergedServerRecords([
+            RelayServerSnapshot(
+                deviceID: "phone",
+                writtenAtMS: 1,
+                servers: [first, second]),
+        ])
+
+        XCTAssertEqual(merged.map(\.id), ["one", "two"])
+    }
+
+    func testWrongCredentialsKeyCannotReadServerBodies() async throws {
+        let objects = MemoryRelayObjectStore()
+        let phone = try serverStore(objects, device: "phone-id")
+        try await phone.save(RelayServerSnapshot(
+            deviceID: "phone-id",
+            writtenAtMS: 1,
+            servers: [
+                server(
+                    id: "server", name: "Music",
+                    token: "secret-token", updatedAtMS: 1),
+            ]))
+        let wrong = try serverStore(
+            objects, device: "pc-id", credentialsByte: 0xEE)
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await wrong.loadServerSnapshots()
+        }
+    }
+
+    func testNeitherTokenNorURLAppearsInStoredCiphertext() async throws {
+        let objects = MemoryRelayObjectStore()
+        let phone = try serverStore(objects, device: "phone-id")
+        try await phone.save(RelayServerSnapshot(
+            deviceID: "phone-id",
+            writtenAtMS: 1,
+            servers: [
+                server(
+                    id: "server",
+                    name: "Music",
+                    token: "super-secret-token",
+                    updatedAtMS: 1),
+            ]))
+
+        for body in await objects.bodies() {
+            XCTAssertNil(body.range(of: Data("super-secret-token".utf8)))
+            XCTAssertNil(body.range(of: Data("music.example.test".utf8)))
+        }
+    }
+
+    func testActiveServerWithoutCredentialIsRefusedBeforeWriting() async throws {
+        let objects = MemoryRelayObjectStore()
+        let phone = try serverStore(objects, device: "phone-id")
+        let invalid = RelayServerRecord(
+            id: "server",
+            kind: "jellyfin",
+            name: "Music",
+            baseURL: "https://music.example.test",
+            token: nil,
+            updatedAtMS: 1)
+
+        await XCTAssertThrowsErrorAsync {
+            try await phone.save(RelayServerSnapshot(
+                deviceID: "phone-id",
+                writtenAtMS: 1,
+                servers: [invalid]))
+        }
+        let writes = await objects.putCount
+        XCTAssertEqual(writes, 0)
     }
 }
 
