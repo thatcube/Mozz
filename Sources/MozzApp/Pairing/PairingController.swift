@@ -120,7 +120,9 @@ final class PairingController: ObservableObject {
 
     /// Stable per-install identity used for relay ownership, never for display.
     static var deviceID: String {
-        (try? KeychainCredentialStore().clientIdentifier()) ?? UUID().uuidString
+        let client = (try? KeychainCredentialStore().clientIdentifier())
+            ?? UUID().uuidString
+        return AppEnvironment.continuityDeviceID(from: client)
     }
 
     /// The local hostname, cleaned up, when it says something a person chose.
