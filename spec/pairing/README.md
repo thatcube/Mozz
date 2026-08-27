@@ -67,18 +67,18 @@ the failure that makes otherwise-correct protocols come apart.
 
 | Label | Used for |
 |---|---|
-| `mozz/pair/v1/qr` | the QR payload |
-| `mozz/pair/v1/commit` | the digit path's commitment |
-| `mozz/pair/v1/sas` | deriving the six digits |
-| `mozz/pair/v1/channel` | sealing the circle secrets |
+| `mozz/pair/v2/qr` | the QR payload |
+| `mozz/pair/v2/commit` | the digit path's commitment |
+| `mozz/pair/v2/sas` | deriving the six digits |
+| `mozz/pair/v2/channel` | sealing the circle secrets |
 
 ### QR payload
 
 ```
 qrPayload := "MOZZ1:" || base64url( body )
 
-body := version   (1 byte, = 0x01)
-     || role      (1 byte, 0x02 = joiner; the only legal value in v1)
+body := version   (1 byte, = 0x02)
+     || role      (1 byte, 0x02 = joiner; the only legal value in v2)
      || pubKey    (32 bytes, X25519 public key, raw)
      || nonce     (16 bytes, random)
 ```
@@ -86,6 +86,11 @@ body := version   (1 byte, = 0x01)
 `base64url` is RFC 4648 §5 **without padding**. Padding is omitted because a QR
 encoder that helpfully strips `=` would otherwise produce a payload that parses
 on one platform and not another.
+
+`MOZZ1:` identifies the QR container and remains stable across protocol
+versions. The byte inside the body is the protocol version. Keeping the prefix
+stable lets an older client recognize a newer code and report an update mismatch
+instead of calling it an unrelated QR code.
 
 The QR carries a **public** key and nothing else of value. A photograph of it is
 not a credential: it lets someone offer to *receive* the circle secrets, and a
@@ -109,7 +114,7 @@ requirement here rather than a detail there.
 stream := HKDF-SHA256(
               ikm  = sharedSecret,
               salt = transcriptHash,
-              info = "mozz/pair/v1/sas" )
+              info = "mozz/pair/v2/sas" )
 
 repeat:
     v := next 4 bytes of stream, big-endian u32
@@ -131,7 +136,7 @@ The grouping is presentation only and is **not** part of any hash.
 ### Commitment, for the digit path
 
 ```
-commit := SHA-256( "mozz/pair/v1/commit" || 0x00 || nonceA )
+commit := SHA-256( "mozz/pair/v2/commit" || 0x00 || nonceA )
 ```
 
 The joiner sends `commit` first, the member replies with `nonceB`, the joiner
@@ -147,7 +152,7 @@ what makes a substituted key visible to a human.
 
 ```
 transcriptHash := SHA-256(
-    "mozz/pair/v1/sas" || 0x00
+    "mozz/pair/v2/sas" || 0x00
  || version            (1 byte)
  || joinerPubKey       (32 bytes)
  || memberPubKey       (32 bytes)
@@ -173,7 +178,7 @@ on Windows as well as Apple platforms by the FFI spike (CI run 32934126070), and
 the reason this can live in the shared core instead of being written three times.
 
 ```
-info := "mozz/pair/v1/channel" || 0x00 || transcriptHash
+info := "mozz/pair/v2/channel" || 0x00 || transcriptHash
 aad  := version || joinerPubKey
 
 plaintext := canonical JSON, sorted keys:
@@ -210,7 +215,7 @@ Rotation is per-key. Removing a device rotates both. A user changing a server
 password re-encrypts only `servers/`, and nothing else in the channel has to
 move.
 
-**A better version exists and is deliberately not v1:** Plex and Jellyfin can
+**A better version exists and is deliberately not v2:** Plex and Jellyfin can
 both mint per-device tokens, so each device could hold only its own and removal
 could revoke it at the server rather than merely locking it out of the channel.
 That is strictly better and it needs per-backend work in three clients, so it is
@@ -275,10 +280,14 @@ will tell you.
 
 ## Changing the encoding
 
-Don't, in v1. If a change is genuinely needed, the version byte increments and
-both encodings ship simultaneously for at least one release — a device that
-cannot pair with the phone it paired with yesterday is a worse failure than
-whatever the change was meant to fix.
+Version 2 added stable device ids and authenticated device names to the frames
+and transcript. Version 1 cannot be decoded as version 2: treating the old
+shape as current would assign bytes to the wrong fields and make relay ownership
+ambiguous. A v2 decoder therefore checks the hello version before parsing the
+rest of that frame and reports that both devices need an update.
+
+Any later wire-shape change increments the version again. The QR container
+prefix stays `MOZZ1:` so version mismatches remain recognizable.
 
 ## Regenerating
 

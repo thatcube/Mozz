@@ -16,9 +16,9 @@ public enum Pairing {
     /// Wire version. Bumping this is a breaking change and both encodings must
     /// ship together for a release — a device that cannot pair with the phone
     /// it paired with yesterday is worse than whatever the change fixed.
-    public static let version: UInt8 = 0x01
+    public static let version: UInt8 = 0x02
 
-    /// Who is speaking. Only the joiner ever produces a QR in v1.
+    /// Who is speaking. Only the joiner ever produces a QR in v2.
     public enum Role: UInt8 {
         case joiner = 0x02
     }
@@ -31,10 +31,10 @@ public enum Pairing {
     /// input to another, which is the failure that takes otherwise-correct
     /// protocols apart.
     public enum Label {
-        public static let qr = "mozz/pair/v1/qr"
-        public static let commit = "mozz/pair/v1/commit"
-        public static let sas = "mozz/pair/v1/sas"
-        public static let channel = "mozz/pair/v1/channel"
+        public static let qr = "mozz/pair/v2/qr"
+        public static let commit = "mozz/pair/v2/commit"
+        public static let sas = "mozz/pair/v2/sas"
+        public static let channel = "mozz/pair/v2/channel"
     }
 
     // MARK: QR payload

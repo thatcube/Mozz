@@ -271,6 +271,13 @@ final class PairingController: ObservableObject {
         let payload: Pairing.QRPayload
         do {
             payload = try Pairing.decodeQR(scannedText)
+        } catch let error as PairingError {
+            if case .unsupportedVersion = error {
+                stage = .failed("That device uses a different pairing version. Update Mozz on both devices and try again.")
+            } else {
+                stage = .failed("That is not a Mozz pairing code.")
+            }
+            return
         } catch {
             stage = .failed("That is not a Mozz pairing code.")
             return
@@ -355,6 +362,10 @@ final class PairingController: ObservableObject {
             return "That code belongs to a different device."
         case PairingSessionError.commitmentMismatch:
             return "The other device answered incorrectly. Start again."
+        case PairingSessionError.unsupportedVersion:
+            return "That device uses a different pairing version. Update Mozz on both devices and try again."
+        case PairingError.unsupportedVersion:
+            return "That device uses a different pairing version. Update Mozz on both devices and try again."
         default:
             return "Pairing did not finish. Try again."
         }

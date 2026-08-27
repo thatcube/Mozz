@@ -174,12 +174,13 @@ final class PairingSessionTests: XCTestCase {
 
     func testAnUnknownVersionIsRefused() throws {
         var (_, member, joinerKey) = try sessions(path: .digits)
-        let hello = PairingFrame.hello(version: 0x99,
+        let futureVersion = Pairing.version + 1
+        let hello = PairingFrame.hello(version: futureVersion,
                                        publicKey: joinerKey.publicKey.rawRepresentation,
                                        commitment: Pairing.commitment(nonceA: nonce(0xA1)),
                                        name: "x", deviceID: "joiner-id")
         XCTAssertThrowsError(try member.receive(hello)) { error in
-            XCTAssertEqual(error as? PairingSessionError, .unsupportedVersion(0x99))
+            XCTAssertEqual(error as? PairingSessionError, .unsupportedVersion(futureVersion))
         }
     }
 
