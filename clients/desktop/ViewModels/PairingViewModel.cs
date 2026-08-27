@@ -183,6 +183,9 @@ public sealed partial class PairingViewModel : ObservableObject
     private void Answer(bool matched)
     {
         IsComparing = false;
+        Status = matched
+            ? $"Confirmed here. Waiting for {SelectedDevice?.Name ?? "the other device"} to confirm the same number…"
+            : "The numbers did not match. Nothing was shared.";
         _awaitingAnswer?.TrySetResult(matched);
         _awaitingAnswer = null;
     }

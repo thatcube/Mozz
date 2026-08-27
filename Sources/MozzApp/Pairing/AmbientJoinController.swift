@@ -33,6 +33,7 @@ final class AmbientJoinController: ObservableObject {
     @Published private(set) var request: Request?
     @Published private(set) var completedCircleID: String?
     @Published private(set) var isDevicesScreenActive = false
+    @Published private(set) var confirmedPeerName: String?
 
     private let store: CircleStore
     private var work: Task<Void, Never>?
@@ -132,6 +133,7 @@ final class AmbientJoinController: ObservableObject {
             completedCircleID = circle.channelId
         }
         request = nil
+        confirmedPeerName = nil
         work = nil
         workGeneration = nil
     }
@@ -143,8 +145,10 @@ final class AmbientJoinController: ObservableObject {
 
     func answer(_ accepted: Bool) {
         guard let continuation = awaitingAnswer else { return }
+        let peerName = request?.peerName
         awaitingAnswer = nil
         request = nil
+        confirmedPeerName = accepted ? peerName : nil
         continuation.resume(returning: accepted)
     }
 
@@ -153,6 +157,7 @@ final class AmbientJoinController: ObservableObject {
         work = nil
         workGeneration = nil
         request = nil
+        confirmedPeerName = nil
         awaitingAnswer?.resume(returning: false)
         awaitingAnswer = nil
     }

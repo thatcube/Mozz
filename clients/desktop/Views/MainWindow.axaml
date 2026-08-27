@@ -2346,17 +2346,20 @@
                                                     Padding="16">
                                                 <StackPanel Spacing="10" HorizontalAlignment="Center">
                                                     <TextBlock Text="{Binding Digits}"
-                                                               FontSize="30"
+                                                               FontSize="48"
+                                                               FontWeight="Bold"
                                                                FontFamily="monospace"
                                                                HorizontalAlignment="Center" />
-                                                    <TextBlock Text="Confirm the same number appears on the other device."
+                                                    <TextBlock Text="Confirm this number on both devices."
                                                                Classes="secondary"
                                                                HorizontalAlignment="Center" />
                                                     <StackPanel Orientation="Horizontal" Spacing="10"
                                                                 HorizontalAlignment="Center">
-                                                        <Button Content="They match" Classes="primary"
+                                                        <Button Content="Numbers Match" Classes="primary"
+                                                                MinWidth="180" Padding="20,12"
                                                                 Command="{Binding MatchesCommand}" />
-                                                        <Button Content="They do not match" Classes="destructive"
+                                                        <Button Content="Numbers Do Not Match" Classes="destructive"
+                                                                MinWidth="180" Padding="20,12"
                                                                 Command="{Binding DoesNotMatchCommand}" />
                                                     </StackPanel>
                                                 </StackPanel>
