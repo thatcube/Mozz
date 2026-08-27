@@ -92,7 +92,7 @@ struct PairingView: View {
                 Button("Numbers Match") {
                     ambientJoin.answer(true)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.mozzProminent)
                 .controlSize(.large)
                 .frame(maxWidth: .infinity)
                 Button("Numbers Do Not Match", role: .destructive) {
