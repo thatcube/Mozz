@@ -281,6 +281,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsSettingsRecommendationsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Recommendations);
     public bool IsSettingsAppearanceSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Appearance);
     public bool IsSettingsDiagnosticsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Diagnostics);
+    public bool IsSettingsDevicesSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Devices);
     public bool IsSettingsAboutSelected => _settingsCategorySelection.IsSelected(SettingsCategory.About);
     public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
@@ -1042,6 +1043,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await RefreshSettingsAsync();
     }
 
+    /// <summary>Raised when Settings asks to add a device; App owns the window.</summary>
+    public event EventHandler? AddDeviceRequested;
+
+    [RelayCommand]
+    private void AddDevice() => AddDeviceRequested?.Invoke(this, EventArgs.Empty);
+
     [RelayCommand]
     private void CloseSettings()
     {
@@ -1068,6 +1075,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsSettingsRecommendationsSelected));
         OnPropertyChanged(nameof(IsSettingsAppearanceSelected));
         OnPropertyChanged(nameof(IsSettingsDiagnosticsSelected));
+        OnPropertyChanged(nameof(IsSettingsDevicesSelected));
         OnPropertyChanged(nameof(IsSettingsAboutSelected));
     }
 

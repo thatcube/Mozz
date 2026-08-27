@@ -86,6 +86,10 @@ public sealed class SettingsTests : IDisposable
             "Playback",
             "Lyrics",
             "Recommendations",
+            // Devices sits here on iOS too. This test exists because the two
+            // drifting apart is invisible on either platform alone, and it
+            // caught exactly that when Devices was added to one side only.
+            "Devices",
             "Appearance",
             "Diagnostics",
             "About",
