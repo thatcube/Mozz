@@ -743,13 +743,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     ? $"Up to date · {DateTime.Now:t}"
                     : $"Imported {outcome.ImportedHistoryEvents} new listening events · {DateTime.Now:t}";
         }
-        catch
+        catch (Exception error)
         {
             // The local log is the durable copy. A failed background pass must
             // not turn app startup or playback into a failure, but Devices
             // should say it is waiting rather than falsely claim success.
             RelaySyncStatus =
-                "Relay unavailable; local music and listening remain safe and will retry.";
+                $"Relay unavailable: {error.Message}";
         }
         finally
         {
