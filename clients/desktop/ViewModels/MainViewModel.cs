@@ -14,6 +14,9 @@ namespace Mozz.Desktop.ViewModels;
 public sealed partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly MozzCore _core = new();
+
+    /// <summary>The open core, for windows that drive it directly (pairing).</summary>
+    public MozzCore Core => _core;
     private readonly AppPreferences _preferences = new();
     private readonly ISecretStore _secrets;
     private readonly MozzServer _server;
