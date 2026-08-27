@@ -11,10 +11,13 @@ struct PairingView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var ambientJoin: AmbientJoinController
     @AppStorage(RelayBootstrapper.enabledKey) private var deviceSyncEnabled = true
+    @State private var didLeaveCircle = false
 
     var body: some View {
         Form {
-            if let request = ambientJoin.request {
+            if didLeaveCircle {
+                leftCircle
+            } else if let request = ambientJoin.request {
                 ambientConfirmation(request)
             } else if let peerName = ambientJoin.confirmedPeerName {
                 waitingForPeerConfirmation(peerName)
@@ -103,7 +106,7 @@ struct PairingView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 24)
         } header: {
-            Text("Add this device to your circle?")
+            Text("Sync this device?")
         }
     }
 
@@ -147,7 +150,7 @@ struct PairingView: View {
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Your circle")
+                Text("Your synced devices")
             } footer: {
                 Text("Your listening, library and servers sync across these devices.")
             }
@@ -156,7 +159,7 @@ struct PairingView: View {
                 Label("Looking for your other devices…", mozz: "person")
                     .foregroundStyle(.secondary)
             } footer: {
-                Text("Add this device to your circle to sync listening, library and servers across everything you own.")
+                Text("Sync listening, library and servers across your devices.")
             }
         }
 
@@ -182,8 +185,8 @@ struct PairingView: View {
             }
         } footer: {
             Text(controller.isPaired
-                 ? "Use this to add another device to your circle."
-                 : "Use this on the device that already has your music. Scanning this way creates your circle.")
+                 ? "Use this to add another synced device."
+                 : "Use this on the device that already has your music.")
         }
 
         if controller.isPaired {
@@ -201,14 +204,34 @@ struct PairingView: View {
 
             Section {
                 Button(role: .destructive) {
+                    ambientJoin.setDevicesScreenActive(false)
                     controller.leaveCircle()
-                    ambientJoin.setDevicesScreenActive(true)
+                    didLeaveCircle = true
                 } label: {
-                    Label("Leave circle", mozz: "person.badge.minus")
+                    Label("Stop syncing this device", mozz: "person.badge.minus")
                 }
             } footer: {
                 Text("This device stops syncing. Nothing is removed from your servers.")
             }
+        }
+
+    }
+
+    @ViewBuilder private var leftCircle: some View {
+        Section {
+            VStack(spacing: 14) {
+                Label("This device stopped syncing", mozz: "checkmark")
+                    .font(.headline)
+                Text("Your music and downloads stay here.")
+                    .foregroundStyle(.secondary)
+                Button("Sync This Device Again") {
+                    didLeaveCircle = false
+                    ambientJoin.setDevicesScreenActive(true)
+                }
+                .buttonStyle(.mozzProminent)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
         }
     }
 
@@ -228,7 +251,7 @@ struct PairingView: View {
                 }
                 #endif
                 ProgressView()
-                Text("Scan this with a device already in your circle.")
+                Text("Scan this with one of your synced devices.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -296,7 +319,7 @@ struct PairingView: View {
 
     @ViewBuilder private var joined: some View {
         Section {
-            Label("Added to your circle", mozz: "checkmark.seal.fill")
+            Label("Device syncing enabled", mozz: "checkmark.seal.fill")
         } footer: {
             Text("These devices now share listening, library and servers.")
         }

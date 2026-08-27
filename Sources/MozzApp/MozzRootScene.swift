@@ -94,7 +94,7 @@ struct RootView: View {
             }
         }
         .alert(
-            "Add this device to your circle?",
+            "Sync this device?",
             isPresented: Binding(
                 get: {
                     ambientJoin.request != nil

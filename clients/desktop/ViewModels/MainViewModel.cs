@@ -43,11 +43,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public string CircleSummary => IsInCircle
         ? CircleMembers.Count switch
         {
-            0 => "This device is in a circle. Device names will appear as they join or sync.",
-            1 => "1 known device in this circle.",
-            _ => $"{CircleMembers.Count} known devices in this circle.",
+            0 => "This device is syncing. Device names appear as they connect.",
+            1 => "1 synced device.",
+            _ => $"{CircleMembers.Count} synced devices.",
         }
-        : "This device is not in a circle yet. Add another device and they will share listening, library and servers.";
+        : "This device is not syncing yet. Add another device to share listening, library and servers.";
 
     /// <summary>
     /// Discovery and ceremony state rendered directly by Settings → Devices.
