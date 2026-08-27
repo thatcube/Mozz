@@ -17,6 +17,32 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>The open core, for windows that drive it directly (pairing).</summary>
     public MozzCore Core => _core;
+
+    /// <summary>
+    /// The running version, for About.
+    ///
+    /// AppVersion existed and was tested from the day the desktop shipped; it
+    /// was simply never put on screen, so About showed a description and a
+    /// licence and nothing that answered "which build am I looking at".
+    /// </summary>
+    public string AppVersionDisplay =>
+        Mozz.Desktop.Core.AppVersion.FromAssembly(typeof(MainViewModel).Assembly);
+
+    /// <summary>Devices known to be in this circle.</summary>
+    public ObservableCollection<Mozz.Desktop.Core.CircleMemberRow> CircleMembers { get; } = new();
+
+    public bool IsInCircle => CircleMembers.Count > 0;
+
+    /// <summary>Re-read the roster, so About/Devices reflect reality.</summary>
+    public void RefreshCircle()
+    {
+        CircleMembers.Clear();
+        foreach (var member in Mozz.Desktop.Core.CircleRoster.Load())
+        {
+            CircleMembers.Add(member);
+        }
+        OnPropertyChanged(nameof(IsInCircle));
+    }
     private readonly AppPreferences _preferences = new();
     private readonly ISecretStore _secrets;
     private readonly MozzServer _server;
@@ -1012,6 +1038,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         IsSettingsDialogOpen = true;
         OnPropertyChanged(nameof(IsSettingsSelected));
+        RefreshCircle();
         await RefreshSettingsAsync();
     }
 

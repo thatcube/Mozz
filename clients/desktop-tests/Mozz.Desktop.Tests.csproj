@@ -24,6 +24,7 @@
   <ItemGroup>
     <Compile Include="..\desktop\Core\SecretStore.cs" />
     <Compile Include="..\desktop\Core\PairingWire.cs" />
+    <Compile Include="..\desktop\Core\CircleRoster.cs" />
     <!-- The generated command client. Included here for the same reason as
          everything else in this list: the wire-fixture conformance test has to
          check the SAME generated code the app ships, not a copy. -->

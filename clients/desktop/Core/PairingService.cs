@@ -74,6 +74,7 @@ public sealed class PairingService
             role = "member",
             pairingPath = usingCode ? "qr" : "digits",
             scannedCode = usingCode ? scannedQrText : null,
+            deviceName = CircleRoster.DeviceName,
         }, token).ConfigureAwait(false);
 
         using var link = await PairingLink.ConnectAsync(device.Address, device.Port, token)
@@ -83,6 +84,11 @@ public sealed class PairingService
         {
             await PumpAsync(began.PairingId, link, confirmDigits, isJoiner: false, token)
                 .ConfigureAwait(false);
+
+            // Both sides go in the roster, so "it worked" is something the
+            // screen can show rather than something the user has to trust.
+            CircleRoster.Remember(CircleRoster.DeviceName, isSelf: true);
+            CircleRoster.Remember(device.Name, isSelf: false);
         }
         finally
         {
