@@ -34,8 +34,17 @@ struct PairingView: View {
             }
         }
         .mozzReadableWidth()
-        .navigationTitle("Devices")
+        .navigationTitle("Your Devices")
         .inlineNavigationTitle()
+        .onAppear {
+            // A device that is not in a circle yet has exactly one thing it
+            // could want here, so it does not need to be asked. Opening the
+            // screen IS the intent; a button that says "start looking" is a
+            // question with one answer.
+            if !controller.isPaired, controller.stage == .idle {
+                controller.join(path: .digits)
+            }
+        }
         .onDisappear { controller.cancel() }
     }
 
@@ -47,7 +56,7 @@ struct PairingView: View {
                 Label("This device is in a circle", mozz: "checkmark.seal.fill")
                     .foregroundStyle(.secondary)
             } else {
-                Label("This device is on its own", mozz: "person")
+                Label("Looking for your other devices…", mozz: "person")
                     .foregroundStyle(.secondary)
             }
         } footer: {
@@ -60,20 +69,10 @@ struct PairingView: View {
             Button {
                 controller.join()
             } label: {
-                Label("Show my code", mozz: "qrcode")
+                Label("Show a code instead", mozz: "qrcode")
             }
         } footer: {
-            Text("Use this to pair with another phone or tablet, which scans the code with its camera.")
-        }
-
-        Section {
-            Button {
-                controller.join(path: .digits)
-            } label: {
-                Label("Pair with a computer", mozz: "desktopcomputer")
-            }
-        } footer: {
-            Text("A computer has no camera worth pointing at a phone, so both screens show the same six digits and you check they match.")
+            Text("For adding this device using another phone or tablet, which scans the code with its camera.")
         }
 
         Section {
@@ -185,7 +184,7 @@ struct PairingView: View {
 
     @ViewBuilder private var joined: some View {
         Section {
-            Label("Paired", mozz: "checkmark.seal.fill")
+            Label("Added to your circle", mozz: "checkmark.seal.fill")
         } footer: {
             Text("These devices now share listening, library and servers.")
         }
