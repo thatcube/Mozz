@@ -1433,6 +1433,16 @@ public final class AppEnvironment: ObservableObject {
     /// server write-back that flushes now if online.
     private func applyFavorite(_ change: FavoriteChange, wasLiked: Bool) async {
         let nowLiked = (try? await favorites.applyLocally(change)) ?? change.isLiked
+        switch change.value {
+        case .favorite(let value):
+            playback.updateFavoriteMetadata(
+                trackID: change.remoteId,
+                isFavorite: value)
+        case .rating(let value):
+            playback.updateFavoriteMetadata(
+                trackID: change.remoteId,
+                rating: .some(value))
+        }
         if nowLiked != wasLiked {
             try? await playEvents.append(
                 PlayEvent(trackID: change.remoteId, kind: nowLiked ? .liked : .unliked),

@@ -380,6 +380,20 @@ public final class PlaybackEngine {
     public var repeatMode: RepeatMode { queue.repeatMode }
     public var isShuffled: Bool { queue.isShuffled }
 
+    public func updateFavoriteMetadata(
+        trackID: String,
+        isFavorite: Bool? = nil,
+        rating: Double?? = nil
+    ) {
+        queue.updateTrack(id: trackID) { track in
+            if let isFavorite { track.isFavorite = isFavorite }
+            if let rating { track.rating = rating }
+        }
+        if currentTrack?.id == trackID {
+            currentTrack = queue.current
+        }
+    }
+
     /// Load a set of tracks and start playing at `startIndex`.
     public func play(tracks: [Track], startAt startIndex: Int = 0) {
         invalidateStation()   // a fresh explicit play ends any active station
