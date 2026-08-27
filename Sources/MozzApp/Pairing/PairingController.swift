@@ -42,6 +42,9 @@ final class PairingController: ObservableObject {
         case idle
         /// Joiner: this is your code, hold it up to the other device.
         case showingCode(String)
+        /// Joiner on the digit path: nothing to show yet, the other device has
+        /// to find us first.
+        case waitingForComputer
         /// Member: pointing the camera.
         case scanning
         case connecting
@@ -78,7 +81,12 @@ final class PairingController: ObservableObject {
                     path: path,
                     into: store,
                     showCode: { text, _ in
-                        Task { @MainActor in self?.stage = .showingCode(text) }
+                        // On the digit path there is nothing to hold up to a
+                        // camera — a code appearing and then being replaced by
+                        // digits would just be confusing.
+                        Task { @MainActor in
+                            self?.stage = path == .digits ? .waitingForComputer : .showingCode(text)
+                        }
                     },
                     confirmDigits: { digits in
                         await self?.ask(digits) ?? false
