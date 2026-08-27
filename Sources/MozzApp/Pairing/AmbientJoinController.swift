@@ -122,7 +122,7 @@ final class AmbientJoinController: ObservableObject {
             } catch {
                 // Setup must remain usable if discovery fails. The Devices
                 // screen exposes the same path and can report a detailed error.
-                finish(generation)
+                finish(generation, joined: try? store.load())
             }
         }
     }

@@ -216,7 +216,15 @@ final class PairingController: ObservableObject {
                 await MainActor.run { self?.stage = .idle }
             } catch {
                 let message = Self.explain(error)
-                await MainActor.run { self?.stage = .failed(message) }
+                await MainActor.run {
+                    if let saved = try? store.load() {
+                        self?.circle = saved
+                        self?.members = (try? store.members()) ?? []
+                        self?.stage = .joined
+                    } else {
+                        self?.stage = .failed(message)
+                    }
+                }
             }
         }
     }
@@ -254,7 +262,13 @@ final class PairingController: ObservableObject {
             } catch {
                 let message = Self.explain(error)
                 await MainActor.run {
-                    self?.stage = .failed(message)
+                    if let saved = try? store.load() {
+                        self?.circle = saved
+                        self?.members = (try? store.members()) ?? []
+                        self?.stage = .joined
+                    } else {
+                        self?.stage = .failed(message)
+                    }
                     self?.work = nil
                 }
             }
@@ -306,7 +320,15 @@ final class PairingController: ObservableObject {
                 await MainActor.run { self?.stage = .idle }
             } catch {
                 let message = Self.explain(error)
-                await MainActor.run { self?.stage = .failed(message) }
+                await MainActor.run {
+                    if let saved = try? store.load() {
+                        self?.circle = saved
+                        self?.members = (try? store.members()) ?? []
+                        self?.stage = .joined
+                    } else {
+                        self?.stage = .failed(message)
+                    }
+                }
             }
         }
     }
