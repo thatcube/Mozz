@@ -33,13 +33,15 @@ public sealed partial class PairingViewModel : ObservableObject
 
     [ObservableProperty] private string _code = string.Empty;
     [ObservableProperty] private PairingCandidate? _selectedDevice;
-    [ObservableProperty] private string _status = "Open Mozz on your phone, then Settings → Devices → Show my code.";
+    [ObservableProperty] private string _status = "On your phone: Settings → Devices → Pair with a computer.";
     [ObservableProperty] private string _digits = string.Empty;
     [ObservableProperty] private bool _isComparing;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isDone;
 
-    public bool CanPair => !IsBusy && !string.IsNullOrWhiteSpace(Code) && SelectedDevice is not null;
+    // A code is optional. Without one this uses the digit path, which is the
+    // normal way to pair a desktop.
+    public bool CanPair => !IsBusy && SelectedDevice is not null;
 
     partial void OnCodeChanged(string value) => OnPropertyChanged(nameof(CanPair));
     partial void OnSelectedDeviceChanged(PairingCandidate? value) => OnPropertyChanged(nameof(CanPair));
@@ -62,7 +64,7 @@ public sealed partial class PairingViewModel : ObservableObject
                     {
                         Devices.Add(device);
                         SelectedDevice ??= device;
-                        Status = $"Found {device.Name}. Paste the code shown on it, then pair.";
+                        Status = $"Found {device.Name}. Select it and choose Pair.";
                     });
                 }
             }
@@ -88,13 +90,14 @@ public sealed partial class PairingViewModel : ObservableObject
     [RelayCommand]
     private async Task PairAsync()
     {
-        if (SelectedDevice is null || string.IsNullOrWhiteSpace(Code)) return;
+        if (SelectedDevice is null) return;
 
         IsBusy = true;
         Status = "Pairing…";
         try
         {
-            await _pairing.AdmitAsync(Code.Trim(), SelectedDevice, AskAsync).ConfigureAwait(true);
+            var code = string.IsNullOrWhiteSpace(Code) ? null : Code.Trim();
+            await _pairing.AdmitAsync(code, SelectedDevice, AskAsync).ConfigureAwait(true);
             IsDone = true;
             Status = "Paired. These devices now share listening, library and servers.";
         }

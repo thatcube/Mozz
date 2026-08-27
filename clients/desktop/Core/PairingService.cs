@@ -57,17 +57,23 @@ public sealed class PairingService
     /// usually has no camera worth pointing at a phone.</param>
     /// <param name="confirmDigits">Asked only on the digit path.</param>
     public async Task AdmitAsync(
-        string scannedQrText,
+        string? scannedQrText,
         PairingCandidate device,
         Func<string, Task<bool>> confirmDigits,
         CancellationToken token = default)
     {
+        // No code means the digit path: both sides show six digits and a person
+        // compares them. That is the whole reason the digit path exists — a
+        // desktop has no camera worth pointing at a phone, and the QR payload is
+        // sixty characters of base64 that nobody should be asked to retype.
+        var usingCode = !string.IsNullOrWhiteSpace(scannedQrText);
+
         var began = await Call<PairingBegan>(new
         {
             cmd = "pairingBegin",
             role = "member",
-            pairingPath = "qr",
-            scannedCode = scannedQrText,
+            pairingPath = usingCode ? "qr" : "digits",
+            scannedCode = usingCode ? scannedQrText : null,
         }, token).ConfigureAwait(false);
 
         using var link = await PairingLink.ConnectAsync(device.Address, device.Port, token)

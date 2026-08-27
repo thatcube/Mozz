@@ -17,6 +17,8 @@ struct PairingView: View {
                 idle
             case let .showingCode(text):
                 showingCode(text)
+            case .waitingForComputer:
+                waiting("Waiting for your computer…")
             case .scanning:
                 scanning
             case .connecting:
@@ -59,7 +61,17 @@ struct PairingView: View {
                 Label("Show my code", mozz: "qrcode")
             }
         } footer: {
-            Text("Use this on the device you are adding. Another device that is already set up scans the code.")
+            Text("Use this to pair with another phone or tablet, which scans the code with its camera.")
+        }
+
+        Section {
+            Button {
+                controller.join(path: .digits)
+            } label: {
+                Label("Pair with a computer", mozz: "desktopcomputer")
+            }
+        } footer: {
+            Text("A computer has no camera worth pointing at a phone, so both screens show the same six digits and you check they match.")
         }
 
         Section {
