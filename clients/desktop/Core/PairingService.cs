@@ -261,7 +261,7 @@ public sealed class PairingService
         return created;
     }
 
-    private CircleDto? LoadCircle()
+    internal static CircleDto? LoadCircle()
     {
         var store = SecretStore.ForCurrentPlatform();
         var channelId = store.Get("circle.channelId");
@@ -275,7 +275,7 @@ public sealed class PairingService
                              int.TryParse(epoch, out var e) ? e : 1, relayKey);
     }
 
-    private static void StoreCircle(CircleDto circle)
+    internal static void StoreCircle(CircleDto circle)
     {
         // Both halves go to the secure store here. Unlike Apple, where the
         // channel key sits in ordinary app storage and only the credentials key

@@ -2210,6 +2210,23 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
+                                            <Border Background="{DynamicResource SurfaceRaised}"
+                                                    CornerRadius="12"
+                                                    Padding="14">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                                    <StackPanel Grid.Column="0" Spacing="3">
+                                                        <TextBlock Text="Sync between your devices"
+                                                                   Classes="primary"
+                                                                   FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding RelaySyncStatus}"
+                                                                   Classes="secondary"
+                                                                   TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <CheckBox Grid.Column="1"
+                                                              IsChecked="{Binding DeviceSyncEnabled}"
+                                                              VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
                                         </StackPanel>
                                     </Border>
 

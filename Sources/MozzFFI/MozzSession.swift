@@ -12,6 +12,7 @@ import MozzDatabase
 import MozzEnrichment
 import MozzJellyfin
 import MozzRecommend
+import MozzRelay
 import MozzSubsonic
 
 // MARK: - The session facade
@@ -113,6 +114,7 @@ struct SessionRequest: Decodable {
     var maxBytes: Int?
     var batch: HistoryExchangeBatch?
     var batches: [HistoryExchangeBatch]?
+    var relayEndpoint: String?
 
     // Lyrics.
     var useLRCLIB: Bool?
@@ -412,6 +414,14 @@ private struct WireAction: Encodable {
 
 private struct WireHistoryImport: Encodable {
     var imported: Int
+}
+
+private struct WireRelayHistorySync: Encodable {
+    var imported: Int
+    /// Replacement capability after initial provisioning or renewal. The host
+    /// persists it in its platform secure store.
+    var relayKey: String
+    var expiresAtMS: Int64
 }
 
 private struct WireFavoriteMutation: Encodable {
@@ -1294,6 +1304,79 @@ private func dispatch(
         )
         return sessionSuccess(request, rollup)
 
+    case "relaySyncHistory":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncHistory needs deviceID")
+        }
+        guard let wireCircle = request.circle else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncHistory needs circle")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncHistory needs a valid relayEndpoint")
+        }
+
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+
+        let objectStore = B2NativeRelayObjectStore(
+            configuration: configuration)
+        let relay = try RelayHistoryStore(
+            objects: objectStore,
+            channelID: circle.channelId,
+            localDeviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey)
+        let exchange = HistoryExchangeStore(session.database)
+
+        // Import first, exactly like HistoryCoordinator. A device returning
+        // after a month should see its peers before publishing its own window.
+        let remote = try await relay.loadBatches()
+            .map(HistoryExchangeBatch.init)
+        let imported = try await exchange.importBatches(
+            remote, localDeviceID: deviceID)
+        let local = try await exchange.exportBatch(
+            localDeviceID: deviceID,
+            deviceName: request.deviceName ?? "",
+            sinceMS: request.sinceMS,
+            windowDays: request.windowDays ?? 180,
+            maximumBytes: relay.maximumBatchBytes)
+        try await relay.save(local.historyBatch)
+
+        let calendar = HistoryRollupBuilder.utcCalendar
+        let year = request.year
+            ?? calendar.component(.year, from: Date())
+        let rollup = try await exchange.yearRollup(
+            year: year, localDeviceID: deviceID)
+        try await relay.save(rollup.historyRollup)
+
+        return sessionSuccess(request, WireRelayHistorySync(
+            imported: imported,
+            relayKey: try configuration.encoded()
+                .base64EncodedString(),
+            expiresAtMS: configuration.expiresAtMS))
+
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
@@ -1733,7 +1816,7 @@ let mozzSessionCommands = [
     "likedTracks", "likedTracksCount",
     "setFavorite", "setRating", "flushFavoriteOutbox",
     "recordPlayEvent", "playHistory", "historyExportBatch",
-    "historyImportBatches", "historyYearRollup",
+    "historyImportBatches", "historyYearRollup", "relaySyncHistory",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",

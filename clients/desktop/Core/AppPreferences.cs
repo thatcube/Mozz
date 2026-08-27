@@ -16,6 +16,7 @@ public sealed class AppPreferences
     public const string AppearanceKey = MozzTheme.AppearanceStorageKey;
     public const string DarkStyleKey = MozzTheme.DarkStyleStorageKey;
     public const string DeviceIdKey = "mozz.deviceID";
+    public const string DeviceSyncEnabledKey = "mozz.deviceSyncEnabled";
 
     private readonly string _path;
     private readonly object _gate = new();
