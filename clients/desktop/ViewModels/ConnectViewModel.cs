@@ -26,10 +26,13 @@ public sealed partial class ConnectViewModel : ViewModelBase
         _onLibraryChanged = onLibraryChanged;
         Accounts = new(server.SavedAccounts());
         Accounts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasAccounts));
+        PlexHomeUsers.CollectionChanged += (_, _) =>
+            OnPropertyChanged(nameof(HasPlexHomeUsers));
     }
 
     public System.Collections.ObjectModel.ObservableCollection<ServerAccount> Accounts { get; }
     public System.Collections.ObjectModel.ObservableCollection<SyncPhaseRow> SyncPhaseRows { get; } = [];
+    public System.Collections.ObjectModel.ObservableCollection<PlexHomeUser> PlexHomeUsers { get; } = [];
 
     [ObservableProperty] private BackendKind _kind = BackendKind.Jellyfin;
     [ObservableProperty] private string _serverUrl = string.Empty;
@@ -45,10 +48,16 @@ public sealed partial class ConnectViewModel : ViewModelBase
     /// <summary>Plex's link code, shown while its PIN flow is in progress.</summary>
     [ObservableProperty] private string? _plexCode;
     [ObservableProperty] private string? _plexLinkUrl;
+    [ObservableProperty] private PlexHomeUser? _selectedPlexHomeUser;
+    [ObservableProperty] private string _plexProfilePIN = string.Empty;
+    [ObservableProperty] private bool _needsPlexProfilePIN;
+    private string? _pendingPlexAccountToken;
+    private string? _pendingPlexClientIdentifier;
 
     public bool IsPlex => Kind == BackendKind.Plex;
     public bool NeedsCredentials => Kind != BackendKind.Plex;
     public bool HasAccounts => Accounts.Count > 0;
+    public bool HasPlexHomeUsers => PlexHomeUsers.Count > 0;
 
     partial void OnKindChanged(BackendKind value)
     {
@@ -123,14 +132,35 @@ public sealed partial class ConnectViewModel : ViewModelBase
             while (!token.IsCancellationRequested && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), token);
-                var account = await _server.PollPlexLinkAsync(link, token);
-                if (account is null) continue;
+                var accountToken = await _server.PollPlexTokenAsync(link, token);
+                if (accountToken is null) continue;
 
                 PlexCode = null;
                 PlexLinkUrl = null;
+                var users = await _server.PlexHomeUsersAsync(
+                    accountToken, link.ClientIdentifier, token);
+                if (users.Count > 1
+                    || users.FirstOrDefault() is
+                        { IsAdmin: false, RequiresPIN: true })
+                {
+                    _pendingPlexAccountToken = accountToken;
+                    _pendingPlexClientIdentifier = link.ClientIdentifier;
+                    PlexHomeUsers.Clear();
+                    foreach (var user in users) PlexHomeUsers.Add(user);
+                    Message = "Who’s listening?";
+                    return;
+                }
+
+                var account = await _server.CompletePlexLoginAsync(
+                    accountToken,
+                    link.ClientIdentifier,
+                    users.FirstOrDefault(),
+                    profilePIN: null,
+                    token);
                 await AfterSignInAsync(account);
                 return;
             }
+
             if (!token.IsCancellationRequested)
             {
                 PlexCode = null;
@@ -150,6 +180,76 @@ public sealed partial class ConnectViewModel : ViewModelBase
         {
             IsBusy = false;
         }
+    }
+
+    [RelayCommand]
+    private async Task SelectPlexHomeUserAsync(PlexHomeUser user)
+    {
+        SelectedPlexHomeUser = user;
+        if (user.RequiresPIN && !user.IsAdmin)
+        {
+            PlexProfilePIN = string.Empty;
+            NeedsPlexProfilePIN = true;
+            Message = $"Enter the PIN for {user.Name}.";
+            return;
+        }
+        await FinishPlexHomeUserAsync(user, profilePIN: null);
+    }
+
+    [RelayCommand]
+    private async Task ConfirmPlexProfilePINAsync()
+    {
+        if (SelectedPlexHomeUser is not { } user
+            || string.IsNullOrWhiteSpace(PlexProfilePIN))
+        {
+            return;
+        }
+        await FinishPlexHomeUserAsync(user, PlexProfilePIN);
+    }
+
+    private async Task FinishPlexHomeUserAsync(
+        PlexHomeUser user,
+        string? profilePIN)
+    {
+        if (_pendingPlexAccountToken is not { } accountToken
+            || _pendingPlexClientIdentifier is not { } clientIdentifier)
+        {
+            return;
+        }
+        try
+        {
+            IsBusy = true;
+            Message = $"Switching to {user.Name}…";
+            var account = await _server.CompletePlexLoginAsync(
+                accountToken,
+                clientIdentifier,
+                user,
+                profilePIN);
+            // The owner token is no longer retained once MozzServer persists
+            // the switched token.
+            ClearPlexProfileSelection();
+            await AfterSignInAsync(account);
+        }
+        catch (Exception ex)
+        {
+            Message = user.RequiresPIN
+                ? "That PIN was not accepted."
+                : Explain(ex);
+        }
+        finally
+        {
+            IsBusy = false;
+            PlexProfilePIN = string.Empty;
+        }
+    }
+
+    private void ClearPlexProfileSelection()
+    {
+        _pendingPlexAccountToken = null;
+        _pendingPlexClientIdentifier = null;
+        SelectedPlexHomeUser = null;
+        NeedsPlexProfilePIN = false;
+        PlexHomeUsers.Clear();
     }
 
     private async Task AfterSignInAsync(ServerAccount account)
@@ -304,6 +404,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
     private void CancelPlex()
     {
         CancelPlexPoll();
+        ClearPlexProfileSelection();
         PlexCode = null;
         PlexLinkUrl = null;
         Message = null;

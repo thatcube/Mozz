@@ -69,20 +69,68 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// Poll once. Returns null while the user has not finished linking, which is
     /// the normal case for the first several seconds.
     /// </summary>
-    public async Task<ServerAccount?> PollPlexLinkAsync(PlexLink link, CancellationToken token = default)
+    public async Task<string?> PollPlexTokenAsync(
+        PlexLink link,
+        CancellationToken token = default)
     {
-        var session = await core.CallAsync<SessionPayload>(new
+        var payload = await core.CallAsync<PlexAccountTokenPayload>(new
         {
-            cmd = "plexPinCheck",
+            cmd = "plexPinToken",
             pinId = link.PinId,
             code = link.Code,
             clientIdentifier = link.ClientIdentifier,
         }, token).ConfigureAwait(false);
+        return payload?.AccountToken;
+    }
 
-        // The core answers `{ "url": null }` for "not linked yet", which
-        // deserializes to a session with no token.
-        if (session is null || string.IsNullOrEmpty(session.Token)) return null;
-        return Persist(session, username: null, link.ClientIdentifier);
+    public async Task<IReadOnlyList<PlexHomeUser>> PlexHomeUsersAsync(
+        string accountToken,
+        string clientIdentifier,
+        CancellationToken token = default)
+    {
+        return await core.CallAsync<IReadOnlyList<PlexHomeUser>>(new
+        {
+            cmd = "plexHomeUsers",
+            accountToken,
+            clientIdentifier,
+        }, token).ConfigureAwait(false) ?? [];
+    }
+
+    /// <summary>
+    /// Finish Plex login for the selected Home profile. If it is managed, the
+    /// owner token is used once to switch and only the switched token survives.
+    /// </summary>
+    public async Task<ServerAccount> CompletePlexLoginAsync(
+        string accountToken,
+        string clientIdentifier,
+        PlexHomeUser? user,
+        string? profilePIN,
+        CancellationToken token = default)
+    {
+        var selectedToken = accountToken;
+        if (user is { IsAdmin: false })
+        {
+            var switched = await core.CallAsync<PlexSwitchedTokenPayload>(new
+            {
+                cmd = "plexHomeSwitch",
+                accountToken,
+                homeUserID = user.Id,
+                profilePIN,
+                clientIdentifier,
+            }, token).ConfigureAwait(false)
+                ?? throw new MozzCoreException("Plex returned no profile token");
+            selectedToken = switched.AccountToken;
+        }
+
+        var session = await core.CallAsync<SessionPayload>(new
+        {
+            cmd = "plexCompleteLogin",
+            accountToken = selectedToken,
+            homeUserID = user?.Id,
+            clientIdentifier,
+        }, token).ConfigureAwait(false)
+            ?? throw new MozzCoreException("Plex returned no session");
+        return Persist(session, user?.Name, clientIdentifier);
     }
 
     // MARK: Attach
@@ -772,6 +820,17 @@ internal sealed record PlexPinPayload(
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("clientIdentifier")] string ClientIdentifier,
     [property: JsonPropertyName("linkURL")] string? LinkUrl);
+
+public sealed record PlexHomeUser(
+    string Id,
+    string Name,
+    bool RequiresPIN,
+    bool IsAdmin,
+    bool IsRestricted,
+    string? AvatarURL);
+
+internal sealed record PlexAccountTokenPayload(string? AccountToken);
+internal sealed record PlexSwitchedTokenPayload(string AccountToken);
 
 internal sealed record AttachPayload(
     [property: JsonPropertyName("serverId")] string ServerId);

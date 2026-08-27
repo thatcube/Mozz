@@ -63,6 +63,36 @@ public struct AuthenticatedSession: Sendable, Hashable {
     }
 }
 
+/// One Plex Home profile available under the signed-in account.
+///
+/// Managed users have no plex.tv login of their own, so selecting one and
+/// switching the account token is the only way they can use Mozz—and the only
+/// way Plex play state is attributed to the right person.
+public struct PlexHomeUser: Identifiable, Sendable, Hashable, Codable {
+    public let id: String
+    public let name: String
+    public let requiresPIN: Bool
+    public let isAdmin: Bool
+    public let isRestricted: Bool
+    public let avatarURL: URL?
+
+    public init(
+        id: String,
+        name: String,
+        requiresPIN: Bool,
+        isAdmin: Bool = false,
+        isRestricted: Bool = false,
+        avatarURL: URL? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.requiresPIN = requiresPIN
+        self.isAdmin = isAdmin
+        self.isRestricted = isRestricted
+        self.avatarURL = avatarURL
+    }
+}
+
 // MARK: - Plex PIN / OAuth flow
 
 /// A pending Plex link code. The UI shows ``code`` (and/or opens the OAuth URL)

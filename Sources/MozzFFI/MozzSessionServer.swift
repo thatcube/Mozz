@@ -72,6 +72,23 @@ struct WirePinSession: Encodable {
     var linkURL: String?
 }
 
+struct WirePlexAccountToken: Encodable {
+    var accountToken: String?
+}
+
+struct WirePlexHomeUser: Encodable {
+    var id: String
+    var name: String
+    var requiresPIN: Bool
+    var isAdmin: Bool
+    var isRestricted: Bool
+    var avatarURL: String?
+}
+
+struct WirePlexSwitchedToken: Encodable {
+    var accountToken: String
+}
+
 struct WireStream: Encodable {
     var url: String
     var isTranscoded: Bool
@@ -302,6 +319,77 @@ func dispatchServerCommand(
             return session.success(request, WireURL(url: nil))
         }
         let authenticated = try await auth.completeLogin(accountToken: accountToken)
+        return session.success(request, wire(authenticated))
+
+    case "plexPinToken":
+        guard let pinId = request.pinId, let code = request.code else {
+            return session.failure(request, "plexPinToken needs pinId and code")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let token = try await auth.checkPin(id: pinId, code: code)
+        return session.success(
+            request,
+            WirePlexAccountToken(accountToken: token))
+
+    case "plexHomeUsers":
+        guard let accountToken = request.accountToken else {
+            return session.failure(
+                request, "plexHomeUsers needs accountToken")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let users = try await auth.homeUsers(accountToken: accountToken)
+        return session.success(request, users.map {
+            WirePlexHomeUser(
+                id: $0.id,
+                name: $0.name,
+                requiresPIN: $0.requiresPIN,
+                isAdmin: $0.isAdmin,
+                isRestricted: $0.isRestricted,
+                avatarURL: $0.avatarURL?.absoluteString)
+        })
+
+    case "plexHomeSwitch":
+        guard let accountToken = request.accountToken,
+              let homeUserID = request.homeUserID else {
+            return session.failure(
+                request,
+                "plexHomeSwitch needs accountToken and homeUserID")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let user = PlexHomeUser(
+            id: homeUserID,
+            name: "",
+            requiresPIN: request.profilePIN != nil,
+            isAdmin: false)
+        let switched = try await auth.token(
+            for: user,
+            accountToken: accountToken,
+            pin: request.profilePIN)
+        return session.success(
+            request,
+            WirePlexSwitchedToken(accountToken: switched))
+
+    case "plexCompleteLogin":
+        guard let accountToken = request.accountToken else {
+            return session.failure(
+                request, "plexCompleteLogin needs accountToken")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let authenticated = try await auth.completeLogin(
+            accountToken: accountToken,
+            plexUserID: request.homeUserID)
         return session.success(request, wire(authenticated))
 
     // MARK: Attach / mirror

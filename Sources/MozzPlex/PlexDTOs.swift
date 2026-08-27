@@ -124,6 +124,27 @@ struct PlexAccountUser: Decodable {
     let thumb: String?
 }
 
+struct PlexHomeUsersResponse: Decodable {
+    let users: [PlexHomeUserDTO]
+}
+
+struct PlexHomeUserDTO: Decodable {
+    let id: Int?
+    let uuid: String?
+    let title: String?
+    let username: String?
+    let admin: Bool?
+    let restricted: Bool?
+    let protected: Bool?
+    let hasPassword: Bool?
+    let thumb: String?
+}
+
+struct PlexHomeSwitchResponse: Decodable {
+    let authToken: String?
+    let authenticationToken: String?
+}
+
 struct PlexConnectionDTO: Decodable {
     let uri: String?
     let address: String?

@@ -1,0 +1,23 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "uuid": "owner-uuid",
+      "title": "Brandon",
+      "username": "brandoland",
+      "admin": true,
+      "restricted": false,
+      "protected": false,
+      "thumb": "https://plex.tv/owner.png"
+    },
+    {
+      "id": 2,
+      "uuid": "managed-uuid",
+      "title": "Music Room",
+      "admin": false,
+      "restricted": true,
+      "protected": true,
+      "thumb": "https://plex.tv/managed.png"
+    }
+  ]
+}

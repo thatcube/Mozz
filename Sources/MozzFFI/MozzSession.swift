@@ -70,6 +70,8 @@ struct SessionRequest: Decodable {
     var apiKey: String?
     var token: String?
     var accountToken: String?
+    var homeUserID: String?
+    var profilePIN: String?
     var userID: String?
     var serverName: String?
     var clientIdentifier: String?
@@ -1823,7 +1825,9 @@ let mozzSessionCommands = [
     "continuityQueueHash", "continuityLoad", "continuitySave",
     "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
-    "connect", "plexPin", "plexPinCheck", "attach", "libraries", "account",
+    "connect", "plexPin", "plexPinCheck", "plexPinToken",
+    "plexHomeUsers", "plexHomeSwitch", "plexCompleteLogin",
+    "attach", "libraries", "account",
     "sync", "syncStatus", "streamURL", "artworkURL",
 ].sorted()
 
