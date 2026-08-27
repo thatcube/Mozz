@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorker } from "./worker.mjs";
 
-const channelId = "abcdefghijklmnop";
+const channelId = "abcd_efghijklmnop";
 
 function environment(overrides = {}) {
   return {
@@ -85,6 +85,8 @@ test("mints one prefix-scoped least-privilege key", async () => {
   ]);
   assert.deepEqual(body.bucketIds, ["bucket-id"]);
   assert.equal(body.namePrefix, `c/${channelId}/`);
+  assert.match(body.keyName, /^mozz-abcd-efghijklmnop-/);
+  assert.ok(!body.keyName.includes("_"));
   assert.equal(body.validDurationInSeconds, 7_776_000);
   assert.ok(!JSON.stringify(body).includes("master-secret"));
 });

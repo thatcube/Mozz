@@ -12,7 +12,13 @@ export function createWorker(fetchImpl = fetch) {
       } catch (error) {
         // B2 response bodies can contain account details. The client gets a
         // stable failure code; operational logs get only the error class.
-        console.error("relay control-plane failure", error?.name ?? "Error");
+        // Every thrown message in this module is a fixed operation name/status
+        // or missing environment-key name; B2 response bodies and credentials
+        // are never included.
+        console.error(
+          "relay control-plane failure",
+          error?.message ?? error?.name ?? "Error",
+        );
         return json({ error: "provisioning_failed" }, 502);
       }
     },
@@ -77,13 +83,16 @@ async function mint(channelId, env, fetchImpl, state) {
   const authorization = await authorizeMaster(env, fetchImpl, state);
   const seconds = boundedLifetime(env.KEY_LIFETIME_SECONDS);
   const now = Date.now();
+  // B2 key names reject `_`, while base64url channel ids legitimately use it.
+  // The actual authorization boundary remains the unsanitized namePrefix below.
+  const keyLabel = channelId.slice(0, 20).replaceAll("_", "-");
   const result = await b2(
     `${authorization.apiInfo.storageApi.apiUrl}/b2api/v4/b2_create_key`,
     authorization.authorizationToken,
     {
       accountId: env.B2_ACCOUNT_ID,
       capabilities: ["listFiles", "readFiles", "writeFiles"],
-      keyName: `mozz-${channelId.slice(0, 20)}-${now}`,
+      keyName: `mozz-${keyLabel}-${now}`,
       validDurationInSeconds: seconds,
       bucketIds: [env.B2_BUCKET_ID],
       namePrefix: `c/${channelId}/`,
