@@ -24,6 +24,9 @@
   <ItemGroup>
     <Compile Include="..\desktop\Core\SecretStore.cs" />
     <Compile Include="..\desktop\Core\PairingWire.cs" />
+    <Compile Include="..\desktop\Core\PairingLink.cs" />
+    <Compile Include="..\desktop\Core\PairingDiscovery.cs" />
+    <Compile Include="..\desktop\Core\PairingHost.cs" />
     <Compile Include="..\desktop\Core\CircleRoster.cs" />
     <!-- The generated command client. Included here for the same reason as
          everything else in this list: the wire-fixture conformance test has to
@@ -84,6 +87,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Google.Protobuf" Version="3.33.1" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
