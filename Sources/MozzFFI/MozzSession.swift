@@ -441,6 +441,7 @@ private struct WireRelayCatalogSync: Encodable {
     var status: String
     var counts: CatalogSnapshotCounts
     var published: Bool
+    var importedFavorites: Int
     var relayKey: String
     var expiresAtMS: Int64
 }
@@ -1526,6 +1527,16 @@ private func dispatch(
             relay: relay,
             localDeviceID: deviceID)
         let hydration = try await catalog.hydrateIfEmpty(scope: scope)
+        let importedFavorites = try await FavoritesRelayCoordinator(
+            database: session.database,
+            relay: relay,
+            localDeviceID: deviceID
+        ).sync(scope: scope)
+        if importedFavorites > 0 {
+            _ = try? await flushFavoriteOutbox(
+                session: session,
+                serverId: serverId)
+        }
         let published: Bool
         if hydration.status == .imported {
             published = false
@@ -1543,6 +1554,7 @@ private func dispatch(
             }(),
             counts: hydration.counts,
             published: published,
+            importedFavorites: importedFavorites,
             relayKey: try configuration.encoded()
                 .base64EncodedString(),
             expiresAtMS: configuration.expiresAtMS))
