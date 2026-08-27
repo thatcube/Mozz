@@ -8,6 +8,7 @@ public struct FavoriteMutationState: Codable, Sendable, Equatable {
     public var value: Double?
     public var updatedAtMS: Int64
     public var sourceDeviceID: String
+    public var needsServerWrite: Bool
 
     public init(
         remoteID: String,
@@ -15,7 +16,8 @@ public struct FavoriteMutationState: Codable, Sendable, Equatable {
         kind: String,
         value: Double?,
         updatedAtMS: Int64,
-        sourceDeviceID: String
+        sourceDeviceID: String,
+        needsServerWrite: Bool
     ) {
         self.remoteID = remoteID
         self.itemType = itemType
@@ -23,5 +25,6 @@ public struct FavoriteMutationState: Codable, Sendable, Equatable {
         self.value = value
         self.updatedAtMS = updatedAtMS
         self.sourceDeviceID = sourceDeviceID
+        self.needsServerWrite = needsServerWrite
     }
 }

@@ -50,7 +50,8 @@ public actor FavoritesRelayCoordinator {
                 updatedAtMS: Int64($0.createdAt * 1_000),
                 sourceDeviceID: $0.sourceDeviceID.isEmpty
                     ? localDeviceID
-                    : $0.sourceDeviceID)
+                    : $0.sourceDeviceID,
+                needsServerWrite: $0.isPending)
         }
     }
 }
