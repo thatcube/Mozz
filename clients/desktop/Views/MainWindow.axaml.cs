@@ -21,6 +21,28 @@ public partial class MainWindow : Window
         Opened += (_, _) => ApplyLayoutForWidth(Bounds.Width);
     }
 
+    /// <summary>
+    /// Moves the one settings control tree into a native window.
+    /// </summary>
+    public Control TakeSettingsSurface()
+    {
+        SettingsParkingLot.Children.Remove(SettingsSurface);
+        return SettingsSurface;
+    }
+
+    /// <summary>
+    /// Returns settings to its hidden parking place after the native window
+    /// closes, ready to be opened again without rebuilding its controls.
+    /// </summary>
+    public void ReturnSettingsSurface(Control surface)
+    {
+        if (surface.Parent is Panel parent)
+        {
+            parent.Children.Remove(surface);
+        }
+        SettingsParkingLot.Children.Add(surface);
+    }
+
     private void OnWindowResized(object? sender, SizeChangedEventArgs e)
     {
         ApplyLayoutForWidth(e.NewSize.Width);
