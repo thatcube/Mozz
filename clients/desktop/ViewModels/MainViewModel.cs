@@ -729,7 +729,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             {
                 ApplySyncedPlaybackSettings(playbackSettings);
             }
-            if (outcome?.ImportedCatalogTracks > 0)
+            if (outcome is { } imported
+                && (imported.ImportedCatalogTracks > 0
+                    || imported.ImportedFavorites > 0))
             {
                 await ReloadAfterSyncAsync();
             }
