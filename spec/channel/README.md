@@ -183,8 +183,17 @@ with their own credentials, so choosing one *is* logging in. This is Plex-only.
 ## Mutable things, and the honest limit
 
 Likes and playback settings are state rather than events — there is one current
-answer, not an accumulating list. Each device writes its own `state` object with
-a timestamp per field, and the newest write per field wins.
+answer, not an accumulating list. Each device writes its own `state` object.
+Playback settings use one timestamp for the cohesive sound profile; likes use a
+timestamp per item. The newest mutation at that scope wins.
+
+Playback settings now use this path as one cohesive record: EQ enabled state,
+the normalized ten-band curve and preamp, ReplayGain mode, and ReplayGain
+preamp. The database timestamp changes only on a real edit, not on launch.
+Exact timestamp ties resolve by stable device id, so every platform chooses the
+same winner. Pre-sync installs migrate their existing platform preference once;
+after that the shared core row is authoritative and the shell applies any remote
+winner to its live audio engine.
 
 That is last-writer-wins, and it can lose an edit: like a track on the phone,
 unlike it on the Mac within the same minute while both are offline, and one of

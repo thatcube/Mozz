@@ -3,6 +3,44 @@ import Foundation
 import MozzCore
 import MozzHistory
 
+private actor RelayManifestWriteGate {
+    static let shared = RelayManifestWriteGate()
+
+    private var held: Set<String> = []
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    func run(
+        key: String,
+        operation: @Sendable () async throws -> Void
+    ) async throws {
+        await acquire(key)
+        do {
+            try await operation()
+            release(key)
+        } catch {
+            release(key)
+            throw error
+        }
+    }
+
+    private func acquire(_ key: String) async {
+        guard !held.insert(key).inserted else { return }
+        await withCheckedContinuation { continuation in
+            waiters[key, default: []].append(continuation)
+        }
+    }
+
+    private func release(_ key: String) {
+        if var queued = waiters[key], !queued.isEmpty {
+            let next = queued.removeFirst()
+            waiters[key] = queued.isEmpty ? nil : queued
+            next.resume()
+        } else {
+            held.remove(key)
+        }
+    }
+}
+
 // MARK: - Provider boundary
 
 /// One object as returned by B2, R2, S3, or a self-hosted equivalent.
@@ -91,6 +129,7 @@ public enum RelayStoreError: Error, Equatable {
     case missingCredentialsKey
     case invalidServerRecord(String)
     case invalidCatalogSnapshot(String)
+    case invalidPlaybackSettings(String)
     case manifestContention(String)
 }
 
@@ -253,6 +292,27 @@ public struct RelayCatalogSnapshotIndex: Codable, Sendable, Equatable {
         self.writtenAtMS = writtenAtMS
         self.counts = counts
         self.chunks = chunks
+    }
+}
+
+public struct RelayPlaybackSettingsSnapshot: Codable, Sendable, Equatable {
+    public static let currentVersion = 1
+
+    public var version: Int
+    public var deviceID: String
+    public var updatedAtMS: Int64
+    public var settings: PlaybackSettings
+
+    public init(
+        version: Int = currentVersion,
+        deviceID: String,
+        updatedAtMS: Int64,
+        settings: PlaybackSettings
+    ) {
+        self.version = version
+        self.deviceID = deviceID
+        self.updatedAtMS = updatedAtMS
+        self.settings = settings
     }
 }
 
@@ -451,6 +511,70 @@ public actor RelayHistoryStore: HistoryStore {
         return selected.values.map(\.0).sorted { $0.id < $1.id }
     }
 
+    // MARK: Playback settings
+
+    public func loadPlaybackSettingsSnapshots() async throws
+        -> [RelayPlaybackSettingsSnapshot] {
+        var snapshots: [RelayPlaybackSettingsSnapshot] = []
+        for (manifestPath, manifest) in try await manifests() {
+            guard let entry = manifest.objects["playbackSettings"] else {
+                continue
+            }
+            try validate(
+                entry: entry,
+                manifestPath: manifestPath,
+                manifest: manifest)
+            guard let plaintext = try await readPlaintext(
+                path: entry.path) else {
+                continue
+            }
+            try validate(plaintext: plaintext, against: entry)
+            let snapshot = try JSONDecoder().decode(
+                RelayPlaybackSettingsSnapshot.self,
+                from: plaintext)
+            guard snapshot.version
+                    == RelayPlaybackSettingsSnapshot.currentVersion,
+                  snapshot.deviceID == manifest.deviceID,
+                  snapshot.updatedAtMS >= 0 else {
+                throw RelayStoreError.invalidPlaybackSettings(
+                    "playback settings identity is invalid")
+            }
+            snapshots.append(snapshot)
+        }
+        return snapshots
+    }
+
+    public func save(
+        _ snapshot: RelayPlaybackSettingsSnapshot
+    ) async throws {
+        guard snapshot.deviceID == localDeviceID,
+              snapshot.version
+                == RelayPlaybackSettingsSnapshot.currentVersion,
+              snapshot.updatedAtMS >= 0 else {
+            throw RelayStoreError.payloadDeviceMismatch(
+                expected: localDeviceID,
+                actual: snapshot.deviceID)
+        }
+        try await save(
+            snapshot,
+            objectKey: "playbackSettings",
+            pathPrefix: "\(devicePrefix)\(localDeviceID)/state/" +
+                "\(epoch)/playback-settings",
+            maximumBytes: 32 * 1024,
+            writtenAtMS: snapshot.updatedAtMS)
+    }
+
+    public static func mergedPlaybackSettings(
+        _ snapshots: [RelayPlaybackSettingsSnapshot]
+    ) -> RelayPlaybackSettingsSnapshot? {
+        snapshots.max {
+            if $0.updatedAtMS != $1.updatedAtMS {
+                return $0.updatedAtMS < $1.updatedAtMS
+            }
+            return $0.deviceID < $1.deviceID
+        }
+    }
+
     // MARK: Catalog snapshots
 
     public static func catalogScopeID(
@@ -607,6 +731,25 @@ public actor RelayHistoryStore: HistoryStore {
             throw RelayStoreError.objectTooLarge(
                 actual: plaintext.count, maximum: maximumBytes)
         }
+        try await RelayManifestWriteGate.shared.run(
+            key: "\(channelID)/\(epoch)/\(localDeviceID)"
+        ) {
+            try await self.saveEncoded(
+                plaintext,
+                objectKey: objectKey,
+                pathPrefix: pathPrefix,
+                writtenAtMS: writtenAtMS,
+                using: objectKeyEncryption)
+        }
+    }
+
+    private func saveEncoded(
+        _ plaintext: Data,
+        objectKey: String,
+        pathPrefix: String,
+        writtenAtMS: Int64,
+        using objectKeyEncryption: SymmetricKey?
+    ) async throws {
         let hash = Self.sha256(plaintext)
         // Content-addressed objects are immutable. If two app processes for the
         // same device race, they write different paths and then contend only on

@@ -18,9 +18,6 @@ final actor MemoryRelayObjectStore: RelayObjectStore {
     private var generation = 0
     private(set) var putCount = 0
     private(set) var bodyReadCount = 0
-    private var manifestBarrierTarget = 0
-    private var manifestBarrierArrivals = 0
-    private var manifestBarrierWaiters: [CheckedContinuation<Void, Never>] = []
 
     func read(path: String, ifNoneMatch: String?) async throws -> RelayReadResult {
         guard let value = values[path] else { return .missing }
@@ -53,28 +50,7 @@ final actor MemoryRelayObjectStore: RelayObjectStore {
     }
 
     func list(prefix: String) async throws -> [String] {
-        if manifestBarrierTarget > 0,
-           prefix.contains("/manifests/") {
-            manifestBarrierArrivals += 1
-            if manifestBarrierArrivals == manifestBarrierTarget {
-                manifestBarrierTarget = 0
-                manifestBarrierArrivals = 0
-                let waiters = manifestBarrierWaiters
-                manifestBarrierWaiters.removeAll()
-                waiters.forEach { $0.resume() }
-            } else {
-                await withCheckedContinuation {
-                    manifestBarrierWaiters.append($0)
-                }
-            }
-        }
         return values.keys.filter { $0.hasPrefix(prefix) }.sorted()
-    }
-
-    func synchronizeNextManifestLists(_ count: Int) {
-        manifestBarrierTarget = count
-        manifestBarrierArrivals = 0
-        manifestBarrierWaiters.removeAll()
     }
 
     func paths() -> [String] { values.keys.sorted() }
@@ -262,7 +238,7 @@ final class RelayHistoryStoreTests: XCTestCase {
         XCTAssertTrue(["first", "second"].contains(loaded[0].events[0].uid))
     }
 
-    func testConcurrentWritersMergeDifferentManifestObjectsBeforeReturning() async throws {
+    func testConcurrentStoreInstancesMergeDifferentManifestObjectsBeforeReturning() async throws {
         let objects = MemoryRelayObjectStore()
         let first = try store(objects, device: "phone-id")
         let second = try store(objects, device: "phone-id")
@@ -272,8 +248,6 @@ final class RelayHistoryStoreTests: XCTestCase {
             monthlyMS: [100],
             monthlyPlays: [1],
             updatedAtMS: 200)
-        await objects.synchronizeNextManifestLists(2)
-
         async let historyWrite: Void = first.save(
             batch(device: "phone-id", uid: "play"))
         async let rollupWrite: Void = second.save(rollup)

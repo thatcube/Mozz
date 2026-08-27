@@ -73,6 +73,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly string _deviceId;
     private readonly PlayHistoryRecorder _playHistory;
     private readonly RelayHistoryService _relayHistory;
+    private readonly PlaybackSettingsCommands _playbackSettingsCommands;
     private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
     private readonly NavigationStack<LibraryPage> _navigation =
@@ -104,6 +105,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private long _continuityGeneration;
     private readonly SemaphoreSlim _continuityFlushGate = new(1, 1);
     private readonly SemaphoreSlim _relaySyncGate = new(1, 1);
+    private CancellationTokenSource? _playbackSettingsPersistCts;
+    private bool _applyingSyncedPlaybackSettings;
+    private string _replayGainMode = "track";
+    private double _replayGainPreampDB;
 
     [ObservableProperty] private LibrarySection _section = LibrarySection.Home;
     [ObservableProperty] private string _pageTitle = "Home";
@@ -348,6 +353,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _server = new MozzServer(_core, _secrets);
         _relayHistory = new RelayHistoryService(
             _core, _deviceId, _server);
+        _playbackSettingsCommands = new PlaybackSettingsCommands(_core);
         _relayHistory.CatalogChanged += () =>
             Dispatcher.UIThread.Post(() => _ = ReloadAfterBackgroundSyncAsync());
         _relayHistory.BackgroundSyncFailed += error =>
@@ -454,6 +460,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private void RestoreSettings()
     {
         NormalizationEnabled = _preferences.GetBool(AppPreferences.NormalizationEnabledKey, true);
+        _replayGainMode = NormalizationEnabled
+            ? _preferences.GetString(
+                AppPreferences.ReplayGainModeKey,
+                "track") switch
+                {
+                    "album" => "album",
+                    _ => "track",
+                }
+            : "off";
+        _replayGainPreampDB = _preferences.GetDouble(
+            AppPreferences.ReplayGainPreampKey,
+            0);
         EnrichmentEnabled = _preferences.GetBool(AppPreferences.EnrichmentEnabledKey, true);
         DeviceSyncEnabled = _preferences.GetBool(
             AppPreferences.DeviceSyncEnabledKey, true);
@@ -477,7 +495,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     partial void OnNormalizationEnabledChanged(bool value)
     {
         _preferences.SetBool(AppPreferences.NormalizationEnabledKey, value);
-        _engine?.SetReplayGain(value ? ReplayGainMode.Track : ReplayGainMode.Off);
+        if (!_applyingSyncedPlaybackSettings)
+        {
+            _replayGainMode = value ? "track" : "off";
+            _preferences.SetString(
+                AppPreferences.ReplayGainModeKey,
+                _replayGainMode);
+            SchedulePlaybackSettingsPersistence();
+        }
+        ApplyReplayGainToEngine();
     }
 
     partial void OnEnrichmentEnabledChanged(bool value) =>
@@ -507,6 +533,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         _preferences.SetBool(AppPreferences.EqualizerEnabledKey, value);
         ApplyEqualizerToEngine();
+        if (!_applyingSyncedPlaybackSettings)
+            SchedulePlaybackSettingsPersistence();
     }
 
     partial void OnEqualizerPreampChanged(double value)
@@ -530,11 +558,125 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(EqualizerPreampText));
         var profile = CurrentEqualizerProfile();
         _preferences.SetEqualizerProfile(profile);
+        _preferences.SetString(
+            AppPreferences.ReplayGainModeKey,
+            _replayGainMode);
+        _preferences.SetDouble(
+            AppPreferences.ReplayGainPreampKey,
+            _replayGainPreampDB);
         ApplyEqualizerToEngine();
+        if (!_applyingSyncedPlaybackSettings)
+            SchedulePlaybackSettingsPersistence();
     }
 
     private void ApplyEqualizerToEngine() =>
         _engine?.SetEqualizer(CurrentEqualizerProfile().ToAudioSettings(EqualizerEnabled));
+
+    private void ApplyReplayGainToEngine() =>
+        _engine?.SetReplayGain(
+            _replayGainMode switch
+            {
+                "off" => ReplayGainMode.Off,
+                "album" => ReplayGainMode.Album,
+                _ => ReplayGainMode.Track,
+            },
+            _replayGainPreampDB);
+
+    private CorePlaybackSettings CurrentCorePlaybackSettings()
+    {
+        var profile = CurrentEqualizerProfile();
+        return new CorePlaybackSettings(
+            EqualizerEnabled,
+            profile.Gains.ToArray(),
+            profile.PreampDB,
+            _replayGainMode,
+            _replayGainPreampDB);
+    }
+
+    private RelayPlaybackSettingsDto CurrentRelayPlaybackSettings()
+    {
+        var current = CurrentCorePlaybackSettings();
+        return new RelayPlaybackSettingsDto(
+            current.EqualizerEnabled,
+            new RelayEqualizerSettingsDto(
+                current.EqualizerBandGainsDB,
+                current.EqualizerPreampDB),
+            current.ReplayGainMode,
+            current.ReplayGainPreampDB);
+    }
+
+    private void SchedulePlaybackSettingsPersistence()
+    {
+        if (!_core.IsOpen) return;
+        _playbackSettingsPersistCts?.Cancel();
+        _playbackSettingsPersistCts?.Dispose();
+        _playbackSettingsPersistCts = new CancellationTokenSource();
+        _ = PersistPlaybackSettingsAfterDelayAsync(
+            _playbackSettingsPersistCts.Token);
+    }
+
+    private async Task PersistPlaybackSettingsAfterDelayAsync(
+        CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(400), token);
+            await _playbackSettingsCommands.SaveAsync(
+                CurrentCorePlaybackSettings(),
+                token);
+            _ = SyncRelayHistoryAsync();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            SettingsMessage =
+                $"Playback settings could not be saved: {error.Message}";
+        }
+    }
+
+    private void ApplySyncedPlaybackSettings(
+        RelayPlaybackSettingsDto settings)
+    {
+        _applyingSyncedPlaybackSettings = true;
+        try
+        {
+            _replayGainMode = settings.ReplayGainMode;
+            _replayGainPreampDB = settings.ReplayGainPreampDB;
+            NormalizationEnabled = settings.ReplayGainMode != "off";
+            EqualizerEnabled = settings.EqualizerEnabled;
+            var profile = new DesktopEqualizerProfile(
+                settings.Equalizer.Gains,
+                settings.Equalizer.PreampDB).Normalized();
+            EqualizerPreamp = profile.PreampDB;
+            for (var index = 0;
+                 index < EqualizerBands.Count && index < profile.Gains.Count;
+                 index++)
+            {
+                EqualizerBands[index].Gain = profile.Gains[index];
+            }
+            _preferences.SetBool(
+                AppPreferences.NormalizationEnabledKey,
+                NormalizationEnabled);
+            _preferences.SetBool(
+                AppPreferences.EqualizerEnabledKey,
+                EqualizerEnabled);
+            _preferences.SetEqualizerProfile(profile);
+            _preferences.SetString(
+                AppPreferences.ReplayGainModeKey,
+                _replayGainMode);
+            _preferences.SetDouble(
+                AppPreferences.ReplayGainPreampKey,
+                _replayGainPreampDB);
+            ApplyReplayGainToEngine();
+            ApplyEqualizerToEngine();
+        }
+        finally
+        {
+            _applyingSyncedPlaybackSettings = false;
+        }
+    }
 
     private void ApplyAppearance()
     {
@@ -579,8 +721,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (!await _relaySyncGate.WaitAsync(0)) return;
         try
         {
-            var outcome = await _relayHistory.SyncAsync();
+            var outcome = await _relayHistory.SyncAsync(
+                CurrentRelayPlaybackSettings());
             Connect.ReloadSavedAccounts();
+            if (outcome?.PlaybackSettingsChanged == true
+                && outcome.PlaybackSettings is { } playbackSettings)
+            {
+                ApplySyncedPlaybackSettings(playbackSettings);
+            }
             if (outcome?.ImportedCatalogTracks > 0)
             {
                 await ReloadAfterSyncAsync();
@@ -1022,6 +1170,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         _continuityFlushCts?.Cancel();
         _continuityFlushCts?.Dispose();
+        _playbackSettingsPersistCts?.Cancel();
+        _playbackSettingsPersistCts?.Dispose();
         _continuityFlushCts = new CancellationTokenSource();
         var token = _continuityFlushCts.Token;
         var delay = checkpoint.Reason == ContinuityCheckpointReason.Periodic

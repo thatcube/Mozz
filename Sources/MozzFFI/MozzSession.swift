@@ -121,6 +121,7 @@ struct SessionRequest: Decodable {
     var servers: [RelayServerRecord]?
     var musicSectionIDs: [String]?
     var allMusicLibraries: Bool?
+    var playbackSettings: PlaybackSettings?
 
     // Lyrics.
     var useLRCLIB: Bool?
@@ -440,6 +441,13 @@ private struct WireRelayCatalogSync: Encodable {
     var status: String
     var counts: CatalogSnapshotCounts
     var published: Bool
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireRelayPlaybackSettingsSync: Encodable {
+    var settings: PlaybackSettings
+    var changed: Bool
     var relayKey: String
     var expiresAtMS: Int64
 }
@@ -1539,6 +1547,63 @@ private func dispatch(
                 .base64EncodedString(),
             expiresAtMS: configuration.expiresAtMS))
 
+    case "relaySyncPlaybackSettings":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncPlaybackSettings needs deviceID")
+        }
+        guard let wireCircle = request.circle,
+              let seed = request.playbackSettings else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncPlaybackSettings needs circle and playbackSettings")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncPlaybackSettings needs a valid relayEndpoint")
+        }
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+        let relay = try RelayHistoryStore(
+            objects: B2NativeRelayObjectStore(
+                configuration: configuration),
+            channelID: circle.channelId,
+            localDeviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey)
+        let synced = try await PlaybackSettingsRelayCoordinator(
+            database: session.database,
+            relay: relay,
+            localDeviceID: deviceID
+        ).sync(seed: seed)
+        return sessionSuccess(
+            request,
+            WireRelayPlaybackSettingsSync(
+                settings: synced.stored.settings,
+                changed: synced.changedLocally,
+                relayKey: try configuration.encoded()
+                    .base64EncodedString(),
+                expiresAtMS: configuration.expiresAtMS))
+
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
@@ -1980,6 +2045,7 @@ let mozzSessionCommands = [
     "recordPlayEvent", "playHistory", "historyExportBatch",
     "historyImportBatches", "historyYearRollup",
     "relaySyncHistory", "relaySyncServers", "relaySyncCatalog",
+    "relaySyncPlaybackSettings",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",

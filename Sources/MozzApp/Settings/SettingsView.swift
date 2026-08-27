@@ -182,7 +182,7 @@ struct SettingsView: View {
             }
             .onAppear { env.playback.normalizationEnabled = normalizationEnabled }
             .onChange(of: normalizationEnabled) { _, enabled in
-                env.playback.normalizationEnabled = enabled
+                env.setNormalizationEnabled(enabled)
             }
             .task {
                 // Only Jellyfin/Subsonic need probing — Plex has its own row and

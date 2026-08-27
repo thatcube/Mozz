@@ -45,6 +45,7 @@
     <Compile Include="..\desktop\Core\Downloads\DownloadCommands.cs" />
     <Compile Include="..\desktop\Core\Downloads\DownloadLayout.cs" />
     <Compile Include="..\desktop\Core\Downloads\DownloadService.cs" />
+    <Compile Include="..\desktop\Core\PlaybackSettingsCommands.cs" />
     <Compile Include="..\desktop\Core\Models.cs" />
     <Compile Include="..\desktop\Core\AppPreferences.cs" />
     <Compile Include="..\desktop\Core\MozzTheme.cs" />
