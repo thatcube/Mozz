@@ -14,7 +14,12 @@ struct PairingView: View {
 
     var body: some View {
         Form {
-            switch controller.stage {
+            if let request = ambientJoin.request {
+                ambientConfirmation(request)
+            } else if let peerName = ambientJoin.confirmedPeerName {
+                waitingForPeerConfirmation(peerName)
+            } else {
+              switch controller.stage {
             case .idle:
                 idle
             case let .showingCode(text):
@@ -33,6 +38,7 @@ struct PairingView: View {
                 joined
             case let .failed(message):
                 failed(message)
+              }
             }
         }
         .mozzReadableWidth()
@@ -64,21 +70,59 @@ struct PairingView: View {
         .onChange(of: deviceSyncEnabled) { _, _ in
             SharedEnvironment.shared.syncHistoryIfDue()
         }
-        .alert(
-            "Add this device to your circle?",
-            isPresented: Binding(
-                get: { ambientJoin.request != nil },
-                set: { _ in }),
-            presenting: ambientJoin.request
-        ) { _ in
-            Button("Add Device") { ambientJoin.answer(true) }
-            Button("Not Now", role: .cancel) { ambientJoin.answer(false) }
-        } message: { request in
-            Text(request.confirmationMessage)
-        }
     }
 
     // MARK: - Stages
+
+    @ViewBuilder private func ambientConfirmation(
+        _ request: AmbientJoinController.Request
+    ) -> some View {
+        Section {
+            VStack(spacing: 20) {
+                Text(request.peerName)
+                    .font(.headline)
+                Text(request.spacedDigits)
+                    .font(.system(size: 54, weight: .bold, design: .monospaced))
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(
+                        request.digits.map(String.init).joined(separator: " "))
+                Text("Confirm this number on both devices.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                Button("Numbers Match") {
+                    ambientJoin.answer(true)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+                Button("Numbers Do Not Match", role: .destructive) {
+                    ambientJoin.answer(false)
+                }
+                .controlSize(.large)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
+        } header: {
+            Text("Add this device to your circle?")
+        }
+    }
+
+    @ViewBuilder private func waitingForPeerConfirmation(
+        _ peerName: String
+    ) -> some View {
+        Section {
+            VStack(spacing: 16) {
+                ProgressView()
+                Text("Confirmed on this device")
+                    .font(.headline)
+                Text("Waiting for \(peerName) to confirm the same number.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+        }
+    }
 
     @ViewBuilder private var idle: some View {
         if controller.isPaired {
