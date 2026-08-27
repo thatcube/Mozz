@@ -37,6 +37,9 @@ struct PairingView: View {
         .navigationTitle("Your Devices")
         .inlineNavigationTitle()
         .onAppear {
+            // A circle may have arrived from another Apple device through
+            // iCloud Keychain since this object was made.
+            controller.refresh()
             // A device that is not in a circle yet has exactly one thing it
             // could want here, so it does not need to be asked. Opening the
             // screen IS the intent; a button that says "start looking" is a

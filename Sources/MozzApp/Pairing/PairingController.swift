@@ -25,10 +25,35 @@ struct KeychainSecureStore: SecureStore {
 }
 
 extension CircleStore {
-    /// The real one: the secret in the keychain, everything else in defaults.
+    /// The real one on Apple platforms: the whole circle in the **syncing**
+    /// keychain, so it reaches the rest of someone's Apple devices by itself.
+    ///
+    /// iCloud Keychain is end-to-end encrypted and already knows which devices
+    /// belong to one person, which is the question a pairing ceremony exists to
+    /// answer. Where the platform can answer it for free, asking a human to
+    /// compare six digits is ceremony for its own sake — Plozz gets this right
+    /// by being iOS-only, and there is no reason Apple-to-Apple should be worse
+    /// here just because Windows also has to work.
+    ///
+    /// This is not an account. Mozz stores nothing, has no user table, and
+    /// cannot read any of it; it borrows an identity the person already has,
+    /// which is precisely the posture ADR-0013 asked for.
+    ///
+    /// Both halves live in the keychain rather than only `credentialsKey`. The
+    /// two-tier split in `spec/channel` is about *local* storage — keeping the
+    /// channel key out of a stolen backup — and putting it somewhere stronger
+    /// does not weaken that. The two keys remain separate keys, which is what
+    /// governs what a leak of either exposes in the relay.
     static var live: CircleStore {
-        CircleStore(secure: KeychainSecureStore(), plain: UserDefaultsStore())
+        let syncing = KeychainSecureStore(
+            KeychainCredentialStore(service: "com.thatcube.Mozz.circle", synchronizable: true))
+        return CircleStore(secure: syncing, plain: syncing)
     }
+}
+
+extension KeychainSecureStore: PlainStore {
+    func value(forKey key: String) throws -> Data? { try secret(forKey: key) }
+    func setValue(_ value: Data?, forKey key: String) throws { try setSecret(value, forKey: key) }
 }
 
 /// Drives a pairing ceremony for the screens.
@@ -69,6 +94,27 @@ final class PairingController: ObservableObject {
     }
 
     var isPaired: Bool { circle != nil }
+
+    /// Re-read the circle from storage.
+    ///
+    /// The store is the truth, not this object. A circle can arrive from
+    /// another of the user's Apple devices through iCloud Keychain at any
+    /// moment, including while this screen is open, and a cached copy would
+    /// keep showing "looking for your other devices" while the device was
+    /// already in one.
+    ///
+    /// It also matters for a race this design allows: two Apple devices that
+    /// each form a circle before iCloud has converged. Whichever one iCloud
+    /// settles on is the one that exists, and a device holding the other must
+    /// adopt it rather than carry on writing to a channel nobody else reads.
+    func refresh() {
+        let stored = try? store.load()
+        guard stored != circle else { return }
+        circle = stored
+        if stored != nil, stage == .waitingForComputer || stage == .idle {
+            stage = .joined
+        }
+    }
 
     // MARK: - Joining
 
