@@ -14,6 +14,7 @@ public sealed record RelaySyncOutcome(
     int ImportedHistoryEvents,
     int ImportedServers,
     int ImportedCatalogTracks,
+    int ImportedFavorites,
     RelayPlaybackSettingsDto? PlaybackSettings,
     bool PlaybackSettingsChanged);
 
@@ -153,6 +154,7 @@ public sealed class RelayHistoryService
         }, token).ConfigureAwait(false);
         var importedServerCount = 0;
         var importedCatalogTracks = 0;
+        var importedFavorites = 0;
         var addedIDs = new HashSet<string>(StringComparer.Ordinal);
         var preparedAccounts = new Dictionary<string, ServerAccount>(
             StringComparer.Ordinal);
@@ -212,6 +214,7 @@ public sealed class RelayHistoryService
                         importedCatalogTracks += catalogResult.Counts.Tracks;
                         accountsToReconcile[prepared.ServerId] = prepared;
                     }
+                    importedFavorites += catalogResult.ImportedFavorites;
                     if (!string.Equals(
                             circle.RelayKey,
                             catalogResult.RelayKey,
@@ -247,6 +250,7 @@ public sealed class RelayHistoryService
             result.Imported,
             importedServerCount,
             importedCatalogTracks,
+            importedFavorites,
             playbackResult?.Settings,
             playbackResult?.Changed ?? false);
     }
