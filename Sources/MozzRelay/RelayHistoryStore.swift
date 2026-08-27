@@ -316,6 +316,26 @@ public struct RelayPlaybackSettingsSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+public struct RelayFavoriteSnapshot: Codable, Sendable, Equatable {
+    public static let currentVersion = 1
+    public var version: Int
+    public var deviceID: String
+    public var scope: CatalogSnapshotScope
+    public var records: [FavoriteMutationState]
+
+    public init(
+        version: Int = currentVersion,
+        deviceID: String,
+        scope: CatalogSnapshotScope,
+        records: [FavoriteMutationState]
+    ) {
+        self.version = version
+        self.deviceID = deviceID
+        self.scope = scope
+        self.records = records
+    }
+}
+
 // MARK: - Encrypted history store
 
 /// Listening history over the zero-knowledge relay.
@@ -573,6 +593,74 @@ public actor RelayHistoryStore: HistoryStore {
             }
             return $0.deviceID < $1.deviceID
         }
+    }
+
+    public func loadFavoriteSnapshots(
+        scope: CatalogSnapshotScope
+    ) async throws -> [RelayFavoriteSnapshot] {
+        let scopeID = try Self.catalogScopeID(scope)
+        var snapshots: [RelayFavoriteSnapshot] = []
+        for (manifestPath, manifest) in try await manifests() {
+            guard let entry = manifest.objects["favorites:\(scopeID)"] else {
+                continue
+            }
+            try validate(entry: entry, manifestPath: manifestPath, manifest: manifest)
+            guard let plaintext = try await readPlaintext(path: entry.path) else { continue }
+            try validate(plaintext: plaintext, against: entry)
+            let snapshot = try JSONDecoder().decode(RelayFavoriteSnapshot.self, from: plaintext)
+            guard snapshot.version == RelayFavoriteSnapshot.currentVersion,
+                  snapshot.deviceID == manifest.deviceID,
+                  snapshot.scope == scope,
+                  snapshot.records.allSatisfy(Self.validFavorite) else {
+                throw RelayStoreError.invalidPlaybackSettings("favorite snapshot identity is invalid")
+            }
+            snapshots.append(snapshot)
+        }
+        return snapshots
+    }
+
+    public func save(_ snapshot: RelayFavoriteSnapshot) async throws {
+        guard snapshot.deviceID == localDeviceID else {
+            throw RelayStoreError.payloadDeviceMismatch(
+                expected: localDeviceID, actual: snapshot.deviceID)
+        }
+        guard snapshot.records.allSatisfy(Self.validFavorite) else {
+            throw RelayStoreError.invalidPlaybackSettings(
+                "favorite mutation is invalid")
+        }
+        let scopeID = try Self.catalogScopeID(snapshot.scope)
+        try await save(
+            snapshot,
+            objectKey: "favorites:\(scopeID)",
+            pathPrefix: "\(devicePrefix)\(localDeviceID)/state/\(epoch)/favorites/\(scopeID)",
+            maximumBytes: Self.maximumCatalogChunkBytes,
+            writtenAtMS: snapshot.records.map(\.updatedAtMS).max() ?? 0)
+    }
+
+    public static func mergedFavoriteRecords(
+        _ snapshots: [RelayFavoriteSnapshot]
+    ) -> [FavoriteMutationState] {
+        var selected: [String: FavoriteMutationState] = [:]
+        for record in snapshots.flatMap(\.records) {
+            guard let current = selected[record.remoteID] else {
+                selected[record.remoteID] = record
+                continue
+            }
+            if record.updatedAtMS > current.updatedAtMS
+                || (record.updatedAtMS == current.updatedAtMS
+                    && record.sourceDeviceID > current.sourceDeviceID) {
+                selected[record.remoteID] = record
+            }
+        }
+        return selected.values.sorted { $0.remoteID < $1.remoteID }
+    }
+
+    private static func validFavorite(_ record: FavoriteMutationState) -> Bool {
+        !record.remoteID.isEmpty
+            && !record.sourceDeviceID.isEmpty
+            && ["track", "album", "artist"].contains(record.itemType)
+            && ["favorite", "rating"].contains(record.kind)
+            && record.updatedAtMS >= 0
     }
 
     // MARK: Catalog snapshots

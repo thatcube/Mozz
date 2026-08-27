@@ -65,11 +65,13 @@ public struct FavoritesStore: Sendable {
             // Newest intent wins: the unique (serverId, remoteId) index means this
             // upsert collapses like→unlike→like into a single pending row.
             try db.execute(sql: """
-                INSERT INTO favorite_outbox (serverId, remoteId, itemType, kind, value, createdAt)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO favorite_outbox
+                    (serverId, remoteId, itemType, kind, value, createdAt, isPending, sourceDeviceID)
+                VALUES (?, ?, ?, ?, ?, ?, 1, '')
                 ON CONFLICT(serverId, remoteId) DO UPDATE SET
                     itemType = excluded.itemType, kind = excluded.kind,
-                    value = excluded.value, createdAt = excluded.createdAt
+                    value = excluded.value, createdAt = excluded.createdAt,
+                    isPending = 1, sourceDeviceID = ''
                 """, arguments: [change.serverId, change.remoteId, change.itemType.rawValue,
                                  change.kindString, change.storedValue, Date().timeIntervalSince1970])
             return change.isLiked
@@ -81,15 +83,19 @@ public struct FavoritesStore: Sendable {
         try await database.read { db in
             if let serverId {
                 return try FavoriteOutboxRecord.fetchAll(db, sql:
-                    "SELECT * FROM favorite_outbox WHERE serverId = ? ORDER BY createdAt", arguments: [serverId])
+                    "SELECT * FROM favorite_outbox WHERE serverId = ? AND isPending = 1 ORDER BY createdAt", arguments: [serverId])
             }
-            return try FavoriteOutboxRecord.fetchAll(db, sql: "SELECT * FROM favorite_outbox ORDER BY createdAt")
+            return try FavoriteOutboxRecord.fetchAll(db, sql: "SELECT * FROM favorite_outbox WHERE isPending = 1 ORDER BY createdAt")
         }
     }
 
     /// Remove a pending op once the server write succeeds.
     public func removePending(id: Int64) async throws {
-        _ = try await database.write { db in try FavoriteOutboxRecord.deleteOne(db, key: id) }
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE favorite_outbox SET isPending = 0 WHERE id = ?",
+                arguments: [id])
+        }
     }
 
     /// Compare-and-delete: remove the pending op ONLY if it still holds the value
@@ -101,9 +107,59 @@ public struct FavoritesStore: Sendable {
     @discardableResult
     public func removePending(id: Int64, ifUnchangedSince createdAt: Double) async throws -> Bool {
         try await database.write { db in
-            try db.execute(sql: "DELETE FROM favorite_outbox WHERE id = ? AND createdAt = ?",
+            try db.execute(sql: "UPDATE favorite_outbox SET isPending = 0 WHERE id = ? AND createdAt = ?",
                            arguments: [id, createdAt])
             return db.changesCount > 0
+        }
+    }
+
+    public func durableState(serverId: ServerID) async throws -> [FavoriteOutboxRecord] {
+        try await database.read { db in
+            try FavoriteOutboxRecord.fetchAll(
+                db,
+                sql: "SELECT * FROM favorite_outbox WHERE serverId = ? ORDER BY remoteId",
+                arguments: [serverId])
+        }
+    }
+
+    public func importRemote(
+        _ records: [FavoriteMutationState],
+        serverId: ServerID
+    ) async throws -> Int {
+        try await database.write { db in
+            var imported = 0
+            for record in records {
+                let current = try FavoriteOutboxRecord.fetchOne(
+                    db,
+                    sql: "SELECT * FROM favorite_outbox WHERE serverId = ? AND remoteId = ?",
+                    arguments: [serverId, record.remoteID])
+                let currentMS = current.map {
+                    Int64($0.createdAt * 1_000)
+                } ?? .min
+                let wins = record.updatedAtMS > currentMS
+                    || (record.updatedAtMS == currentMS
+                        && record.sourceDeviceID > (current?.sourceDeviceID ?? ""))
+                guard wins else { continue }
+                let createdAt = Double(record.updatedAtMS) / 1_000
+                try db.execute(sql: """
+                    INSERT INTO favorite_outbox
+                        (serverId, remoteId, itemType, kind, value, createdAt, isPending, sourceDeviceID)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                    ON CONFLICT(serverId, remoteId) DO UPDATE SET
+                        itemType = excluded.itemType, kind = excluded.kind,
+                        value = excluded.value, createdAt = excluded.createdAt,
+                        isPending = 1, sourceDeviceID = excluded.sourceDeviceID
+                    """, arguments: [
+                        serverId, record.remoteID, record.itemType, record.kind,
+                        record.value, createdAt, record.sourceDeviceID,
+                    ])
+                let column = record.kind == "rating" ? "rating" : "isFavorite"
+                try db.execute(
+                    sql: "UPDATE track SET \(column) = ? WHERE serverId = ? AND remoteId = ?",
+                    arguments: [record.value, serverId, record.remoteID])
+                imported += 1
+            }
+            return imported
         }
     }
 

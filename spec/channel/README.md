@@ -195,6 +195,12 @@ same winner. Pre-sync installs migrate their existing platform preference once;
 after that the shared core row is authoritative and the shell applies any remote
 winner to its live audio engine.
 
+Like and rating rows remain after their server write succeeds; only their
+`isPending` flag clears. That durable desired state is encrypted per exact
+server/account/library scope. A remote winner updates the local catalog
+immediately and re-enters the outbox so an online peer can deliver an offline
+device's intent to Plex or Jellyfin.
+
 That is last-writer-wins, and it can lose an edit: like a track on the phone,
 unlike it on the Mac within the same minute while both are offline, and one of
 those disappears. A real limitation, stated rather than hidden. It is acceptable

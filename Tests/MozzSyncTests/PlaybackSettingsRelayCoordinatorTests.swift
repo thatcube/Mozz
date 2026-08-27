@@ -5,7 +5,7 @@ import MozzRelay
 @testable import MozzSync
 import XCTest
 
-private actor SettingsMemoryRelayStore: RelayObjectStore {
+actor SettingsMemoryRelayStore: RelayObjectStore {
     private struct Stored {
         var data: Data
         var etag: String

@@ -1439,6 +1439,7 @@ public final class AppEnvironment: ObservableObject {
                 serverId: change.serverId)
         }
         await flushFavoriteOutbox()
+        syncHistoryIfDue(forceRelayState: true)
     }
 
     /// Replay queued like/rating writes to the server, removing each on success.
@@ -2072,6 +2073,21 @@ public final class AppEnvironment: ObservableObject {
             localDeviceID: Self.continuityDeviceID(
                 from: clientIdentifier))
         await syncCatalog(through: relay)
+        if let active,
+           let stored = SessionPersistence.load(credentials),
+           let scope = CatalogSnapshotScope(
+               connection: active.connection,
+               libraryIDs: Self.catalogScopeLibraryIDs(
+                   stored: stored,
+                   backend: active.backend)),
+           (try? await FavoritesRelayCoordinator(
+               database: database,
+               relay: relay,
+               localDeviceID: Self.continuityDeviceID(
+                   from: clientIdentifier)
+           ).sync(scope: scope)) ?? 0 > 0 {
+            await flushFavoriteOutbox()
+        }
         let playbackSettings = try? await PlaybackSettingsRelayCoordinator(
             database: database,
             relay: relay,

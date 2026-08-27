@@ -16,6 +16,8 @@ public struct FavoriteOutboxRecord: Codable, FetchableRecord, MutablePersistable
     /// favorite → 1/0; rating → stars (nil = clear the rating).
     public var value: Double?
     public var createdAt: Double
+    public var isPending: Bool
+    public var sourceDeviceID: String
 
     public mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
 

@@ -212,6 +212,9 @@ public struct CatalogSnapshotDatabase: Sendable {
         try db.execute(
             sql: "DELETE FROM artist WHERE serverId = ?",
             arguments: [serverID])
+        try db.execute(
+            sql: "DELETE FROM favorite_outbox WHERE serverId = ?",
+            arguments: [serverID])
     }
 
     private static func pageSQL(table: String, after remoteID: String?) -> String {

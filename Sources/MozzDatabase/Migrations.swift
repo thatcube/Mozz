@@ -28,6 +28,7 @@ enum Schema {
         registerV19(&migrator)
         registerV20(&migrator)
         registerV21(&migrator)
+        registerV22(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -734,6 +735,15 @@ enum Schema {
                     column: "updatedAtMS",
                     .integer
                 ).notNull().defaults(to: 0)
+            }
+        }
+    }
+
+    private static func registerV22(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v22.durableFavoriteState") { db in
+            try db.alter(table: "favorite_outbox") { t in
+                t.add(column: "isPending", .boolean).notNull().defaults(to: true)
+                t.add(column: "sourceDeviceID", .text).notNull().defaults(to: "")
             }
         }
     }

@@ -44,6 +44,7 @@ public sealed record RelayCatalogSyncResult(
     string Status,
     RelayCatalogCounts Counts,
     bool Published,
+    int ImportedFavorites,
     string RelayKey,
     long ExpiresAtMS);
 
