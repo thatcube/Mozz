@@ -197,7 +197,10 @@ if [ "$RUN" = "1" ]; then
   # prompt asked in the first place, which is the part that only happens once
   # and only from here.
   INSTALLED="/Applications/$(basename "$APP")"
-  echo "▸ Installing to $INSTALLED…"
+  # Braced deliberately: bash 3.2 under some locales swallows the following
+  # multibyte character into the variable name, so `$INSTALLED…` looks up a
+  # variable that does not exist and `set -u` aborts the install.
+  echo "▸ Installing to ${INSTALLED}…"
   rm -rf "$INSTALLED"
   cp -R "$APP" "$INSTALLED"
 
