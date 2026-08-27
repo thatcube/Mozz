@@ -71,6 +71,7 @@ public struct PairingSession {
     private let privateKey: Curve25519.KeyAgreement.PrivateKey
     private let ownNonce: Data
     private let scanned: Pairing.QRPayload?
+    private let ownName: String
 
     private var state: State = .fresh
     private var peerPublicKey: Data?
@@ -87,7 +88,8 @@ public struct PairingSession {
         path: PairingPath,
         privateKey: Curve25519.KeyAgreement.PrivateKey,
         nonce: Data,
-        scanned: Pairing.QRPayload? = nil
+        scanned: Pairing.QRPayload? = nil,
+        name: String = "Mozz"
     ) throws {
         guard nonce.count == PairingFrame.Size.nonce else {
             throw PairingError.wrongLength(field: "nonce",
@@ -102,7 +104,12 @@ public struct PairingSession {
         self.privateKey = privateKey
         self.ownNonce = nonce
         self.scanned = scanned
+        self.ownName = name
     }
+
+    /// What the other device calls itself. Unauthenticated until the digits are
+    /// compared, so it is a label to recognise, never a fact to rely on.
+    public private(set) var peerName: String?
 
     public var ownPublicKey: Data { privateKey.publicKey.rawRepresentation }
 
@@ -118,7 +125,8 @@ public struct PairingSession {
         state = .awaitingPeer
         return [.send(.hello(version: Pairing.version,
                              publicKey: ownPublicKey,
-                             commitment: path == .digits ? Pairing.commitment(nonceA: ownNonce) : nil))]
+                             commitment: path == .digits ? Pairing.commitment(nonceA: ownNonce) : nil,
+                             name: ownName))]
     }
 
     public mutating func receive(_ frame: PairingFrame) throws -> [PairingStep] {
@@ -132,7 +140,7 @@ public struct PairingSession {
 
     private mutating func step(_ frame: PairingFrame) throws -> [PairingStep] {
         switch (state, frame) {
-        case let (.fresh, .hello(version, publicKey, incomingCommitment)):
+        case let (.fresh, .hello(version, publicKey, incomingCommitment, incomingName)):
             guard role == .member else {
                 throw PairingSessionError.outOfOrder(expected: "nothing", got: "hello")
             }
@@ -141,7 +149,8 @@ public struct PairingSession {
             }
             peerPublicKey = publicKey
             memberNonce = ownNonce
-            let answer = PairingStep.send(.peer(publicKey: ownPublicKey, nonce: ownNonce))
+            peerName = incomingName
+            let answer = PairingStep.send(.peer(publicKey: ownPublicKey, nonce: ownNonce, name: ownName))
 
             switch path {
             case .qr:
@@ -170,9 +179,10 @@ public struct PairingSession {
                 return [answer]
             }
 
-        case let (.awaitingPeer, .peer(publicKey, nonce)):
+        case let (.awaitingPeer, .peer(publicKey, nonce, incomingName)):
             peerPublicKey = publicKey
             memberNonce = nonce
+            peerName = incomingName
 
             switch path {
             case .qr:

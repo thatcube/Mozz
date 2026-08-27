@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 import MozzCore
 import MozzPairing
 import SwiftUI
@@ -83,6 +86,21 @@ final class PairingController: ObservableObject {
 
     @Published private(set) var stage: Stage = .idle
     @Published private(set) var circle: CircleSecrets?
+    @Published private(set) var members: [CircleMember] = []
+
+    /// What this device calls itself to the others.
+    ///
+    /// iOS returns the model name rather than "Brandon's iPhone" unless the app
+    /// carries an entitlement Apple grants sparingly, so this is honest about
+    /// being a model rather than pretending to a personal name. It still beats
+    /// three entries called Mozz, which is what a hardcoded name produced.
+    static var deviceName: String {
+        #if canImport(UIKit)
+        return UIDevice.current.name
+        #else
+        return Host.current().localizedName ?? "Mac"
+        #endif
+    }
 
     private let store: CircleStore
     private var work: Task<Void, Never>?
@@ -91,6 +109,7 @@ final class PairingController: ObservableObject {
     init(store: CircleStore = .live) {
         self.store = store
         circle = try? store.load()
+        members = (try? store.members()) ?? []
     }
 
     var isPaired: Bool { circle != nil }
@@ -108,6 +127,7 @@ final class PairingController: ObservableObject {
     /// settles on is the one that exists, and a device holding the other must
     /// adopt it rather than carry on writing to a channel nobody else reads.
     func refresh() {
+        members = (try? store.members()) ?? []
         let stored = try? store.load()
         guard stored != circle else { return }
         circle = stored
@@ -128,6 +148,7 @@ final class PairingController: ObservableObject {
                 let joined = try await PairingCeremony.join(
                     path: path,
                     into: store,
+                    deviceName: Self.deviceName,
                     showCode: { text, _ in
                         // On the digit path there is nothing to hold up to a
                         // camera — a code appearing and then being replaced by
@@ -141,6 +162,7 @@ final class PairingController: ObservableObject {
                     })
                 await MainActor.run {
                     self?.circle = joined
+                    self?.members = (try? store.members()) ?? []
                     self?.stage = .joined
                 }
             } catch is CancellationError {
@@ -178,11 +200,13 @@ final class PairingController: ObservableObject {
                 // very first pairing always is.
                 try await PairingCeremony.admit(
                     from: store, path: path, scanned: payload,
+                    deviceName: Self.deviceName,
                     confirmDigits: { digits in
                         await self?.ask(digits) ?? false
                     })
                 await MainActor.run {
                     self?.circle = try? store.load()
+                    self?.members = (try? store.members()) ?? []
                     self?.stage = .joined
                 }
             } catch is CancellationError {
@@ -231,6 +255,7 @@ final class PairingController: ObservableObject {
         cancel()
         try? store.clear()
         circle = nil
+        members = []
         stage = .idle
     }
 

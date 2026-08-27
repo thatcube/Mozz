@@ -140,7 +140,7 @@ final class PairingSessionTests: XCTestCase {
         var (_, member, joinerKey) = try sessions(path: .qr)
         let hello = PairingFrame.hello(version: Pairing.version,
                                        publicKey: joinerKey.publicKey.rawRepresentation,
-                                       commitment: Pairing.commitment(nonceA: nonce(0xA1)))
+                                       commitment: Pairing.commitment(nonceA: nonce(0xA1)), name: "x")
         XCTAssertThrowsError(try member.receive(hello)) { error in
             guard case .pathMismatch = error as? PairingSessionError else {
                 return XCTFail("expected a path mismatch, got \(error)")
@@ -152,7 +152,7 @@ final class PairingSessionTests: XCTestCase {
         var (_, member, joinerKey) = try sessions(path: .digits)
         let hello = PairingFrame.hello(version: Pairing.version,
                                        publicKey: joinerKey.publicKey.rawRepresentation,
-                                       commitment: nil)
+                                       commitment: nil, name: "x")
         XCTAssertThrowsError(try member.receive(hello)) { error in
             guard case .pathMismatch = error as? PairingSessionError else {
                 return XCTFail("expected a path mismatch, got \(error)")
@@ -175,7 +175,7 @@ final class PairingSessionTests: XCTestCase {
         var (_, member, joinerKey) = try sessions(path: .digits)
         let hello = PairingFrame.hello(version: 0x99,
                                        publicKey: joinerKey.publicKey.rawRepresentation,
-                                       commitment: Pairing.commitment(nonceA: nonce(0xA1)))
+                                       commitment: Pairing.commitment(nonceA: nonce(0xA1)), name: "x")
         XCTAssertThrowsError(try member.receive(hello)) { error in
             XCTAssertEqual(error as? PairingSessionError, .unsupportedVersion(0x99))
         }

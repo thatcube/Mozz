@@ -54,18 +54,39 @@ struct PairingView: View {
     // MARK: - Stages
 
     @ViewBuilder private var idle: some View {
-        Section {
-            if controller.isPaired {
-                Label("This device is in a circle", mozz: "checkmark.seal.fill")
-                    .foregroundStyle(.secondary)
-            } else {
+        if controller.isPaired {
+            Section {
+                // The answer to "how do I know it worked". Saying "you are in a
+                // circle" while naming nothing in it is a claim with nothing
+                // behind it.
+                ForEach(controller.members, id: \.name) { member in
+                    HStack {
+                        Label(member.name, mozz: member.isSelf ? "iphone" : "checkmark.seal.fill")
+                        Spacer()
+                        if member.isSelf {
+                            Text("This device").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text(member.joinedAt, format: .relative(presentation: .named))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if controller.members.isEmpty {
+                    Label("This device is in a circle", mozz: "checkmark.seal.fill")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Your circle")
+            } footer: {
+                Text("Your listening, library and servers sync across these devices.")
+            }
+        } else {
+            Section {
                 Label("Looking for your other devices…", mozz: "person")
                     .foregroundStyle(.secondary)
+            } footer: {
+                Text("Add this device to your circle to sync listening, library and servers across everything you own.")
             }
-        } footer: {
-            Text(controller.isPaired
-                 ? "Your listening, library and servers sync with the other devices in your circle."
-                 : "Pair with another device to sync your listening, library and servers between them.")
         }
 
         Section {

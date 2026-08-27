@@ -31,6 +31,7 @@ public struct CircleStore: Sendable {
     public enum Key {
         public static let credentials = "circle.credentialsKey"
         public static let rest = "circle.record"
+        public static let members = "circle.members"
     }
 
     private let secure: SecureStore
@@ -47,6 +48,28 @@ public struct CircleStore: Sendable {
         let channelKey: Data
         let epoch: Int
         let relayKey: Data
+    }
+
+    /// The devices this one knows are in the circle.
+    ///
+    /// Local knowledge, not authoritative membership: a device learns about
+    /// another when it takes part in a ceremony with it, or when the relay
+    /// carries its writes. Without this, "you are in a circle" is a claim with
+    /// nothing behind it — someone looking at the screen cannot tell whether it
+    /// worked, which is exactly the question the screen exists to answer.
+    public func members() throws -> [CircleMember] {
+        guard let encoded = try plain.value(forKey: Key.members) else { return [] }
+        return (try? JSONDecoder().decode([CircleMember].self, from: encoded)) ?? []
+    }
+
+    /// Records a device, replacing any earlier entry for the same name.
+    public func remember(_ member: CircleMember) throws {
+        var known = try members().filter { $0.name != member.name }
+        known.append(member)
+        known.sort { $0.joinedAt > $1.joinedAt }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try plain.setValue(try encoder.encode(known), forKey: Key.members)
     }
 
     public func save(_ secrets: CircleSecrets) throws {
@@ -96,6 +119,21 @@ public struct CircleStore: Sendable {
     public func clear() throws {
         try secure.setSecret(nil, forKey: Key.credentials)
         try plain.setValue(nil, forKey: Key.rest)
+        try plain.setValue(nil, forKey: Key.members)
+    }
+}
+
+/// A device known to be in the circle.
+public struct CircleMember: Codable, Equatable, Sendable {
+    public let name: String
+    public let joinedAt: Date
+    /// True for the device reading this, so a list can say "this device".
+    public let isSelf: Bool
+
+    public init(name: String, joinedAt: Date = Date(), isSelf: Bool = false) {
+        self.name = name
+        self.joinedAt = joinedAt
+        self.isSelf = isSelf
     }
 }
 

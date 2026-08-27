@@ -13,10 +13,14 @@ import Foundation
 public enum PairingFrame: Sendable, Equatable {
     /// Joiner opens. `commitment` is present on the digit path and absent on the
     /// QR path, where the camera already carried the nonce.
-    case hello(version: UInt8, publicKey: Data, commitment: Data?)
+    ///
+    /// `name` is what the other side shows a human — "Brandon's iPhone" rather
+    /// than an address. It is unauthenticated until the digits are compared, so
+    /// it is a label to recognise, never a fact to rely on.
+    case hello(version: UInt8, publicKey: Data, commitment: Data?, name: String)
 
     /// Member answers with its own contribution.
-    case peer(publicKey: Data, nonce: Data)
+    case peer(publicKey: Data, nonce: Data, name: String)
 
     /// Joiner opens its commitment. Digit path only.
     case reveal(nonce: Data)
@@ -30,6 +34,10 @@ public enum PairingFrame: Sendable, Equatable {
         public static let publicKey = 32
         public static let nonce = 16
         public static let commitment = 32
+
+        /// Long enough for any device name a person would recognise, short
+        /// enough that it cannot be used to pad a frame.
+        public static let maxName = 64
 
         /// A ceiling on the seal, so a peer cannot make us allocate arbitrarily
         /// by claiming a large length. The plaintext is five short JSON fields;
@@ -52,17 +60,19 @@ public enum PairingFrame: Sendable, Equatable {
     public func encoded() -> Data {
         var out = Data()
         switch self {
-        case let .hello(version, publicKey, commitment):
+        case let .hello(version, publicKey, commitment, name):
             out.append(Tag.hello.rawValue)
             out.append(version)
             out.append(publicKey)
             out.append(commitment == nil ? 0x00 : 0x01)
             if let commitment { out.append(commitment) }
+            out.append(Self.encodeName(name))
 
-        case let .peer(publicKey, nonce):
+        case let .peer(publicKey, nonce, name):
             out.append(Tag.peer.rawValue)
             out.append(publicKey)
             out.append(nonce)
+            out.append(Self.encodeName(name))
 
         case let .reveal(nonce):
             out.append(Tag.reveal.rawValue)
@@ -95,19 +105,22 @@ public enum PairingFrame: Sendable, Equatable {
             let version = try reader.byte(field: "version")
             let publicKey = try reader.take(Size.publicKey, field: "publicKey")
             let hasCommitment = try reader.byte(field: "hasCommitment")
+            let commitment: Data?
             switch hasCommitment {
             case 0x00:
-                frame = .hello(version: version, publicKey: publicKey, commitment: nil)
+                commitment = nil
             case 0x01:
-                frame = .hello(version: version, publicKey: publicKey,
-                               commitment: try reader.take(Size.commitment, field: "commitment"))
+                commitment = try reader.take(Size.commitment, field: "commitment")
             default:
                 throw PairingError.malformed("hasCommitment must be 0 or 1, got \(hasCommitment)")
             }
+            frame = .hello(version: version, publicKey: publicKey, commitment: commitment,
+                           name: try Self.decodeName(&reader))
 
         case .peer:
             frame = .peer(publicKey: try reader.take(Size.publicKey, field: "publicKey"),
-                          nonce: try reader.take(Size.nonce, field: "nonce"))
+                          nonce: try reader.take(Size.nonce, field: "nonce"),
+                          name: try Self.decodeName(&reader))
 
         case .reveal:
             frame = .reveal(nonce: try reader.take(Size.nonce, field: "nonce"))
@@ -136,6 +149,25 @@ public enum PairingFrame: Sendable, Equatable {
             throw PairingError.malformed("\(reader.remaining) unexpected bytes after the frame")
         }
         return frame
+    }
+
+    private static func encodeName(_ name: String) -> Data {
+        // Truncate by UTF-8 bytes, not characters, or a name of emoji would
+        // encode longer than the length byte can describe.
+        var bytes = Array(name.utf8)
+        if bytes.count > Size.maxName { bytes = Array(bytes.prefix(Size.maxName)) }
+        return Data([UInt8(bytes.count)]) + Data(bytes)
+    }
+
+    private static func decodeName(_ reader: inout Reader) throws -> String {
+        let length = Int(try reader.byte(field: "nameLength"))
+        guard length <= Size.maxName else {
+            throw PairingError.malformed("device name of \(length) bytes exceeds the limit")
+        }
+        let bytes = try reader.take(length, field: "name")
+        // A name that is not valid UTF-8 is a display problem, not a protocol
+        // one: refuse the name, not the ceremony.
+        return String(data: bytes, encoding: .utf8) ?? "Unknown device"
     }
 
     private struct Reader {
