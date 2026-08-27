@@ -45,7 +45,7 @@ struct PairingView: View {
             }
         }
         .mozzReadableWidth()
-        .navigationTitle("Your Devices")
+        .navigationTitle("Sync")
         .inlineNavigationTitle()
         .onAppear {
             // A circle may have arrived from another Apple device through

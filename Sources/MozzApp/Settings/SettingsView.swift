@@ -119,7 +119,7 @@ struct SettingsView: View {
                         NavigationLink {
                             PairingView()
                         } label: {
-                            Label("Devices", mozz: "iphone.and.arrow.forward")
+                            Label("Sync", mozz: "iphone.and.arrow.forward")
                         }
                     }
 
