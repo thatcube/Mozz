@@ -157,6 +157,18 @@
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
+        <!-- The resting background, stated rather than inherited.
+             Only the hover and selected styles below used to set this, so at
+             rest the presenter fell back to the template binding. Navigating
+             changes Classes.selected on all seven buttons at once, and while
+             that resolves, every one of them briefly painted as though the
+             pointer were over it - a flash across the whole sidebar on each
+             click. Giving the resting state a value of its own leaves nothing
+             to resolve. It must stay above the two styles that follow, which
+             are meant to override it. -->
+        <Style Selector="Button.nav /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
         <Style Selector="Button.nav:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
             <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
