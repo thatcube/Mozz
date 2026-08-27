@@ -14,7 +14,7 @@ enum RelayBootstrapper {
     static let defaultEndpoint = "https://relay.mozzmusic.com"
 
     struct Configured {
-        let store: any HistoryStore
+        let store: RelayHistoryStore
         let expiresAtMS: Int64
     }
 
@@ -60,7 +60,8 @@ enum RelayBootstrapper {
             channelID: circle.channelId,
             localDeviceID: localDeviceID,
             epoch: circle.epoch,
-            channelKey: circle.channelKey)
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey)
         return Configured(
             store: history,
             expiresAtMS: configuration.expiresAtMS)

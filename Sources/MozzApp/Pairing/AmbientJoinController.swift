@@ -25,6 +25,7 @@ final class AmbientJoinController: ObservableObject {
     }
 
     @Published private(set) var request: Request?
+    @Published private(set) var completedCircleID: String?
 
     private let store: CircleStore
     private var work: Task<Void, Never>?
@@ -83,6 +84,7 @@ final class AmbientJoinController: ObservableObject {
                 // Whether it arrived through iCloud or a ceremony, setup now
                 // has a circle and this device no longer advertises.
                 _ = circle
+                completedCircleID = circle.channelId
                 request = nil
                 work = nil
             } catch is CancellationError {

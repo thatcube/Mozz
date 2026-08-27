@@ -160,6 +160,11 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             serverMachineIdentifier = account.ServerMachineIdentifier,
             musicSectionID = account.MusicSectionId,
         }, token).ConfigureAwait(false);
+        ServerSyncJournal.Upsert(
+            secrets,
+            account,
+            secret,
+            secrets.Get($"plex.account.{account.ServerId}"));
     }
 
     /// <summary>
@@ -339,6 +344,11 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         var accounts = SavedAccounts();
         var canonical = CanonicalServerId(accounts.FirstOrDefault(a => a.ServerId == serverId)) ?? serverId;
         var removed = accounts.Where(a => a.ServerId == serverId || CanonicalServerId(a) == canonical).ToList();
+        foreach (var account in removed)
+        {
+            ServerSyncJournal.Tombstone(
+                secrets, account.ServerId, account.Kind);
+        }
         var remaining = accounts.Except(removed).ToList();
         WriteAccounts(remaining);
         foreach (var account in removed)
@@ -353,6 +363,8 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     {
         foreach (var account in SavedAccounts())
         {
+            ServerSyncJournal.Tombstone(
+                secrets, account.ServerId, account.Kind);
             DeleteCredentialKeys(account);
         }
         WriteAccounts([]);
@@ -397,6 +409,14 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             .ToList();
         accounts.Add(account);
         WriteAccounts(accounts);
+        if (SecretFor(account) is { } token)
+        {
+            ServerSyncJournal.Upsert(
+                secrets,
+                account,
+                token,
+                secrets.Get($"plex.account.{account.ServerId}"));
+        }
     }
 
     internal void SaveAccount(ServerAccount account, string secret, string? accountToken = null)
@@ -405,6 +425,87 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         secrets.Set(SecretKey(account.ServerId), secret);
         if (accountToken is not null) secrets.Set($"plex.account.{account.ServerId}", accountToken);
         SaveAccount(account);
+    }
+
+    internal IReadOnlyList<RelayServerRecordDto> ExportSyncedServers()
+    {
+        // Seed journals created by builds before server sync existed.
+        foreach (var account in SavedAccounts())
+        {
+            if (SecretFor(account) is { } token)
+            {
+                ServerSyncJournal.Upsert(
+                    secrets,
+                    account,
+                    token,
+                    secrets.Get($"plex.account.{account.ServerId}"));
+            }
+        }
+        return ServerSyncJournal.Load(secrets);
+    }
+
+    internal SyncedServerImport ImportSyncedServers(
+        IReadOnlyList<RelayServerRecordDto> remote)
+    {
+        var previousAccounts = SavedAccounts();
+        var previousIDs = previousAccounts
+            .Select(account => account.ServerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var previousRecords = ServerSyncJournal.Load(secrets)
+            .ToDictionary(record => record.Id, StringComparer.Ordinal);
+        var merged = ServerSyncJournal.Merge(
+            ServerSyncJournal.Load(secrets), remote);
+        ServerSyncJournal.Save(secrets, merged);
+
+        var accounts = new List<ServerAccount>();
+        foreach (var record in merged)
+        {
+            if (record.IsRemoved)
+            {
+                secrets.Set(SecretKey(record.Id), null);
+                secrets.Set($"plex.account.{record.Id}", null);
+                continue;
+            }
+            if (record.Token is not { Length: > 0 } token
+                || record.BaseUrl is not { Length: > 0 } baseUrl
+                || record.Name is not { Length: > 0 } name)
+            {
+                continue;
+            }
+            var account = new ServerAccount
+            {
+                ServerId = record.Id,
+                Kind = BackendKindExtensions.Parse(record.Kind),
+                BaseUrl = baseUrl,
+                ServerName = name,
+                UserId = record.UserId,
+                Username = record.Username,
+                ClientIdentifier = ClientIdentifier,
+                ServerMachineIdentifier = record.ServerMachineIdentifier,
+                MusicSectionId = record.MusicSectionIds?.FirstOrDefault(),
+            };
+            accounts.Add(account);
+            secrets.Set(SecretKey(account.ServerId), token);
+            if (record.AccountToken is not null)
+            {
+                secrets.Set(
+                    $"plex.account.{account.ServerId}",
+                    record.AccountToken);
+            }
+        }
+        WriteAccounts(accounts);
+        var added = accounts
+            .Where(account => !previousIDs.Contains(account.ServerId))
+            .ToArray();
+        var changed = accounts
+            .Where(account =>
+            {
+                var next = merged.First(record => record.Id == account.ServerId);
+                return !previousRecords.TryGetValue(account.ServerId, out var old)
+                    || next.MutationAtMS > old.MutationAtMS;
+            })
+            .ToArray();
+        return new SyncedServerImport(changed, added);
     }
 
     private void WriteAccounts(IReadOnlyList<ServerAccount> accounts)

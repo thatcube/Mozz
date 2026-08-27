@@ -25,6 +25,7 @@ public struct MozzRootScene: Scene {
                     // start from the car, this awaits that same work instead of
                     // repeating it.
                     await SharedEnvironment.start()
+                    await env.bootstrapServerFromCircleIfNeeded()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Returning to the foreground resumes the enrichment crawl so an
@@ -84,6 +85,12 @@ struct RootView: View {
         }
         .onChange(of: isInSetup) { _, enabled in
             ambientJoin.update(enabled: enabled)
+        }
+        .onChange(of: ambientJoin.completedCircleID) { _, circleID in
+            guard circleID != nil else { return }
+            Task { @MainActor in
+                await env.bootstrapServerFromCircleIfNeeded()
+            }
         }
         .alert(
             "Add this device to your circle?",

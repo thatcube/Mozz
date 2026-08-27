@@ -455,7 +455,9 @@ let package = Package(
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
         .testTarget(
             name: "MozzAppTests",
-            dependencies: ["MozzApp", "MozzDatabase", "MozzHistory"]
+            dependencies: [
+                "MozzApp", "MozzDatabase", "MozzHistory", "MozzRelay",
+            ]
         ),
     ],
     swiftLanguageModes: [.v5]

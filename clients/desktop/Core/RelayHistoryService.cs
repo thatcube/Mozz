@@ -9,6 +9,10 @@ public sealed record RelayHistorySyncResult(
     string RelayKey,
     long ExpiresAtMS);
 
+public sealed record RelaySyncOutcome(
+    int ImportedHistoryEvents,
+    int ImportedServers);
+
 /// <summary>
 /// Schedules one universal history exchange through the shared Swift core.
 /// </summary>
@@ -24,14 +28,20 @@ public sealed class RelayHistoryService
 
     private readonly MozzCore _core;
     private readonly string _deviceID;
+    private readonly MozzServer _server;
 
-    public RelayHistoryService(MozzCore core, string deviceID)
+    public RelayHistoryService(
+        MozzCore core,
+        string deviceID,
+        MozzServer server)
     {
         _core = core;
         _deviceID = deviceID;
+        _server = server;
     }
 
-    public async Task<int?> SyncAsync(CancellationToken token = default)
+    public async Task<RelaySyncOutcome?> SyncAsync(
+        CancellationToken token = default)
     {
         var circle = PairingService.LoadCircle();
         if (circle is null) return null;
@@ -55,7 +65,51 @@ public sealed class RelayHistoryService
             {
                 RelayKey = result.RelayKey,
             });
+            circle = circle with { RelayKey = result.RelayKey };
         }
-        return result.Imported;
+
+        var localServers = _server.ExportSyncedServers();
+        var serverResult = await _core.CallAsync<RelayServerSyncResult>(new
+        {
+            cmd = "relaySyncServers",
+            circle,
+            deviceId = _deviceID,
+            servers = localServers,
+            relayEndpoint = DefaultEndpoint,
+        }, token).ConfigureAwait(false);
+        var importedServerCount = 0;
+        if (serverResult is not null)
+        {
+            var imported = _server.ImportSyncedServers(
+                serverResult.Servers);
+            importedServerCount = imported.Added.Count;
+            var addedIDs = imported.Added
+                .Select(account => account.ServerId)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var account in imported.Changed)
+            {
+                var prepared = await _server.AttachForSyncAsync(
+                    account, token).ConfigureAwait(false);
+                if (addedIDs.Contains(account.ServerId))
+                {
+                    await _server.SyncAsync(
+                        prepared.ServerId,
+                        token: token).ConfigureAwait(false);
+                }
+            }
+            if (!string.Equals(
+                    circle.RelayKey,
+                    serverResult.RelayKey,
+                    StringComparison.Ordinal))
+            {
+                PairingService.StoreCircle(circle with
+                {
+                    RelayKey = serverResult.RelayKey,
+                });
+            }
+        }
+        return new RelaySyncOutcome(
+            result.Imported,
+            importedServerCount);
     }
 }
