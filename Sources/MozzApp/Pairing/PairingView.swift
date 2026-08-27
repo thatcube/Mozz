@@ -19,6 +19,8 @@ struct PairingView: View {
                 showingCode(text)
             case .waitingForComputer:
                 waiting("Waiting for your computer…")
+            case .finishing:
+                waiting("Waiting for the other device…")
             case .scanning:
                 scanning
             case .connecting:

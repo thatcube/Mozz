@@ -45,6 +45,8 @@ final class PairingController: ObservableObject {
         /// Joiner on the digit path: nothing to show yet, the other device has
         /// to find us first.
         case waitingForComputer
+        /// The human has answered and the other device has not finished yet.
+        case finishing
         /// Member: pointing the camera.
         case scanning
         case connecting
@@ -149,8 +151,13 @@ final class PairingController: ObservableObject {
     // MARK: - The human's answer
 
     func answer(_ matched: Bool) {
-        awaitingAnswer?.resume(returning: matched)
+        guard let continuation = awaitingAnswer else { return }
         awaitingAnswer = nil
+        // Move off the comparison BEFORE resuming. Without this the screen keeps
+        // showing the same two buttons, so a tap that worked perfectly reads as
+        // one that was ignored — and the obvious response is to tap it again.
+        stage = matched ? .finishing : .failed("You said the numbers did not match, so nothing was shared.")
+        continuation.resume(returning: matched)
     }
 
     private func ask(_ digits: String) async -> Bool {
