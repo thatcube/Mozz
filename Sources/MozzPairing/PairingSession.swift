@@ -72,6 +72,7 @@ public struct PairingSession {
     private let ownNonce: Data
     private let scanned: Pairing.QRPayload?
     private let ownName: String
+    private let ownDeviceID: String
 
     private var state: State = .fresh
     private var peerPublicKey: Data?
@@ -89,7 +90,8 @@ public struct PairingSession {
         privateKey: Curve25519.KeyAgreement.PrivateKey,
         nonce: Data,
         scanned: Pairing.QRPayload? = nil,
-        name: String = "Mozz"
+        name: String = "Mozz",
+        deviceID: String = UUID().uuidString
     ) throws {
         guard nonce.count == PairingFrame.Size.nonce else {
             throw PairingError.wrongLength(field: "nonce",
@@ -104,12 +106,17 @@ public struct PairingSession {
         self.privateKey = privateKey
         self.ownNonce = nonce
         self.scanned = scanned
-        self.ownName = name
+        self.ownName = PairingFrame.normalizedText(
+            name, maximumBytes: PairingFrame.Size.maxName)
+        self.ownDeviceID = PairingFrame.normalizedText(
+            deviceID, maximumBytes: PairingFrame.Size.maxDeviceID)
     }
 
     /// What the other device calls itself. Unauthenticated until the digits are
     /// compared, so it is a label to recognise, never a fact to rely on.
     public private(set) var peerName: String?
+    /// Stable ownership prefix for the peer's relay objects.
+    public private(set) var peerDeviceID: String?
 
     public var ownPublicKey: Data { privateKey.publicKey.rawRepresentation }
 
@@ -126,7 +133,8 @@ public struct PairingSession {
         return [.send(.hello(version: Pairing.version,
                              publicKey: ownPublicKey,
                              commitment: path == .digits ? Pairing.commitment(nonceA: ownNonce) : nil,
-                             name: ownName))]
+                             name: ownName,
+                             deviceID: ownDeviceID))]
     }
 
     public mutating func receive(_ frame: PairingFrame) throws -> [PairingStep] {
@@ -140,7 +148,9 @@ public struct PairingSession {
 
     private mutating func step(_ frame: PairingFrame) throws -> [PairingStep] {
         switch (state, frame) {
-        case let (.fresh, .hello(version, publicKey, incomingCommitment, incomingName)):
+        case let (.fresh, .hello(
+            version, publicKey, incomingCommitment, incomingName, incomingDeviceID
+        )):
             guard role == .member else {
                 throw PairingSessionError.outOfOrder(expected: "nothing", got: "hello")
             }
@@ -150,7 +160,12 @@ public struct PairingSession {
             peerPublicKey = publicKey
             memberNonce = ownNonce
             peerName = incomingName
-            let answer = PairingStep.send(.peer(publicKey: ownPublicKey, nonce: ownNonce, name: ownName))
+            peerDeviceID = incomingDeviceID
+            let answer = PairingStep.send(.peer(
+                publicKey: ownPublicKey,
+                nonce: ownNonce,
+                name: ownName,
+                deviceID: ownDeviceID))
 
             switch path {
             case .qr:
@@ -179,10 +194,11 @@ public struct PairingSession {
                 return [answer]
             }
 
-        case let (.awaitingPeer, .peer(publicKey, nonce, incomingName)):
+        case let (.awaitingPeer, .peer(publicKey, nonce, incomingName, incomingDeviceID)):
             peerPublicKey = publicKey
             memberNonce = nonce
             peerName = incomingName
+            peerDeviceID = incomingDeviceID
 
             switch path {
             case .qr:
@@ -264,11 +280,20 @@ public struct PairingSession {
         guard let peerPublicKey, let joinerNonce, let memberNonce else {
             throw PairingSessionError.outOfOrder(expected: "a complete transcript", got: "missing parts")
         }
-        let (joinerKey, memberKey) = role == .joiner
-            ? (ownPublicKey, peerPublicKey)
-            : (peerPublicKey, ownPublicKey)
+        guard let peerDeviceID, let peerName else {
+            throw PairingSessionError.outOfOrder(
+                expected: "peer identity", got: "missing parts")
+        }
+        let (joinerKey, memberKey, joinerID, memberID, joinerName, memberName) =
+            role == .joiner
+            ? (ownPublicKey, peerPublicKey, ownDeviceID, peerDeviceID, ownName, peerName)
+            : (peerPublicKey, ownPublicKey, peerDeviceID, ownDeviceID, peerName, ownName)
         return try Pairing.transcriptHash(joinerPublicKey: joinerKey,
                                           memberPublicKey: memberKey,
+                                          joinerDeviceID: joinerID,
+                                          memberDeviceID: memberID,
+                                          joinerName: joinerName,
+                                          memberName: memberName,
                                           nonceA: joinerNonce,
                                           nonceB: memberNonce)
     }

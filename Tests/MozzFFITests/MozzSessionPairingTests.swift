@@ -108,6 +108,7 @@ final class MozzSessionPairingTests: XCTestCase {
             "role": "joiner",
             "pairingPath": "digits",
             "deviceName": "Fresh Windows PC",
+            "deviceId": "windows-id",
         ]))
         let joinerId = try XCTUnwrap(joinerBegan["pairingId"] as? String)
         let hello = try XCTUnwrap((joinerBegan["steps"] as? [[String: Any]])?.first?["frame"] as? String)
@@ -117,6 +118,7 @@ final class MozzSessionPairingTests: XCTestCase {
             "role": "member",
             "pairingPath": "digits",
             "deviceName": "Brandon's iPhone",
+            "deviceId": "iphone-id",
         ]))
         let memberId = try XCTUnwrap(memberBegan["pairingId"] as? String)
 
@@ -125,6 +127,7 @@ final class MozzSessionPairingTests: XCTestCase {
         ]))
         let memberSteps = try XCTUnwrap(memberResponse["steps"] as? [[String: Any]])
         XCTAssertEqual(memberResponse["peerName"] as? String, "Fresh Windows PC")
+        XCTAssertEqual(memberResponse["peerDeviceID"] as? String, "windows-id")
         let answer = try XCTUnwrap(memberSteps.first { $0["kind"] as? String == "send" }?["frame"] as? String)
 
         let joinerResponse = try payload(try await call([
@@ -132,6 +135,7 @@ final class MozzSessionPairingTests: XCTestCase {
         ]))
         let joinerSteps = try XCTUnwrap(joinerResponse["steps"] as? [[String: Any]])
         XCTAssertEqual(joinerResponse["peerName"] as? String, "Brandon's iPhone")
+        XCTAssertEqual(joinerResponse["peerDeviceID"] as? String, "iphone-id")
         let joinerDigits = try XCTUnwrap(joinerSteps.first { $0["kind"] as? String == "digits" }?["digits"] as? String)
         let reveal = try XCTUnwrap(joinerSteps.first { $0["kind"] as? String == "send" }?["frame"] as? String)
 

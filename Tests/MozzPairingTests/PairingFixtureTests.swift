@@ -71,6 +71,10 @@ final class PairingFixtureTests: XCTestCase {
                 let t = try Pairing.transcriptHash(
                     joinerPublicKey: hex(c.input["joinerPublicKey"]!),
                     memberPublicKey: hex(c.input["memberPublicKey"]!),
+                    joinerDeviceID: c.input["joinerDeviceID"]!,
+                    memberDeviceID: c.input["memberDeviceID"]!,
+                    joinerName: c.input["joinerName"]!,
+                    memberName: c.input["memberName"]!,
                     nonceA: hex(c.input["nonceA"]!),
                     nonceB: hex(c.input["nonceB"]!))
                 XCTAssertEqual(t.map { String(format: "%02x", $0) }.joined(), c.expected,
@@ -111,11 +115,42 @@ final class PairingFixtureTests: XCTestCase {
         let n2 = Data(repeating: 0xBB, count: 16)
 
         let forward = try Pairing.transcriptHash(
-            joinerPublicKey: a, memberPublicKey: b, nonceA: n1, nonceB: n2)
+            joinerPublicKey: a, memberPublicKey: b,
+            joinerDeviceID: "a", memberDeviceID: "b",
+            joinerName: "A", memberName: "B",
+            nonceA: n1, nonceB: n2)
         let swapped = try Pairing.transcriptHash(
-            joinerPublicKey: b, memberPublicKey: a, nonceA: n1, nonceB: n2)
+            joinerPublicKey: b, memberPublicKey: a,
+            joinerDeviceID: "a", memberDeviceID: "b",
+            joinerName: "A", memberName: "B",
+            nonceA: n1, nonceB: n2)
 
         XCTAssertNotEqual(forward, swapped, "the transcript must bind which side is which")
+    }
+
+    func testChangingADeviceIdentityChangesTheTranscript() throws {
+        let key = Data(repeating: 0x11, count: 32)
+        let nonce = Data(repeating: 0xAA, count: 16)
+        let baseline = try Pairing.transcriptHash(
+            joinerPublicKey: key, memberPublicKey: key,
+            joinerDeviceID: "phone-id", memberDeviceID: "pc-id",
+            joinerName: "Brandon's iPhone", memberName: "Gaming PC",
+            nonceA: nonce, nonceB: nonce)
+        let relabelled = try Pairing.transcriptHash(
+            joinerPublicKey: key, memberPublicKey: key,
+            joinerDeviceID: "phone-id", memberDeviceID: "pc-id",
+            joinerName: "Brandon's iPhone", memberName: "Brandon's MacBook",
+            nonceA: nonce, nonceB: nonce)
+        let impersonated = try Pairing.transcriptHash(
+            joinerPublicKey: key, memberPublicKey: key,
+            joinerDeviceID: "phone-id", memberDeviceID: "other-id",
+            joinerName: "Brandon's iPhone", memberName: "Gaming PC",
+            nonceA: nonce, nonceB: nonce)
+
+        XCTAssertNotEqual(baseline, relabelled,
+                          "a recognisable name cannot be substituted without changing digits")
+        XCTAssertNotEqual(baseline, impersonated,
+                          "relay ownership cannot be substituted without changing digits")
     }
 
     /// A truncated code must be refused rather than parsed. Accepting a short

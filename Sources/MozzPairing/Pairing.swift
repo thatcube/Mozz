@@ -118,6 +118,10 @@ public enum Pairing {
     public static func transcriptHash(
         joinerPublicKey: Data,
         memberPublicKey: Data,
+        joinerDeviceID: String,
+        memberDeviceID: String,
+        joinerName: String,
+        memberName: String,
         nonceA: Data,
         nonceB: Data
     ) throws -> Data {
@@ -139,6 +143,14 @@ public enum Pairing {
         input.append(version)
         input.append(joinerPublicKey)
         input.append(memberPublicKey)
+        // Hash variable-width identity labels into fixed-width transcript
+        // fields. Device IDs make relay ownership stable; names make the human
+        // confirmation honest rather than allowing an attacker to relabel an
+        // unknown machine as one the user recognises without changing digits.
+        input.append(contentsOf: SHA256.hash(data: Data(joinerDeviceID.utf8)))
+        input.append(contentsOf: SHA256.hash(data: Data(memberDeviceID.utf8)))
+        input.append(contentsOf: SHA256.hash(data: Data(joinerName.utf8)))
+        input.append(contentsOf: SHA256.hash(data: Data(memberName.utf8)))
         input.append(nonceA)
         input.append(nonceB)
         return Data(SHA256.hash(data: input))

@@ -25,9 +25,9 @@ public sealed partial class PairingViewModel : ObservableObject
     private TaskCompletionSource<bool>? _awaitingAnswer;
     private bool _startedAutomatically;
 
-    public PairingViewModel(MozzCore core)
+    public PairingViewModel(MozzCore core, string deviceID)
     {
-        _pairing = new PairingService(core);
+        _pairing = new PairingService(core, deviceID);
     }
 
     public ObservableCollection<PairingCandidate> Devices { get; } = new();

@@ -151,12 +151,19 @@ transcriptHash := SHA-256(
  || version            (1 byte)
  || joinerPubKey       (32 bytes)
  || memberPubKey       (32 bytes)
+ || SHA-256(joinerDeviceId UTF-8)  (32 bytes)
+ || SHA-256(memberDeviceId UTF-8)  (32 bytes)
+ || SHA-256(joinerName UTF-8)      (32 bytes)
+ || SHA-256(memberName UTF-8)      (32 bytes)
  || nonceA             (16 bytes)
  || nonceB             (16 bytes) )
 ```
 
-Field order is fixed and every field is fixed-width, so no length prefixes are
-needed and no field can be confused with its neighbour.
+Field order is fixed and every transcript field is fixed-width, so no length
+prefixes are needed and no field can be confused with its neighbour. Device ids
+are the stable per-install identities that own relay prefixes. Names are display
+labels, but they are covered too: otherwise an attacker could relabel an unknown
+machine as one the user recognises without changing the six digits.
 
 ### Sealing the circle secrets
 

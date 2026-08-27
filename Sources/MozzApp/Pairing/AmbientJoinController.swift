@@ -59,6 +59,7 @@ final class AmbientJoinController: ObservableObject {
                             path: .digits,
                             into: store,
                             deviceName: PairingController.deviceName,
+                            deviceID: PairingController.deviceID,
                             showCode: { _, _ in },
                             confirmDigits: { digits, peerName in
                                 await self.ask(digits, peerName: peerName)

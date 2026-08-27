@@ -99,8 +99,9 @@ final class PairingCeremonyTests: XCTestCase {
         // this — the joiner has no way to know. The protection is that the two
         // sides now hash different transcripts, so the seal will not open.
         XCTAssertThrowsError(try runCeremony(path: .qr, tamperWithPeerFrame: { frame in
-            guard case let .peer(_, nonce, _) = frame else { return frame }
-            return .peer(publicKey: impostor.publicKey.rawRepresentation, nonce: nonce, name: "impostor")
+            guard case let .peer(_, nonce, _, deviceID) = frame else { return frame }
+            return .peer(publicKey: impostor.publicKey.rawRepresentation, nonce: nonce,
+                         name: "impostor", deviceID: deviceID)
         })) { error in
             XCTAssertFalse(error is XCTSkip, "the ceremony should complete and then fail to open")
         }
@@ -108,8 +109,9 @@ final class PairingCeremonyTests: XCTestCase {
 
     func testASubstitutedNonceMakesTheSealUnopenable() throws {
         XCTAssertThrowsError(try runCeremony(path: .qr, tamperWithPeerFrame: { frame in
-            guard case let .peer(publicKey, _, _) = frame else { return frame }
-            return .peer(publicKey: publicKey, nonce: Data(repeating: 0xFF, count: 16), name: "x")
+            guard case let .peer(publicKey, _, _, deviceID) = frame else { return frame }
+            return .peer(publicKey: publicKey, nonce: Data(repeating: 0xFF, count: 16),
+                         name: "x", deviceID: deviceID)
         }))
     }
 

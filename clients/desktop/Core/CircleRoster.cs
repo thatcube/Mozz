@@ -5,7 +5,11 @@ using System.Text.Json;
 namespace Mozz.Desktop.Core;
 
 /// <summary>A device known to be in this circle.</summary>
-public sealed record CircleMemberRow(string Name, DateTimeOffset JoinedAt, bool IsSelf)
+public sealed record CircleMemberRow(
+    string Name,
+    DateTimeOffset JoinedAt,
+    bool IsSelf,
+    string? ID = null)
 {
     public string JoinedDescription => IsSelf ? "This device" : JoinedAt.LocalDateTime.ToString("d MMM, HH:mm");
 }
@@ -42,11 +46,11 @@ public static class CircleRoster
         }
     }
 
-    public static void Remember(string name, bool isSelf)
+    public static void Remember(string id, string name, bool isSelf)
     {
         var known = new List<CircleMemberRow>(Load());
-        known.RemoveAll(m => string.Equals(m.Name, name, StringComparison.Ordinal));
-        known.Add(new CircleMemberRow(name, DateTimeOffset.UtcNow, isSelf));
+        known.RemoveAll(m => string.Equals(m.ID ?? m.Name, id, StringComparison.Ordinal));
+        known.Add(new CircleMemberRow(name, DateTimeOffset.UtcNow, isSelf, id));
         known.Sort((a, b) => b.JoinedAt.CompareTo(a.JoinedAt));
         SecretStore.ForCurrentPlatform().Set(Key, JsonSerializer.Serialize(known));
     }
