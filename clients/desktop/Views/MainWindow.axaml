@@ -2264,7 +2264,7 @@
                                 <StackPanel Spacing="16" IsVisible="{Binding IsSettingsDevicesSelected}">
                                     <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
                                         <StackPanel Spacing="12">
-                                            <TextBlock Text="Your circle" Classes="sectionTitle" />
+                                            <TextBlock Text="Your synced devices" Classes="sectionTitle" />
                                             <TextBlock Text="{Binding CircleSummary}"
                                                        Classes="secondary"
                                                        TextWrapping="Wrap" />

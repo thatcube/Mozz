@@ -26,7 +26,7 @@ final class AmbientJoinController: ObservableObject {
         var confirmationMessage: String {
             "\(peerName) is asking to add this device.\n\n" +
                 "Confirm \(spacedDigits) appears there too. Adding shares " +
-                "your media servers, listening history, and library across the circle."
+                "your media servers, listening history, and library across your devices."
         }
     }
 

@@ -115,7 +115,7 @@ public sealed partial class PairingViewModel : ObservableObject
                     IsDone = true;
                     IsBusy = false;
                     IsJoiningCircle = false;
-                    Status = "Added. This device now shares listening, library and servers with your circle.";
+                    Status = "Syncing enabled. This device now shares listening, library and servers.";
                 });
             }
             catch (OperationCanceledException)
@@ -161,7 +161,7 @@ public sealed partial class PairingViewModel : ObservableObject
             var code = string.IsNullOrWhiteSpace(Code) ? null : Code.Trim();
             await _pairing.AdmitAsync(code, SelectedDevice, AskAsync).ConfigureAwait(true);
             IsDone = true;
-            Status = "Added. These devices now share listening, library and servers.";
+            Status = "Syncing enabled. These devices now share listening, library and servers.";
         }
         catch (Exception ex)
         {
