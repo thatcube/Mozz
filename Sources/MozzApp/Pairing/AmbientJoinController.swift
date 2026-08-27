@@ -22,17 +22,23 @@ final class AmbientJoinController: ObservableObject {
             let middle = digits.index(digits.startIndex, offsetBy: 3)
             return "\(digits[..<middle]) \(digits[middle...])"
         }
+
+        var confirmationMessage: String {
+            "\(peerName) is asking to add this device.\n\n" +
+                "Confirm \(spacedDigits) appears there too. Adding shares " +
+                "your media servers, listening history, and library across the circle."
+        }
     }
 
     @Published private(set) var request: Request?
     @Published private(set) var completedCircleID: String?
+    @Published private(set) var isDevicesScreenActive = false
 
     private let store: CircleStore
     private var work: Task<Void, Never>?
     private var workGeneration: UUID?
     private var awaitingAnswer: CheckedContinuation<Bool, Never>?
     private var setupActive = false
-    private var devicesScreenActive = false
     private var pairingScreenRunsCeremony = false
 
     init(store: CircleStore = .live) {
@@ -45,7 +51,7 @@ final class AmbientJoinController: ObservableObject {
     }
 
     func setDevicesScreenActive(_ active: Bool) {
-        devicesScreenActive = active
+        isDevicesScreenActive = active
         reconcileListener()
     }
 
@@ -58,7 +64,7 @@ final class AmbientJoinController: ObservableObject {
     }
 
     private func reconcileListener() {
-        if (setupActive || devicesScreenActive) && !pairingScreenRunsCeremony {
+        if (setupActive || isDevicesScreenActive) && !pairingScreenRunsCeremony {
             startIfNeeded()
         } else {
             stop()

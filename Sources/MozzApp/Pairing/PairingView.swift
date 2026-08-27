@@ -64,6 +64,18 @@ struct PairingView: View {
         .onChange(of: deviceSyncEnabled) { _, _ in
             SharedEnvironment.shared.syncHistoryIfDue()
         }
+        .alert(
+            "Add this device to your circle?",
+            isPresented: Binding(
+                get: { ambientJoin.request != nil },
+                set: { _ in }),
+            presenting: ambientJoin.request
+        ) { _ in
+            Button("Add Device") { ambientJoin.answer(true) }
+            Button("Not Now", role: .cancel) { ambientJoin.answer(false) }
+        } message: { request in
+            Text(request.confirmationMessage)
+        }
     }
 
     // MARK: - Stages
