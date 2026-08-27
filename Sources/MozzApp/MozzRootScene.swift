@@ -96,7 +96,10 @@ struct RootView: View {
         .alert(
             "Add this device to your circle?",
             isPresented: Binding(
-                get: { ambientJoin.request != nil },
+                get: {
+                    ambientJoin.request != nil
+                        && !ambientJoin.isDevicesScreenActive
+                },
                 // The buttons below own the answer. SwiftUI is allowed to set
                 // presentation false before invoking a button action; treating
                 // that setter as "No" races the explicit Add tap and can make
@@ -108,11 +111,7 @@ struct RootView: View {
             Button("Add Device") { ambientJoin.answer(true) }
             Button("Not Now", role: .cancel) { ambientJoin.answer(false) }
         } message: { request in
-            Text(
-                "\(request.peerName) is asking to add this device.\n\n" +
-                "Confirm \(request.spacedDigits) appears there too. Adding shares " +
-                "your media servers, listening history, and library across the circle."
-            )
+            Text(request.confirmationMessage)
         }
         .onOpenURL { url in
             env.handle(url: url)
