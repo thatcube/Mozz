@@ -139,19 +139,25 @@ public struct FavoritesStore: Sendable {
                 let wins = record.updatedAtMS > currentMS
                     || (record.updatedAtMS == currentMS
                         && record.sourceDeviceID > (current?.sourceDeviceID ?? ""))
+                    || (record.updatedAtMS == currentMS
+                        && record.sourceDeviceID == current?.sourceDeviceID
+                        && !record.needsServerWrite
+                        && current?.isPending == true)
                 guard wins else { continue }
                 let createdAt = Double(record.updatedAtMS) / 1_000
                 try db.execute(sql: """
                     INSERT INTO favorite_outbox
                         (serverId, remoteId, itemType, kind, value, createdAt, isPending, sourceDeviceID)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(serverId, remoteId) DO UPDATE SET
                         itemType = excluded.itemType, kind = excluded.kind,
                         value = excluded.value, createdAt = excluded.createdAt,
-                        isPending = 1, sourceDeviceID = excluded.sourceDeviceID
+                        isPending = excluded.isPending,
+                        sourceDeviceID = excluded.sourceDeviceID
                     """, arguments: [
                         serverId, record.remoteID, record.itemType, record.kind,
-                        record.value, createdAt, record.sourceDeviceID,
+                        record.value, createdAt, record.needsServerWrite,
+                        record.sourceDeviceID,
                     ])
                 let column = record.kind == "rating" ? "rating" : "isFavorite"
                 try db.execute(

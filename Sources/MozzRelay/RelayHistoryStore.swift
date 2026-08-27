@@ -650,6 +650,11 @@ public actor RelayHistoryStore: HistoryStore {
                 || (record.updatedAtMS == current.updatedAtMS
                     && record.sourceDeviceID > current.sourceDeviceID) {
                 selected[record.remoteID] = record
+            } else if record.updatedAtMS == current.updatedAtMS,
+                      record.sourceDeviceID == current.sourceDeviceID,
+                      !record.needsServerWrite,
+                      current.needsServerWrite {
+                selected[record.remoteID] = record
             }
         }
         return selected.values.sorted { $0.remoteID < $1.remoteID }
