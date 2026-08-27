@@ -23,6 +23,7 @@ public enum PairingCeremony {
     public static func join(
         path: PairingPath,
         into store: CircleStore,
+        deviceName: String = "Mozz",
         host: PairingHost? = nil,
         showCode: @Sendable (String, Pairing.QRPayload) -> Void,
         confirmDigits: @Sendable (String) async -> Bool = { _ in true }
@@ -34,12 +35,15 @@ public enum PairingCeremony {
         let payload = Pairing.QRPayload(publicKey: privateKey.publicKey.rawRepresentation, nonce: nonce)
         showCode(try Pairing.encodeQR(payload), payload)
 
-        let host = try host ?? PairingHost(advertise: true)
+        // Advertised under the device's own name, so the other side lists
+        // "Brandon's iPhone" rather than three entries called Mozz.
+        let host = try host ?? PairingHost(advertise: true, name: deviceName)
         try await host.start()
         defer { Task { await host.stop() } }
 
         let link = try await host.nextLink()
-        var session = try PairingSession(role: .joiner, path: path, privateKey: privateKey, nonce: nonce)
+        var session = try PairingSession(role: .joiner, path: path, privateKey: privateKey,
+                                         nonce: nonce, name: deviceName)
 
         for step in try session.start() where isSend(step) {
             try await send(step, over: link)
@@ -62,6 +66,10 @@ public enum PairingCeremony {
                                                         privateKey: privateKey,
                                                         transcriptHash: transcript)
                     try store.save(circle)
+                    try store.remember(CircleMember(name: deviceName, isSelf: true))
+                    if let peer = session.peerName {
+                        try store.remember(CircleMember(name: peer))
+                    }
                     await link.close()
                     return circle
                 default:
@@ -85,10 +93,12 @@ public enum PairingCeremony {
         from store: CircleStore,
         path: PairingPath,
         scanned: Pairing.QRPayload?,
+        deviceName: String = "Mozz",
         endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
         confirmDigits: @Sendable (String) async -> Bool = { _ in true }
     ) async throws {
         try await admit(try store.loadOrCreate(), path: path, scanned: scanned,
+                        deviceName: deviceName, store: store,
                         endpoints: endpoints, confirmDigits: confirmDigits)
     }
 
@@ -96,6 +106,8 @@ public enum PairingCeremony {
         _ circle: CircleSecrets,
         path: PairingPath,
         scanned: Pairing.QRPayload?,
+        deviceName: String = "Mozz",
+        store: CircleStore? = nil,
         endpoints: AsyncStream<NWEndpoint> = browseForPairingDevices(),
         confirmDigits: @Sendable (String) async -> Bool = { _ in true }
     ) async throws {
@@ -107,8 +119,13 @@ public enum PairingCeremony {
                 continue
             }
             do {
-                try await runMember(circle, path: path, scanned: scanned,
-                                    link: link, confirmDigits: confirmDigits)
+                let admitted = try await runMember(circle, path: path, scanned: scanned,
+                                                   link: link, deviceName: deviceName,
+                                                   confirmDigits: confirmDigits)
+                if let store {
+                    try store.remember(CircleMember(name: deviceName, isSelf: true))
+                    if let admitted { try store.remember(CircleMember(name: admitted)) }
+                }
                 await link.close()
                 return
             } catch PairingSessionError.wrongDevice {
@@ -125,19 +142,22 @@ public enum PairingCeremony {
 
     /// Split out so a caller holding its own link — a test, or a transport that
     /// is not Bonjour — can run the member side directly.
+    @discardableResult
     public static func runMember(
         _ circle: CircleSecrets,
         path: PairingPath,
         scanned: Pairing.QRPayload?,
         link: PairingLink,
+        deviceName: String = "Mozz",
         confirmDigits: @Sendable (String) async -> Bool = { _ in true }
-    ) async throws {
+    ) async throws -> String? {
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         var nonce = Data(count: 16)
         for index in 0..<16 { nonce[index] = UInt8.random(in: 0...255) }
 
         var session = try PairingSession(role: .member, path: path,
-                                         privateKey: privateKey, nonce: nonce, scanned: scanned)
+                                         privateKey: privateKey, nonce: nonce,
+                                         scanned: scanned, name: deviceName)
 
         while true {
             let steps = try session.receive(try await link.receive())
@@ -163,7 +183,7 @@ public enum PairingCeremony {
                     break
                 }
             }
-            if sealed { return }
+            if sealed { return session.peerName }
         }
     }
 
