@@ -828,6 +828,48 @@ private func wire(_ snapshot: ContinuitySnapshot, hydrated: [TrackRecord]) -> Wi
 
 // MARK: - Session
 
+private actor RelayStorePool {
+    private struct Identity: Equatable {
+        let configuration: B2RelayConfiguration
+        let channelID: String
+        let deviceID: String
+        let epoch: Int
+        let channelKey: Data
+        let credentialsKey: Data?
+    }
+
+    private var cached: (Identity, RelayHistoryStore)?
+
+    func store(
+        configuration: B2RelayConfiguration,
+        channelID: String,
+        deviceID: String,
+        epoch: Int,
+        channelKey: Data,
+        credentialsKey: Data?
+    ) throws -> RelayHistoryStore {
+        let identity = Identity(
+            configuration: configuration,
+            channelID: channelID,
+            deviceID: deviceID,
+            epoch: epoch,
+            channelKey: channelKey,
+            credentialsKey: credentialsKey)
+        if let cached, cached.0 == identity {
+            return cached.1
+        }
+        let store = try RelayHistoryStore(
+            objects: B2NativeRelayObjectStore(configuration: configuration),
+            channelID: channelID,
+            localDeviceID: deviceID,
+            epoch: epoch,
+            channelKey: channelKey,
+            credentialsKey: credentialsKey)
+        cached = (identity, store)
+        return store
+    }
+}
+
 /// One open library, owning the database pool for its lifetime.
 final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
@@ -855,6 +897,7 @@ final class MozzSession: @unchecked Sendable {
     /// a device opened before the audio session is active emits silence while
     /// reporting itself healthy.
     let playback: PlaybackCommandService
+    fileprivate let relayStores = RelayStorePool()
 
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
@@ -1371,14 +1414,15 @@ private func dispatch(
             }
         }
 
-        let objectStore = B2NativeRelayObjectStore(
-            configuration: configuration)
-        let relay = try RelayHistoryStore(
-            objects: objectStore,
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
             channelID: circle.channelId,
-            localDeviceID: deviceID,
+            deviceID: deviceID,
             epoch: circle.epoch,
-            channelKey: circle.channelKey)
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
         let exchange = HistoryExchangeStore(session.database)
 
         // Import first, exactly like HistoryCoordinator. A device returning
@@ -1447,14 +1491,15 @@ private func dispatch(
                     current: configuration)
             }
         }
-        let relay = try RelayHistoryStore(
-            objects: B2NativeRelayObjectStore(
-                configuration: configuration),
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
             channelID: circle.channelId,
-            localDeviceID: deviceID,
+            deviceID: deviceID,
             epoch: circle.epoch,
             channelKey: circle.channelKey,
-            credentialsKey: circle.credentialsKey)
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
         try await relay.save(RelayServerSnapshot(
             deviceID: deviceID,
             writtenAtMS: localServers.map(\.mutationAtMS).max() ?? 0,
@@ -1522,14 +1567,15 @@ private func dispatch(
                     current: configuration)
             }
         }
-        let relay = try RelayHistoryStore(
-            objects: B2NativeRelayObjectStore(
-                configuration: configuration),
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
             channelID: circle.channelId,
-            localDeviceID: deviceID,
+            deviceID: deviceID,
             epoch: circle.epoch,
             channelKey: circle.channelKey,
-            credentialsKey: circle.credentialsKey)
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
         let catalog = CatalogRelayCoordinator(
             database: session.database,
             relay: relay,
@@ -1602,14 +1648,15 @@ private func dispatch(
                     current: configuration)
             }
         }
-        let relay = try RelayHistoryStore(
-            objects: B2NativeRelayObjectStore(
-                configuration: configuration),
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
             channelID: circle.channelId,
-            localDeviceID: deviceID,
+            deviceID: deviceID,
             epoch: circle.epoch,
             channelKey: circle.channelKey,
-            credentialsKey: circle.credentialsKey)
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
         let synced = try await PlaybackSettingsRelayCoordinator(
             database: session.database,
             relay: relay,

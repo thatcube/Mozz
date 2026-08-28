@@ -17,9 +17,11 @@ final actor MemoryRelayObjectStore: RelayObjectStore {
     private var values: [String: Value] = [:]
     private var generation = 0
     private(set) var putCount = 0
+    private(set) var readCount = 0
     private(set) var bodyReadCount = 0
 
     func read(path: String, ifNoneMatch: String?) async throws -> RelayReadResult {
+        readCount += 1
         guard let value = values[path] else { return .missing }
         if value.etag == ifNoneMatch { return .notModified }
         bodyReadCount += 1
@@ -135,20 +137,61 @@ final class RelayHistoryStoreTests: XCTestCase {
         XCTAssertEqual(afterSecond, afterFirst)
     }
 
-    func testASecondReadUsesConditionalGetsAndDownloadsNoBodies() async throws {
+    func testASecondReadIssuesNoRequestsForImmutableObjects() async throws {
         let objects = MemoryRelayObjectStore()
         let phone = try store(objects, device: "phone-id")
         try await phone.save(batch(device: "phone-id", uid: "once"))
 
         let reader = try store(objects, device: "reader-id")
         _ = try await reader.loadBatches()
-        let afterFirstRead = await objects.bodyReadCount
+        let afterFirstRead = await objects.readCount
         _ = try await reader.loadBatches()
-        let afterSecondRead = await objects.bodyReadCount
+        let afterSecondRead = await objects.readCount
 
         XCTAssertEqual(afterFirstRead, 2, "manifest plus history object")
         XCTAssertEqual(afterSecondRead, afterFirstRead,
-                       "unchanged ETags must not download either body again")
+                       "immutable cached paths need no conditional request")
+    }
+
+    func testOnlyNewestManifestGenerationIsReadForEachDevice() async throws {
+        let objects = MemoryRelayObjectStore()
+        let phone = try store(objects, device: "phone-id")
+        try await phone.save(batch(device: "phone-id", uid: "first"))
+        try await phone.save(batch(
+            device: "phone-id", uid: "second", writtenAtMS: 200))
+        try await phone.save(batch(
+            device: "phone-id", uid: "third", writtenAtMS: 300))
+
+        let readsBefore = await objects.readCount
+        let reader = try store(objects, device: "reader-id")
+        let loaded = try await reader.loadBatches()
+        let readsAfter = await objects.readCount
+
+        XCTAssertEqual(loaded.flatMap(\.events).map(\.uid), ["third"])
+        XCTAssertEqual(
+            readsAfter - readsBefore,
+            2,
+            "one newest manifest and one referenced object should be read")
+    }
+
+    func testCachedReaderSeesAPeersNewManifestGeneration() async throws {
+        let objects = MemoryRelayObjectStore()
+        let phone = try store(objects, device: "phone-id")
+        let reader = try store(objects, device: "reader-id")
+        try await phone.save(batch(device: "phone-id", uid: "first"))
+        _ = try await reader.loadBatches()
+
+        try await phone.save(batch(
+            device: "phone-id", uid: "second", writtenAtMS: 200))
+        let readsBefore = await objects.readCount
+        let loaded = try await reader.loadBatches()
+        let readsAfter = await objects.readCount
+
+        XCTAssertEqual(loaded.flatMap(\.events).map(\.uid), ["second"])
+        XCTAssertEqual(
+            readsAfter - readsBefore,
+            2,
+            "a new manifest path must bypass the immutable-object cache")
     }
 
     func testChangingABatchWritesTheObjectAndItsOwnManifest() async throws {
