@@ -94,10 +94,10 @@ public sealed class SettingsTests : IDisposable
             "Playback",
             "Lyrics",
             "Recommendations",
-            // Devices sits here on iOS too. This test exists because the two
+            // Sync sits here on iOS too. This test exists because the two
             // drifting apart is invisible on either platform alone, and it
-            // caught exactly that when Devices was added to one side only.
-            "Devices",
+            // caught exactly that when Sync was added to one side only.
+            "Sync",
             "Appearance",
             "Diagnostics",
             "About",

@@ -390,7 +390,6 @@ public actor RelayHistoryStore: HistoryStore {
     public static let maximumCatalogChunkBytes = 2 * 1024 * 1024
 
     private struct CachedObject {
-        let etag: String
         let plaintext: Data
     }
 
@@ -401,7 +400,10 @@ public actor RelayHistoryStore: HistoryStore {
     private let key: SymmetricKey
     private let credentialsKey: SymmetricKey?
     private var cache: [String: CachedObject] = [:]
+    private var cacheOrder: [String] = []
+    private var cachedPlaintextBytes = 0
     private var catalogPathsByScope: [String: Set<String>] = [:]
+    private static let maximumCachedPlaintextBytes = 32 * 1024 * 1024
 
     public init(
         objects: any RelayObjectStore,
@@ -983,12 +985,12 @@ public actor RelayHistoryStore: HistoryStore {
                 manifestPlaintext,
                 path: manifestPath,
                 key: key)
-            let etag = try await objects.put(
+            _ = try await objects.put(
                 path: manifestPath,
                 data: manifestCiphertext,
                 condition: .none)
-            cache[manifestPath] = CachedObject(
-                etag: etag,
+            cacheObject(
+                path: manifestPath,
                 plaintext: manifestPlaintext)
 
             // Another process may have written the same generation and won the
@@ -1009,18 +1011,13 @@ public actor RelayHistoryStore: HistoryStore {
 
     private func manifests() async throws -> [(String, RelayDeviceManifest)] {
         let paths = try await objects.list(prefix: manifestPrefix).sorted()
-        var newest: [String: (String, RelayDeviceManifest)] = [:]
-        for path in paths {
-            if let manifest = try await readManifest(path: path) {
-                if let current = newest[manifest.deviceID],
-                   (current.1.generation, current.0)
-                    >= (manifest.generation, path) {
-                    continue
-                }
-                newest[manifest.deviceID] = (path, manifest)
-            }
+        let newestPaths = newestManifestPaths(in: paths)
+        var newest: [(String, RelayDeviceManifest)] = []
+        for path in newestPaths.values.sorted() {
+            guard let manifest = try await readManifest(path: path) else { continue }
+            newest.append((path, manifest))
         }
-        return newest.values.sorted { $0.0 < $1.0 }
+        return newest
     }
 
     private func latestManifest(
@@ -1028,17 +1025,48 @@ public actor RelayHistoryStore: HistoryStore {
     ) async throws -> RelayDeviceManifest? {
         let prefix = "\(manifestPrefix)\(try Self.pathComponent(deviceID))/"
         let paths = try await objects.list(prefix: prefix).sorted()
-        var latest: (String, RelayDeviceManifest)?
+        guard let path = newestManifestPaths(
+            in: paths,
+            expectedDeviceID: deviceID
+        )[deviceID] else { return nil }
+        return try await readManifest(path: path)
+    }
+
+    /// Manifest objects are immutable and their generation is authenticated
+    /// again after decryption. Select from the path first so a device with years
+    /// of history costs one body read, not one read per historical generation.
+    private func newestManifestPaths(
+        in paths: [String],
+        expectedDeviceID: String? = nil
+    ) -> [String: String] {
+        var newest: [String: (generation: Int64, path: String)] = [:]
         for path in paths {
-            guard let manifest = try await readManifest(path: path) else { continue }
-            if let current = latest,
-               (current.1.generation, current.0)
-                >= (manifest.generation, path) {
+            guard path.hasPrefix(manifestPrefix) else { continue }
+            let relative = path.dropFirst(manifestPrefix.count)
+            let components = relative.split(
+                separator: "/",
+                omittingEmptySubsequences: false)
+            guard components.count == 2 else { continue }
+
+            let deviceID = String(components[0])
+            guard (try? Self.pathComponent(deviceID)) == deviceID,
+                  expectedDeviceID == nil || expectedDeviceID == deviceID else {
                 continue
             }
-            latest = (path, manifest)
+
+            let fileName = components[1]
+            guard let separator = fileName.firstIndex(of: "-"),
+                  let generation = Int64(fileName[..<separator]),
+                  generation > 0 else {
+                continue
+            }
+            if let current = newest[deviceID],
+               (current.generation, current.path) >= (generation, path) {
+                continue
+            }
+            newest[deviceID] = (generation, path)
         }
-        return latest?.1
+        return newest.mapValues(\.path)
     }
 
     private func readManifest(path: String) async throws -> RelayDeviceManifest? {
@@ -1065,16 +1093,21 @@ public actor RelayHistoryStore: HistoryStore {
         maximumBytes: Int? = nil
     ) async throws -> Data? {
         let maximumBytes = maximumBytes ?? Self.maximumPlaintextBytes
-        let cached = cache[path]
-        switch try await objects.read(path: path, ifNoneMatch: cached?.etag) {
+        if let cached = cache[path] {
+            guard cached.plaintext.count <= maximumBytes else {
+                throw RelayStoreError.objectTooLarge(
+                    actual: cached.plaintext.count,
+                    maximum: maximumBytes)
+            }
+            touchCachedObject(path)
+            return cached.plaintext
+        }
+        switch try await objects.read(path: path, ifNoneMatch: nil) {
         case .missing:
-            cache[path] = nil
+            removeCachedObject(path)
             return nil
         case .notModified:
-            guard let cached else {
-                throw RelayStoreError.changedWithoutBody(path)
-            }
-            return cached.plaintext
+            throw RelayStoreError.changedWithoutBody(path)
         case let .object(object):
             guard object.data.count <= maximumBytes + 64 else {
                 throw RelayStoreError.objectTooLarge(
@@ -1085,10 +1118,36 @@ public actor RelayHistoryStore: HistoryStore {
                 object.data,
                 path: path,
                 key: decryptionKey ?? key)
-            cache[path] = CachedObject(
-                etag: object.etag, plaintext: plaintext)
+            cacheObject(
+                path: path,
+                plaintext: plaintext)
             return plaintext
         }
+    }
+
+    private func cacheObject(path: String, plaintext: Data) {
+        removeCachedObject(path)
+        guard plaintext.count <= Self.maximumCachedPlaintextBytes else { return }
+        while cachedPlaintextBytes + plaintext.count
+                > Self.maximumCachedPlaintextBytes,
+              let oldest = cacheOrder.first {
+            removeCachedObject(oldest)
+        }
+        cache[path] = CachedObject(plaintext: plaintext)
+        cacheOrder.append(path)
+        cachedPlaintextBytes += plaintext.count
+    }
+
+    private func touchCachedObject(_ path: String) {
+        cacheOrder.removeAll { $0 == path }
+        cacheOrder.append(path)
+    }
+
+    private func removeCachedObject(_ path: String) {
+        if let removed = cache.removeValue(forKey: path) {
+            cachedPlaintextBytes -= removed.plaintext.count
+        }
+        cacheOrder.removeAll { $0 == path }
     }
 
     private func validate(

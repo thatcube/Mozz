@@ -79,6 +79,9 @@ Verified against Backblaze's own transaction-pricing page:
 
 Storage is $0.00695/GB-month after the first 10 GB. Uploads incur no bandwidth
 charge. Egress is free "to or through partner CDNs… including Cloudflare".
+Backblaze's separately configured daily transaction maxima are availability
+caps, not free-tier allowances: a 2,500 Class B maximum can block reads even
+though every one of those reads costs $0.
 
 That matters structurally rather than as a discount. **Our workload is
 operation-heavy and storage-light** — thousands of tiny writes against a few GB
@@ -122,7 +125,9 @@ have not changed. That is absurd for syncing a play history.
 Instead each device writes immutable generations of a small **manifest** in a
 manifest-only prefix
 (`manifests/{epoch}/{deviceId}/{generation}-{hash}`, ~1 KB) listing that
-device's current objects and hashes. Readers list that prefix, choose the
+device's current objects and hashes. Readers list that prefix, select the newest
+generation from each device's path, then authenticate the same generation after
+decryption. Historical manifest bodies are never fetched. Readers then
 greatest generation per device, compare hashes, and fetch only what actually
 changed. Old manifest generations expire through bucket lifecycle.
 Conditional `GET` (`If-None-Match`) covers the rest.
@@ -152,7 +157,8 @@ two or three readers and is rewritten several times a day.
 
 The relay carries whatever a device needs to hand to its peers — history batches,
 yearly rollups, server credentials, warm-start catalog snapshots, playback
-settings, and later ratings. Each is a **separate object**, because they
+settings, ratings/favorites, and device membership. Each is a **separate
+object**, because they
 change at wildly different rates: history moves whenever music plays, a catalog
 snapshot only after a complete mirror, and EQ presets essentially never. One
 combined blob would rewrite everything on every listen.
@@ -167,10 +173,11 @@ remains authoritative and every hydrated device reconciles in the background.
 This is what makes "what else should sync?" a payload question rather than an
 infrastructure question.
 
-### 6. Guardrails, because usage-based billing has no ceiling
+### 6. Guardrails, because free transactions can still exhaust availability
 
-Neither B2 nor Cloudflare offers a hard spend cap. A client retry loop is
-therefore a billing event, and the only real defences are ours:
+Backblaze offers account-wide caps and alerts, but they are too broad to contain
+one compromised channel and can block every user at once. A client retry loop is
+still an availability and bandwidth event, so the real defences are ours:
 
 - **A hard client-side floor between writes**, well above ADR-0011's current
   30-minute interval. History is latency-tolerant by design; syncing a few times
@@ -178,6 +185,9 @@ therefore a billing event, and the only real defences are ours:
 - **Never write an unchanged object.** Deterministic serialization already makes
   this a hash comparison, and a device that played nothing writes nothing. This
   is the primary cost control, not an optimization.
+- **Never reread immutable history.** Fetch only each device's newest manifest
+  generation and retain a bounded 32 MB plaintext cache across one desktop
+  session's relay commands.
 - **A maximum object size**, enforced client-side and by the key's scope.
 - **Prefix-scoped keys with expiry**, so a compromised or looping device can be
   cut off without touching anyone else.
@@ -262,8 +272,9 @@ competing product.
 
 ## Status
 
-Blocked on the pairing/security ADR (ADR-0010 §8), which owns the ceremony and
-the encryption this relay assumes. Nothing here ships before that lands.
+Accepted and implemented on the cross-device branch. The production B2 bucket,
+Cloudflare read endpoint, provisioning Worker, pairing ceremony, encrypted
+payloads, and per-device immutable manifests are active.
 
 Unaffected by this decision: `MozzHistory`, `HistorySyncStore`,
 `HistoryRollupBuilder`, `spec/history`, and the `HistoryStore` protocol — the
