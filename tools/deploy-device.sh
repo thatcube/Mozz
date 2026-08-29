@@ -167,44 +167,9 @@ device_udid() {
     | awk -F': ' '/• UDID:/ { gsub(/^[ \t]+/, "", $2); print $2; exit }'
 }
 
-# --- Reachability pre-flight -------------------------------------------------
-# `devicectl list devices` reports a device as "available (paired)" from its
-# cached pairing record even when it has been off the network for hours.
-# xcodebuild then spends a minute on "Connecting to <device>" before failing
-# with a destination error that says nothing about why.
-#
-# The cause is usually mundane and never guessable from that message: the
-# device is paired over the local network rather than USB, and it is not on
-# the network right now. Say so in a second instead of a minute, and say what
-# to do about it.
-check_reachable() {
-  local label="$1" id="$2" details
-  details="$(xcrun devicectl device info details --device "$id" 2>&1)"
-  grep -q "A connection to this device could not be established" <<<"$details" || return 0
-
-  local last
-  last="$(awk -F': ' '/Last Connection Date/ { sub(/^[^:]*: /, ""); print; exit }' <<<"$details")"
-
-  echo "✗ $label is paired but not reachable right now." >&2
-  [[ -n "$last" ]] && echo "  Last seen: $last" >&2
-
-  if grep -q "localNetwork" <<<"$details"; then
-    echo "  It is paired over the network rather than USB, so both ends have to" >&2
-    echo "  be on the same one. Worth checking THIS Mac first: if its address" >&2
-    echo "  changed the pairing goes quiet even though the device is fine, and" >&2
-    echo "  the device is the obvious thing to blame and the wrong one." >&2
-    echo "    this Mac: $(ipconfig getifaddr en0 2>/dev/null || echo 'no address on en0')" >&2
-    echo "  Otherwise wake the device, or plug it in — USB sidesteps all of it." >&2
-  else
-    echo "  Unlock it and check the cable." >&2
-  fi
-  return 1
-}
-
-for entry in ${TARGETS[@]+"${TARGETS[@]}"}; do
-  check_reachable "${entry%%:*}" "${entry#*:}" || exit 1
-done
-
+# Do not probe reachability first. A sleeping network-paired phone can reject
+# `device info details` immediately and still accept the verified install; only
+# the install result is authoritative.
 BUILD_DESTINATION="generic/platform=iOS"
 # Only name the concrete device if xcodebuild can actually see it.
 #

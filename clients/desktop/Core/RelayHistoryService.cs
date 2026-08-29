@@ -192,8 +192,24 @@ public sealed class RelayHistoryService
 
             foreach (var account in _server.SavedAccounts())
             {
-                var prepared = preparedAccounts.GetValueOrDefault(
-                    account.ServerId, account);
+                ServerAccount prepared;
+                if (!preparedAccounts.TryGetValue(
+                        account.ServerId,
+                        out prepared!))
+                {
+                    try
+                    {
+                        prepared = await _server.AttachForSyncAsync(
+                            account,
+                            token).ConfigureAwait(false);
+                        preparedAccounts[account.ServerId] = prepared;
+                    }
+                    catch (Exception error)
+                    {
+                        BackgroundSyncFailed?.Invoke(error);
+                        continue;
+                    }
+                }
                 try
                 {
                     var catalogResult = await _core.CallAsync<RelayCatalogSyncResult>(

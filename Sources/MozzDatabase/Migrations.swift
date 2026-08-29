@@ -806,6 +806,12 @@ enum Schema {
                 try rekeyTrackRefTable(db, table: "play_event", column: "track_ref", oldId: oldId, canonicalId: canonicalId)
                 try rekeyTrackRefTable(db, table: "track_features", column: "track_ref", oldId: oldId, canonicalId: canonicalId, primaryKey: true)
                 try rekeyRecommendationItems(db, oldId: oldId, canonicalId: canonicalId)
+                if try db.tableExists("catalogScope") {
+                    try rekeyCatalogScope(
+                        db,
+                        oldId: oldId,
+                        canonicalId: canonicalId)
+                }
             }
 
             let stale = servers.map { $0["id"] as String }.filter { $0 != canonicalId }
@@ -896,6 +902,38 @@ enum Schema {
             SET track_ref = ? || substr(track_ref, ?)
             WHERE substr(track_ref, 1, ?) = ?
             """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+    }
+
+    private static func rekeyCatalogScope(
+        _ db: Database,
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        guard let encoded = try String.fetchOne(
+            db,
+            sql: "SELECT scope FROM catalogScope WHERE serverId = ?",
+            arguments: [oldId]),
+              var scope = try? JSONDecoder().decode(
+                CatalogSnapshotScope.self,
+                from: Data(encoded.utf8)) else {
+            return
+        }
+        scope.serverID = canonicalId
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let canonicalScope = try String(
+            decoding: encoder.encode(scope),
+            as: UTF8.self)
+        try db.execute(
+            sql: "DELETE FROM catalogScope WHERE serverId = ?",
+            arguments: [canonicalId])
+        try db.execute(
+            sql: """
+                UPDATE catalogScope
+                SET serverId = ?, scope = ?
+                WHERE serverId = ?
+                """,
+            arguments: [canonicalId, canonicalScope, oldId])
     }
 
     private static func plexMachineIdentifier(serverId: String, baseURL: String) -> String? {

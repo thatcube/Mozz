@@ -755,7 +755,37 @@ public actor RelayHistoryStore: HistoryStore {
                 if wins { selected[record.id] = (record, snapshot.deviceID) }
             }
         }
-        return selected.values.map(\.0).sorted { $0.id < $1.id }
+        let records = selected.values.map(\.0)
+        let stableActiveNames = Set<String>(records.compactMap { record in
+            guard !record.isRemoved,
+                  !record.id.hasPrefix("legacy:") else {
+                return nil
+            }
+            return normalizedLegacyDeviceName(record.name)
+        })
+        return records.filter { record in
+            !record.id.hasPrefix("legacy:")
+                || record.isRemoved
+                || !stableActiveNames.contains(
+                    normalizedLegacyDeviceName(record.name))
+        }.sorted { $0.id < $1.id }
+    }
+
+    private static func normalizedLegacyDeviceName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"),
+              let marker = trimmed.range(
+                of: " (",
+                options: .backwards),
+              marker.upperBound < trimmed.index(before: trimmed.endIndex),
+              Int(trimmed[
+                marker.upperBound..<trimmed.index(before: trimmed.endIndex)
+              ]) != nil else {
+            return trimmed.lowercased()
+        }
+        return trimmed[..<marker.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private static func validFavorite(_ record: FavoriteMutationState) -> Bool {

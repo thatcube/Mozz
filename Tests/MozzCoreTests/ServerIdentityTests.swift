@@ -12,6 +12,15 @@ final class ServerIdentityTests: XCTestCase {
             "plex-machine-123")
     }
 
+    func testLegacyPlexDirectURLDerivesTheStableMachineIdentity() {
+        XCTAssertEqual(
+            ServerIdentity.id(
+                kind: .plex,
+                baseURL: URL(string:
+                    "https://192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct:32400")!),
+            "plex-50acfe994de74f8998deb9fc43e6262e")
+    }
+
     func testSubsonicIdentityIncludesTheAccount() {
         let url = URL(string: "https://music.example.test")!
         XCTAssertNotEqual(

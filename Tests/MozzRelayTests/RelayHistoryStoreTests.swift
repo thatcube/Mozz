@@ -555,6 +555,40 @@ final class RelayHistoryStoreTests: XCTestCase {
         XCTAssertEqual(merged, [removed])
         XCTAssertTrue(merged[0].isRemoved)
     }
+
+    func testStableMembershipPrunesItsLegacyNumberedAlias() {
+        let stable = RelayMemberRecord(
+            id: "phone-id",
+            name: "Brandos iPhone",
+            joinedAtMS: 200)
+        let legacy = RelayMemberRecord(
+            id: "legacy:brandos iphone (2)",
+            name: "Brandos iPhone (2)",
+            joinedAtMS: 100)
+
+        XCTAssertEqual(
+            RelayHistoryStore.mergedMembership([
+                RelayMembershipSnapshot(
+                    deviceID: "desktop",
+                    records: [stable, legacy]),
+            ]),
+            [stable])
+    }
+
+    func testLegacyMembershipRemainsWithoutAStableReplacement() {
+        let legacy = RelayMemberRecord(
+            id: "legacy:family pc",
+            name: "Family PC",
+            joinedAtMS: 100)
+
+        XCTAssertEqual(
+            RelayHistoryStore.mergedMembership([
+                RelayMembershipSnapshot(
+                    deviceID: "desktop",
+                    records: [legacy]),
+            ]),
+            [legacy])
+    }
 }
 
 private extension Array {

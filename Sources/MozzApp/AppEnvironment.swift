@@ -545,6 +545,10 @@ public final class AppEnvironment: ObservableObject {
             return
         }
         let (connection, backend) = try await buildBackend(from: stored)
+        if stored.kind == .plex {
+            try await CatalogSnapshotDatabase(database)
+                .repairPlexServerIdentities()
+        }
         try await CatalogWriter(database).saveServer(connection)
 
         // Prefer live detection; if the server is unreachable (offline launch),

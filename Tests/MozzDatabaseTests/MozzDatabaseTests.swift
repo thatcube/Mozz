@@ -166,6 +166,99 @@ final class SchemaAndWriteTests: XCTestCase {
         }
     }
 
+    func testRuntimePlexRepairMergesRelayHydratedLegacyState() async throws {
+        let database = try MusicDatabase.inMemory()
+        let machine = "50acfe994de74f8998deb9fc43e6262e"
+        let legacy = "plex-https://192-168-68-71.\(machine).plex.direct:32400"
+        let canonical = "plex-\(machine)"
+        let baseURL = "https://192-168-68-71.\(machine).plex.direct:32400"
+        let legacyScope = CatalogSnapshotScope(
+            backend: .plex,
+            serverID: legacy,
+            accountID: "owner",
+            libraryIDs: ["*"])
+        let canonicalScope = CatalogSnapshotScope(
+            backend: .plex,
+            serverID: canonical,
+            accountID: "owner",
+            libraryIDs: ["3"])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+
+        try await database.write { db in
+            try db.execute(sql: """
+                INSERT INTO server (
+                    id, kind, name, baseURL, userID,
+                    clientIdentifier, musicSectionID
+                ) VALUES
+                    (?, 'plex', 'Brandoland', ?, NULL, 'phone', NULL),
+                    (?, 'plex', 'Brandoland', ?, NULL, 'desktop', '3')
+                """, arguments: [legacy, baseURL, canonical, baseURL])
+            try db.execute(sql: """
+                INSERT INTO track (
+                    serverId, remoteId, title, sortTitle, artistName,
+                    duration, isFavorite, genres, rating
+                ) VALUES
+                    (?, '17283', 'Your Blood', 'Your Blood', 'AURORA',
+                        1, 0, '[]', 4.5),
+                    (?, '17283', 'Your Blood', 'Your Blood', 'AURORA',
+                        1, 0, '[]', 5)
+                """, arguments: [legacy, canonical])
+            try db.execute(sql: """
+                INSERT INTO favorite_outbox (
+                    serverId, remoteId, itemType, kind, value,
+                    createdAt, isPending, sourceDeviceID
+                ) VALUES (?, '17283', 'track', 'rating', 4.5, 1, 0, 'phone')
+                """, arguments: [legacy])
+            try db.execute(
+                sql: "INSERT INTO catalogScope (serverId, scope) VALUES (?, ?), (?, ?)",
+                arguments: [
+                    legacy,
+                    String(decoding: try encoder.encode(legacyScope), as: UTF8.self),
+                    canonical,
+                    String(decoding: try encoder.encode(canonicalScope), as: UTF8.self),
+                ])
+        }
+
+        try await CatalogSnapshotDatabase(database)
+            .repairPlexServerIdentities()
+
+        try await database.read { db in
+            XCTAssertEqual(
+                try String.fetchAll(
+                    db,
+                    sql: "SELECT id FROM server ORDER BY id"),
+                [canonical])
+            XCTAssertEqual(
+                try Double.fetchOne(
+                    db,
+                    sql: """
+                        SELECT rating FROM track
+                        WHERE serverId = ? AND remoteId = '17283'
+                        """,
+                    arguments: [canonical]),
+                4.5)
+            XCTAssertEqual(
+                try String.fetchOne(
+                    db,
+                    sql: "SELECT serverId FROM favorite_outbox"),
+                canonical)
+            let scopeText = try XCTUnwrap(String.fetchOne(
+                db,
+                sql: "SELECT scope FROM catalogScope WHERE serverId = ?",
+                arguments: [canonical]))
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    CatalogSnapshotScope.self,
+                    from: Data(scopeText.utf8)),
+                CatalogSnapshotScope(
+                    backend: .plex,
+                    serverID: canonical,
+                    accountID: "owner",
+                    libraryIDs: ["*"]))
+        }
+    }
+
     private func tableCounts(_ queue: DatabaseQueue, _ tables: [String]) throws -> [String: Int] {
         try queue.read { db in
             var counts: [String: Int] = [:]
