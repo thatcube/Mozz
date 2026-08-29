@@ -17,6 +17,18 @@ public struct CatalogSnapshotDatabase: Sendable {
         self.database = database
     }
 
+    /// Re-run the idempotent Plex identity repair after relay hydration.
+    ///
+    /// Schema v18 fixed URL-keyed rows present during migration, but another
+    /// device can later publish an old stored session. Repairing at activation
+    /// merges that late duplicate into the stable machine id before the UI or
+    /// mutable-state relay chooses a catalog scope.
+    public func repairPlexServerIdentities() async throws {
+        try await database.write { db in
+            try Schema.repairPlexServerIdentities(db)
+        }
+    }
+
     /// Adopt the requested identity, clearing a catalog owned by another
     /// account/library selection in the same transaction. A pre-v20 catalog has
     /// no marker and is adopted in place for migration compatibility.
