@@ -129,6 +129,17 @@ fun MozzShell(
      */
     var playerMounted by remember { mutableStateOf(false) }
 
+    /**
+     * The mirror of [playerMounted], for the pill's own controls.
+     *
+     * The dock's rectangle does not move with the morph — it is always a pill at
+     * the bottom of the screen — so anything of the dock's left composed while the
+     * player is open sits over whatever the player has put there. It was over the
+     * transport, which is why play, pause and the skips did nothing while the
+     * lyrics and queue buttons below them worked.
+     */
+    var dockMounted by remember { mutableStateOf(true) }
+
     // How much of the bottom navigation is on screen. Driven by scrolling, and
     // only meaningful when the bar exists at all: a rail does not hide.
     val navShown = remember { mutableFloatStateOf(1f) }
@@ -276,13 +287,18 @@ fun MozzShell(
                 wide = wide,
                 expanded = expanded,
                 mounted = playerMounted,
+                dockMounted = dockMounted,
                 onOpen = {
                     expanded = true
                     playerMounted = true
-                    scope.launch { p.animateTo(1f, MorphSpring) }
+                    scope.launch {
+                        p.animateTo(1f, MorphSpring)
+                        dockMounted = false
+                    }
                 },
                 onCollapse = {
                     expanded = false
+                    dockMounted = true
                     scope.launch {
                         p.animateTo(0f, MorphSpring)
                         playerMounted = false
@@ -292,6 +308,7 @@ fun MozzShell(
                 // there is one collapse in the app rather than two that have to
                 // be kept looking alike.
                 onDismissDrag = { travelled ->
+                    dockMounted = true
                     scope.launch {
                         p.snapTo((1f - travelled / dismissTravelPx).coerceIn(0f, 1f))
                     }
@@ -321,6 +338,7 @@ fun MozzShell(
         BackHandler(enabled = expanded && panelIsModal) { panel = null }
 
         PredictiveBackHandler(enabled = expanded && !panelIsModal) { events ->
+            dockMounted = true
             try {
                 events.collect { event ->
                     // Ease the gesture: a linear drag makes the player feel like

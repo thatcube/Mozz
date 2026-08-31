@@ -79,6 +79,8 @@ internal fun MorphHost(
     expanded: Boolean,
     /** Whether the player's body should exist at all — see the shell. */
     mounted: Boolean,
+    /** Whether the pill's own controls should exist — see the shell. */
+    dockMounted: Boolean,
     onOpen: () -> Unit,
     onCollapse: () -> Unit,
     onDismissDrag: (Float) -> Unit,
@@ -120,14 +122,16 @@ internal fun MorphHost(
                     clip = true
                 }
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                // Collapsed, the whole pill is the tap target. Expanded, it must
-                // not be — the body has its own controls and a stray tap on the
-                // background should do nothing.
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    enabled = !expanded,
-                    onClick = onOpen,
+                // Collapsed, the whole pill is the tap target. Expanded the
+                // modifier is removed outright rather than disabled: a disabled
+                // `clickable` is still a pointer region, and this one grows to
+                // fill the screen as the player opens.
+                .then(
+                    if (expanded) Modifier else Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onOpen,
+                    )
                 ),
         ) {
             // The artwork wash, which has to arrive before the body that sits on
@@ -246,17 +250,22 @@ internal fun MorphHost(
             )
         }
 
-        // The pill's own controls, gone well before the body arrives.
-        Box(
-            modifier = Modifier
-                .morphFrame {
-                    val m = frame()
-                    Rect(m.dockLeft, m.dockTop, m.dockLeft + m.dockWidth, m.dockBottom)
-                }
-                .graphicsLayer { alpha = frame().dockContentAlpha }
-                .then(if (expanded) Modifier.blockTouches() else Modifier),
-        ) {
-            DockContent(state = state, playback = playback, wide = wide, onOpen = onOpen)
+        // The pill's own controls, gone well before the body arrives — and not
+        // composed at all once the player is open. The pill's rectangle stays at
+        // the bottom of the screen whatever the morph is doing, so leaving these
+        // mounted put an invisible strip of dock controls across whatever the
+        // open player had placed there.
+        if (dockMounted) {
+            Box(
+                modifier = Modifier
+                    .morphFrame {
+                        val m = frame()
+                        Rect(m.dockLeft, m.dockTop, m.dockLeft + m.dockWidth, m.dockBottom)
+                    }
+                    .graphicsLayer { alpha = frame().dockContentAlpha },
+            ) {
+                DockContent(state = state, playback = playback, wide = wide, onOpen = onOpen)
+            }
         }
     }
 }
