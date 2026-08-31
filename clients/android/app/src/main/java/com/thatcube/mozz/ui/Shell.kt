@@ -160,6 +160,8 @@ fun MozzShell(
         hasBottomNav = !wide,
         navShown = navShown.floatValue,
         presentation = presentation,
+        contentLeft = if (wide) with(density) { Dock.railWidth.toPx() } else 0f,
+        dockMaxWidthPx = with(density) { Dock.maxWidth.toPx() },
         measuredArtCenterX = artSlot?.center?.x,
         measuredArtCenterY = artSlot?.center?.y,
         measuredArtSide = artSlot?.let { minOf(it.width, it.height) },
@@ -177,8 +179,6 @@ fun MozzShell(
                 MozzNavRail(
                     selected = tab,
                     onSelect = { tab = it },
-                    // Stops above the dock: the transport owns the bottom edge of
-                    // the window, navigation owns the left.
                     modifier = Modifier
                         .fillMaxHeight()
                         // The rail runs the full height of the window, so it has
@@ -191,7 +191,11 @@ fun MozzShell(
                                 WindowInsetsSides.Top + WindowInsetsSides.Start
                             )
                         )
-                        .padding(bottom = Dock.reserve(hasTrack, hasBottomNav = false)),
+                        // The rail runs the full height and the dock floats over
+                        // the content beside it, so there is nothing to stop
+                        // short of — only the rail's own last item to keep clear
+                        // of the bottom edge.
+                        .padding(bottom = Dock.margin),
                 )
             }
             Box(

@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,6 +45,7 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.playback.PlaybackState
 import com.thatcube.mozz.playback.PlayerController
+import com.thatcube.mozz.playback.RepeatMode
 import kotlin.math.roundToInt
 
 /**
@@ -157,6 +159,24 @@ internal fun MorphHost(
         // It fades where it stands when a panel takes its place, which is the
         // only honest reading of "the queue replaces the artwork": the cover does
         // not slide away or shrink, the panel arrives over it.
+        // Apple Music's paused shrink, on iOS's numbers: the cover sits 25%
+        // smaller at rest and grows as the music starts. Scaled by `p` so only
+        // the expanded cover does it — the pill's 48dp thumbnail must not
+        // breathe. Driven by intent rather than `isPlaying`, or it shrinks for a
+        // moment on every track change while the next one buffers.
+        val pausedShrink by animateFloatAsState(
+            targetValue = if (state.intendsToPlay) 0f else PAUSED_ART_SHRINK,
+            animationSpec = spring(dampingRatio = 0.72f, stiffness = 224f),
+            label = "paused-shrink",
+        )
+        // Only once it has arrived, and never behind a panel: a shadow that
+        // animates its blur re-rasterises every frame, which is a hitch exactly
+        // where the morph can least afford one.
+        val shadow by animateFloatAsState(
+            targetValue = if (expanded && presentation != PlayerPresentation.PANEL_INSTEAD) 1f else 0f,
+            animationSpec = tween(300),
+            label = "cover-shadow",
+        )
         val coverAlpha by animateFloatAsState(
             targetValue = if (presentation == PlayerPresentation.PANEL_INSTEAD) 0f else 1f,
             animationSpec = tween(PANEL_SWAP_MS),
@@ -175,9 +195,16 @@ internal fun MorphHost(
                     )
                 }
                 .graphicsLayer {
-                    shape = RoundedCornerShape(frame().artRadius)
+                    val m = frame()
+                    val scale = 1f - pausedShrink * m.p
+                    scaleX = scale
+                    scaleY = scale
+                    shape = RoundedCornerShape(m.artRadius)
                     clip = true
                     alpha = coverAlpha
+                    shadowElevation = COVER_SHADOW.toPx() * shadow * m.p
+                    ambientShadowColor = Color.Black
+                    spotShadowColor = Color.Black
                 },
         ) {
             Artwork(
@@ -199,7 +226,7 @@ internal fun MorphHost(
                 .graphicsLayer { alpha = frame().dockContentAlpha }
                 .then(if (expanded) Modifier.blockTouches() else Modifier),
         ) {
-            DockContent(state = state, playback = playback, onOpen = onOpen)
+            DockContent(state = state, playback = playback, wide = wide, onOpen = onOpen)
         }
     }
 }
@@ -214,6 +241,8 @@ internal fun MorphHost(
 private fun DockContent(
     state: PlaybackState,
     playback: PlayerController,
+    /** A wide dock has room for the controls a phone-width one cannot fit. */
+    wide: Boolean,
     onOpen: () -> Unit,
 ) {
     val track = state.track ?: return
@@ -248,6 +277,22 @@ private fun DockContent(
             )
         }
 
+        // Shuffle and repeat only where there is room. On a phone-width pill,
+        // artwork plus a title plus five controls is a row of things too small to
+        // hit; on a tablet the space is there and reaching the player to shuffle
+        // is a trip you should not have to make.
+        if (wide) {
+            IconButton(onClick = playback::toggleShuffle) {
+                Icon(
+                    painterResource(R.drawable.ic_shuffle),
+                    contentDescription = if (state.shuffle) "Shuffle on" else "Shuffle off",
+                    tint = if (state.shuffle) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
         IconButton(onClick = playback::togglePlayPause) {
             Icon(
                 painterResource(if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
@@ -264,6 +309,26 @@ private fun DockContent(
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
+        }
+
+        if (wide) {
+            IconButton(onClick = playback::cycleRepeat) {
+                Icon(
+                    painterResource(
+                        if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
+                        else R.drawable.ic_repeat
+                    ),
+                    contentDescription = when (state.repeat) {
+                        RepeatMode.OFF -> "Repeat off"
+                        RepeatMode.ALL -> "Repeat all"
+                        RepeatMode.ONE -> "Repeat one"
+                    },
+                    tint = if (state.repeat == RepeatMode.OFF)
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -312,3 +377,9 @@ internal fun Modifier.reportBounds(onBounds: (Rect) -> Unit): Modifier =
 
 /** iOS's panel crossfade, to the millisecond. Shared with the player's own swap. */
 private const val PANEL_SWAP_MS = 180
+
+/** How much smaller the expanded cover sits when paused. iOS's value. */
+private const val PAUSED_ART_SHRINK = 0.25f
+
+/** Lift under the settled cover, so it reads as sitting on the backdrop. */
+private val COVER_SHADOW = 16.dp

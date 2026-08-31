@@ -161,13 +161,13 @@ internal fun PlayerBody(
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    if (wide) PanelTabs(panel, onPanel)
                 }
             }
 
             when (presentation) {
                 PlayerPresentation.PANEL_BESIDE -> Row(
-                    modifier = Modifier.fillMaxSize().padding(start = 32.dp, end = 24.dp, bottom = 16.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                        .padding(start = 32.dp, end = 24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(
@@ -187,13 +187,17 @@ internal fun PlayerBody(
                             server = server,
                             playback = playback,
                             library = library,
+                            // Beside the artwork there is no need to repeat the
+                            // current track as a card — it is already the biggest
+                            // thing on the screen, in the next column.
+                            showsNowPlayingCard = false,
                             onInteraction = { interactions++ },
                         )
                     }
                 }
 
                 else -> Column(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     // One box, two occupants. The cover is drawn into it by the
@@ -213,6 +217,11 @@ internal fun PlayerBody(
                                 server = server,
                                 playback = playback,
                                 library = library,
+                                // Here the panel has taken the artwork's place,
+                                // so the card is the only thing still showing
+                                // what is playing — and it is where the
+                                // travelling cover lands.
+                                showsNowPlayingCard = true,
                                 onInteraction = { interactions++ },
                             )
                         }
@@ -223,17 +232,93 @@ internal fun PlayerBody(
                         enter = fadeIn(spring()) + expandVertically(spring()),
                         exit = fadeOut(spring()) + shrinkVertically(spring()),
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column {
                             Spacer(Modifier.height(24.dp))
                             Chrome(state, playback)
-                            Spacer(Modifier.height(12.dp))
-                            PanelTabs(panel, onPanel)
-                            Spacer(Modifier.height(12.dp))
                         }
                     }
                 }
             }
+
+            AnimatedVisibility(
+                visible = !immersive,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                PlayerBottomBar(panel = panel, onPanel = onPanel)
+            }
         }
+    }
+}
+
+/**
+ * The row along the bottom: lyrics, output route, queue.
+ *
+ * iOS's order, so the two apps put the same control under the same thumb. The
+ * two panel toggles are mutually exclusive and share a job — tapping one while
+ * the other is open swaps between them rather than closing anything.
+ *
+ * Persistent icons rather than labelled tabs. The panels are somewhere you go and
+ * come back from, not a mode the player is in, and a lit icon says that better
+ * than a selected tab does — it also stops the controls above from reflowing
+ * every time a panel opens.
+ */
+@Composable
+private fun PlayerBottomBar(panel: PlayerPanel?, onPanel: (PlayerPanel?) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PanelButton(
+            icon = R.drawable.ic_lyrics,
+            label = "Lyrics",
+            selected = panel == PlayerPanel.LYRICS,
+            onClick = { onPanel(if (panel == PlayerPanel.LYRICS) null else PlayerPanel.LYRICS) },
+        )
+        Spacer(Modifier.weight(1f))
+        // iOS shows the real output route here and opens the AirPlay picker.
+        // Android's equivalent is Cast, which is a receiver and a MediaRouter
+        // away — real work, not this pass. Present and quiet, because a control
+        // the layout assumes is harder to add back later than one that waits.
+        IconButton(onClick = {}, enabled = false) {
+            Icon(
+                painterResource(R.drawable.ic_cast),
+                contentDescription = "Cast (not yet available)",
+                tint = PlayerForegroundMuted.copy(alpha = 0.4f),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        PanelButton(
+            icon = R.drawable.ic_queue,
+            label = "Queue",
+            selected = panel == PlayerPanel.QUEUE,
+            onClick = { onPanel(if (panel == PlayerPanel.QUEUE) null else PlayerPanel.QUEUE) },
+        )
+    }
+}
+
+/** One panel toggle: a lit circle when its panel is open. */
+@Composable
+private fun PanelButton(icon: Int, label: String, selected: Boolean, onClick: () -> Unit) {
+    val wash by animateFloatAsState(
+        targetValue = if (selected) 0.22f else 0f,
+        animationSpec = tween(PANEL_SWAP_MS),
+        label = "panel-button",
+    )
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(percent = 50))
+            .background(PlayerForeground.copy(alpha = wash))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = label,
+            tint = if (selected) PlayerForeground else PlayerForegroundMuted,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 
@@ -264,41 +349,6 @@ private fun Chrome(state: PlaybackState, playback: PlayerController) {
     }
 }
 
-/**
- * Which panel is showing, if any.
- *
- * Selecting the panel you are on closes it, which is how the cover comes back
- * without a separate "show artwork" control.
- */
-@Composable
-private fun PanelTabs(current: PlayerPanel?, onSelect: (PlayerPanel?) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PlayerPanel.entries.forEach { panel ->
-            val selected = current == panel
-            val wash by animateFloatAsState(
-                targetValue = if (selected) 0.18f else 0f,
-                animationSpec = tween(PANEL_SWAP_MS),
-                label = "panel-tab",
-            )
-            Surface(
-                color = PlayerForeground.copy(alpha = wash),
-                shape = RoundedCornerShape(percent = 50),
-                modifier = Modifier.clickable { onSelect(if (selected) null else panel) },
-            ) {
-                Text(
-                    when (panel) {
-                        PlayerPanel.QUEUE -> "Up next"
-                        PlayerPanel.LYRICS -> "Lyrics"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (selected) PlayerForeground else PlayerForegroundMuted,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun Panel(
     panel: PlayerPanel,
@@ -306,28 +356,34 @@ private fun Panel(
     server: MozzServer,
     playback: PlayerController,
     library: MozzLibrary,
+    showsNowPlayingCard: Boolean,
     onInteraction: () -> Unit,
 ) {
     when (panel) {
-        PlayerPanel.QUEUE -> QueuePane(state, server, playback)
+        PlayerPanel.QUEUE -> QueuePane(state, server, playback, showsNowPlayingCard)
         PlayerPanel.LYRICS -> LyricsPane(state, library, onInteraction)
     }
 }
 
 /**
- * What is playing, and what is coming.
+ * What has played, what is playing, and what is coming.
  *
- * Structured the way iOS structures it — played tracks above, the current track
- * as a card, up next below — rather than as one flat list with the current row
- * highlighted. That structure is what produces the animation: when a track
- * starts, it *leaves* the up-next list and becomes the card, so the row shrinks
- * out of the queue instead of a highlight silently jumping down one place.
+ * Three sections in iOS's order and with iOS's names — History, the now-playing
+ * card, then Queue — because the two apps are one product and a queue that calls
+ * the same thing by two names is the kind of difference people notice without
+ * being able to say why. ("Continue Playing" is Apple's phrase, and only ever
+ * appeared in Mozz's code comments; the string iOS actually ships is "Queue".)
+ *
+ * The structure is what produces the animation the flat list could not: when a
+ * track starts it *leaves* the queue and becomes the card, so the row shrinks out
+ * of the list rather than a highlight silently jumping down one place.
  */
 @Composable
 private fun QueuePane(
     state: PlaybackState,
     server: MozzServer,
     playback: PlayerController,
+    showsNowPlayingCard: Boolean,
 ) {
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
@@ -350,9 +406,9 @@ private fun QueuePane(
     var rowHeight by remember { mutableFloatStateOf(0f) }
     val upNext = preview ?: committed
 
-    // Open on the card, with the history above it rather than scrolled away —
-    // where you came from is part of the queue, it just is not what you are
-    // looking for.
+    // Open on what is playing, with the history above it rather than scrolled
+    // away — where you came from is part of the queue, it just is not what you
+    // are looking for.
     LaunchedEffect(Unit) {
         if (history.isNotEmpty()) listState.scrollToItem(history.size)
     }
@@ -365,31 +421,37 @@ private fun QueuePane(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
+        if (history.isNotEmpty()) {
+            item(key = "history-header") {
+                SectionRow("History", onClear = playback::clearHistory, Modifier.animateItem())
+            }
+        }
         itemsIndexed(history, key = { _, t -> "past-${t.id}" }) { index, track ->
             QueueRow(
                 track = track,
+                server = server,
                 muted = true,
+                draggable = false,
                 onClick = { playback.playQueueIndex(index) },
                 modifier = Modifier.animateItem(),
             )
         }
 
-        state.track?.let { track ->
-            item(key = "now-playing") {
-                NowPlayingCard(track, state.isPlaying, server, Modifier.animateItem())
+        if (showsNowPlayingCard) {
+            state.track?.let { track ->
+                item(key = "now-playing") {
+                    NowPlayingCard(track, state.intendsToPlay, server, Modifier.animateItem())
+                }
             }
         }
 
+        item(key = "queue-controls") {
+            QueueControls(state, playback, Modifier.animateItem())
+        }
+
         if (upNext.isNotEmpty()) {
-            item(key = "up-next-header") {
-                Text(
-                    "Up next",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = PlayerForegroundMuted,
-                    modifier = Modifier
-                        .padding(start = 16.dp, top = 20.dp, bottom = 6.dp)
-                        .animateItem(),
-                )
+            item(key = "queue-header") {
+                SectionRow("Queue", onClear = playback::clearQueue, Modifier.animateItem())
             }
         }
 
@@ -397,12 +459,14 @@ private fun QueuePane(
             val isLifted = index == lifted
             QueueRow(
                 track = track,
+                server = server,
                 muted = false,
+                draggable = true,
                 onClick = { playback.playQueueIndex(current + 1 + index) },
                 modifier = Modifier
-                    // The lifted row is driven by the finger, so it must not
-                    // also be animated into place by the list — the two would
-                    // fight, and the row would lag behind the touch.
+                    // The lifted row is driven by the finger, so it must not also
+                    // be animated into place by the list — the two would fight,
+                    // and the row would lag behind the touch.
                     .then(if (isLifted) Modifier else Modifier.animateItem())
                     .then(if (isLifted) Modifier.zIndex(1f) else Modifier)
                     .onSizeChanged { if (it.height > 0) rowHeight = it.height.toFloat() }
@@ -477,12 +541,109 @@ private fun QueuePane(
 /** How much a lifted row grows, so it reads as picked up rather than slid. */
 private const val LIFT_SCALE = 1.03f
 
+/** A section's name, with the control that empties it. */
+@Composable
+private fun SectionRow(title: String, onClear: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = PlayerForeground,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            "Clear",
+            style = MaterialTheme.typography.labelLarge,
+            color = PlayerForegroundMuted,
+            modifier = Modifier
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable(onClick = onClear)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * Shuffle and repeat, as pills above the queue.
+ *
+ * The same two controls as the transport below, deliberately: they change what
+ * the queue *is*, so they belong where you are looking at it — iOS puts them in
+ * the same place for the same reason.
+ */
+@Composable
+private fun QueueControls(
+    state: PlaybackState,
+    playback: PlayerController,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        QueuePill(
+            icon = R.drawable.ic_shuffle,
+            label = if (state.shuffle) "Shuffle on" else "Shuffle off",
+            selected = state.shuffle,
+            onClick = playback::toggleShuffle,
+            modifier = Modifier.weight(1f),
+        )
+        QueuePill(
+            icon = if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
+            else R.drawable.ic_repeat,
+            label = when (state.repeat) {
+                RepeatMode.OFF -> "Repeat off"
+                RepeatMode.ALL -> "Repeat all"
+                RepeatMode.ONE -> "Repeat one"
+            },
+            selected = state.repeat != RepeatMode.OFF,
+            onClick = playback::cycleRepeat,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun QueuePill(
+    icon: Int,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val wash by animateFloatAsState(
+        targetValue = if (selected) 0.22f else 0.08f,
+        animationSpec = tween(PANEL_SWAP_MS),
+        label = "queue-pill",
+    )
+    Box(
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(percent = 50))
+            .background(PlayerForeground.copy(alpha = wash))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = label,
+            tint = if (selected) PlayerForeground else PlayerForegroundMuted,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
 /**
  * The current track, sitting in the queue where it belongs.
  *
- * Its cover breathes with the music — a small settle when the music stops and a
- * return when it starts. Small enough that nobody would name it, absent enough
- * to be missed.
+ * Shown only when the panel has taken the artwork's place — beside the artwork it
+ * would just be the same track twice. Its cover is where the travelling cover
+ * lands, so the two are the same size and in the same place.
  */
 @Composable
 private fun NowPlayingCard(
@@ -492,8 +653,8 @@ private fun NowPlayingCard(
     modifier: Modifier = Modifier,
 ) {
     val breathe by animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0.965f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 220f),
+        targetValue = if (isPlaying) 1f else 1f - PAUSED_CARD_SHRINK,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 224f),
         label = "now-playing-breathe",
     )
 
@@ -536,10 +697,15 @@ private fun NowPlayingCard(
     }
 }
 
+/** The card's cover shrinks when paused, like the big one does. */
+private const val PAUSED_CARD_SHRINK = 0.06f
+
 @Composable
 private fun QueueRow(
     track: Track,
+    server: MozzServer,
     muted: Boolean,
+    draggable: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -547,9 +713,17 @@ private fun QueueRow(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Artwork(
+            server = server,
+            serverId = track.serverId,
+            artworkKey = track.artworkKey,
+            size = 160,
+            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
+        )
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 track.title,
@@ -568,12 +742,23 @@ private fun QueueRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            track.duration,
-            style = MaterialTheme.typography.labelMedium,
-            color = PlayerForegroundMuted,
-        )
+        Spacer(Modifier.width(8.dp))
+        if (draggable) {
+            // The affordance the long-press needs. Without it, a queue you can
+            // reorder is indistinguishable from one you cannot.
+            Icon(
+                painterResource(R.drawable.ic_grip),
+                contentDescription = "Drag to reorder",
+                tint = PlayerForegroundMuted.copy(alpha = 0.6f),
+                modifier = Modifier.size(20.dp),
+            )
+        } else {
+            Text(
+                track.duration,
+                style = MaterialTheme.typography.labelMedium,
+                color = PlayerForegroundMuted,
+            )
+        }
     }
 }
 
@@ -682,27 +867,47 @@ private fun LyricLine(text: String, sung: Boolean, alwaysLit: Boolean) {
     )
 }
 
+/**
+ * Title over artist, with the track's star beside them.
+ *
+ * Left-aligned rather than centred, and the star sits on the same row's trailing
+ * edge — iOS's arrangement, so the two apps read the same. The title block is
+ * greedy and the star has a fixed width, so a long title reflows around it
+ * instead of pushing it off the row.
+ */
 @Composable
 private fun TrackTitles(state: PlaybackState) {
     val track = state.track ?: return
 
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        MarqueeLine(
-            text = track.title,
-            style = MaterialTheme.typography.headlineMedium.copy(textAlign = TextAlign.Center),
-            color = PlayerForeground,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            listOfNotNull(track.artistName, track.albumTitle).joinToString(" · "),
-            style = MaterialTheme.typography.bodyMedium,
-            color = PlayerForegroundMuted,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Column(modifier = Modifier.weight(1f)) {
+            MarqueeLine(
+                text = track.title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = PlayerForeground,
+                weight = FontWeight.Bold,
+            )
+            MarqueeLine(
+                text = track.artistName,
+                style = MaterialTheme.typography.titleMedium,
+                color = PlayerForegroundMuted,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        // Reports the state the server already has — on Plex a "like" is a 5-star
+        // rating, which is what fills Liked Songs. Deliberately not tappable yet:
+        // setting it needs a session command the core does not expose, and a star
+        // that lies about whether it took is worse than one that only reports.
+        Icon(
+            painterResource(
+                if (track.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star
+            ),
+            contentDescription = if (track.isFavorite) "Liked" else "Not liked",
+            tint = if (track.isFavorite) PlayerForeground else PlayerForegroundMuted,
+            modifier = Modifier.size(26.dp),
         )
     }
 }
@@ -794,8 +999,10 @@ private fun Scrubber(state: PlaybackState, playback: PlayerController) {
                 style = MaterialTheme.typography.labelMedium,
                 color = PlayerForegroundMuted,
             )
+            // Remaining, not total: what is left is the thing anyone actually
+            // reads off a scrubber mid-song.
             Text(
-                clock(state.durationMillis),
+                "-" + clock(state.durationMillis - (fraction * state.durationMillis).toLong()),
                 style = MaterialTheme.typography.labelMedium,
                 color = PlayerForegroundMuted,
             )

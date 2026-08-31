@@ -68,8 +68,19 @@ fun playerPresentation(wide: Boolean, panel: PlayerPanel?): PlayerPresentation =
  * morph serve both, instead of a phone morph and a tablet morph that drift apart.
  */
 object Dock {
-    /** Dock inset from the screen's side edges. */
+    /** Dock inset from the content area's side edges. */
     val margin: Dp = 12.dp
+
+    /**
+     * The widest the dock is allowed to get.
+     *
+     * Past this it stops growing and simply centres itself over the content, so
+     * on a tablet it reads as a floating capsule rather than a bar welded across
+     * the window. One rule covers both shapes: on a phone the content is narrower
+     * than the cap, so the dock is full width less a margin and nothing appears
+     * to be capped at all.
+     */
+    val maxWidth: Dp = 640.dp
 
     /** The docked pill. Tall enough for a 48dp cover plus breathing room. */
     val height: Dp = 64.dp
@@ -131,6 +142,16 @@ data class Morph(
     val dockArtLeadingPx: Float,
     /** Whether a bottom navigation bar exists at all (false when the rail is showing). */
     val hasBottomNav: Boolean,
+    /**
+     * Left edge of the content area — the rail's width when there is a rail.
+     *
+     * The dock centres over the content, not over the window, so it does not sit
+     * visibly off-centre with a rail down one side. The rail itself runs the full
+     * height and passes behind nothing: the dock simply floats above it.
+     */
+    val contentLeft: Float,
+    /** Widest the docked pill may be, in px. */
+    val dockMaxWidthPx: Float,
     /** How much of that bar is on screen: 1 shown, 0 slid away under the scroll. */
     val navShown: Float,
     /** Which way the expanded player is laid out — decides where the cover flies to. */
@@ -172,8 +193,16 @@ data class Morph(
 
     val dockBottom: Float get() = height - dockBottomInset
     val dockTop: Float get() = dockBottom - dockHeightPx
-    val dockLeft: Float get() = dockMarginPx
-    val dockWidth: Float get() = width - 2 * dockMarginPx
+
+    val dockWidth: Float
+        get() {
+            val available = (width - contentLeft) - 2 * dockMarginPx
+            return minOf(available, dockMaxWidthPx).coerceAtLeast(0f)
+        }
+
+    /** Centred in the content area, which is the window less any rail. */
+    val dockLeft: Float
+        get() = contentLeft + ((width - contentLeft) - dockWidth) / 2
 
     // Morphing surface --------------------------------------------------------
 

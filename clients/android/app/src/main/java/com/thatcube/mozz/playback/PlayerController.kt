@@ -30,6 +30,13 @@ data class PlaybackState(
     val queue: List<Track> = emptyList(),
     val indexInQueue: Int = 0,
     val isPlaying: Boolean = false,
+    /**
+     * What the player is *trying* to do, which is not the same as what it is
+     * doing: `isPlaying` goes false the moment a track starts buffering. Anything
+     * in the UI that reacts to "is this playing" wants this instead, or it
+     * flickers on every track change.
+     */
+    val intendsToPlay: Boolean = false,
     val positionMillis: Long = 0,
     val durationMillis: Long = 0,
     val shuffle: Boolean = false,
@@ -276,6 +283,27 @@ class PlayerController(
         publish(media)
     }
 
+    /** Drop everything already played, leaving the current track at the top. */
+    fun clearHistory() {
+        val media = controller ?: return
+        val current = media.currentMediaItemIndex
+        if (current <= 0) return
+        queue = queue.drop(current)
+        media.removeMediaItems(0, current)
+        publish(media)
+    }
+
+    /** Drop everything after the current track, leaving it playing. */
+    fun clearQueue() {
+        val media = controller ?: return
+        val current = media.currentMediaItemIndex
+        val end = media.mediaItemCount
+        if (current + 1 >= end) return
+        queue = queue.take(current + 1)
+        media.removeMediaItems(current + 1, end)
+        publish(media)
+    }
+
     fun release() {
         controller?.release()
         controller = null
@@ -287,6 +315,10 @@ class PlayerController(
             queue = queue,
             indexInQueue = player.currentMediaItemIndex,
             isPlaying = player.isPlaying,
+            // Distinct from `isPlaying`, which goes false the moment a track
+            // starts buffering. Anything that reacts to "is this playing" in the
+            // UI wants this instead, or it flickers on every track change.
+            intendsToPlay = player.playWhenReady,
             positionMillis = player.currentPosition.coerceAtLeast(0),
             durationMillis = player.duration.takeIf { it > 0 } ?: 0,
             shuffle = player.shuffleModeEnabled,

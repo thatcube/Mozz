@@ -51,18 +51,28 @@ navigation rail included. The player and the dock are one object in two
 presentations and never both; "full screen" is not negotiable per device, because
 the artwork backdrop is the point and it wants the room.
 
-## Also decided: the dock's geometry does not vary
+## Also decided: one dock rule, two shapes
 
 Navigation moves with width — a bar along the bottom on a phone, a rail down the
-left when there is room. The dock does not. It is the same floating pill at every
-size: full width less a margin, at the bottom, with the rail stopping *above* it
-rather than beside it.
+left when there is room. The dock is governed by a single rule at every size:
 
-This is what desktop Spotify, Apple Music on Mac and YouTube Music on tablet all
-converged on — the transport owns the bottom edge of the window, navigation owns
-the left — and it buys something specific: **one morph instead of two.** The
-full-screen player grows from the same rectangle on a phone and on a tablet, so
-there is a single set of geometry to get right and a single one to keep right.
+> centred over the **content area** (the window less any rail), full width less a
+> margin, capped at 640dp.
+
+On a phone the content is narrower than the cap, so the dock is simply full width
+less a margin and nothing appears to be capped. On a tablet it stops growing and
+floats as a centred capsule, with the rail running the full height behind it.
+
+One rule, so there is still **one morph instead of two**: the player grows from
+whatever rectangle the dock occupies, and that rectangle is computed the same way
+everywhere.
+
+*Superseded a first version of this section*, which had the dock spanning the
+full window with the rail stopping above it. That was reasoned from desktop
+players — Spotify, Apple Music on Mac — and it is a defensible arrangement, but
+it is not the one Mozz wants: a bar welded across a tablet window reads heavier
+than a floating capsule, and the capsule is what the design references call for.
+The cap is what lets both fall out of one expression.
 
 ## Consequences
 
