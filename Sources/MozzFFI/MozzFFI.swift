@@ -4,10 +4,14 @@ import CryptoKit
 import Crypto
 #endif
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import GRDB
 import MozzContinuity
 import MozzCore
 import MozzDatabase
+import MozzNetworking
 
 // MARK: - Mozz FFI spike facade
 //
@@ -588,7 +592,115 @@ public func mozz_ffi_probe_hpke() -> UnsafeMutablePointer<CChar>? {
     }
 }
 
-// MARK: - 6. Lifetime
+// MARK: - 6. HTTPS through Foundation
+
+private struct HTTPSProbe: Encodable {
+    var reachable: Bool
+    var url: String
+    var usedTLS: Bool
+    var statusCode: Int?
+    var byteCount: Int?
+    var elapsedMs: Double?
+    var foundationNetworking: Bool
+    var error: String?
+}
+
+/// A `Sendable` reduction of the transport's result, so it can cross the
+/// `runBlocking` boundary. `HTTPURLResponse` is a class and is not `Sendable`
+/// on any platform; only the two numbers this probe reports need to travel.
+private struct HTTPSOutcome: Sendable {
+    var statusCode: Int
+    var byteCount: Int
+}
+
+/// Determine whether the core can actually make an HTTPS request on this
+/// platform — the one question ADR-0014 left open.
+///
+/// The core does its own networking: `connect`, `sync` and `streamURL` all go
+/// through `MozzNetworking.URLSessionTransport`. On Apple and on Windows that is
+/// settled. On Android it is not, and the spike's other gates cannot see it,
+/// because they exercise SQLite, crypto and hashing — none of which open a
+/// socket. The finding recorded in ADR-0014 is only that the link *resolves*:
+/// the static `lib_CFURLSessionInterface.a` wants ~26 libcurl symbols the SDK
+/// does not ship, but the final `.so` binds the *dynamic*
+/// `libFoundationNetworking.so`, which depends on libz rather than curl. Whether
+/// a request then succeeds at runtime was never tested.
+///
+/// The answer decides the Android client's architecture:
+///   - **works** — Android needs no networking code at all; Kotlin never sees HTTP.
+///   - **fails** — the Kotlin layer supplies an `HTTPTransport` (OkHttp) through
+///     the FFI boundary, and the core stays pure compute.
+///
+/// Deliberately exercises `URLSessionTransport` — the production type the
+/// backends use — rather than `URLSession` directly, so a pass means the real
+/// path works and not merely that some socket somewhere opened.
+///
+/// The default URL returns 204 with an empty body, which keeps the check about
+/// DNS + TLS + a completed exchange rather than about parsing anyone's HTML.
+/// Pass a URL to point it at a real Plex/Jellyfin/Navidrome server instead.
+@_cdecl("mozz_ffi_probe_https")
+public func mozz_ffi_probe_https(
+    _ urlPointer: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>? {
+    let raw = swiftString(urlPointer).flatMap { $0.isEmpty ? nil : $0 }
+        ?? "https://www.google.com/generate_204"
+
+    #if canImport(FoundationNetworking)
+    let hasFoundationNetworking = true
+    #else
+    let hasFoundationNetworking = false
+    #endif
+
+    guard let url = URL(string: raw), let scheme = url.scheme?.lowercased() else {
+        return success(HTTPSProbe(
+            reachable: false,
+            url: raw,
+            usedTLS: false,
+            statusCode: nil,
+            byteCount: nil,
+            elapsedMs: nil,
+            foundationNetworking: hasFoundationNetworking,
+            error: "not a URL"
+        ))
+    }
+
+    let started = Date()
+    do {
+        let outcome = try runBlocking { () async throws -> HTTPSOutcome in
+            let transport = URLSessionTransport(role: .interactive)
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            let (data, response) = try await transport.send(request)
+            return HTTPSOutcome(statusCode: response.statusCode, byteCount: data.count)
+        }
+        return success(HTTPSProbe(
+            reachable: true,
+            url: raw,
+            usedTLS: scheme == "https",
+            statusCode: outcome.statusCode,
+            byteCount: outcome.byteCount,
+            elapsedMs: Date().timeIntervalSince(started) * 1000,
+            foundationNetworking: hasFoundationNetworking,
+            error: nil
+        ))
+    } catch {
+        // Reported as a *successful probe with a negative finding*, not as a
+        // failed call: "Android cannot do HTTPS" is a result the harness must be
+        // able to read and print, not an error that hides the reason.
+        return success(HTTPSProbe(
+            reachable: false,
+            url: raw,
+            usedTLS: scheme == "https",
+            statusCode: nil,
+            byteCount: nil,
+            elapsedMs: Date().timeIntervalSince(started) * 1000,
+            foundationNetworking: hasFoundationNetworking,
+            error: String(describing: error)
+        ))
+    }
+}
+
+// MARK: - 7. Lifetime
 
 /// Release a string returned by any function above. Every returned pointer must
 /// be passed here exactly once.

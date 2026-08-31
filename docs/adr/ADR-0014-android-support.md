@@ -195,6 +195,11 @@ otherwise. In rough order:
    layer make the calls (OkHttp) while the core stays pure compute. This is the
    one genuinely open design question the spike surfaced, and it wants its own
    short ADR.
+
+   **Resolved by [ADR-0015](ADR-0015-android-networking.md): neither.** Gate 7 of
+   the spike shows Foundation's networking works on Android as shipped —
+   `libFoundationNetworking.so` has libcurl and BoringSSL statically linked
+   inside it. The core keeps its own HTTP; the Kotlin layer needs none.
 4. **Gradle/AGP integration** to invoke the Swift cross-compile and stage
    `jniLibs` as part of the Android build.
 5. **A Compose UI** — the actual per-platform work, which is the point of having

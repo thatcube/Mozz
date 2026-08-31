@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // The C ABI exported by Sources/MozzFFI. Keep these in lockstep with the
 // @_cdecl signatures; a mismatch here is a bug in the harness, not the core.
@@ -30,6 +31,7 @@ typedef char *(*benchmark_fn)(const char *db_path, int32_t track_count);
 typedef char *(*search_fn)(const char *db_path, const char *query, int32_t limit);
 typedef char *(*hpke_fn)(void);
 typedef char *(*continuity_fn)(const char *fixtures_json);
+typedef char *(*https_fn)(const char *url);
 typedef void (*free_fn)(char *ptr);
 typedef int64_t (*session_open_fn)(const char *db_path);
 typedef char *(*session_call_fn)(int64_t handle, const char *request_json);
@@ -99,6 +101,9 @@ int main(int argc, char **argv) {
     long track_count = (argc > 2) ? strtol(argv[2], NULL, 10) : 100000;
     const char *db_path = (argc > 3) ? argv[3] : "/data/local/tmp/mozz-android-spike.sqlite";
     const char *fixtures_path = (argc > 4) ? argv[4] : NULL;
+    // Optional. NULL lets the probe pick its own default (a 204 endpoint); pass
+    // a real Plex/Jellyfin/Navidrome URL to test the server you actually run.
+    const char *https_url = (argc > 5) ? argv[5] : NULL;
 
     int failures = 0;
     char err_buf[512];
@@ -126,6 +131,10 @@ int main(int argc, char **argv) {
     search_fn search = (search_fn)dlsym(handle, "mozz_ffi_search");
     hpke_fn probe_hpke = (hpke_fn)dlsym(handle, "mozz_ffi_probe_hpke");
     continuity_fn verify_continuity = (continuity_fn)dlsym(handle, "mozz_ffi_verify_continuity_hashes");
+    // Resolved, but absence is not fatal here: a .so built before the HTTPS gate
+    // existed should still run every other gate and report this one as missing,
+    // rather than abort the whole battery on a dlsym miss.
+    https_fn probe_https = (https_fn)dlsym(handle, "mozz_ffi_probe_https");
     mozz_free = (free_fn)dlsym(handle, "mozz_ffi_free_string");
     session_open_fn session_open = (session_open_fn)dlsym(handle, "mozz_session_open");
     session_call_fn session_call = (session_call_fn)dlsym(handle, "mozz_session_call");
@@ -298,6 +307,52 @@ int main(int argc, char **argv) {
             }
             if (cases) mozz_free(cases);
         }
+    }
+
+    // --- 7. HTTPS: can the core do its own networking on this platform? -----
+    //
+    // The question ADR-0014 left open, and the only one the other six gates
+    // cannot see — they exercise SQLite, crypto and hashing, none of which open
+    // a socket. `connect`, `sync` and `streamURL` all make HTTPS calls from
+    // inside Swift, so if this fails the Android client has to supply the
+    // transport (OkHttp) through the FFI boundary instead.
+    printf("\n=== 7. HTTPS: can the core reach a server through Foundation? ===\n");
+    if (!probe_https) {
+        FAIL("mozz_ffi_probe_https is not exported — rebuild libMozzFFI.so from a tree that has the HTTPS gate");
+    } else {
+        // Retried, unlike every other gate. The first HTTPS attempt on a
+        // freshly booted emulator has been seen to fail on a slow NAT while
+        // every attempt after it succeeds — an environment artefact that would
+        // otherwise redden CI and, worse, read as "Android cannot do HTTPS".
+        // See ADR-0015. A genuine platform failure fails all three.
+        char *https_json = NULL;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            if (https_json) mozz_free(https_json);
+            https_json = probe_https(https_url);
+            if (https_json && json_bool_true(https_json, "reachable")) break;
+            if (attempt < 3) {
+                printf("  attempt %d did not complete; retrying\n", attempt);
+                sleep(2);
+            }
+        }
+        if (envelope_ok("probeHTTPS", https_json)) {
+            printf("  %s\n", https_json);
+            if (json_bool_true(https_json, "reachable")) {
+                printf("  => Foundation networking works here. The core keeps its own HTTP;\n");
+                printf("     the Android client needs no networking code at all.\n");
+            } else {
+                // Distinguished from a crash on purpose: this is a finding, and
+                // the operator has to rule out "this device has no network"
+                // before concluding the platform cannot do it.
+                printf("  => the request did not complete. If this device HAS working connectivity,\n");
+                printf("     the core cannot do its own HTTPS on Android, and the Kotlin layer must\n");
+                printf("     supply an HTTPTransport (OkHttp) across the FFI boundary.\n");
+                FAIL("HTTPS through Foundation did not complete — verify connectivity, then treat as an ADR-0015 decision");
+            }
+        } else {
+            FAIL("HTTPS probe entry point failed");
+        }
+        if (https_json) mozz_free(https_json);
     }
 
 report:

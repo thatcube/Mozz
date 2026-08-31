@@ -24,6 +24,7 @@ numbers.
 | 6 | Search p95 < 100 ms | The hard product requirement, independent of platform |
 | 7 | **HPKE (RFC 9180) works** | ADR-0013 puts pairing crypto in the shared core. If swift-crypto's HPKE doesn't function on Android, pairing needs a per-platform implementation |
 | 8 | Continuity hashes match `spec/` | A non-Apple peer must derive byte-identical queue hashes, or cross-device resume fails silently |
+| 9 | **HTTPS through Foundation** | The core makes its own HTTPS calls. If Foundation cannot on Android, the client has to supply the transport — see ADR-0015 |
 
 Gate 4 is the decisive one, and the reason this spike compiles SQLite from the
 amalgamation. See the ADR below.
