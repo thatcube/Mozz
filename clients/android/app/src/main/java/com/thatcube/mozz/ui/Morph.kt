@@ -203,8 +203,17 @@ internal fun MorphHost(
                 wide = wide,
                 capabilities = capabilities,
                 onCollapse = onCollapse,
-                onArtSlot = { artSlot = it },
-                onCardArtSlot = { cardSlot = it },
+                // Only the resting slot is the cover's destination.
+                //
+                // The body carries the morph's transform now, and these are
+                // measured inside it with `boundsInRoot`, which includes that
+                // transform. Taken mid-drag they are a moving target: the slot
+                // slides down with the body, the cover chases it, and it ends up
+                // travelling further and faster than the dock it is aiming for.
+                // `dockMounted` is false exactly when the player is settled open,
+                // which is when these mean what they say.
+                onArtSlot = { if (artSlot == null || !dockMounted) artSlot = it },
+                onCardArtSlot = { if (cardSlot == null || !dockMounted) cardSlot = it },
                 queueProgress = queueProgress,
                 panelSettled = panelSettled,
                 onDismissDrag = onDismissDrag,

@@ -2,8 +2,8 @@
 <!-- Generated from docs/brand/mozz_logo.svg by tools/svg-to-vector-drawable.py.
      Do not edit by hand; regenerate when the brand mark changes. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
+    android:width="32dp"
+    android:height="32dp"
     android:viewportWidth="32"
     android:viewportHeight="32">
     <group
@@ -11,9 +11,7 @@
         android:scaleY="0.62"
         android:rotation="0"
         android:pivotX="16"
-        android:pivotY="16"
-        android:translateX="6.08"
-        android:translateY="6.08">
+        android:pivotY="16">
         <path
             android:fillColor="#B00023"
             android:pathData="M12 3H20V4H22V5H24V6H25V7H26L27 8V10H28V12H29V20H28V22H27V24H26V25H25V26H24V27H22V28H20V29H12V28H10V27H8V26H7V25H6V24H5V22H4V20H3V12H4V10H5V8H6V7H7V6H8V5H10V4H12V3Z" />

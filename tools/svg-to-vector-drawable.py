@@ -172,17 +172,19 @@ def convert(source, size, scale, rotate=0.0):
         # Centre the artwork at the requested scale — what an adaptive launcher
         # icon needs, where the art must sit inside a safe zone rather than fill
         # the canvas.
-        offset_x = viewport_width * (1 - scale) / 2
-        offset_y = viewport_height * (1 - scale) / 2
+        # No translate. The pivot is already the viewport's centre, so both the
+        # scale and the rotation happen about it and the artwork stays put. The
+        # translate that used to be here was the correction you need when scaling
+        # about the ORIGIN — applying both moved the mark off-centre by
+        # `(1 - scale) / 2` of the viewport, which on the launcher icon was a
+        # visible fifth of the tile.
         body = (
             f'    <group\n'
             f'        android:scaleX="{scale:g}"\n'
             f'        android:scaleY="{scale:g}"\n'
             f'        android:rotation="{rotate:g}"\n'
             f'        android:pivotX="{viewport_width / 2:g}"\n'
-            f'        android:pivotY="{viewport_height / 2:g}"\n'
-            f'        android:translateX="{offset_x:g}"\n'
-            f'        android:translateY="{offset_y:g}">\n'
+            f'        android:pivotY="{viewport_height / 2:g}">\n'
             + "\n".join("    " + line for line in body.split("\n"))
             + "\n    </group>"
         )
