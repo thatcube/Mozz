@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +71,10 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -82,6 +87,7 @@ import com.thatcube.mozz.playback.PlaybackState
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.playback.RepeatMode
 import com.thatcube.mozz.ui.theme.quietBody
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
 /**
@@ -115,6 +121,12 @@ internal fun PlayerBody(
     wide: Boolean,
     onCollapse: () -> Unit,
     onArtSlot: (Rect) -> Unit,
+    /** Where the queue card's thumbnail landed — the cover's second destination. */
+    onCardArtSlot: (Rect) -> Unit,
+    /** Queue-open progress, read in layout and draw rather than in composition. */
+    queueProgress: () -> Float,
+    /** True once the cover has arrived in the card and the card's own can take over. */
+    panelSettled: () -> Boolean,
     /** Live drag of the dismiss gesture, in pixels down from where it started. */
     onDismissDrag: (Float) -> Unit,
     /** Finger lifted, with its velocity in px/s — positive is downward. */
@@ -164,18 +176,25 @@ internal fun PlayerBody(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        // A grabber rather than a close button, matching iOS. The
+                        // sheet is dragged away, and Android's back gesture does
+                        // the same job for anyone who does not reach for it.
+                        .semantics {
+                            contentDescription = "Drag down to close the player"
+                            onClick("Close the player") { onCollapse(); true }
+                        },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    IconButton(onClick = onCollapse) {
-                        Icon(
-                            painterResource(R.drawable.ic_chevron_down),
-                            contentDescription = "Close the player",
-                            tint = PlayerForegroundMuted,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .size(width = 36.dp, height = 5.dp)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(PlayerForegroundMuted.copy(alpha = 0.5f))
+                    )
                 }
             }
 
@@ -193,7 +212,7 @@ internal fun PlayerBody(
                     ) {
                         ArtSlot(onArtSlot, Modifier.weight(1f, fill = false))
                         Spacer(Modifier.height(28.dp))
-                        Chrome(state, playback)
+                        Chrome(state, playback, queueProgress, panelOpen = false)
                         Spacer(Modifier.height(16.dp))
                         RouteButton()
                     }
@@ -213,6 +232,9 @@ internal fun PlayerBody(
                             // column next to this one.
                             showsNowPlayingCard = false,
                             bottomInset = PANEL_BUTTONS_INSET,
+                            onCardArtSlot = onCardArtSlot,
+                            queueProgress = queueProgress,
+                            panelSettled = panelSettled,
                             onInteraction = { interactions++ },
                         )
                         Row(
@@ -252,6 +274,9 @@ internal fun PlayerBody(
                                 // travelling cover lands.
                                 showsNowPlayingCard = true,
                                 bottomInset = 0.dp,
+                                onCardArtSlot = onCardArtSlot,
+                                queueProgress = queueProgress,
+                                panelSettled = panelSettled,
                                 onInteraction = { interactions++ },
                             )
                         }
@@ -264,7 +289,7 @@ internal fun PlayerBody(
                     ) {
                         Column {
                             Spacer(Modifier.height(24.dp))
-                            Chrome(state, playback)
+                            Chrome(state, playback, queueProgress, panelOpen = panel != null)
                             Spacer(Modifier.height(8.dp))
                             // One column, so the three controls share one row:
                             // lyrics, route, queue — iOS's order.
@@ -412,15 +437,66 @@ private fun ArtSlot(onBounds: (Rect) -> Unit, modifier: Modifier = Modifier) {
 
 /** Titles, scrubber and transport — everything that is not the cover or a panel. */
 @Composable
-private fun Chrome(state: PlaybackState, playback: PlayerController) {
+private fun Chrome(
+    state: PlaybackState,
+    playback: PlayerController,
+    queueProgress: () -> Float,
+    panelOpen: Boolean,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        TrackTitles(state)
+        HeroTitles(state, queueProgress)
         Spacer(Modifier.height(20.dp))
         Scrubber(state, playback)
         Spacer(Modifier.height(12.dp))
-        Transport(state, playback)
+        // Shuffle and repeat move to the pills above the queue when it is open,
+        // so the transport drops to the three controls that are still its job.
+        Transport(state, playback, compact = panelOpen)
     }
 }
+
+/**
+ * The title row, and its half of the cross-fade into the queue card.
+ *
+ * As the queue opens this rises and fades, while the card's own title rises from
+ * below and fades in to catch it — a directional cross-fade rather than one
+ * label dissolving into another. It also collapses out of the layout as it goes,
+ * or the chrome below would hold a gap where an invisible row used to be.
+ *
+ * The numbers are iOS's: lift 360dp ending at q=0.9, fade across q 0.2 → 0.68.
+ */
+@Composable
+private fun HeroTitles(state: PlaybackState, queueProgress: () -> Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val gone = fadeProgress(queueProgress())
+                val height = (placeable.height * (1f - gone)).roundToInt()
+                layout(placeable.width, height) { placeable.place(0, 0) }
+            }
+            .graphicsLayer {
+                val q = queueProgress()
+                translationY = -HERO_ROW_LIFT.toPx() * (q / HERO_LIFT_END).coerceIn(0f, 1f)
+                alpha = 1f - fadeProgress(q)
+            },
+    ) {
+        TrackTitles(state)
+    }
+}
+
+/** How far through its fade the hero row is, at queue progress [q]. */
+private fun fadeProgress(q: Float): Float =
+    ((q - HERO_FADE_START) / (HERO_FADE_END - HERO_FADE_START)).coerceIn(0f, 1f)
+
+private val HERO_ROW_LIFT = 360.dp
+private const val HERO_LIFT_END = 0.9f
+private const val HERO_FADE_START = 0.2f
+private const val HERO_FADE_END = 0.68f
+
+/** Where the card's own row comes in, once the hero row has mostly cleared. */
+private const val CARD_FADE_START = 0.7f
+private val CARD_ROW_RISE = 80.dp
 
 @Composable
 private fun Panel(
@@ -431,10 +507,22 @@ private fun Panel(
     library: MozzLibrary,
     showsNowPlayingCard: Boolean,
     bottomInset: Dp,
+    onCardArtSlot: (Rect) -> Unit,
+    queueProgress: () -> Float,
+    panelSettled: () -> Boolean,
     onInteraction: () -> Unit,
 ) {
     when (panel) {
-        PlayerPanel.QUEUE -> QueuePane(state, server, playback, showsNowPlayingCard, bottomInset)
+        PlayerPanel.QUEUE -> QueuePane(
+            state = state,
+            server = server,
+            playback = playback,
+            showsNowPlayingCard = showsNowPlayingCard,
+            bottomInset = bottomInset,
+            onCardArtSlot = onCardArtSlot,
+            queueProgress = queueProgress,
+            panelSettled = panelSettled,
+        )
         PlayerPanel.LYRICS -> LyricsPane(state, library, bottomInset, onInteraction)
     }
 }
@@ -459,6 +547,9 @@ private fun QueuePane(
     playback: PlayerController,
     showsNowPlayingCard: Boolean,
     bottomInset: Dp,
+    onCardArtSlot: (Rect) -> Unit,
+    queueProgress: () -> Float,
+    panelSettled: () -> Boolean,
 ) {
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
@@ -481,19 +572,42 @@ private fun QueuePane(
     var rowHeight by remember { mutableFloatStateOf(0f) }
     val upNext = preview ?: committed
 
-    // Open on what is playing, with the history above it rather than scrolled
-    // away — where you came from is part of the queue, it just is not what you
-    // are looking for.
+    // Open on what is coming, with the history scrolled just above it — where
+    // you came from is part of the queue, it just is not what you opened it for.
+    //
+    // The target is the "Queue" header, which sits after the History header and
+    // its rows. Landing on the last history row instead leaves a couple of played
+    // tracks stranded at the top with no label above them to say what they are.
+    val queueHeaderIndex = if (history.isEmpty()) 0 else history.size + 1
     LaunchedEffect(Unit) {
-        if (history.isNotEmpty()) listState.scrollToItem(history.size)
+        if (queueHeaderIndex > 0) listState.scrollToItem(queueHeaderIndex)
     }
     LaunchedEffect(current) {
-        if (history.isNotEmpty()) listState.animateScrollToItem(history.size)
+        if (queueHeaderIndex > 0) listState.animateScrollToItem(queueHeaderIndex)
     }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Pinned above the list rather than scrolled with it. The card is where
+        // the cover lands and where the titles arrive, so it has to hold still —
+        // iOS gets the same effect from a snap detent, which is a great deal more
+        // machinery for the same resting position.
+        if (showsNowPlayingCard) {
+            state.track?.let { track ->
+                NowPlayingCard(
+                    track = track,
+                    isPlaying = state.intendsToPlay,
+                    server = server,
+                    onArtSlot = onCardArtSlot,
+                    queueProgress = queueProgress,
+                    panelSettled = panelSettled,
+                )
+            }
+            QueueControls(state, playback)
+        }
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxWidth().weight(1f),
         contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + bottomInset),
     ) {
         if (history.isNotEmpty()) {
@@ -510,20 +624,6 @@ private fun QueuePane(
                 onClick = { playback.playQueueIndex(index) },
                 modifier = Modifier.animateItem(),
             )
-        }
-
-        if (showsNowPlayingCard) {
-            state.track?.let { track ->
-                item(key = "now-playing") {
-                    NowPlayingCard(track, state.intendsToPlay, server, Modifier.animateItem())
-                }
-            }
-        }
-
-        if (showsNowPlayingCard) {
-            item(key = "queue-controls") {
-                QueueControls(state, playback, Modifier.animateItem())
-            }
         }
 
         if (upNext.isNotEmpty()) {
@@ -613,6 +713,7 @@ private fun QueuePane(
             )
         }
     }
+    }
 }
 
 /** How much a lifted row grows, so it reads as picked up rather than slid. */
@@ -665,7 +766,8 @@ private fun QueueControls(
     ) {
         QueuePill(
             icon = R.drawable.ic_shuffle,
-            label = if (state.shuffle) "Shuffle on" else "Shuffle off",
+            label = "Shuffle",
+            description = if (state.shuffle) "Shuffle on" else "Shuffle off",
             selected = state.shuffle,
             onClick = playback::toggleShuffle,
             modifier = Modifier.weight(1f),
@@ -673,7 +775,8 @@ private fun QueueControls(
         QueuePill(
             icon = if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
             else R.drawable.ic_repeat,
-            label = when (state.repeat) {
+            label = "Repeat",
+            description = when (state.repeat) {
                 RepeatMode.OFF -> "Repeat off"
                 RepeatMode.ALL -> "Repeat all"
                 RepeatMode.ONE -> "Repeat one"
@@ -689,6 +792,7 @@ private fun QueueControls(
 private fun QueuePill(
     icon: Int,
     label: String,
+    description: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -698,36 +802,55 @@ private fun QueuePill(
         animationSpec = tween(PANEL_SWAP_MS),
         label = "queue-pill",
     )
-    Box(
+    Row(
         modifier = modifier
-            .height(38.dp)
+            .height(44.dp)
             .clip(RoundedCornerShape(percent = 50))
             .background(PlayerForeground.copy(alpha = wash))
+            .border(
+                width = 1.dp,
+                color = PlayerForeground.copy(alpha = if (selected) 0.28f else 0.12f),
+                shape = RoundedCornerShape(percent = 50),
+            )
             .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             painterResource(icon),
-            contentDescription = label,
+            contentDescription = description,
             tint = if (selected) PlayerForeground else PlayerForegroundMuted,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) PlayerForeground else PlayerForegroundMuted,
         )
     }
 }
 
 /**
- * The current track, sitting in the queue where it belongs.
+ * The current track, at the top of the queue.
  *
  * Shown only when the panel has taken the artwork's place — beside the artwork it
- * would just be the same track twice. Its cover is where the travelling cover
- * lands, so the two are the same size and in the same place.
+ * would be the same track twice. Its thumbnail slot is where the travelling cover
+ * lands, so the two are the same size in the same place and the hand-off is
+ * invisible.
+ *
+ * Its title and star are the arriving half of a directional cross-fade: they rise
+ * from below and fade in as the hero row above lifts away, so the titles appear
+ * to be caught rather than swapped.
  */
 @Composable
 private fun NowPlayingCard(
     track: Track,
     isPlaying: Boolean,
     server: MozzServer,
-    modifier: Modifier = Modifier,
+    onArtSlot: (Rect) -> Unit,
+    queueProgress: () -> Float,
+    panelSettled: () -> Boolean,
 ) {
     val breathe by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 1f - PAUSED_CARD_SHRINK,
@@ -736,46 +859,108 @@ private fun NowPlayingCard(
     )
 
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(PlayerForeground.copy(alpha = 0.12f))
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Artwork(
-            server = server,
-            serverId = track.serverId,
-            artworkKey = track.artworkKey,
-            size = 256,
+        Box(modifier = Modifier.size(CARD_ART_SIDE).reportBounds(onArtSlot)) {
+            // The card's own cover, which appears only once the travelling one
+            // has arrived on this exact slot — so it can then scroll and clip
+            // with the panel instead of floating above it.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = if (panelSettled()) 1f else 0f
+                        scaleX = breathe
+                        scaleY = breathe
+                    }
+                    .clip(RoundedCornerShape(11.dp)),
+            ) {
+                Artwork(
+                    server = server,
+                    serverId = track.serverId,
+                    artworkKey = track.artworkKey,
+                    size = 256,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(
             modifier = Modifier
-                .size(64.dp)
-                .graphicsLayer { scaleX = breathe; scaleY = breathe }
-                .clip(RoundedCornerShape(9.dp)),
+                .weight(1f)
+                .graphicsLayer {
+                    val arrived = cardArrival(queueProgress())
+                    translationY = CARD_ROW_RISE.toPx() * (1f - arrived)
+                    alpha = arrived
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                MarqueeLine(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = PlayerForeground,
+                    weight = FontWeight.SemiBold,
+                )
+                Text(
+                    track.artistName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = PlayerForegroundMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            StarAndOverflow(track)
+        }
+    }
+}
+
+/** How far into its arrival the card's row is, at queue progress [q]. */
+private fun cardArrival(q: Float): Float =
+    ((q - CARD_FADE_START) / (1f - CARD_FADE_START)).coerceIn(0f, 1f)
+
+/** iOS's queue thumbnail, which the travelling cover docks into. */
+private val CARD_ART_SIDE = 72.dp
+
+/** The card's cover shrinks when paused, like the big one does. */
+private const val PAUSED_CARD_SHRINK = 0.06f
+
+/**
+ * The track's star and its overflow menu, shown in both places a track heads a
+ * screen: the hero title row, and the queue card it collapses into.
+ *
+ * The star reports the state the server already has — on Plex a "like" is a
+ * 5-star rating, which is what fills Liked Songs. Neither control acts yet: the
+ * star needs a session command the core does not expose, and the menu needs
+ * artist and album destinations that Android has no routes for. A star that lied
+ * about whether it took would be worse than one that only reports.
+ */
+@Composable
+private fun StarAndOverflow(track: Track) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            painterResource(
+                if (track.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star
+            ),
+            contentDescription = if (track.isFavorite) "Liked" else "Not liked",
+            tint = if (track.isFavorite) PlayerForeground else PlayerForegroundMuted,
+            modifier = Modifier.size(24.dp),
         )
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            MarqueeLine(
-                text = track.title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = PlayerForeground,
-                weight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                track.artistName,
-                style = MaterialTheme.typography.bodySmall,
-                color = PlayerForegroundMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        IconButton(onClick = {}, enabled = false) {
+            Icon(
+                painterResource(R.drawable.ic_more),
+                contentDescription = "More (not yet available)",
+                tint = PlayerForegroundMuted.copy(alpha = 0.5f),
+                modifier = Modifier.size(22.dp),
             )
         }
     }
 }
 
-/** The card's cover shrinks when paused, like the big one does. */
-private const val PAUSED_CARD_SHRINK = 0.06f
 
 @Composable
 private fun QueueRow(
@@ -980,18 +1165,7 @@ private fun TrackTitles(state: PlaybackState) {
             )
         }
         Spacer(Modifier.width(8.dp))
-        // Reports the state the server already has — on Plex a "like" is a 5-star
-        // rating, which is what fills Liked Songs. Deliberately not tappable yet:
-        // setting it needs a session command the core does not expose, and a star
-        // that lies about whether it took is worse than one that only reports.
-        Icon(
-            painterResource(
-                if (track.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star
-            ),
-            contentDescription = if (track.isFavorite) "Liked" else "Not liked",
-            tint = if (track.isFavorite) PlayerForeground else PlayerForegroundMuted,
-            modifier = Modifier.size(26.dp),
-        )
+        StarAndOverflow(track)
     }
 }
 
@@ -1102,7 +1276,12 @@ private val SCRUB_THUMB = 6.dp
 private val SCRUB_THUMB_HELD = 9.dp
 
 @Composable
-private fun Transport(state: PlaybackState, playback: PlayerController) {
+private fun Transport(
+    state: PlaybackState,
+    playback: PlayerController,
+    /** Queue open: shuffle and repeat are pills up there, so drop them here. */
+    compact: Boolean,
+) {
     val active = PlayerForeground
     val idle = PlayerForegroundMuted
 
@@ -1111,14 +1290,17 @@ private fun Transport(state: PlaybackState, playback: PlayerController) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = playback::toggleShuffle) {
-            Icon(
-                painterResource(R.drawable.ic_shuffle),
-                contentDescription = if (state.shuffle) "Shuffle on" else "Shuffle off",
-                // On/off is carried by contrast, not by the accent: the accent
-                // means "the action", and a shuffle toggle is not that.
-                tint = if (state.shuffle) active else idle,
-            )
+        if (!compact) {
+            IconButton(onClick = playback::toggleShuffle) {
+                Icon(
+                    painterResource(R.drawable.ic_shuffle),
+                    contentDescription = if (state.shuffle) "Shuffle on" else "Shuffle off",
+                    // On/off is carried by contrast, not by the accent: the
+                    // accent means "the action", and a shuffle toggle is not
+                    // that.
+                    tint = if (state.shuffle) active else idle,
+                )
+            }
         }
 
         IconButton(onClick = { playback.previous() }) {
@@ -1141,19 +1323,21 @@ private fun Transport(state: PlaybackState, playback: PlayerController) {
             )
         }
 
-        IconButton(onClick = playback::cycleRepeat) {
-            Icon(
-                painterResource(
-                    if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
-                    else R.drawable.ic_repeat
-                ),
-                contentDescription = when (state.repeat) {
-                    RepeatMode.OFF -> "Repeat off"
-                    RepeatMode.ALL -> "Repeat all"
-                    RepeatMode.ONE -> "Repeat one"
-                },
-                tint = if (state.repeat == RepeatMode.OFF) idle else active,
-            )
+        if (!compact) {
+            IconButton(onClick = playback::cycleRepeat) {
+                Icon(
+                    painterResource(
+                        if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
+                        else R.drawable.ic_repeat
+                    ),
+                    contentDescription = when (state.repeat) {
+                        RepeatMode.OFF -> "Repeat off"
+                        RepeatMode.ALL -> "Repeat all"
+                        RepeatMode.ONE -> "Repeat one"
+                    },
+                    tint = if (state.repeat == RepeatMode.OFF) idle else active,
+                )
+            }
         }
     }
 }

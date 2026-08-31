@@ -68,7 +68,8 @@ internal fun MorphHost(
     library: MozzLibrary,
     playback: PlayerController,
     progress: () -> Float,
-    morphAt: (Float, Rect?) -> Morph,
+    morphAt: (Float, Rect?, Rect?) -> Morph,
+    queueProgress: () -> Float,
     presentation: PlayerPresentation,
     panel: PlayerPanel?,
     onPanel: (PlayerPanel?) -> Unit,
@@ -86,9 +87,19 @@ internal fun MorphHost(
     // Where the expanded player put its cover. Null until it has been laid out,
     // which is what the fallback in `Morph` is for.
     var artSlot by remember { mutableStateOf<Rect?>(null) }
+    // The queue card's thumbnail slot, which the cover docks into once the panel
+    // has taken the artwork's place.
+    var cardSlot by remember { mutableStateOf<Rect?>(null) }
 
     // Read once per frame in the layout/draw lambdas below, never in composition.
-    val frame = { morphAt(progress(), artSlot) }
+    val frame = { morphAt(progress(), artSlot, cardSlot) }
+
+    /**
+     * True once the cover has arrived in the card's slot, at which point the
+     * card's own artwork takes over so it can scroll and clip with the list. The
+     * swap happens at a coincident position, so it reads as nothing at all.
+     */
+    val panelSettled = { queueProgress() > 0.995f }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // The surface. One rounded rectangle that is a pill at rest and the whole
@@ -150,6 +161,9 @@ internal fun MorphHost(
                 wide = wide,
                 onCollapse = onCollapse,
                 onArtSlot = { artSlot = it },
+                onCardArtSlot = { cardSlot = it },
+                queueProgress = queueProgress,
+                panelSettled = panelSettled,
                 onDismissDrag = onDismissDrag,
                 onDismissEnd = onDismissEnd,
             )
@@ -205,7 +219,7 @@ internal fun MorphHost(
                     scaleY = scale
                     shape = RoundedCornerShape(m.artRadius)
                     clip = true
-                    alpha = coverAlpha
+                    alpha = if (panelSettled()) 0f else 1f
                     shadowElevation = COVER_SHADOW.toPx() * shadow * m.p
                     ambientShadowColor = Color.Black
                     spotShadowColor = Color.Black

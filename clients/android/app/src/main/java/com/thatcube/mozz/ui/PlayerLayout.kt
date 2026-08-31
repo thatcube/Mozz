@@ -157,6 +157,20 @@ data class Morph(
     /** Which way the expanded player is laid out — decides where the cover flies to. */
     val presentation: PlayerPresentation,
     /**
+     * Queue-open progress: 0 = cover big in the middle of the player, 1 = docked
+     * into the now-playing card's thumbnail slot at the top of the queue.
+     *
+     * A second stage on top of [pRaw], and only meaningful once the player is
+     * open. Composing the two as `dock → big → card` rather than as one blend is
+     * what lets the queue open and close without disturbing the dock morph, and
+     * it is how iOS does it.
+     */
+    val queue: Float = 0f,
+    /** The card's thumbnail slot, measured, once the card is laid out. */
+    val cardArtCenterX: Float? = null,
+    val cardArtCenterY: Float? = null,
+    val cardArtSide: Float? = null,
+    /**
      * Where the expanded player actually put its artwork slot, once it has been
      * laid out and has said so.
      *
@@ -171,6 +185,7 @@ data class Morph(
     val measuredArtSide: Float? = null,
 ) {
     val p: Float get() = pRaw.coerceIn(0f, 1f)
+    val q: Float get() = queue.coerceIn(0f, 1f)
 
     // Docked pill -------------------------------------------------------------
 
@@ -263,10 +278,19 @@ data class Morph(
             else -> safeTop + expandedArtTopGapPx + expandedArtSide / 2
         }
 
-    val artSide: Float get() = lerp(dockArtSidePx, expandedArtSide, p)
-    val artCenterX: Float get() = lerp(dockArtCenterX, expandedArtCenterX, p)
-    val artCenterY: Float get() = lerp(dockArtCenterY, expandedArtCenterY, p)
-    val artRadius: Float get() = lerp(dockArtRadiusPx, expandedArtRadiusPx, p)
+    private val restingArtSide: Float
+        get() = lerp(expandedArtSide, cardArtSide ?: expandedArtSide, q)
+    private val restingArtCenterX: Float
+        get() = lerp(expandedArtCenterX, cardArtCenterX ?: expandedArtCenterX, q)
+    private val restingArtCenterY: Float
+        get() = lerp(expandedArtCenterY, cardArtCenterY ?: expandedArtCenterY, q)
+    private val restingArtRadius: Float
+        get() = lerp(expandedArtRadiusPx, cardArtRadiusPx, q)
+
+    val artSide: Float get() = lerp(dockArtSidePx, restingArtSide, p)
+    val artCenterX: Float get() = lerp(dockArtCenterX, restingArtCenterX, p)
+    val artCenterY: Float get() = lerp(dockArtCenterY, restingArtCenterY, p)
+    val artRadius: Float get() = lerp(dockArtRadiusPx, restingArtRadius, p)
 
     // Opacities ---------------------------------------------------------------
 
@@ -284,6 +308,7 @@ data class Morph(
 
     private val expandedArtInsetPx: Float get() = dockMarginPx * 2.6f
     private val expandedArtRadiusPx: Float get() = dockArtRadiusPx * 2.2f
+    private val cardArtRadiusPx: Float get() = dockArtRadiusPx * 1.4f
     private val expandedArtTopGapPx: Float get() = dockHeightPx * 0.95f
 }
 

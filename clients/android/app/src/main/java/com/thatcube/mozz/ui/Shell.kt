@@ -3,6 +3,7 @@ package com.thatcube.mozz.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -145,7 +146,16 @@ fun MozzShell(
     val hasTrack = state.track != null
     val presentation = playerPresentation(wide, panel)
 
-    fun morphAt(progress: Float, artSlot: Rect?) = Morph(
+    // Not destructured with `by`: the morph lambdas read this inside the layout
+    // and draw phases, so a frame of the queue opening costs a re-layout rather
+    // than a recomposition of the list underneath it.
+    val queueDock = animateFloatAsState(
+        targetValue = if (presentation == PlayerPresentation.PANEL_INSTEAD) 1f else 0f,
+        animationSpec = QueueDockSpring,
+        label = "queue-dock",
+    )
+
+    fun morphAt(progress: Float, artSlot: Rect?, cardSlot: Rect?) = Morph(
         pRaw = progress,
         width = size.width.toFloat(),
         height = size.height.toFloat(),
@@ -167,6 +177,10 @@ fun MozzShell(
         measuredArtCenterX = artSlot?.center?.x,
         measuredArtCenterY = artSlot?.center?.y,
         measuredArtSide = artSlot?.let { minOf(it.width, it.height) },
+        queue = queueDock.value,
+        cardArtCenterX = cardSlot?.center?.x,
+        cardArtCenterY = cardSlot?.center?.y,
+        cardArtSide = cardSlot?.let { minOf(it.width, it.height) },
     )
 
     Box(
@@ -243,6 +257,7 @@ fun MozzShell(
                 playback = playback,
                 progress = { p.value },
                 morphAt = ::morphAt,
+                queueProgress = { queueDock.value },
                 presentation = presentation,
                 panel = panel,
                 onPanel = { panel = it },
@@ -327,6 +342,16 @@ private val DISMISS_TRAVEL = 340.dp
 
 /** How much of that travel commits the dismiss on release. */
 private const val DISMISS_FRACTION = 0.33f
+
+/**
+ * The cover's trip into the queue card, and the title cross-fade riding on it.
+ *
+ * Gentler than [MorphSpring]: this is a rearrangement inside a screen that is
+ * already open, not the screen arriving, and it carries a directional cross-fade
+ * that needs room to read.
+ */
+private val QueueDockSpring: AnimationSpec<Float> =
+    spring(dampingRatio = 0.9f, stiffness = 260f)
 
 /**
  * The page for the selected tab.
