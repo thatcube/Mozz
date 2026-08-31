@@ -154,12 +154,16 @@ private fun NavItem(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = ripple(bounded = false, radius = 40.dp),
             )
-            .padding(vertical = 10.dp),
+            .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .size(width = 64.dp, height = 32.dp)
+                // Taller than Material's 64×32, which is sized for a 24dp icon.
+                // At 30dp — iOS's size, and the size the rest of this app's
+                // controls are matched to — a 32dp pill clips the glyph's corners
+                // against its own rounded edge.
+                .size(width = 64.dp, height = 40.dp)
                 .clip(RoundedCornerShape(percent = 50))
                 // A faint wash, not a filled pill: the one saturated colour in
                 // this app means "the action", and a tab is not that.
@@ -170,7 +174,11 @@ private fun NavItem(
                 painterResource(if (selected) tab.selectedIcon else tab.icon),
                 contentDescription = tab.title,
                 tint = if (selected) scheme.onBackground else scheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp).scale(scale),
+                // iOS's tab icon size. Material's own is 24dp, but every other
+                // control in this app is already matched to iOS's metrics, and a
+                // navigation bar that alone disagreed read as a smaller icon
+                // rather than a deliberate one.
+                modifier = Modifier.size(30.dp).scale(scale),
             )
         }
         Spacer(Modifier.height(4.dp))
