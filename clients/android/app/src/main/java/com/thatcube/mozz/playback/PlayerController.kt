@@ -261,6 +261,21 @@ class PlayerController(
         }
     }
 
+    /**
+     * Move a track within the queue.
+     *
+     * Both lists move together. Media3 owns the playback order and `queue` is the
+     * Track-level mirror the UI reads from; letting them drift by one means the
+     * row you dragged is not the song that plays.
+     */
+    fun moveQueueItem(from: Int, to: Int) {
+        val media = controller ?: return
+        if (from !in queue.indices || to !in queue.indices || from == to) return
+        queue = queue.toMutableList().apply { add(to, removeAt(from)) }
+        media.moveMediaItem(from, to)
+        publish(media)
+    }
+
     fun release() {
         controller?.release()
         controller = null

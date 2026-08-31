@@ -16,7 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thatcube.mozz.ui.FailedScreen
-import com.thatcube.mozz.ui.HomeScreen
+import com.thatcube.mozz.ui.MozzShell
 import com.thatcube.mozz.ui.LibraryPickerScreen
 import com.thatcube.mozz.ui.LinkingScreen
 import com.thatcube.mozz.ui.SignInScreen
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
 
             is AppState.Syncing -> SyncingScreen(state.serverName, state.status)
 
-            is AppState.Ready -> HomeScreen(
+            is AppState.Ready -> MozzShell(
                 account = state.account,
                 library = (application as MozzApplication).library,
                 server = (application as MozzApplication).server,

@@ -72,12 +72,17 @@ fun HomeScreen(
     library: MozzLibrary,
     server: MozzServer,
     playback: PlayerController,
+    directive: androidx.compose.material3.adaptive.layout.PaneScaffoldDirective,
+    bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    val playbackState by playback.state.collectAsStateWithLifecycle()
-    var playerOpen by remember { mutableStateOf(false) }
-    val navigator = rememberListDetailPaneScaffoldNavigator<String>()
+    // The shell's directive, not one of our own: the two must agree about how
+    // many columns this window has, or the app shows a phone's navigation over a
+    // tablet's layout.
+    val navigator = rememberListDetailPaneScaffoldNavigator<String>(
+        scaffoldDirective = directive,
+    )
     val scope = rememberCoroutineScope()
 
     var liked by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -93,40 +98,27 @@ fun HomeScreen(
         loading = false
     }
 
-    // The player sits above everything, the now-playing bar included: it is a
-    // full screen, not a pane, and a transport bar peeking out from under it
-    // would be two sets of controls for one thing.
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text(account.serverName, style = MaterialTheme.typography.titleMedium) },
-                    actions = {
-                        TextButton(
-                            onClick = onResync,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        ) { Text("Refresh") }
-                        TextButton(
-                            onClick = onSignOut,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        ) { Text("Sign out") }
-                    },
-                )
-            },
-            bottomBar = {
-                NowPlayingBar(
-                    state = playbackState,
-                    onPlayPause = playback::togglePlayPause,
-                    onNext = { playback.next() },
-                    onOpen = { playerOpen = true },
-                    server = server,
-                )
-            },
-        ) { insets ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(account.serverName, style = MaterialTheme.typography.titleMedium) },
+                actions = {
+                    TextButton(
+                        onClick = onResync,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    ) { Text("Refresh") }
+                    TextButton(
+                        onClick = onSignOut,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    ) { Text("Sign out") }
+                },
+            )
+        },
+    ) { insets ->
             Box(modifier = Modifier.fillMaxSize().padding(insets)) {
                 if (loading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -142,6 +134,7 @@ fun HomeScreen(
                                     albums = albums,
                                     albumTotal = counts?.albums ?: albums.size,
                                     server = server,
+                                    bottomReserve = bottomReserve,
                                     onPlayLiked = { index -> playback.play(liked, index) },
                                     onOpenAlbum = { album ->
                                         scope.launch {
@@ -170,16 +163,6 @@ fun HomeScreen(
                     )
                 }
             }
-        }
-
-        PlayerSheet(
-            visible = playerOpen,
-            state = playbackState,
-            server = server,
-            library = library,
-            playback = playback,
-            onCollapse = { playerOpen = false },
-        )
     }
 }
 
@@ -189,10 +172,11 @@ private fun LibraryList(
     albums: List<Album>,
     albumTotal: Int,
     server: MozzServer,
+    bottomReserve: androidx.compose.ui.unit.Dp,
     onPlayLiked: (Int) -> Unit,
     onOpenAlbum: (Album) -> Unit,
 ) {
-    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(contentPadding = PaddingValues(bottom = bottomReserve)) {
         item {
             SectionHeader("Liked Songs", "%,d".format(liked.size))
         }
@@ -202,7 +186,7 @@ private fun LibraryList(
         // Tapping a song plays from there through the rest of the list, which is
         // what every music player does and what "play my liked songs" means.
         itemsIndexed(liked.take(50), key = { _, track -> "liked-${track.id}" }) { index, track ->
-            TrackRow(track, onClick = { onPlayLiked(index) })
+            TrackRow(track, server = server, onClick = { onPlayLiked(index) })
         }
 
         item { SectionHeader("Albums", "%,d".format(albumTotal)) }
@@ -239,14 +223,26 @@ private fun Hint(text: String) {
 }
 
 @Composable
-private fun TrackRow(track: Track, onClick: (() -> Unit)? = null) {
+private fun TrackRow(track: Track, server: MozzServer? = null, onClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Given a server to ask, a song row carries its cover. Inside an album
+        // it does not: forty copies of the same sleeve is noise, not information.
+        if (server != null) {
+            Artwork(
+                server = server,
+                serverId = track.serverId,
+                artworkKey = track.artworkKey,
+                size = 160,
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
+            )
+            Spacer(Modifier.width(14.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 track.title,
@@ -351,76 +347,6 @@ private fun AlbumDetail(
         }
         itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
             TrackRow(track, onClick = { playback.play(tracks, index) })
-        }
-    }
-}
-
-
-/**
- * The bar that says what is playing.
- *
- * Absent entirely when nothing is, rather than present and empty: a permanent
- * dead strip along the bottom of a library is the sort of chrome that makes an
- * app feel heavier than it is.
- */
-@Composable
-private fun NowPlayingBar(
-    state: PlaybackState,
-    server: MozzServer,
-    onPlayPause: () -> Unit,
-    onNext: () -> Unit,
-    onOpen: () -> Unit,
-) {
-    val track = state.track ?: return
-
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Artwork(
-                server = server,
-                serverId = track.serverId,
-                artworkKey = track.artworkKey,
-                size = 128,
-                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    track.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    track.artistName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            TextButton(
-                onClick = onPlayPause,
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-            ) {
-                Text(if (state.isPlaying) "Pause" else "Play")
-            }
-            TextButton(
-                onClick = onNext,
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-            ) { Text("Next") }
         }
     }
 }
