@@ -43,14 +43,36 @@ NAMED_COLOURS = {
 
 
 def colour(value):
+    """An SVG colour as an `#AARRGGBB` literal.
+
+    Always eight digits. `aapt` is not reliable about the three-digit shorthand
+    that SVG allows, and a colour it cannot parse fails the build rather than
+    falling back — so shorthand is expanded here instead of being passed through.
+    """
     if value is None:
         return None
     value = value.strip()
-    if value.startswith("#"):
-        return value
     if value in NAMED_COLOURS:
-        return NAMED_COLOURS[value]
-    raise SystemExit(f"unrecognised colour {value!r} — add it to NAMED_COLOURS")
+        value = NAMED_COLOURS[value]
+        # "none" resolves to nothing at all — the path simply has no fill (or no
+        # stroke), which is different from having a colour we failed to read.
+        if value is None:
+            return None
+    if not value.startswith("#"):
+        raise SystemExit(f"unrecognised colour {value!r} — add it to NAMED_COLOURS")
+
+    digits = value[1:]
+    if len(digits) == 3:                      # #rgb
+        digits = "".join(d * 2 for d in digits)
+    elif len(digits) == 4:                    # #argb
+        digits = "".join(d * 2 for d in digits)
+        digits = digits[2:] + digits[:2]      # to RRGGBBAA order first
+        digits = digits[6:] + digits[:6]      # then back to AARRGGBB
+    if len(digits) == 6:
+        digits = "FF" + digits
+    if len(digits) != 8:
+        raise SystemExit(f"cannot read colour {value!r}")
+    return "#" + digits.upper()
 
 
 def number(text, default=0.0):
@@ -158,8 +180,16 @@ def walk(element, inherited_alpha, out, inherited=None):
 
 def convert(source, size, scale, rotate=0.0):
     root = ElementTree.parse(source).getroot()
-    viewbox = (root.get("viewBox") or "0 0 32 32").split()
-    viewport_width, viewport_height = float(viewbox[2]), float(viewbox[3])
+    # A viewBox wins; without one, fall back to the SVG's own width/height, which
+    # is the coordinate space its paths are actually drawn in. Defaulting to the
+    # brand mark's 32 regardless silently rendered a 24-space icon at 75% size,
+    # anchored top-left, which looks like a small icon rather than a broken one.
+    if root.get("viewBox"):
+        viewbox = root.get("viewBox").split()
+        viewport_width, viewport_height = float(viewbox[2]), float(viewbox[3])
+    else:
+        viewport_width = _length(root.get("width"), 32.0)
+        viewport_height = _length(root.get("height"), viewport_width)
 
     paths = []
     # Seeded from <svg> itself, not from an empty scope: the icon sets declare
@@ -200,6 +230,14 @@ def convert(source, size, scale, rotate=0.0):
         f'    android:viewportHeight="{trim(viewport_height)}">\n'
         f"{body}\n</vector>\n"
     )
+
+
+def _length(value, fallback):
+    """An SVG length as a number, ignoring any unit suffix ("24", "24px")."""
+    if not value:
+        return fallback
+    match = re.match(r"\s*(-?[\d.]+)", value)
+    return float(match.group(1)) if match else fallback
 
 
 def main():

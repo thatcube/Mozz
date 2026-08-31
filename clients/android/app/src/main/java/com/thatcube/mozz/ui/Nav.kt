@@ -45,7 +45,7 @@ import com.thatcube.mozz.R
 enum class AppTab(val title: String, val icon: Int, val selectedIcon: Int) {
     HOME("Home", R.drawable.ic_home, R.drawable.ic_home_filled),
     LIBRARY("Library", R.drawable.ic_library, R.drawable.ic_library),
-    SEARCH("Search", R.drawable.ic_search, R.drawable.ic_search),
+    SEARCH("Search", R.drawable.ic_search, R.drawable.ic_search_filled),
 }
 
 /**
