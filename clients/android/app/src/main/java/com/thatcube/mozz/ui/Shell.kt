@@ -1,5 +1,7 @@
 package com.thatcube.mozz.ui
 
+import android.os.Build
+import android.view.RoundedCorner
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
@@ -36,6 +38,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.core.LikeGlyph
 import com.thatcube.mozz.core.MozzLibrary
@@ -159,6 +162,23 @@ fun MozzShell(
     LaunchedEffect(wide) { if (wide) navShown.floatValue = 1f }
 
     val navBarPx = with(density) { Dock.navBarHeight.toPx() }
+
+    // The display's own corner radius, so the open player's corners are the
+    // screen's. Reported from API 31 onward; older devices and any that decline
+    // simply fall back. Read after composition because the view has no window
+    // insets until it is attached.
+    val view = LocalView.current
+    var deviceCornerPx by remember(view) { mutableStateOf<Float?>(null) }
+    LaunchedEffect(view) {
+        deviceCornerPx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            view.rootWindowInsets
+                ?.getRoundedCorner(RoundedCorner.POSITION_TOP_LEFT)
+                ?.radius
+                ?.toFloat()
+        } else {
+            null
+        }
+    }
     /** How far the sheet has to travel for the drag to have collapsed it fully. */
     val dismissTravelPx = with(density) { DISMISS_TRAVEL.toPx() }
     val hideOnScroll = remember(navBarPx, wide) {
@@ -208,6 +228,7 @@ fun MozzShell(
         hasBottomNav = !wide,
         navShown = navShown.floatValue,
         presentation = presentation,
+        deviceCornerPx = deviceCornerPx,
         contentLeft = if (wide) with(density) { Dock.railWidth.toPx() } else 0f,
         dockMaxWidthPx = with(density) { Dock.maxWidth.toPx() },
         measuredArtCenterX = artSlot?.center?.x,

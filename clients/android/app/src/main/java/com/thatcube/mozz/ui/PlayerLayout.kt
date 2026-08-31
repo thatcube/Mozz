@@ -157,6 +157,15 @@ data class Morph(
     /** Which way the expanded player is laid out — decides where the cover flies to. */
     val presentation: PlayerPresentation,
     /**
+     * The display's own corner radius, when the device will say.
+     *
+     * A sheet covering the screen looks most like a sheet when its corners are
+     * the screen's corners. Android reports this from API 31; below that, and on
+     * a device that declines to answer, [expandedRadiusPx] falls back to a
+     * proportion of the dock's own corner.
+     */
+    val deviceCornerPx: Float? = null,
+    /**
      * Queue-open progress: 0 = cover big in the middle of the player, 1 = docked
      * into the now-playing card's thumbnail slot at the top of the queue.
      *
@@ -309,8 +318,15 @@ data class Morph(
     /** The artwork backdrop, which has to be there before the body it sits behind. */
     val backdropAlpha: Float get() = ((p - 0.12f) / 0.38f).coerceIn(0f, 1f)
 
-    /** iOS's `expandedRadius`, expressed against the dock's own corner. */
-    val expandedRadiusPx: Float get() = dockRadiusPx * 1.33f
+    /**
+     * The open player's corner: the display's, when the device reports one.
+     *
+     * Matching the screen is what makes the player read as a sheet laid over the
+     * device rather than a rectangle drawn on it. The fallback is iOS's
+     * `expandedRadius`, expressed against the dock's own corner.
+     */
+    val expandedRadiusPx: Float
+        get() = deviceCornerPx?.takeIf { it > 0f } ?: (dockRadiusPx * 1.33f)
 
     private val expandedArtInsetPx: Float get() = dockMarginPx * 2.6f
     private val expandedArtRadiusPx: Float get() = dockArtRadiusPx * 2.2f
