@@ -75,7 +75,13 @@ class PlayerController(
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
     /** The device id this installation reports in listening history. */
-    private val deviceId: String by lazy {
+    /**
+     * This installation's id, as history and likes attribute them.
+     *
+     * Exposed because a like is a recommender signal too, and it is attributed
+     * the same way a play is.
+     */
+    val deviceId: String by lazy {
         android.provider.Settings.Secure.getString(
             context.contentResolver,
             android.provider.Settings.Secure.ANDROID_ID,

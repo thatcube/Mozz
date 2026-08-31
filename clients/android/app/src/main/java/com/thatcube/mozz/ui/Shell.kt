@@ -37,7 +37,9 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.thatcube.mozz.core.LikeGlyph
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.ServerCapabilities
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.playback.PlayerController
@@ -139,6 +141,13 @@ fun MozzShell(
      * lyrics and queue buttons below them worked.
      */
     var dockMounted by remember { mutableStateOf(true) }
+
+    // What this server can do, asked once. The like control differs per backend
+    // and the client should not be guessing from its name.
+    var capabilities by remember(account.serverId) { mutableStateOf<ServerCapabilities?>(null) }
+    LaunchedEffect(account.serverId) {
+        capabilities = runCatching { server.capabilities(account.serverId) }.getOrNull()
+    }
 
     // How much of the bottom navigation is on screen. Driven by scrolling, and
     // only meaningful when the bar exists at all: a rail does not hide.
@@ -285,6 +294,7 @@ fun MozzShell(
                 panel = panel,
                 onPanel = { panel = it },
                 wide = wide,
+                likeGlyph = capabilities?.likeGlyph ?: LikeGlyph.HEART,
                 expanded = expanded,
                 mounted = playerMounted,
                 dockMounted = dockMounted,

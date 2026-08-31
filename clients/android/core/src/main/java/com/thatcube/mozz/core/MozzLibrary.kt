@@ -153,6 +153,54 @@ class MozzLibrary(private val core: MozzCore) {
      * play counts, "recently played" and the recommender are built from, and it
      * is the same log the iPhone writes, so the two agree after a sync.
      */
+    /**
+     * Like or unlike a track.
+     *
+     * One control for every backend: the core translates it into whatever that
+     * server actually has — a boolean favourite on Jellyfin, five stars on Plex.
+     * Returns the resulting liked state, which is the local database's answer and
+     * therefore immediate: the write to the server is queued behind it and
+     * survives being offline.
+     *
+     * [deviceId] is optional and only used to attribute the like as a
+     * recommender signal. A like never fails for want of it.
+     */
+    suspend fun setLiked(
+        serverId: String,
+        remoteId: String,
+        liked: Boolean,
+        deviceId: String? = null,
+    ): Boolean =
+        core.call<LikePayload>(
+            CoreRequest(
+                cmd = "setLiked",
+                serverId = serverId,
+                remoteId = remoteId,
+                liked = liked,
+                deviceId = deviceId,
+            )
+        )?.liked ?: liked
+
+    /**
+     * Set or clear a granular star rating. Ratings backends only (Plex,
+     * Subsonic); the core refuses it elsewhere rather than pretending.
+     */
+    suspend fun setRating(
+        serverId: String,
+        remoteId: String,
+        stars: Double?,
+        deviceId: String? = null,
+    ): Boolean =
+        core.call<LikePayload>(
+            CoreRequest(
+                cmd = "setRating",
+                serverId = serverId,
+                remoteId = remoteId,
+                stars = stars,
+                deviceId = deviceId,
+            )
+        )?.liked ?: false
+
     suspend fun recordPlayEvent(
         serverId: String,
         remoteId: String,

@@ -56,8 +56,27 @@ public sealed record Track(
     double DurationSeconds,
     string? ArtworkKey,
     bool IsFavorite,
+    /// <summary>
+    /// The star rating, where the backend keeps one. Carried alongside
+    /// <see cref="IsFavorite"/> because on a ratings backend (Plex) that flag is
+    /// always false and this is what "liked" actually means — see IsLiked.
+    /// </summary>
+    double? Rating = null,
+    /// <summary>Codec and bitrate as the server reported them.</summary>
+    string? Codec = null,
+    int? BitrateKbps = null,
     double? NormalizationGainDB = null)
 {
+    /// <summary>
+    /// Whether this counts as liked, by the same rule every Mozz client uses:
+    /// a boolean favourite, or four stars and up. Matches LikePolicy in the core.
+    /// </summary>
+    public bool IsLiked => IsFavorite || (Rating ?? 0) >= 4.0;
+
+    /// <summary>A short format badge — "FLAC", "AAC" — or null when unreported.</summary>
+    public string? Format =>
+        string.IsNullOrWhiteSpace(Codec) ? null : Codec!.ToUpperInvariant();
+
     /// <summary>m:ss, the form every music player uses.</summary>
     public string Duration
     {

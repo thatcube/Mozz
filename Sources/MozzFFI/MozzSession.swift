@@ -72,6 +72,14 @@ struct SessionRequest: Decodable {
     /// passes false.
     var useLRCLIB: Bool?
 
+    // Likes and ratings. `liked` is the universal control — every backend can
+    // express it, whatever it calls the thing. `stars` is the granular one and
+    // only means anything where `supportsRatings` is true.
+    var liked: Bool?
+    var stars: Double?
+    /// Which kind of thing is being liked. Defaults to a track.
+    var itemType: String?
+
     // Artwork palette. The client decodes and downscales its own artwork — that
     // part is irreducibly platform work — and hands the raw pixels over.
     /// Base64 RGBA, 8 bits per channel, `width * height * 4` bytes.
@@ -252,6 +260,14 @@ private struct WireTrack: Encodable {
     var durationSeconds: Double
     var artworkKey: String?
     var isFavorite: Bool
+    /// The track's star rating where the backend keeps one (Plex, Subsonic).
+    /// Carried alongside `isFavorite` because on a ratings backend that flag is
+    /// always false and the rating is what "liked" actually means.
+    var rating: Double?
+    /// Codec and bitrate as the server reported them — what a client needs to
+    /// show a format badge, and to tell a lossless file from a transcode.
+    var codec: String?
+    var bitrateKbps: Int?
     /// ReplayGain in dB, when the server supplied one. Carried across the
     /// boundary because without it a client has no way to level a library, and
     /// the loudness difference between two albums is the most audible thing a
@@ -372,6 +388,7 @@ private func wire(_ r: TrackRecord) -> WireTrack {
         albumRemoteId: r.albumRemoteId, trackNumber: r.trackNumber,
         discNumber: r.discNumber, durationSeconds: r.duration,
         artworkKey: r.artworkKey, isFavorite: r.isFavorite,
+        rating: r.rating, codec: r.codec, bitrateKbps: r.bitrateKbps,
         normalizationGainDB: r.normalizationGainDB
     )
 }
@@ -911,6 +928,7 @@ let mozzSessionCommands = [
     "unsuppressTrack", "unsuppressArtist", "suppressions",
     "connect", "plexPin", "plexPinCheck", "attach", "libraries",
     "sync", "syncStatus", "streamURL", "artworkURL",
+    "capabilities", "setLiked", "setRating",
 ].sorted()
 
 /// A wrong command name is one of the few mistakes that can only be made across

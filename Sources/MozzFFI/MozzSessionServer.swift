@@ -95,6 +95,37 @@ struct WireURL: Encodable {
     var url: String?
 }
 
+struct WireLike: Encodable {
+    var liked: Bool
+}
+
+/// What a server can do, so a client can ask instead of branching on its name.
+///
+/// The like control is the reason this crosses the boundary: Jellyfin has a
+/// heart, Plex has five stars, Subsonic has both. A client that guessed from the
+/// backend's name would be wrong the first time a server grew a feature.
+struct WireCapabilities: Encodable {
+    var backend: String
+    var serverVersion: String?
+    var supportsFavorites: Bool
+    var supportsRatings: Bool
+    var supportsLyrics: Bool
+    var supportsTranscoding: Bool
+    var supportsOriginalFileDownload: Bool
+}
+
+private func wire(_ c: ServerCapabilities) -> WireCapabilities {
+    WireCapabilities(
+        backend: c.backend.rawValue,
+        serverVersion: c.serverVersion,
+        supportsFavorites: c.supportsFavorites,
+        supportsRatings: c.supportsRatings,
+        supportsLyrics: c.supportsLyrics,
+        supportsTranscoding: c.supportsTranscoding,
+        supportsOriginalFileDownload: c.supportsOriginalFileDownload
+    )
+}
+
 struct WireSyncStart: Encodable {
     var started: Bool
     var reason: String?
@@ -185,6 +216,12 @@ final class BackendTable: @unchecked Sendable {
     private let lock = NSLock()
     private var backends: [String: any MusicBackend] = [:]
     private var syncs: [String: SyncBox] = [:]
+    /// Capabilities, remembered per server.
+    ///
+    /// `detectCapabilities()` is a network call on every backend, so it cannot
+    /// run on the path of something as small as a like. Fetched once on first
+    /// need and kept for the life of the session.
+    private var caps: [String: ServerCapabilities] = [:]
 
     func set(_ backend: any MusicBackend, for id: String) {
         lock.lock(); defer { lock.unlock() }
@@ -205,6 +242,95 @@ final class BackendTable: @unchecked Sendable {
     func ids() -> [String] {
         lock.lock(); defer { lock.unlock() }
         return Array(backends.keys)
+    }
+
+    func capabilities(_ id: String) -> ServerCapabilities? {
+        lock.lock(); defer { lock.unlock() }
+        return caps[id]
+    }
+
+    func setCapabilities(_ value: ServerCapabilities, for id: String) {
+        lock.lock(); defer { lock.unlock() }
+        caps[id] = value
+    }
+}
+
+/// A backend's capabilities, fetched once per session and remembered.
+private func resolveCapabilities(
+    _ backend: any MusicBackend,
+    _ session: SessionContext
+) async throws -> ServerCapabilities {
+    let id = backend.connection.id
+    if let cached = session.backends.capabilities(id) { return cached }
+    let detected = try await backend.detectCapabilities()
+    session.backends.setCapabilities(detected, for: id)
+    return detected
+}
+
+/// Apply a like or rating: local row first, then the server.
+///
+/// Offline-first, matching what the iOS app does rather than inventing a second
+/// policy. The local database is the source of truth a client reads back, so it
+/// is written immediately and the change is queued in the outbox; the server
+/// write is attempted right away and simply stays queued if it fails. That is
+/// what makes a like survive a tunnel.
+private func applyLike(
+    _ request: ServerRequest,
+    _ session: SessionContext,
+    _ backend: any MusicBackend,
+    remoteId: String,
+    value: FavoriteChange.Value
+) async throws -> String {
+    let serverId = backend.connection.id
+    let itemType = request.itemType.flatMap(CatalogItemType.init(rawValue:)) ?? .track
+    let favorites = FavoritesStore(session.database)
+
+    let wasLiked = (try? await favorites.isLiked(serverId: serverId, remoteId: remoteId)) ?? false
+    let change = FavoriteChange(
+        serverId: serverId, remoteId: remoteId, itemType: itemType, value: value)
+    let nowLiked = try await favorites.applyLocally(change)
+
+    // A like is a recommender signal, not just a flag, so the transition is
+    // recorded the same way iOS records it. Only when the client has identified
+    // itself: a like must never fail because a device had no name to give.
+    if nowLiked != wasLiked, let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty {
+        _ = try? await HistoryExchangeStore(session.database).recordLocalPlayEvent(
+            PlayEvent(trackID: remoteId, kind: nowLiked ? .liked : .unliked),
+            serverId: serverId,
+            deviceID: deviceID
+        )
+    }
+
+    await flushFavorites(session, backend)
+    return session.success(request, WireLike(liked: nowLiked))
+}
+
+/// Replay queued like/rating writes, dropping each one that lands.
+///
+/// A failure breaks the loop rather than skipping: the usual cause is the server
+/// being unreachable, and the rest of the queue will fail the same way. They stay
+/// queued for the next attempt.
+private func flushFavorites(_ session: SessionContext, _ backend: any MusicBackend) async {
+    let serverId = backend.connection.id
+    let favorites = FavoritesStore(session.database)
+    let pending = (try? await favorites.pending(serverId: serverId)) ?? []
+    for op in pending {
+        let type = CatalogItemType(rawValue: op.itemType) ?? .track
+        do {
+            if op.kind == "favorite" {
+                try await backend.setFavorite((op.value ?? 0) >= 0.5, itemID: op.remoteId, type: type)
+            } else {
+                try await backend.setRating(op.value, itemID: op.remoteId, type: type)
+            }
+            // Compare-and-delete: if the user re-toggled while this (slow) write
+            // was in flight, its createdAt changed and this no-ops, leaving the
+            // newer intent queued.
+            if let id = op.id {
+                _ = try await favorites.removePending(id: id, ifUnchangedSince: op.createdAt)
+            }
+        } catch {
+            break
+        }
     }
 }
 
@@ -353,6 +479,47 @@ func dispatchServerCommand(
             // asserting a negative it cannot support.
             staySilent: resolution.staySilent
         ))
+
+    case "capabilities":
+        guard let backend = try requireBackend(request, session) else {
+            return session.failure(request, "capabilities needs an attached serverId")
+        }
+        let caps = try await resolveCapabilities(backend, session)
+        return session.success(request, wire(caps))
+
+    case "setLiked":
+        guard let backend = try requireBackend(request, session) else {
+            return session.failure(request, "setLiked needs an attached serverId")
+        }
+        guard let remoteId = request.remoteId else {
+            return session.failure(request, "setLiked needs remoteId")
+        }
+        guard let liked = request.liked else {
+            return session.failure(request, "setLiked needs liked")
+        }
+        let caps = try await resolveCapabilities(backend, session)
+        // The one control every backend can express, in each one's own terms: a
+        // boolean favourite where there is one, and the "I really like this"
+        // star where there is not. `LikePolicy` owns both halves of that
+        // translation so a like means the same thing on every client.
+        let value: FavoriteChange.Value = caps.supportsFavorites
+            ? .favorite(liked)
+            : .rating(liked ? LikePolicy.likeStars : nil)
+        return try await applyLike(request, session, backend, remoteId: remoteId, value: value)
+
+    case "setRating":
+        guard let backend = try requireBackend(request, session) else {
+            return session.failure(request, "setRating needs an attached serverId")
+        }
+        guard let remoteId = request.remoteId else {
+            return session.failure(request, "setRating needs remoteId")
+        }
+        let caps = try await resolveCapabilities(backend, session)
+        guard caps.supportsRatings else {
+            return session.failure(request, "this server has no ratings — use setLiked")
+        }
+        return try await applyLike(
+            request, session, backend, remoteId: remoteId, value: .rating(request.stars))
 
     case "artworkURL":
         guard let backend = try requireBackend(request, session) else {

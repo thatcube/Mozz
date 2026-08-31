@@ -265,6 +265,19 @@ class MozzServer(
             )
         )?.url
 
+    /**
+     * What the attached server can do.
+     *
+     * Worth asking rather than inferring: the like control differs per backend —
+     * a heart on Jellyfin, a star on Plex, both on Subsonic — and a client that
+     * guessed from the backend's name would be wrong the first time a server grew
+     * a feature. The core fetches this once per session and remembers it.
+     */
+    suspend fun capabilities(serverId: String): ServerCapabilities? =
+        core.call<ServerCapabilities>(
+            CoreRequest(cmd = "capabilities", serverId = serverId)
+        )
+
     // MARK: Saved accounts
 
     /**

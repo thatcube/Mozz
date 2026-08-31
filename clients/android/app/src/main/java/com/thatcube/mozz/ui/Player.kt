@@ -83,6 +83,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.thatcube.mozz.R
+import com.thatcube.mozz.core.LikeGlyph
 import com.thatcube.mozz.core.Lyrics
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
@@ -92,7 +93,9 @@ import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.playback.RepeatMode
 import com.thatcube.mozz.ui.theme.quietBody
 import kotlin.math.roundToInt
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The player's own foreground colours.
@@ -123,6 +126,8 @@ internal fun PlayerBody(
     panel: PlayerPanel?,
     onPanel: (PlayerPanel?) -> Unit,
     wide: Boolean,
+    /** Heart or star — the server's answer, not the client's guess. */
+    likeGlyph: LikeGlyph,
     onCollapse: () -> Unit,
     onArtSlot: (Rect) -> Unit,
     /** Where the queue card's thumbnail landed — the cover's second destination. */
@@ -155,6 +160,25 @@ internal fun PlayerBody(
         if (panel != PlayerPanel.LYRICS || !state.isPlaying) return@LaunchedEffect
         delay(IMMERSIVE_DELAY_MS)
         immersive = true
+    }
+
+    // The like, held locally so the tap lands immediately. The core writes the
+    // row and queues the server call, but the queue this player is reading came
+    // from the database when playback started, so nothing would refresh it.
+    val scope = rememberCoroutineScope()
+    var likeOverride by remember(track.remoteId) { mutableStateOf<Boolean?>(null) }
+    val liked = likeOverride ?: track.isLiked
+    val toggleLike: () -> Unit = {
+        val next = !liked
+        likeOverride = next
+        scope.launch {
+            val settled = runCatching {
+                library.setLiked(track.serverId, track.remoteId, next, playback.deviceId)
+            }.getOrNull()
+            // Snap back if the core disagreed; it owns the policy for what a like
+            // means on this backend.
+            if (settled != null) likeOverride = settled
+        }
     }
 
     // Warm the next cover while the current one is still playing. Holding the
@@ -217,7 +241,10 @@ internal fun PlayerBody(
                     ) {
                         ArtSlot(onArtSlot, Modifier.weight(1f, fill = false))
                         Spacer(Modifier.height(28.dp))
-                        Chrome(state, playback, queueProgress, panelOpen = false)
+                        Chrome(
+                            state, playback, queueProgress, panelOpen = false,
+                            likeGlyph = likeGlyph, liked = liked, onToggleLike = toggleLike,
+                        )
                     }
                     Spacer(Modifier.width(32.dp))
                     // Right: the panel, with its two toggles sitting at the
@@ -239,6 +266,9 @@ internal fun PlayerBody(
                             queueProgress = queueProgress,
                             panelSettled = panelSettled,
                             onShowArtwork = { onPanel(null) },
+                            likeGlyph = likeGlyph,
+                            liked = liked,
+                            onToggleLike = toggleLike,
                             onInteraction = { interactions++ },
                         )
                     }
@@ -281,6 +311,9 @@ internal fun PlayerBody(
                                 queueProgress = queueProgress,
                                 panelSettled = panelSettled,
                                 onShowArtwork = { onPanel(null) },
+                                likeGlyph = likeGlyph,
+                                liked = liked,
+                                onToggleLike = toggleLike,
                                 onInteraction = { interactions++ },
                             )
                         }
@@ -293,7 +326,10 @@ internal fun PlayerBody(
                     ) {
                         Column {
                             Spacer(Modifier.height(24.dp))
-                            Chrome(state, playback, queueProgress, panelOpen = panel != null)
+                            Chrome(
+                                state, playback, queueProgress, panelOpen = panel != null,
+                                likeGlyph = likeGlyph, liked = liked, onToggleLike = toggleLike,
+                            )
                         }
                     }
                 }
@@ -462,9 +498,12 @@ private fun Chrome(
     playback: PlayerController,
     queueProgress: () -> Float,
     panelOpen: Boolean,
+    likeGlyph: LikeGlyph,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        HeroTitles(state, queueProgress)
+        HeroTitles(state, queueProgress, likeGlyph, liked, onToggleLike)
         Spacer(Modifier.height(20.dp))
         Scrubber(state, playback)
         Spacer(Modifier.height(16.dp))
@@ -488,7 +527,13 @@ private fun Chrome(
  * The numbers are iOS's: lift 360dp ending at q=0.9, fade across q 0.2 → 0.68.
  */
 @Composable
-private fun HeroTitles(state: PlaybackState, queueProgress: () -> Float) {
+private fun HeroTitles(
+    state: PlaybackState,
+    queueProgress: () -> Float,
+    likeGlyph: LikeGlyph,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -504,7 +549,7 @@ private fun HeroTitles(state: PlaybackState, queueProgress: () -> Float) {
                 alpha = 1f - fadeProgress(q)
             },
     ) {
-        TrackTitles(state)
+        TrackTitles(state, likeGlyph, liked, onToggleLike)
     }
 }
 
@@ -534,6 +579,9 @@ private fun Panel(
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
     onShowArtwork: () -> Unit,
+    likeGlyph: LikeGlyph,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
     onInteraction: () -> Unit,
 ) {
     when (panel) {
@@ -547,6 +595,9 @@ private fun Panel(
             queueProgress = queueProgress,
             panelSettled = panelSettled,
             onShowArtwork = onShowArtwork,
+            likeGlyph = likeGlyph,
+            liked = liked,
+            onToggleLike = onToggleLike,
         )
         PlayerPanel.LYRICS -> LyricsPane(state, library, bottomInset, onInteraction)
     }
@@ -576,6 +627,9 @@ private fun QueuePane(
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
     onShowArtwork: () -> Unit,
+    likeGlyph: LikeGlyph,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
@@ -645,6 +699,9 @@ private fun QueuePane(
                         queueProgress = queueProgress,
                         panelSettled = panelSettled,
                         onTapArtwork = onShowArtwork,
+                        likeGlyph = likeGlyph,
+                        liked = liked,
+                        onToggleLike = onToggleLike,
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -916,6 +973,9 @@ private fun NowPlayingCard(
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
     onTapArtwork: () -> Unit,
+    likeGlyph: LikeGlyph,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val breathe by animateFloatAsState(
@@ -988,7 +1048,7 @@ private fun NowPlayingCard(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            StarAndOverflow(track)
+            StarAndOverflow(likeGlyph, liked, onToggleLike)
         }
     }
 }
@@ -1014,16 +1074,29 @@ private const val PAUSED_CARD_SHRINK = 0.06f
  * about whether it took would be worse than one that only reports.
  */
 @Composable
-private fun StarAndOverflow(track: Track) {
+private fun StarAndOverflow(likeGlyph: LikeGlyph, liked: Boolean, onToggleLike: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            painterResource(
-                if (track.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star
-            ),
-            contentDescription = if (track.isFavorite) "Liked" else "Not liked",
-            tint = if (track.isFavorite) PlayerForeground else PlayerForegroundMuted,
-            modifier = Modifier.size(24.dp),
-        )
+        // A heart where the server has favourites, a star where it has ratings —
+        // Jellyfin and Plex genuinely mean different things by "liked", and the
+        // glyph should say which one you are setting.
+        val glyph = when (likeGlyph) {
+            LikeGlyph.HEART -> if (liked) R.drawable.ic_heart_filled else R.drawable.ic_heart
+            LikeGlyph.STAR -> if (liked) R.drawable.ic_star_filled else R.drawable.ic_star
+        }
+        Box(
+            modifier = Modifier
+                .size(MIN_HIT)
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable(onClick = onToggleLike),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painterResource(glyph),
+                contentDescription = if (liked) "Liked" else "Not liked",
+                tint = if (liked) PlayerForeground else PlayerForegroundMuted,
+                modifier = Modifier.size(24.dp),
+            )
+        }
         IconButton(onClick = {}, enabled = false) {
             Icon(
                 painterResource(R.drawable.ic_more),
@@ -1218,7 +1291,12 @@ private fun LyricLine(text: String, sung: Boolean, alwaysLit: Boolean) {
  * instead of pushing it off the row.
  */
 @Composable
-private fun TrackTitles(state: PlaybackState) {
+private fun TrackTitles(
+    state: PlaybackState,
+    likeGlyph: LikeGlyph,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
+) {
     val track = state.track ?: return
 
     Row(
@@ -1239,7 +1317,7 @@ private fun TrackTitles(state: PlaybackState) {
             )
         }
         Spacer(Modifier.width(8.dp))
-        StarAndOverflow(track)
+        StarAndOverflow(likeGlyph, liked, onToggleLike)
     }
 }
 
@@ -1324,12 +1402,27 @@ private fun Scrubber(state: PlaybackState, playback: PlayerController) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 clock((fraction * state.durationMillis).toLong()),
                 style = MaterialTheme.typography.labelMedium,
                 color = PlayerForegroundMuted,
             )
+            // What the server is actually sending. Quiet, because it only
+            // matters to the people it matters to — and absent entirely when the
+            // server did not say, rather than guessed at.
+            state.track?.format?.let { format ->
+                Text(
+                    format,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PlayerForegroundMuted,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(PlayerForeground.copy(alpha = 0.10f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                )
+            }
             // Remaining, not total: what is left is the thing anyone actually
             // reads off a scrubber mid-song.
             Text(

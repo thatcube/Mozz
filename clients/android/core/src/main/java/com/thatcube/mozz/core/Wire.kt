@@ -53,6 +53,11 @@ data class CoreRequest(
     val width: Int? = null,
     val height: Int? = null,
 
+    // Likes and ratings.
+    val liked: Boolean? = null,
+    val stars: Double? = null,
+    val itemType: String? = null,
+
     // Listening history.
     val eventKind: String? = null,
     val positionSeconds: Double? = null,
@@ -128,8 +133,30 @@ data class Track(
     val durationSeconds: Double = 0.0,
     val artworkKey: String? = null,
     val isFavorite: Boolean = false,
+    /**
+     * The star rating, where the backend keeps one.
+     *
+     * Carried alongside [isFavorite] because on a ratings backend that flag is
+     * always false and this is what "liked" actually means — see [isLiked].
+     */
+    val rating: Double? = null,
+    /** Codec and bitrate as the server reported them. */
+    val codec: String? = null,
+    val bitrateKbps: Int? = null,
     val normalizationGainDB: Double? = null,
 ) {
+    /**
+     * Whether this counts as liked, by the same rule every Mozz client uses.
+     *
+     * A Plex track has no boolean favourite: four stars or more is a like, which
+     * also means ratings someone set in Plexamp years ago already show up as
+     * liked here. The threshold matches `LikePolicy` in the core.
+     */
+    val isLiked: Boolean get() = isFavorite || (rating ?: 0.0) >= LIKE_RATING_THRESHOLD
+
+    /** A short format badge — "FLAC", "AAC" — or null when the server said nothing. */
+    val format: String? get() = codec?.takeIf { it.isNotBlank() }?.uppercase()
+
     /** m:ss, the form every music player uses. */
     val duration: String
         get() {
@@ -297,6 +324,37 @@ internal data class PlexPinPayload(
 
 @Serializable
 internal data class UrlPayload(val url: String? = null)
+
+@Serializable
+internal data class LikePayload(val liked: Boolean = false)
+
+/**
+ * What the attached server can do.
+ *
+ * The like control is why this exists: Jellyfin has a heart, Plex has five
+ * stars, Subsonic has both. Asking the core beats guessing from the backend's
+ * name, which would be wrong the first time a server grew a feature.
+ */
+@Serializable
+data class ServerCapabilities(
+    val backend: String = "",
+    val serverVersion: String? = null,
+    val supportsFavorites: Boolean = false,
+    val supportsRatings: Boolean = false,
+    val supportsLyrics: Boolean = false,
+    val supportsTranscoding: Boolean = false,
+    val supportsOriginalFileDownload: Boolean = false,
+) {
+    /** A heart where the server has favourites, a star where it has ratings. */
+    val likeGlyph: LikeGlyph
+        get() = if (supportsFavorites) LikeGlyph.HEART else LikeGlyph.STAR
+}
+
+/** How "liked" is drawn, which is a property of the server, not the client. */
+enum class LikeGlyph { HEART, STAR }
+
+/** Four stars or more is a like. Matches `LikePolicy.ratingThreshold`. */
+private const val LIKE_RATING_THRESHOLD = 4.0
 
 // MARK: - Saved accounts
 
