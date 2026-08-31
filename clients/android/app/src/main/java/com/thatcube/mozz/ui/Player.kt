@@ -174,6 +174,7 @@ internal fun PlayerBody(
                 // children see the pointer first, so a list that is scrolling
                 // consumes the drag before this ever sees it.
                 .dismissDrag(onDismissDrag, onDismissEnd),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             AnimatedVisibility(
                 visible = !immersive,
@@ -237,13 +238,21 @@ internal fun PlayerBody(
                             onCardArtSlot = onCardArtSlot,
                             queueProgress = queueProgress,
                             panelSettled = panelSettled,
+                            onShowArtwork = { onPanel(null) },
                             onInteraction = { interactions++ },
                         )
                     }
                 }
 
                 else -> Column(
-                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        // Capped *before* filling: `fillMaxWidth` pins the
+                        // minimum to the parent's width, so a cap applied after
+                        // it has nothing left to shrink.
+                        .widthIn(max = SINGLE_COLUMN_MAX)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
                 ) {
                     // One box, two occupants. The cover is drawn into it by the
                     // morph; a panel, when there is one, takes the same space —
@@ -271,6 +280,7 @@ internal fun PlayerBody(
                                 onCardArtSlot = onCardArtSlot,
                                 queueProgress = queueProgress,
                                 panelSettled = panelSettled,
+                                onShowArtwork = { onPanel(null) },
                                 onInteraction = { interactions++ },
                             )
                         }
@@ -395,11 +405,12 @@ private fun PanelToggles(panel: PlayerPanel?, onPanel: (PlayerPanel?) -> Unit) {
  */
 @Composable
 private fun RouteButton() {
-    IconButton(onClick = {}, enabled = false) {
+    Box(modifier = Modifier.size(MIN_HIT), contentAlignment = Alignment.Center) {
         Icon(
             painterResource(R.drawable.ic_cast),
             contentDescription = "Cast (not yet available)",
             tint = PlayerForegroundMuted.copy(alpha = 0.4f),
+            modifier = Modifier.size(22.dp),
         )
     }
 }
@@ -414,7 +425,7 @@ private fun PanelButton(icon: Int, label: String, selected: Boolean, onClick: ()
     )
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(MIN_HIT)
             .clip(RoundedCornerShape(percent = 50))
             .background(PlayerForeground.copy(alpha = wash))
             .clickable(onClick = onClick),
@@ -424,7 +435,7 @@ private fun PanelButton(icon: Int, label: String, selected: Boolean, onClick: ()
             painterResource(icon),
             contentDescription = label,
             tint = if (selected) PlayerForeground else PlayerForegroundMuted,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(UTILITY_GLYPH),
         )
     }
 }
@@ -456,10 +467,13 @@ private fun Chrome(
         HeroTitles(state, queueProgress)
         Spacer(Modifier.height(20.dp))
         Scrubber(state, playback)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
         // Shuffle and repeat move to the pills above the queue when it is open,
         // so the transport drops to the three controls that are still its job.
         Transport(state, playback, compact = panelOpen)
+        // The row of panel toggles sits below this. Without the gap, a thumb
+        // reaching for pause lands on the queue.
+        Spacer(Modifier.height(20.dp))
     }
 }
 
@@ -519,6 +533,7 @@ private fun Panel(
     onCardArtSlot: (Rect) -> Unit,
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
+    onShowArtwork: () -> Unit,
     onInteraction: () -> Unit,
 ) {
     when (panel) {
@@ -531,6 +546,7 @@ private fun Panel(
             onCardArtSlot = onCardArtSlot,
             queueProgress = queueProgress,
             panelSettled = panelSettled,
+            onShowArtwork = onShowArtwork,
         )
         PlayerPanel.LYRICS -> LyricsPane(state, library, bottomInset, onInteraction)
     }
@@ -559,6 +575,7 @@ private fun QueuePane(
     onCardArtSlot: (Rect) -> Unit,
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
+    onShowArtwork: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
@@ -627,6 +644,7 @@ private fun QueuePane(
                         onArtSlot = onCardArtSlot,
                         queueProgress = queueProgress,
                         panelSettled = panelSettled,
+                        onTapArtwork = onShowArtwork,
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -753,6 +771,14 @@ private fun Modifier.fadeOutBottom(height: Dp = PANEL_FADE_HEIGHT): Modifier = t
 
 /** Enough to clear the controls beneath, plus room for the fade to read. */
 private val PANEL_FADE_HEIGHT = 96.dp
+
+/**
+ * Widest a single column of player content gets before it simply centres.
+ *
+ * Stretched across a tablet, one column of artwork and transport reads as a
+ * phone layout that has been pulled apart rather than a layout for this screen.
+ */
+private val SINGLE_COLUMN_MAX = 560.dp
 
 /** How much a lifted row grows, so it reads as picked up rather than slid. */
 private const val LIFT_SCALE = 1.03f
@@ -889,6 +915,7 @@ private fun NowPlayingCard(
     onArtSlot: (Rect) -> Unit,
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
+    onTapArtwork: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val breathe by animateFloatAsState(
@@ -903,7 +930,15 @@ private fun NowPlayingCard(
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(modifier = Modifier.size(CARD_ART_SIDE).reportBounds(onArtSlot)) {
+        Box(
+            modifier = Modifier
+                .size(CARD_ART_SIDE)
+                .reportBounds(onArtSlot)
+                // Tapping the cover puts the record back, which is the shortest
+                // way out of the queue and what iOS does. Only once it has
+                // settled: mid-flight the cover is not really here yet.
+                .clickable(enabled = panelSettled(), onClick = onTapArtwork),
+        ) {
             // The card's own cover, which appears only once the travelling one
             // has arrived on this exact slot — so it can then scroll and clip
             // with the panel instead of floating above it.
@@ -1330,100 +1365,141 @@ private fun Transport(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!compact) {
-            IconButton(onClick = playback::toggleShuffle) {
-                Icon(
-                    painterResource(R.drawable.ic_shuffle),
-                    contentDescription = if (state.shuffle) "Shuffle on" else "Shuffle off",
-                    // On/off is carried by contrast, not by the accent: the
-                    // accent means "the action", and a shuffle toggle is not
-                    // that.
-                    tint = if (state.shuffle) active else idle,
-                )
-            }
-        }
-
-        IconButton(onClick = { playback.previous() }) {
-            Icon(
-                painterResource(R.drawable.ic_skip_back),
-                contentDescription = "Previous",
-                tint = active,
-                modifier = Modifier.size(30.dp),
+            TransportButton(
+                icon = R.drawable.ic_shuffle,
+                label = if (state.shuffle) "Shuffle on" else "Shuffle off",
+                // On/off is carried by contrast, not by the accent: the accent
+                // means "the action", and a shuffle toggle is not that.
+                tint = if (state.shuffle) active else idle,
+                glyph = UTILITY_GLYPH,
+                hit = MIN_HIT,
+                onClick = playback::toggleShuffle,
             )
         }
+
+        TransportButton(
+            icon = R.drawable.ic_skip_back,
+            label = "Previous",
+            tint = active,
+            glyph = SKIP_GLYPH,
+            hit = SKIP_HIT,
+            onClick = { playback.previous() },
+        )
 
         PlayButton(isPlaying = state.isPlaying, onClick = playback::togglePlayPause)
 
-        IconButton(onClick = { playback.next() }, enabled = state.hasNext) {
-            Icon(
-                painterResource(R.drawable.ic_skip_forward),
-                contentDescription = "Next",
-                tint = if (state.hasNext) active else idle,
-                modifier = Modifier.size(30.dp),
-            )
-        }
+        TransportButton(
+            icon = R.drawable.ic_skip_forward,
+            label = "Next",
+            tint = if (state.hasNext) active else idle,
+            glyph = SKIP_GLYPH,
+            hit = SKIP_HIT,
+            enabled = state.hasNext,
+            onClick = { playback.next() },
+        )
 
         if (!compact) {
-            IconButton(onClick = playback::cycleRepeat) {
-                Icon(
-                    painterResource(
-                        if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
-                        else R.drawable.ic_repeat
-                    ),
-                    contentDescription = when (state.repeat) {
-                        RepeatMode.OFF -> "Repeat off"
-                        RepeatMode.ALL -> "Repeat all"
-                        RepeatMode.ONE -> "Repeat one"
-                    },
-                    tint = if (state.repeat == RepeatMode.OFF) idle else active,
-                )
-            }
+            TransportButton(
+                icon = if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
+                else R.drawable.ic_repeat,
+                label = when (state.repeat) {
+                    RepeatMode.OFF -> "Repeat off"
+                    RepeatMode.ALL -> "Repeat all"
+                    RepeatMode.ONE -> "Repeat one"
+                },
+                tint = if (state.repeat == RepeatMode.OFF) idle else active,
+                glyph = UTILITY_GLYPH,
+                hit = MIN_HIT,
+                onClick = playback::cycleRepeat,
+            )
         }
     }
 }
 
 /**
- * The one crimson thing on the screen, and the only control anyone reaches for
- * without looking.
+ * A transport control: a glyph centred in a square that is bigger than it.
  *
- * It dips under the finger. A 68dp target that does not acknowledge a press is
- * the difference between a control and a picture of one.
+ * The two sizes are separate on purpose. The visible icon is whatever reads
+ * right next to its neighbours; the tappable square is whatever a thumb needs.
+ * Tying them together is how skip buttons end up being missed.
+ */
+@Composable
+private fun TransportButton(
+    icon: Int,
+    label: String,
+    tint: Color,
+    glyph: Dp,
+    hit: Dp,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(hit)
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(glyph),
+        )
+    }
+}
+
+/**
+ * Play and pause, as one glyph swapping for the other.
+ *
+ * No filled disc: iOS draws this as a plain glyph the same colour as its
+ * neighbours, and the accent is spent elsewhere. The outgoing icon shrinks away
+ * while the incoming one grows past its mark and settles, which is what sells a
+ * toggle as a physical switch rather than a picture changing.
  */
 @Composable
 private fun PlayButton(isPlaying: Boolean, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.90f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 900f),
-        label = "play-press",
-    )
+    val swap = spring<Float>(dampingRatio = 0.62f, stiffness = 246f)
+    val playAlpha by animateFloatAsState(if (isPlaying) 0f else 1f, swap, label = "play-glyph")
+    val playScale by animateFloatAsState(if (isPlaying) 0.62f else 1f, swap, label = "play-scale")
+    val pauseAlpha by animateFloatAsState(if (isPlaying) 1f else 0f, swap, label = "pause-glyph")
+    val pauseScale by animateFloatAsState(if (isPlaying) 1f else 0.62f, swap, label = "pause-scale")
 
-    Surface(
-        color = MaterialTheme.colorScheme.primary,
-        shape = RoundedCornerShape(percent = 50),
+    Box(
         modifier = Modifier
-            .size(68.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        pressed = true
-                        tryAwaitRelease()
-                        pressed = false
-                    },
-                    onTap = { onClick() },
-                )
-            },
+            .size(PLAY_HIT)
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                painterResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(30.dp),
-            )
-        }
+        Icon(
+            painterResource(R.drawable.ic_play),
+            contentDescription = null,
+            tint = PlayerForeground,
+            modifier = Modifier
+                .size(PLAY_GLYPH)
+                .graphicsLayer { alpha = playAlpha; scaleX = playScale; scaleY = playScale },
+        )
+        Icon(
+            painterResource(R.drawable.ic_pause),
+            contentDescription = if (isPlaying) "Pause" else "Play",
+            tint = PlayerForeground,
+            modifier = Modifier
+                .size(PLAY_GLYPH)
+                .graphicsLayer { alpha = pauseAlpha; scaleX = pauseScale; scaleY = pauseScale },
+        )
     }
 }
+
+// iOS's control metrics, so a thumb that has learned one app has learned both.
+// Glyph sizes and hit targets are kept separate: the icon is sized to read, the
+// square around it is sized to be hit.
+private val UTILITY_GLYPH = 26.dp
+private val SKIP_GLYPH = 40.dp
+private val PLAY_GLYPH = 60.dp
+private val MIN_HIT = 48.dp
+private val SKIP_HIT = 60.dp
+private val PLAY_HIT = 76.dp
 
 /** m:ss, matching how durations read everywhere else in the app. */
 private fun clock(millis: Long): String {

@@ -77,6 +77,8 @@ internal fun MorphHost(
     /** Target state, not progress: a boolean that flips twice per open, so the
      *  touch gating below costs two recompositions rather than one per frame. */
     expanded: Boolean,
+    /** Whether the player's body should exist at all — see the shell. */
+    mounted: Boolean,
     onOpen: () -> Unit,
     onCollapse: () -> Unit,
     onDismissDrag: (Float) -> Unit,
@@ -145,14 +147,18 @@ internal fun MorphHost(
         }
 
         // The player's body: everything except the cover, which travels. Full
-        // size always — only its opacity moves — so the queue and the lyrics are
-        // laid out once rather than re-measured every frame of the morph.
+        // size while it exists — only its opacity moves — so the queue and the
+        // lyrics are laid out once rather than re-measured every frame.
+        //
+        // Not composed at all when the player is away. It is full-screen, so
+        // leaving it mounted put an invisible sheet over the entire app.
+        if (mounted) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = frame().bodyAlpha }
-                // Untouchable until it is actually there, or an invisible
-                // transport swallows taps meant for the library behind it.
+                // During the collapse it is still on screen but no longer the
+                // thing being used, so it stops taking touches a beat early.
                 .then(if (expanded) Modifier else Modifier.blockTouches()),
         ) {
             PlayerBody(
@@ -172,6 +178,7 @@ internal fun MorphHost(
                 onDismissDrag = onDismissDrag,
                 onDismissEnd = onDismissEnd,
             )
+        }
         }
 
         // The travelling cover. One image, moved — not a small one dissolving

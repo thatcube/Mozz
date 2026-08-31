@@ -117,6 +117,18 @@ fun MozzShell(
     val p = remember { Animatable(0f) }
     var expanded by remember { mutableStateOf(false) }
 
+    /**
+     * Whether the player is on screen at all — true through the collapse, false
+     * once it has finished.
+     *
+     * The player's body is full-screen and stays laid out for the morph, so while
+     * it was mounted it sat over the whole app swallowing touches: the library,
+     * the navigation and the top bar all stopped responding, and only the dock
+     * still worked because it is drawn above it. Not mounting it at all when the
+     * player is away is the fix; blocking its touches was treating the symptom.
+     */
+    var playerMounted by remember { mutableStateOf(false) }
+
     // How much of the bottom navigation is on screen. Driven by scrolling, and
     // only meaningful when the bar exists at all: a rail does not hide.
     val navShown = remember { mutableFloatStateOf(1f) }
@@ -263,13 +275,18 @@ fun MozzShell(
                 onPanel = { panel = it },
                 wide = wide,
                 expanded = expanded,
+                mounted = playerMounted,
                 onOpen = {
                     expanded = true
+                    playerMounted = true
                     scope.launch { p.animateTo(1f, MorphSpring) }
                 },
                 onCollapse = {
                     expanded = false
-                    scope.launch { p.animateTo(0f, MorphSpring) }
+                    scope.launch {
+                        p.animateTo(0f, MorphSpring)
+                        playerMounted = false
+                    }
                 },
                 // The drag drives the same value the back gesture drives, so
                 // there is one collapse in the app rather than two that have to
@@ -287,6 +304,7 @@ fun MozzShell(
                         if (travelled > dismissTravelPx * DISMISS_FRACTION) {
                             expanded = false
                             p.animateTo(0f, MorphSpring)
+                            playerMounted = false
                         } else {
                             p.animateTo(1f, MorphSpring)
                         }
@@ -312,6 +330,7 @@ fun MozzShell(
                 }
                 expanded = false
                 p.animateTo(0f, MorphSpring)
+                playerMounted = false
             } catch (_: CancellationException) {
                 // Cancelled mid-gesture: spring back open from wherever the
                 // finger left it, which is why this is an Animatable.
@@ -404,6 +423,10 @@ private fun ComingSoon(title: String, promise: String) {
             androidx.compose.material3.Text(
                 title,
                 style = MaterialTheme.typography.headlineMedium,
+                // Explicit: nothing above this provides a content colour, and
+                // Material's default is black — which on this background is a
+                // heading that simply is not there.
+                color = MaterialTheme.colorScheme.onBackground,
             )
             androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
             androidx.compose.material3.Text(

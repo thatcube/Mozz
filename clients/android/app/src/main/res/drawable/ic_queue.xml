@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Generated from Sources/MozzApp/Resources/Icons.xcassets/playlist.imageset/playlist.svg by tools/svg-to-vector-drawable.py.
+<!-- Generated from Sources/MozzApp/Resources/Icons.xcassets/list.imageset/list.svg by tools/svg-to-vector-drawable.py.
      Do not edit by hand; regenerate when the brand mark changes. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
+    android:width="32dp"
+    android:height="32dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
@@ -11,29 +11,35 @@
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M11 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+        android:pathData="M9 6l11 0" />
     <path
         android:strokeColor="#FF000000"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M17 17v-13h4" />
+        android:pathData="M9 12l11 0" />
     <path
         android:strokeColor="#FF000000"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M13 5h-10" />
+        android:pathData="M9 18l11 0" />
     <path
         android:strokeColor="#FF000000"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M3 9l10 0" />
+        android:pathData="M5 6l0 .01" />
     <path
         android:strokeColor="#FF000000"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M9 13h-6" />
+        android:pathData="M5 12l0 .01" />
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M5 18l0 .01" />
 </vector>
