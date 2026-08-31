@@ -122,6 +122,8 @@ fun MozzShell(
     LaunchedEffect(wide) { if (wide) navShown.floatValue = 1f }
 
     val navBarPx = with(density) { Dock.navBarHeight.toPx() }
+    /** How far the sheet has to travel for the drag to have collapsed it fully. */
+    val dismissTravelPx = with(density) { DISMISS_TRAVEL.toPx() }
     val hideOnScroll = remember(navBarPx, wide) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -254,6 +256,27 @@ fun MozzShell(
                     expanded = false
                     scope.launch { p.animateTo(0f, MorphSpring) }
                 },
+                // The drag drives the same value the back gesture drives, so
+                // there is one collapse in the app rather than two that have to
+                // be kept looking alike.
+                onDismissDrag = { travelled ->
+                    scope.launch {
+                        p.snapTo((1f - travelled / dismissTravelPx).coerceIn(0f, 1f))
+                    }
+                },
+                onDismissEnd = { travelled ->
+                    scope.launch {
+                        // Past a third of the way down it goes; short of that it
+                        // springs back open, so a stray downward brush on the
+                        // artwork never costs you the player.
+                        if (travelled > dismissTravelPx * DISMISS_FRACTION) {
+                            expanded = false
+                            p.animateTo(0f, MorphSpring)
+                        } else {
+                            p.animateTo(1f, MorphSpring)
+                        }
+                    }
+                },
             )
         }
 
@@ -292,6 +315,18 @@ fun MozzShell(
  */
 internal val MorphSpring: AnimationSpec<Float> =
     spring(dampingRatio = 0.86f, stiffness = 380f)
+
+/**
+ * Travel that maps to the whole collapse.
+ *
+ * Shorter than the screen on purpose: a drag that had to cross a tablet's full
+ * height to put the player away would be a workout, and the gesture should read
+ * as a flick rather than a haul.
+ */
+private val DISMISS_TRAVEL = 340.dp
+
+/** How much of that travel commits the dismiss on release. */
+private const val DISMISS_FRACTION = 0.33f
 
 /**
  * The page for the selected tab.

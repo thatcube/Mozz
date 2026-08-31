@@ -60,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.onSizeChanged
@@ -69,6 +70,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.thatcube.mozz.R
@@ -113,6 +115,10 @@ internal fun PlayerBody(
     wide: Boolean,
     onCollapse: () -> Unit,
     onArtSlot: (Rect) -> Unit,
+    /** Live drag of the dismiss gesture, in pixels down from where it started. */
+    onDismissDrag: (Float) -> Unit,
+    /** Finger lifted, with its velocity in px/s — positive is downward. */
+    onDismissEnd: (Float) -> Unit,
 ) {
     val track = state.track ?: return
 
@@ -143,7 +149,16 @@ internal fun PlayerBody(
     }
 
     CompositionLocalProvider(LocalContentColor provides PlayerForeground) {
-        Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                // Drag the sheet down to put it away. Attached here rather than to
+                // the whole player so a scrolling queue keeps its own gestures:
+                // children see the pointer first, so a list that is scrolling
+                // consumes the drag before this ever sees it.
+                .dismissDrag(onDismissDrag, onDismissEnd),
+        ) {
             AnimatedVisibility(
                 visible = !immersive,
                 enter = fadeIn() + expandVertically(),
@@ -168,18 +183,23 @@ internal fun PlayerBody(
                 PlayerPresentation.PANEL_BESIDE -> Row(
                     modifier = Modifier.weight(1f).fillMaxWidth()
                         .padding(start = 32.dp, end = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Left: the record and its controls, with the output route
+                    // under them — the reference puts it at the bottom of this
+                    // column, not spread across the whole window.
                     Column(
                         modifier = Modifier.weight(1f).fillMaxHeight().widthIn(max = 620.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
                         ArtSlot(onArtSlot, Modifier.weight(1f, fill = false))
                         Spacer(Modifier.height(28.dp))
                         Chrome(state, playback)
+                        Spacer(Modifier.height(16.dp))
+                        RouteButton()
                     }
                     Spacer(Modifier.width(32.dp))
+                    // Right: the panel, with its two toggles sitting at the
+                    // bottom of the same column they act on.
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                         Panel(
                             panel = panel ?: PlayerPanel.QUEUE,
@@ -188,17 +208,26 @@ internal fun PlayerBody(
                             playback = playback,
                             library = library,
                             // Beside the artwork there is no need to repeat the
-                            // current track as a card — it is already the biggest
-                            // thing on the screen, in the next column.
+                            // current track as a card, or to offer shuffle and
+                            // repeat a second time — both are already in the
+                            // column next to this one.
                             showsNowPlayingCard = false,
+                            bottomInset = PANEL_BUTTONS_INSET,
                             onInteraction = { interactions++ },
                         )
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 4.dp, bottom = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PanelToggles(panel, onPanel)
+                        }
                     }
                 }
 
                 else -> Column(
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     // One box, two occupants. The cover is drawn into it by the
                     // morph; a panel, when there is one, takes the same space —
@@ -222,6 +251,7 @@ internal fun PlayerBody(
                                 // what is playing — and it is where the
                                 // travelling cover lands.
                                 showsNowPlayingCard = true,
+                                bottomInset = 0.dp,
                                 onInteraction = { interactions++ },
                             )
                         }
@@ -229,73 +259,116 @@ internal fun PlayerBody(
 
                     AnimatedVisibility(
                         visible = !immersive,
-                        enter = fadeIn(spring()) + expandVertically(spring()),
-                        exit = fadeOut(spring()) + shrinkVertically(spring()),
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically(),
                     ) {
                         Column {
                             Spacer(Modifier.height(24.dp))
                             Chrome(state, playback)
+                            Spacer(Modifier.height(8.dp))
+                            // One column, so the three controls share one row:
+                            // lyrics, route, queue — iOS's order.
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                PanelButton(
+                                    icon = R.drawable.ic_lyrics,
+                                    label = "Lyrics",
+                                    selected = panel == PlayerPanel.LYRICS,
+                                    onClick = {
+                                        onPanel(if (panel == PlayerPanel.LYRICS) null else PlayerPanel.LYRICS)
+                                    },
+                                )
+                                Spacer(Modifier.weight(1f))
+                                RouteButton()
+                                Spacer(Modifier.weight(1f))
+                                PanelButton(
+                                    icon = R.drawable.ic_queue,
+                                    label = "Queue",
+                                    selected = panel == PlayerPanel.QUEUE,
+                                    onClick = {
+                                        onPanel(if (panel == PlayerPanel.QUEUE) null else PlayerPanel.QUEUE)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
-            }
-
-            AnimatedVisibility(
-                visible = !immersive,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically(),
-            ) {
-                PlayerBottomBar(panel = panel, onPanel = onPanel)
             }
         }
     }
 }
 
 /**
- * The row along the bottom: lyrics, output route, queue.
+ * Drag the player down to dismiss it.
  *
- * iOS's order, so the two apps put the same control under the same thumb. The
- * two panel toggles are mutually exclusive and share a job — tapping one while
- * the other is open swaps between them rather than closing anything.
+ * The morph is already a single scrubbable value, so this is not a second
+ * animation — the finger drives exactly what the back gesture drives, and letting
+ * go hands the same value to the same spring.
  *
- * Persistent icons rather than labelled tabs. The panels are somewhere you go and
- * come back from, not a mode the player is in, and a lit icon says that better
- * than a selected tab does — it also stops the controls above from reflowing
- * every time a panel opens.
+ * Deliberately a plain drag detector on a parent rather than a nested-scroll
+ * connection: Compose gives children the pointer first, so a queue that is
+ * scrolling consumes the gesture and this never fires inside it. Dragging works
+ * on the artwork, the chrome and the empty space, which is where anyone reaches
+ * to put a sheet away.
+ */
+private fun Modifier.dismissDrag(
+    onDrag: (Float) -> Unit,
+    onEnd: (Float) -> Unit,
+): Modifier = this.pointerInput(Unit) {
+    var travelled = 0f
+    detectVerticalDragGestures(
+        onDragStart = { travelled = 0f },
+        onVerticalDrag = { change, delta ->
+            // Only downward travel dismisses; dragging up does nothing rather
+            // than winding the morph past its open state.
+            travelled = (travelled + delta).coerceAtLeast(0f)
+            if (travelled > 0f) change.consume()
+            onDrag(travelled)
+        },
+        onDragEnd = { onEnd(travelled) },
+        onDragCancel = { onEnd(0f) },
+    )
+}
+
+/** The two panel toggles, as a pair — they share a job and sit together. */
+@Composable
+private fun PanelToggles(panel: PlayerPanel?, onPanel: (PlayerPanel?) -> Unit) {
+    PanelButton(
+        icon = R.drawable.ic_lyrics,
+        label = "Lyrics",
+        selected = panel == PlayerPanel.LYRICS,
+        onClick = { onPanel(if (panel == PlayerPanel.LYRICS) null else PlayerPanel.LYRICS) },
+    )
+    PanelButton(
+        icon = R.drawable.ic_queue,
+        label = "Queue",
+        selected = panel == PlayerPanel.QUEUE,
+        onClick = { onPanel(if (panel == PlayerPanel.QUEUE) null else PlayerPanel.QUEUE) },
+    )
+}
+
+/**
+ * Where iOS shows the current output device and opens the AirPlay picker.
+ *
+ * Android's equivalent is Cast, which needs a MediaRouter and a receiver — real
+ * work, and not this pass. Present and quiet, because a control the layout is
+ * built around is harder to add back later than one that waits.
  */
 @Composable
-private fun PlayerBottomBar(panel: PlayerPanel?, onPanel: (PlayerPanel?) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PanelButton(
-            icon = R.drawable.ic_lyrics,
-            label = "Lyrics",
-            selected = panel == PlayerPanel.LYRICS,
-            onClick = { onPanel(if (panel == PlayerPanel.LYRICS) null else PlayerPanel.LYRICS) },
-        )
-        Spacer(Modifier.weight(1f))
-        // iOS shows the real output route here and opens the AirPlay picker.
-        // Android's equivalent is Cast, which is a receiver and a MediaRouter
-        // away — real work, not this pass. Present and quiet, because a control
-        // the layout assumes is harder to add back later than one that waits.
-        IconButton(onClick = {}, enabled = false) {
-            Icon(
-                painterResource(R.drawable.ic_cast),
-                contentDescription = "Cast (not yet available)",
-                tint = PlayerForegroundMuted.copy(alpha = 0.4f),
-            )
-        }
-        Spacer(Modifier.weight(1f))
-        PanelButton(
-            icon = R.drawable.ic_queue,
-            label = "Queue",
-            selected = panel == PlayerPanel.QUEUE,
-            onClick = { onPanel(if (panel == PlayerPanel.QUEUE) null else PlayerPanel.QUEUE) },
+private fun RouteButton() {
+    IconButton(onClick = {}, enabled = false) {
+        Icon(
+            painterResource(R.drawable.ic_cast),
+            contentDescription = "Cast (not yet available)",
+            tint = PlayerForegroundMuted.copy(alpha = 0.4f),
         )
     }
 }
+
+/** Room under the panel's last row so the toggles never sit on top of it. */
+private val PANEL_BUTTONS_INSET = 56.dp
 
 /** One panel toggle: a lit circle when its panel is open. */
 @Composable
@@ -357,11 +430,12 @@ private fun Panel(
     playback: PlayerController,
     library: MozzLibrary,
     showsNowPlayingCard: Boolean,
+    bottomInset: Dp,
     onInteraction: () -> Unit,
 ) {
     when (panel) {
-        PlayerPanel.QUEUE -> QueuePane(state, server, playback, showsNowPlayingCard)
-        PlayerPanel.LYRICS -> LyricsPane(state, library, onInteraction)
+        PlayerPanel.QUEUE -> QueuePane(state, server, playback, showsNowPlayingCard, bottomInset)
+        PlayerPanel.LYRICS -> LyricsPane(state, library, bottomInset, onInteraction)
     }
 }
 
@@ -384,6 +458,7 @@ private fun QueuePane(
     server: MozzServer,
     playback: PlayerController,
     showsNowPlayingCard: Boolean,
+    bottomInset: Dp,
 ) {
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
@@ -419,7 +494,7 @@ private fun QueuePane(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 8.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + bottomInset),
     ) {
         if (history.isNotEmpty()) {
             item(key = "history-header") {
@@ -445,8 +520,10 @@ private fun QueuePane(
             }
         }
 
-        item(key = "queue-controls") {
-            QueueControls(state, playback, Modifier.animateItem())
+        if (showsNowPlayingCard) {
+            item(key = "queue-controls") {
+                QueueControls(state, playback, Modifier.animateItem())
+            }
         }
 
         if (upNext.isNotEmpty()) {
@@ -778,6 +855,7 @@ private fun QueueRow(
 private fun LyricsPane(
     state: PlaybackState,
     library: MozzLibrary,
+    bottomInset: Dp,
     onInteraction: () -> Unit,
 ) {
     val track = state.track
@@ -818,7 +896,12 @@ private fun LyricsPane(
             else -> LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 32.dp, horizontal = 8.dp),
+                contentPadding = PaddingValues(
+                    top = 32.dp,
+                    bottom = 32.dp + bottomInset,
+                    start = 8.dp,
+                    end = 8.dp,
+                ),
             ) {
                 itemsIndexed(resolved.lines) { index, line ->
                     LyricLine(

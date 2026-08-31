@@ -78,6 +78,8 @@ internal fun MorphHost(
     expanded: Boolean,
     onOpen: () -> Unit,
     onCollapse: () -> Unit,
+    onDismissDrag: (Float) -> Unit,
+    onDismissEnd: (Float) -> Unit,
 ) {
     val track = state.track ?: return
 
@@ -148,6 +150,8 @@ internal fun MorphHost(
                 wide = wide,
                 onCollapse = onCollapse,
                 onArtSlot = { artSlot = it },
+                onDismissDrag = onDismissDrag,
+                onDismissEnd = onDismissEnd,
             )
         }
 
