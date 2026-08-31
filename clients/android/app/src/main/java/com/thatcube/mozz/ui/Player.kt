@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -144,6 +145,13 @@ fun PlayerScreen(
         if (wide || panel != PlayerPanel.LYRICS || !state.isPlaying) return@LaunchedEffect
         delay(IMMERSIVE_DELAY_MS)
         immersive = true
+    }
+
+    // Warm the next cover while the current one is still playing. Holding the
+    // previous artwork stops the black square; this is what stops the wait.
+    val context = LocalContext.current
+    LaunchedEffect(state.indexInQueue, state.queue.size) {
+        prefetchArtwork(server, context, state.queue.getOrNull(state.indexInQueue + 1), 1024)
     }
 
     BackHandler {

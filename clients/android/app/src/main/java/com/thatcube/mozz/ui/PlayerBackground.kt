@@ -1,6 +1,8 @@
 package com.thatcube.mozz.ui
 
 import android.graphics.Bitmap
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -67,7 +69,8 @@ private object ArtworkSampling {
     /** 48×48 ≈ 2.3k pixels — plenty to characterise a cover, cheap to scale. */
     const val SAMPLE_DIM = 48
 
-    /** Small on purpose: this image is histogrammed, never shown. */
+
+/** Small on purpose: this image is histogrammed, never shown. */
     const val REQUEST_SIZE = 240
 
     /** Drift amplitude as a fraction of the frame: alive without folding. */
@@ -114,10 +117,13 @@ fun PlayerBackground(
 ) {
     val context = LocalContext.current
     val fallback = androidx.compose.material3.MaterialTheme.colorScheme.background
-    var tones by remember(artworkKey) { mutableStateOf<ArtworkTones?>(null) }
+    // Deliberately not keyed on the artwork: the previous field stays up until
+    // the next one has been computed. Resetting to null between tracks is what
+    // made the background drop to black while the next cover loaded.
+    var tones by remember { mutableStateOf<ArtworkTones?>(null) }
 
     LaunchedEffect(serverId, artworkKey) {
-        tones = artworkKey?.let { key ->
+        val next = artworkKey?.let { key ->
             runCatching {
                 val pixels = withContext(Dispatchers.IO) {
                     val url = server.artworkUrl(serverId, key, ArtworkSampling.REQUEST_SIZE)
@@ -134,6 +140,9 @@ fun PlayerBackground(
                 library.artworkTones(pixels, ArtworkSampling.SAMPLE_DIM, ArtworkSampling.SAMPLE_DIM)
             }.getOrNull()
         }
+        // Same rule as the cover: only ever replaced by something real, so one
+        // track without artwork does not wash the field out to nothing.
+        if (next != null) tones = next
     }
 
     val palette = tones
@@ -143,9 +152,14 @@ fun PlayerBackground(
     }
 
     fun ArtworkTone.compose() = Color(red.toFloat(), green.toFloat(), blue.toFloat())
-    val top = palette.top.compose()
-    val middle = palette.middle.compose()
-    val bottom = palette.bottom.compose()
+
+    // The field drifts between albums rather than cutting. A cut announces the
+    // track change a beat before the music does, and the whole point of the
+    // backdrop is that it is ambient.
+    val fade = tween<Color>(durationMillis = TONE_FADE_MS, easing = FastOutSlowInEasing)
+    val top by animateColorAsState(palette.top.compose(), fade, label = "tone-top")
+    val middle by animateColorAsState(palette.middle.compose(), fade, label = "tone-middle")
+    val bottom by animateColorAsState(palette.bottom.compose(), fade, label = "tone-bottom")
     val still = LocalInspectionMode.current
     val transition = rememberInfiniteTransition(label = "backdrop")
 
@@ -221,3 +235,6 @@ fun PlayerBackground(
         )
     }
 }
+
+/** How long the field takes to become the next album. */
+private const val TONE_FADE_MS = 1400
