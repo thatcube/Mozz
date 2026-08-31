@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -13,8 +14,11 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlayEventKind
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.Track
+import com.thatcube.mozz.ui.ToastAction
+import com.thatcube.mozz.ui.ToastCenter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,10 +70,15 @@ class PlayerController(
     private val context: Context,
     private val server: MozzServer,
     private val library: MozzLibrary,
+    private val toasts: ToastCenter,
     private val scope: CoroutineScope,
 ) {
     private var controller: MediaController? = null
     private var queue: List<Track> = emptyList()
+
+    /** The retry schedule currently working against a failure, if any. */
+    private var retryJob: Job? = null
+    private var attemptsSpent = 0
 
     private val _state = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
@@ -89,7 +98,16 @@ class PlayerController(
     }
 
     suspend fun connect() {
-        if (controller != null) return
+        // `!= null` is not the same as usable. When the session goes away — the
+        // service stopped while nothing was playing, say — the controller we
+        // hold stays non-null and every command on it becomes a silent no-op.
+        // Left unchecked that is a player which never works again and never says
+        // why, until the app is killed.
+        controller?.let {
+            if (it.isConnected) return
+            it.release()
+            controller = null
+        }
         val token = SessionToken(
             context,
             ComponentName(context, MozzPlaybackService::class.java),
@@ -106,6 +124,27 @@ class PlayerController(
         media.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 publish(player)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                // The only breadcrumb anyone gets when this happens on a phone
+                // that is not plugged in. The error code is the part worth
+                // having: the message shown to the user is deliberately vague,
+                // and the code is what says whether it was the network, the
+                // server, or the file.
+                android.util.Log.w(
+                    "MozzPlayback",
+                    "playback failed (code ${error.errorCode} ${error.errorCodeName})",
+                    error,
+                )
+                noteFailure(describe(error))
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Sound came out, so whatever went wrong is over. Clearing on
+                // READY rather than on the retry call means a retry that fails
+                // again never gets credited with fixing anything.
+                if (playbackState == Player.STATE_READY) clearFailure()
             }
 
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
@@ -158,8 +197,16 @@ class PlayerController(
         if (window.isEmpty()) return@launch
         val start = startIndex.coerceIn(0, window.size - 1)
 
+        clearFailure()
         val first = window[start]
-        val firstItem = mediaItem(first) ?: return@launch
+        val firstItem = mediaItem(first)
+        if (firstItem == null) {
+            // No address for the very track that was tapped. Silently returning
+            // here is what made an unreachable server look like an app that
+            // ignores you.
+            noteFailure(UNREACHABLE)
+            return@launch
+        }
 
         queue = listOf(first)
         media.setMediaItems(listOf(firstItem), 0, 0)
@@ -216,12 +263,124 @@ class PlayerController(
             .build()
     }.getOrNull()
 
-    fun togglePlayPause() {
-        val media = controller ?: return
-        if (media.isPlaying) media.pause() else media.play()
+    // MARK: Failure and recovery
+
+    /**
+     * Media3 parks the player in IDLE after a fatal error, and IDLE ignores
+     * everything: play, seek and skip all return without doing anything. Only
+     * `prepare()` gets it moving again, so every control that could be pressed
+     * in this state has to check for it first. Without that, one dropped
+     * connection leaves the whole transport dead until the app is restarted —
+     * which is exactly what it looks like from the outside.
+     */
+    private fun Player.isStalled(): Boolean =
+        playbackState == Player.STATE_IDLE && playerError != null
+
+    /**
+     * Say what went wrong, and start — or continue — working on it.
+     *
+     * At most two toasts per outage, which is the whole point of counting the
+     * attempts. The first says what happened while the automatic retries run
+     * quietly behind it; the last, once those are spent, is the one that offers
+     * the button. A toast per attempt would be three apologies for one problem.
+     */
+    private fun noteFailure(message: String) {
+        val willRetry = attemptsSpent < RETRY_DELAYS_MS.size
+        if (attemptsSpent == 0) {
+            toasts.show(message)
+        } else if (!willRetry) {
+            toasts.show(message, ToastAction("Retry") { retry() })
+        }
+        if (!willRetry) return
+
+        val delayMs = RETRY_DELAYS_MS[attemptsSpent]
+        attemptsSpent++
+        retryJob?.cancel()
+        retryJob = scope.launch {
+            delay(delayMs)
+            reload()
+        }
     }
 
-    fun next() = controller?.seekToNextMediaItem()
+    private fun clearFailure() {
+        retryJob?.cancel()
+        retryJob = null
+        attemptsSpent = 0
+    }
+
+    /**
+     * Try the current track again, with a freshly resolved URL.
+     *
+     * Re-resolving rather than just re-preparing, because the URL is the thing
+     * most likely to have gone stale: it carries the server's token and, on a
+     * transcode, a session id. Preparing the same dead address again would only
+     * reproduce the same failure more slowly.
+     *
+     * The position is kept, so a drop-out thirty seconds into a song resumes
+     * thirty seconds into the song.
+     */
+    private suspend fun reload() {
+        val media = controller ?: return
+        val index = media.currentMediaItemIndex
+        val position = media.currentPosition.coerceAtLeast(0)
+        val track = queue.getOrNull(index)
+
+        if (track != null) {
+            val fresh = mediaItem(track)
+            if (fresh == null) {
+                // Could not even get an address. Same failure, next backoff.
+                noteFailure(UNREACHABLE)
+                return
+            }
+            media.replaceMediaItem(index, fresh)
+        }
+        media.seekTo(index, position)
+        media.prepare()
+        media.play()
+    }
+
+    /**
+     * The person asked for this one, so the backoff starts over.
+     *
+     * A retry someone pressed is worth more patience than the third automatic
+     * one: they have new information — they can see the wifi is back — that the
+     * schedule cannot.
+     */
+    fun retry() = scope.launch {
+        connect()
+        attemptsSpent = 0
+        retryJob?.cancel()
+        reload()
+    }
+
+    /** What went wrong, in a form worth putting in front of someone. */
+    private fun describe(error: PlaybackException): String = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The server refused this track"
+        PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "This track is not on the server"
+        // Everything else in the IO family is some flavour of "the bytes never
+        // arrived", and the distinctions below that are not ones anybody
+        // holding a phone can act on. Deliberately the whole range rather than
+        // the two or three codes seen so far: a failure classified as "unknown"
+        // because it was a socket error nobody had enumerated is how this ends
+        // up saying nothing useful again.
+        in PlaybackException.ERROR_CODE_IO_UNSPECIFIED..
+            PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE -> UNREACHABLE
+        else -> "This track would not play"
+    }
+
+    fun togglePlayPause() {
+        val media = controller ?: return
+        // Play, on a player stopped by an error, means "try again" — which is
+        // what anyone pressing it after a failure is asking for.
+        if (media.isStalled()) retry()
+        else if (media.isPlaying) media.pause() else media.play()
+    }
+
+    fun next() {
+        val media = controller ?: return
+        media.seekToNextMediaItem()
+        if (media.isStalled()) media.prepare()
+    }
 
     /**
      * Restart the track, or go back one if it has only just started.
@@ -237,6 +396,7 @@ class PlayerController(
         } else {
             media.seekToPreviousMediaItem()
         }
+        if (media.isStalled()) media.prepare()
     }
 
     fun seekTo(millis: Long) {
@@ -270,6 +430,7 @@ class PlayerController(
         val media = controller ?: return
         if (index in queue.indices) {
             media.seekTo(index, 0)
+            if (media.isStalled()) media.prepare()
             media.play()
         }
     }
@@ -311,6 +472,8 @@ class PlayerController(
     }
 
     fun release() {
+        retryJob?.cancel()
+        retryJob = null
         controller?.release()
         controller = null
     }
@@ -361,5 +524,22 @@ class PlayerController(
         // queue's worth of them is not a download.
         const val ARTWORK_SIZE = 768
         const val RESTART_THRESHOLD_MS = 3000L
+
+        /**
+         * What a server that will not answer is called, wherever we have to say
+         * it. One phrase, because it is one situation however we found out.
+         */
+        const val UNREACHABLE = "Can't reach the server"
+
+        /**
+         * How long to wait before each automatic retry.
+         *
+         * Three tries over about twenty seconds, widening as they go. Short
+         * enough that a wifi handover or a server hiccup is fixed before anyone
+         * reaches for the phone; finite because a server that is genuinely down
+         * should not be polled all night, and the play button is a better retry
+         * than a loop nobody asked for.
+         */
+        val RETRY_DELAYS_MS = longArrayOf(2_000, 6_000, 15_000)
     }
 }

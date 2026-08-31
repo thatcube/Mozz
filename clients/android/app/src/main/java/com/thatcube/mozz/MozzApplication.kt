@@ -11,6 +11,7 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.SecretStore
 import com.thatcube.mozz.playback.PlayerController
+import com.thatcube.mozz.ui.ToastCenter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.MainScope
@@ -51,6 +52,16 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
     val library: MozzLibrary by lazy { MozzLibrary(core) }
 
     /**
+     * Where anything in the app says a short thing to the person using it.
+     *
+     * Application-scoped for the same reason playback is: the thing with news
+     * to report often outlives the screen that was open when it happened. A
+     * playback failure is exactly that — it arrives from a media session that
+     * does not know or care which tab is showing.
+     */
+    val toasts: ToastCenter by lazy { ToastCenter(MainScope()) }
+
+    /**
      * Playback outlives any one screen — that is what a media session is for —
      * so the controller is owned here rather than by a ViewModel.
      */
@@ -59,6 +70,7 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             context = this,
             server = server,
             library = library,
+            toasts = toasts,
             scope = MainScope(),
         )
     }

@@ -1,6 +1,7 @@
 package com.thatcube.mozz.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -50,6 +51,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.draw.drawWithContent
@@ -93,6 +96,7 @@ import com.thatcube.mozz.playback.PlaybackState
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.playback.RepeatMode
 import com.thatcube.mozz.ui.theme.quietBody
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
@@ -613,7 +617,19 @@ private fun Panel(
             onShowArtwork = onShowArtwork,
             likes = likes,
         )
-        PlayerPanel.LYRICS -> LyricsPane(state, library, bottomInset, onInteraction)
+        PlayerPanel.LYRICS -> LyricsPane(
+            state = state,
+            server = server,
+            library = library,
+            showsNowPlayingCard = showsNowPlayingCard,
+            bottomInset = bottomInset,
+            onCardArtSlot = onCardArtSlot,
+            queueProgress = queueProgress,
+            panelSettled = panelSettled,
+            onShowArtwork = onShowArtwork,
+            likes = likes,
+            onInteraction = onInteraction,
+        )
     }
 }
 
@@ -1115,7 +1131,13 @@ private fun StarAndOverflow(likes: LikeControls) {
         }
         IconButton(onClick = {}, enabled = false) {
             Icon(
-                painterResource(R.drawable.ic_more),
+                // Vertical here, horizontal on iOS. The one place the two apps
+                // deliberately draw the same control differently: an overflow
+                // menu is one of the few glyphs each platform has actually
+                // taught its users, and they were taught opposite orientations.
+                // Nothing is lost by honouring both — the meaning lives in
+                // "three dots", not in which way they run.
+                painterResource(R.drawable.ic_more_vert),
                 contentDescription = "More (not yet available)",
                 tint = PlayerForegroundMuted.copy(alpha = 0.5f),
                 modifier = Modifier.size(22.dp),
@@ -1202,14 +1224,25 @@ private fun QueueRow(
 @Composable
 private fun LyricsPane(
     state: PlaybackState,
+    server: MozzServer,
     library: MozzLibrary,
+    showsNowPlayingCard: Boolean,
     bottomInset: Dp,
+    onCardArtSlot: (Rect) -> Unit,
+    queueProgress: () -> Float,
+    panelSettled: () -> Boolean,
+    onShowArtwork: () -> Unit,
+    likes: LikeControls,
     onInteraction: () -> Unit,
 ) {
     val track = state.track
     var lyrics by remember(track?.remoteId) { mutableStateOf<Lyrics?>(null) }
     var loading by remember(track?.remoteId) { mutableStateOf(true) }
     val listState = rememberLazyListState()
+    // The column's own height, which is what the focus anchor is a fraction of.
+    // Taken from the scrolling box rather than the pane, so the pinned card
+    // above it does not push the sung line off its mark.
+    var columnHeight by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(track?.remoteId) {
         val current = track ?: return@LaunchedEffect
@@ -1218,54 +1251,107 @@ private fun LyricsPane(
         loading = false
     }
 
-    val currentLine = lyrics?.lineIndex(state.positionMillis / 1000.0)
-
-    // Keep the sung line a third of the way down rather than at the very top:
-    // the lines just gone are as much of the context as the ones coming.
-    LaunchedEffect(currentLine) {
-        val index = currentLine ?: return@LaunchedEffect
-        listState.animateScrollToItem(index.coerceAtLeast(0), scrollOffset = -220)
+    val resolved = lyrics
+    // Null unless the lyrics are timed AND we have reached a line: with nothing
+    // being sung, every line reads at one even brightness rather than one of
+    // them being arbitrarily picked out. Same rule as iOS.
+    val active = if (resolved?.isSynced == true) {
+        resolved.lineIndex(state.positionMillis / 1000.0)
+    } else {
+        null
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) { detectTapGestures { onInteraction() } },
-        contentAlignment = Alignment.Center,
-    ) {
-        val resolved = lyrics
-        when {
-            loading -> Unit
-            resolved == null || resolved.isEmpty -> {
-                if (resolved?.staySilent != true) {
-                    Text("No lyrics for this song.", style = quietBody)
-                }
+    LaunchedEffect(active, columnHeight) {
+        val index = active ?: return@LaunchedEffect
+        if (columnHeight <= 0) return@LaunchedEffect
+        listState.animateScrollToItem(
+            index.coerceAtLeast(0),
+            scrollOffset = -(columnHeight * LyricDepth.FOCUS_ANCHOR).roundToInt(),
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // The same card the queue pins, showing the same four things: the
+        // cover, the title and artist, the rating, and the overflow. It is also
+        // where the travelling artwork docks, so switching between the two
+        // panels does not move the picture.
+        if (showsNowPlayingCard) {
+            track?.let {
+                NowPlayingCard(
+                    track = it,
+                    isPlaying = state.intendsToPlay,
+                    server = server,
+                    onArtSlot = onCardArtSlot,
+                    queueProgress = queueProgress,
+                    panelSettled = panelSettled,
+                    onTapArtwork = onShowArtwork,
+                    likes = likes,
+                )
             }
-            else -> LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    top = 32.dp,
-                    bottom = 32.dp + bottomInset,
-                    start = 8.dp,
-                    end = 8.dp,
-                ),
-            ) {
-                itemsIndexed(resolved.lines) { index, line ->
-                    LyricLine(
-                        text = line.text,
-                        sung = index == currentLine,
-                        alwaysLit = !resolved.isSynced,
-                    )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .onSizeChanged { columnHeight = it.height }
+                .pointerInput(Unit) { detectTapGestures { onInteraction() } },
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                loading -> Unit
+                resolved == null || resolved.isEmpty -> {
+                    if (resolved?.staySilent != true) {
+                        Text("No lyrics for this song.", style = quietBody)
+                    }
                 }
-                resolved.source?.let { source ->
-                    item {
-                        Text(
-                            "Lyrics from $source",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = PlayerForegroundMuted,
-                            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // Dissolve into the backdrop at the edges instead of
+                        // cutting off against them. Offscreen compositing is
+                        // what lets DstIn erase the alpha of what was drawn
+                        // rather than of the whole player behind it.
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            val top = (LyricDepth.TOP_FADE.dp.toPx() / size.height)
+                                .coerceIn(0f, 0.4f)
+                            val bottom = (LyricDepth.BOTTOM_FADE.dp.toPx() / size.height)
+                                .coerceIn(0f, 0.4f)
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    top to Color.Black,
+                                    1f - bottom to Color.Black,
+                                    1f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        },
+                    contentPadding = PaddingValues(
+                        top = 32.dp,
+                        bottom = 32.dp + bottomInset,
+                        start = 8.dp,
+                        end = 8.dp,
+                    ),
+                ) {
+                    itemsIndexed(resolved.lines) { index, line ->
+                        LyricLine(
+                            text = line.text,
+                            distance = active?.let { abs(index - it) },
                         )
+                    }
+                    resolved.source?.let { source ->
+                        item {
+                            Text(
+                                "Lyrics from $source",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = PlayerForegroundMuted,
+                                modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1274,27 +1360,42 @@ private fun LyricsPane(
 }
 
 /**
- * One line, lighting up as it is sung.
+ * One line, at its depth in the column.
  *
- * The change is animated rather than switched. A hard cut between two greys on
- * every line reads as flicker at the tempo of the song; an eased one reads as
- * the words arriving.
+ * Brightness says which line is being sung; blur says how far from it you are
+ * looking. Both are animated rather than switched — a hard cut between two
+ * states on every line reads as flicker at the tempo of the song, while an
+ * eased one reads as the words arriving.
+ *
+ * The blur is a no-op below API 31, which is a graceful place to lose it: the
+ * opacity ramp carries the depth on its own, and it is the half that actually
+ * tells you where you are.
  */
 @Composable
-private fun LyricLine(text: String, sung: Boolean, alwaysLit: Boolean) {
-    val lit by animateFloatAsState(
-        targetValue = if (sung || alwaysLit) 1f else 0f,
+private fun LyricLine(text: String, distance: Int?) {
+    val alpha by animateFloatAsState(
+        targetValue = LyricDepth.opacity(distance),
         animationSpec = tween(LYRIC_LIGHT_MS),
-        label = "lyric-line",
+        label = "lyric-alpha",
+    )
+    val softness by animateDpAsState(
+        targetValue = LyricDepth.blurRadius(distance).dp,
+        animationSpec = tween(LYRIC_LIGHT_MS),
+        label = "lyric-blur",
     )
     Text(
         text,
         style = MaterialTheme.typography.headlineSmall,
-        fontWeight = if (sung) FontWeight.Bold else FontWeight.Medium,
-        // Unsung lines recede rather than disappear, so the shape of the song
-        // stays readable.
-        color = androidx.compose.ui.graphics.lerp(PlayerForegroundMuted, PlayerForeground, lit),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        fontWeight = if (distance == 0) FontWeight.Bold else FontWeight.Medium,
+        color = PlayerForeground,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            // Unbounded: a blurred line has to be allowed to bleed past its own
+            // box, or the softening is sliced off square at the text bounds and
+            // reads as a rendering fault rather than as depth.
+            .blur(softness, BlurredEdgeTreatment.Unbounded)
+            .graphicsLayer { this.alpha = alpha },
     )
 }
 

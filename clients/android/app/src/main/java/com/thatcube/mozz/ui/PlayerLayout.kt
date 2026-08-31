@@ -336,3 +336,64 @@ data class Morph(
 
 internal fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
+/**
+ * The depth-of-field a lyric column is read through.
+ *
+ * iOS's ramp, line for line, so the two apps make the same words legible at the
+ * same moment. Kept here with the rest of the portable rules rather than in
+ * either client's view code: it is a description of how the panel reads, not of
+ * how one platform draws.
+ *
+ * `distance` is how many lines away from the one being sung, or null when
+ * nothing is — unsynced lyrics, or the run-up before the first timestamp — in
+ * which case every line sits at one calm, even brightness with no blur.
+ */
+object LyricDepth {
+
+    /** How many lines either side of the current one stay perfectly sharp. */
+    const val SHARP_RADIUS = 1
+
+    /** Added softness, in dp, per line beyond the sharp radius. */
+    const val BLUR_STEP = 1.1f
+
+    /** The most any line is softened, however far away it is. */
+    const val BLUR_CEILING = 3.5f
+
+    fun opacity(distance: Int?): Float = when (distance) {
+        null -> 0.8f
+        0 -> 1f
+        1 -> 0.4f
+        2 -> 0.28f
+        else -> 0.2f
+    }
+
+    /**
+     * The lines you are about to read stay SHARP. Softening starts a couple of
+     * lines out, so the blur reads as the column receding towards its edges
+     * rather than as a spotlight on one line: by the time a line is soft it is
+     * also close to scrolling off, which is the only place unreadable is the
+     * right answer.
+     *
+     * Blurring the immediate neighbours is the version that fights the reader.
+     * The next line is the one being sung in a moment and the eye is already on
+     * it; softening it means spending the bar squinting at words you are about
+     * to hear. Dimming is enough on its own to say which line is current.
+     */
+    fun blurRadius(distance: Int?): Float {
+        val beyond = (distance ?: return 0f) - SHARP_RADIUS
+        if (beyond <= 0) return 0f
+        return minOf(BLUR_CEILING, beyond * BLUR_STEP)
+    }
+
+    /** How far the column dissolves into the backdrop at its top edge, in dp. */
+    const val TOP_FADE = 56f
+
+    /** And at its bottom, where there is more still to come. */
+    const val BOTTOM_FADE = 72f
+
+    /**
+     * Where the line being sung sits in the column: a third of the way down
+     * rather than dead centre, so there is more room to read ahead than behind.
+     */
+    const val FOCUS_ANCHOR = 0.34f
+}

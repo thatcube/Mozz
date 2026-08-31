@@ -297,20 +297,30 @@ struct PlayerLyricsPanel<Card: View>: View {
     /// How soft a line is given its distance from the active one — the depth-of-
     /// field that makes the current line pop off the page.
     ///
-    /// A gentle ramp with a low ceiling. The words either side of the current line
-    /// should read as *out of focus*, not erased: you want to still catch the shape
-    /// of what's coming. Pushing the radius much past the cap turns everything
-    /// beyond the neighbours into an unreadable smear, which reads as a rendering
-    /// bug rather than depth.
+    /// The lines you are about to read stay SHARP. Softening starts a couple of
+    /// lines out and ramps from there, so the blur reads as the column receding
+    /// towards its edges rather than as a spotlight on one line: by the time a
+    /// line is soft it is also close to scrolling off, which is the only place
+    /// unreadable is the right answer.
+    ///
+    /// Blurring the immediate neighbours is the version that fights the reader.
+    /// The next line is the one being sung in a moment, and the eye is already
+    /// on it; softening it means you spend the bar squinting at the words you
+    /// are about to hear. Dimming those lines is enough on its own to say which
+    /// one is current — that is what `opacity(forDistance:)` is for.
     static func blur(forDistance distance: Int?) -> CGFloat {
-        guard let distance, distance > 0 else { return 0 }
-        return min(blurCeiling, CGFloat(distance) * blurStep)
+        guard let distance else { return 0 }
+        let beyond = distance - sharpRadius
+        guard beyond > 0 else { return 0 }
+        return min(blurCeiling, CGFloat(beyond) * blurStep)
     }
 
-    /// Added softness per line of distance from the current one.
-    private static var blurStep: CGFloat { 1.5 }
+    /// How many lines either side of the current one stay perfectly sharp.
+    private static var sharpRadius: Int { 1 }
+    /// Added softness per line beyond the sharp radius.
+    private static var blurStep: CGFloat { 1.1 }
     /// The most any line is softened, however far away it is.
-    private static var blurCeiling: CGFloat { 4.5 }
+    private static var blurCeiling: CGFloat { 3.5 }
 
     /// Dissolves the lines into the backdrop at the top and bottom of the column
     /// rather than letting them cut off against a hard edge.

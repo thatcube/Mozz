@@ -80,6 +80,7 @@ fun MozzShell(
     library: MozzLibrary,
     server: MozzServer,
     playback: PlayerController,
+    toasts: ToastCenter,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -364,6 +365,23 @@ fun MozzShell(
                 },
             )
         }
+
+        // Last, so it is on top of everything including the open player.
+        //
+        // iOS keeps its toasts *below* the full-player morph, and for the
+        // things iOS raises them about — "Don't recommend", "Removed download",
+        // all of them started from a list — that is right. This one also
+        // carries playback failures, and the screen someone is most likely to
+        // be looking at when playback fails is the player itself. A message
+        // that is hidden exactly where it is needed is not a message.
+        ToastOverlay(
+            toasts = toasts,
+            // Clear of the bottom furniture: the navigation bar and the dock.
+            // With the player open that furniture is not there, but the number
+            // still lands the card above the transport rather than over it.
+            bottomInset = Dock.reserve(hasTrack, hasBottomNav = !wide),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
         // The back ladder. Only the player's own collapse is scrubbable — the
         // other rungs are state changes with nothing to drag, and giving them a

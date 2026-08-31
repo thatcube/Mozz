@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
                 library = (application as MozzApplication).library,
                 server = (application as MozzApplication).server,
                 playback = (application as MozzApplication).playback,
+                toasts = (application as MozzApplication).toasts,
                 onResync = viewModel::resync,
                 onSignOut = viewModel::signOut,
             )
