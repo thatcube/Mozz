@@ -37,6 +37,7 @@ import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,9 +81,17 @@ fun HomeScreen(
     // The shell's directive, not one of our own: the two must agree about how
     // many columns this window has, or the app shows a phone's navigation over a
     // tablet's layout.
-    val navigator = rememberListDetailPaneScaffoldNavigator<String>(
-        scaffoldDirective = directive,
-    )
+    //
+    // Keyed on the partition count because the activity survives a fold — it
+    // declares `configChanges` so the music does not stop — and the navigator
+    // therefore keeps whatever directive it was built with. Passing the new one
+    // as a parameter is not enough: folding a two-pane layout onto the cover
+    // screen left the album detail sitting beside the list on a single column.
+    // Rebuilding it costs the open destination, which is the right trade: folding
+    // the phone shut is a reasonable moment to be handed back the list.
+    val navigator = key(directive.maxHorizontalPartitions) {
+        rememberListDetailPaneScaffoldNavigator<String>(scaffoldDirective = directive)
+    }
     val scope = rememberCoroutineScope()
 
     var liked by remember { mutableStateOf<List<Track>>(emptyList()) }

@@ -98,8 +98,13 @@ internal fun MorphHost(
      * True once the cover has arrived in the card's slot, at which point the
      * card's own artwork takes over so it can scroll and clip with the list. The
      * swap happens at a coincident position, so it reads as nothing at all.
+     *
+     * Gated on the player actually being open. The panel is a remembered choice,
+     * not a thing that closes when the player does, so without this a collapsed
+     * dock whose queue happened to be open hid its own cover — handing off to a
+     * card that was nowhere on screen.
      */
-    val panelSettled = { queueProgress() > 0.995f }
+    val panelSettled = { expanded && queueProgress() > 0.995f }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // The surface. One rounded rectangle that is a pill at rest and the whole
