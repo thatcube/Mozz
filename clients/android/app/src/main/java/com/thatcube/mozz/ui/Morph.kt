@@ -41,7 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.R
-import com.thatcube.mozz.core.LikeGlyph
+import com.thatcube.mozz.core.ServerCapabilities
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.playback.PlaybackState
@@ -75,7 +75,7 @@ internal fun MorphHost(
     panel: PlayerPanel?,
     onPanel: (PlayerPanel?) -> Unit,
     wide: Boolean,
-    likeGlyph: LikeGlyph,
+    capabilities: ServerCapabilities?,
     /** Target state, not progress: a boolean that flips twice per open, so the
      *  touch gating below costs two recompositions rather than one per frame. */
     expanded: Boolean,
@@ -176,7 +176,7 @@ internal fun MorphHost(
                 panel = panel,
                 onPanel = onPanel,
                 wide = wide,
-                likeGlyph = likeGlyph,
+                capabilities = capabilities,
                 onCollapse = onCollapse,
                 onArtSlot = { artSlot = it },
                 onCardArtSlot = { cardSlot = it },

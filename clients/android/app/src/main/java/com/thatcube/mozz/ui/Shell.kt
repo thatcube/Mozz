@@ -294,7 +294,7 @@ fun MozzShell(
                 panel = panel,
                 onPanel = { panel = it },
                 wide = wide,
-                likeGlyph = capabilities?.likeGlyph ?: LikeGlyph.HEART,
+                capabilities = capabilities,
                 expanded = expanded,
                 mounted = playerMounted,
                 dockMounted = dockMounted,

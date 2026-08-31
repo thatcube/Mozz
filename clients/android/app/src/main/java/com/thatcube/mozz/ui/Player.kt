@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.thatcube.mozz.R
 import com.thatcube.mozz.core.LikeGlyph
+import com.thatcube.mozz.core.ServerCapabilities
 import com.thatcube.mozz.core.Lyrics
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
@@ -126,8 +127,8 @@ internal fun PlayerBody(
     panel: PlayerPanel?,
     onPanel: (PlayerPanel?) -> Unit,
     wide: Boolean,
-    /** Heart or star — the server's answer, not the client's guess. */
-    likeGlyph: LikeGlyph,
+    /** What this server means by "liked", and how to change it. */
+    capabilities: ServerCapabilities?,
     onCollapse: () -> Unit,
     onArtSlot: (Rect) -> Unit,
     /** Where the queue card's thumbnail landed — the cover's second destination. */
@@ -167,19 +168,42 @@ internal fun PlayerBody(
     // from the database when playback started, so nothing would refresh it.
     val scope = rememberCoroutineScope()
     var likeOverride by remember(track.remoteId) { mutableStateOf<Boolean?>(null) }
-    val liked = likeOverride ?: track.isLiked
-    val toggleLike: () -> Unit = {
-        val next = !liked
-        likeOverride = next
-        scope.launch {
-            val settled = runCatching {
-                library.setLiked(track.serverId, track.remoteId, next, playback.deviceId)
-            }.getOrNull()
-            // Snap back if the core disagreed; it owns the policy for what a like
-            // means on this backend.
-            if (settled != null) likeOverride = settled
-        }
-    }
+    var ratingEdited by remember(track.remoteId) { mutableStateOf(false) }
+    var ratingValue by remember(track.remoteId) { mutableStateOf<Double?>(null) }
+
+    val rating = if (ratingEdited) ratingValue else track.rating
+    val liked = likeOverride
+        ?: if (ratingEdited) (rating ?: 0.0) >= LIKE_THRESHOLD else track.isLiked
+
+    val likes = LikeControls(
+        usesRatings = capabilities?.supportsRatings == true,
+        glyph = capabilities?.likeGlyph ?: LikeGlyph.HEART,
+        liked = liked,
+        rating = rating,
+        onToggleLike = {
+            val next = !liked
+            likeOverride = next
+            ratingEdited = false
+            scope.launch {
+                val settled = runCatching {
+                    library.setLiked(track.serverId, track.remoteId, next, playback.deviceId)
+                }.getOrNull()
+                // Snap back if the core disagreed; it owns the policy for what a
+                // like means on this backend.
+                if (settled != null) likeOverride = settled
+            }
+        },
+        onSetRating = { stars ->
+            ratingEdited = true
+            ratingValue = stars
+            likeOverride = null
+            scope.launch {
+                runCatching {
+                    library.setRating(track.serverId, track.remoteId, stars, playback.deviceId)
+                }
+            }
+        },
+    )
 
     // Warm the next cover while the current one is still playing. Holding the
     // previous artwork stops the black square; this is what stops the wait.
@@ -243,7 +267,7 @@ internal fun PlayerBody(
                         Spacer(Modifier.height(28.dp))
                         Chrome(
                             state, playback, queueProgress, panelOpen = false,
-                            likeGlyph = likeGlyph, liked = liked, onToggleLike = toggleLike,
+                            likes = likes,
                         )
                     }
                     Spacer(Modifier.width(32.dp))
@@ -266,9 +290,7 @@ internal fun PlayerBody(
                             queueProgress = queueProgress,
                             panelSettled = panelSettled,
                             onShowArtwork = { onPanel(null) },
-                            likeGlyph = likeGlyph,
-                            liked = liked,
-                            onToggleLike = toggleLike,
+                            likes = likes,
                             onInteraction = { interactions++ },
                         )
                     }
@@ -311,9 +333,7 @@ internal fun PlayerBody(
                                 queueProgress = queueProgress,
                                 panelSettled = panelSettled,
                                 onShowArtwork = { onPanel(null) },
-                                likeGlyph = likeGlyph,
-                                liked = liked,
-                                onToggleLike = toggleLike,
+                                likes = likes,
                                 onInteraction = { interactions++ },
                             )
                         }
@@ -328,7 +348,7 @@ internal fun PlayerBody(
                             Spacer(Modifier.height(24.dp))
                             Chrome(
                                 state, playback, queueProgress, panelOpen = panel != null,
-                                likeGlyph = likeGlyph, liked = liked, onToggleLike = toggleLike,
+                                likes = likes,
                             )
                         }
                     }
@@ -498,12 +518,10 @@ private fun Chrome(
     playback: PlayerController,
     queueProgress: () -> Float,
     panelOpen: Boolean,
-    likeGlyph: LikeGlyph,
-    liked: Boolean,
-    onToggleLike: () -> Unit,
+    likes: LikeControls,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        HeroTitles(state, queueProgress, likeGlyph, liked, onToggleLike)
+        HeroTitles(state, queueProgress, likes)
         Spacer(Modifier.height(20.dp))
         Scrubber(state, playback)
         Spacer(Modifier.height(16.dp))
@@ -530,9 +548,7 @@ private fun Chrome(
 private fun HeroTitles(
     state: PlaybackState,
     queueProgress: () -> Float,
-    likeGlyph: LikeGlyph,
-    liked: Boolean,
-    onToggleLike: () -> Unit,
+    likes: LikeControls,
 ) {
     Box(
         modifier = Modifier
@@ -549,7 +565,7 @@ private fun HeroTitles(
                 alpha = 1f - fadeProgress(q)
             },
     ) {
-        TrackTitles(state, likeGlyph, liked, onToggleLike)
+        TrackTitles(state, likes)
     }
 }
 
@@ -579,9 +595,7 @@ private fun Panel(
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
     onShowArtwork: () -> Unit,
-    likeGlyph: LikeGlyph,
-    liked: Boolean,
-    onToggleLike: () -> Unit,
+    likes: LikeControls,
     onInteraction: () -> Unit,
 ) {
     when (panel) {
@@ -595,9 +609,7 @@ private fun Panel(
             queueProgress = queueProgress,
             panelSettled = panelSettled,
             onShowArtwork = onShowArtwork,
-            likeGlyph = likeGlyph,
-            liked = liked,
-            onToggleLike = onToggleLike,
+            likes = likes,
         )
         PlayerPanel.LYRICS -> LyricsPane(state, library, bottomInset, onInteraction)
     }
@@ -627,9 +639,7 @@ private fun QueuePane(
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
     onShowArtwork: () -> Unit,
-    likeGlyph: LikeGlyph,
-    liked: Boolean,
-    onToggleLike: () -> Unit,
+    likes: LikeControls,
 ) {
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
@@ -699,9 +709,7 @@ private fun QueuePane(
                         queueProgress = queueProgress,
                         panelSettled = panelSettled,
                         onTapArtwork = onShowArtwork,
-                        likeGlyph = likeGlyph,
-                        liked = liked,
-                        onToggleLike = onToggleLike,
+                        likes = likes,
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -973,9 +981,7 @@ private fun NowPlayingCard(
     queueProgress: () -> Float,
     panelSettled: () -> Boolean,
     onTapArtwork: () -> Unit,
-    likeGlyph: LikeGlyph,
-    liked: Boolean,
-    onToggleLike: () -> Unit,
+    likes: LikeControls,
     modifier: Modifier = Modifier,
 ) {
     val breathe by animateFloatAsState(
@@ -1048,7 +1054,7 @@ private fun NowPlayingCard(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            StarAndOverflow(likeGlyph, liked, onToggleLike)
+            StarAndOverflow(likes)
         }
     }
 }
@@ -1074,28 +1080,30 @@ private const val PAUSED_CARD_SHRINK = 0.06f
  * about whether it took would be worse than one that only reports.
  */
 @Composable
-private fun StarAndOverflow(likeGlyph: LikeGlyph, liked: Boolean, onToggleLike: () -> Unit) {
+private fun StarAndOverflow(likes: LikeControls) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        // A heart where the server has favourites, a star where it has ratings —
-        // Jellyfin and Plex genuinely mean different things by "liked", and the
-        // glyph should say which one you are setting.
-        val glyph = when (likeGlyph) {
-            LikeGlyph.HEART -> if (liked) R.drawable.ic_heart_filled else R.drawable.ic_heart
-            LikeGlyph.STAR -> if (liked) R.drawable.ic_star_filled else R.drawable.ic_star
-        }
-        Box(
-            modifier = Modifier
-                .size(MIN_HIT)
-                .clip(RoundedCornerShape(percent = 50))
-                .clickable(onClick = onToggleLike),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painterResource(glyph),
-                contentDescription = if (liked) "Liked" else "Not liked",
-                tint = if (liked) PlayerForeground else PlayerForegroundMuted,
-                modifier = Modifier.size(24.dp),
-            )
+        // Where the server keeps stars, this is a rating control and a like is
+        // just five of them; where it keeps favourites, it is a heart and there
+        // is nothing finer to set. iOS forks on the same question.
+        if (likes.usesRatings) {
+            FluidRatingControl(rating = likes.rating, onSet = likes.onSetRating)
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(MIN_HIT)
+                    .clip(RoundedCornerShape(percent = 50))
+                    .clickable(onClick = likes.onToggleLike),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painterResource(
+                        if (likes.liked) R.drawable.ic_heart_filled else R.drawable.ic_heart
+                    ),
+                    contentDescription = if (likes.liked) "Liked" else "Not liked",
+                    tint = if (likes.liked) PlayerForeground else PlayerForegroundMuted,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
         }
         IconButton(onClick = {}, enabled = false) {
             Icon(
@@ -1293,9 +1301,7 @@ private fun LyricLine(text: String, sung: Boolean, alwaysLit: Boolean) {
 @Composable
 private fun TrackTitles(
     state: PlaybackState,
-    likeGlyph: LikeGlyph,
-    liked: Boolean,
-    onToggleLike: () -> Unit,
+    likes: LikeControls,
 ) {
     val track = state.track ?: return
 
@@ -1317,7 +1323,7 @@ private fun TrackTitles(
             )
         }
         Spacer(Modifier.width(8.dp))
-        StarAndOverflow(likeGlyph, liked, onToggleLike)
+        StarAndOverflow(likes)
     }
 }
 
@@ -1590,7 +1596,7 @@ private fun PlayButton(isPlaying: Boolean, onClick: () -> Unit) {
 private val UTILITY_GLYPH = 26.dp
 private val SKIP_GLYPH = 40.dp
 private val PLAY_GLYPH = 60.dp
-private val MIN_HIT = 48.dp
+internal val MIN_HIT = 48.dp
 private val SKIP_HIT = 60.dp
 private val PLAY_HIT = 76.dp
 
@@ -1617,3 +1623,19 @@ private const val PANEL_SWAP_MS = 180
 
 /** Slow enough to read as the word arriving rather than a colour switching. */
 private const val LYRIC_LIGHT_MS = 220
+
+/**
+ * The like control's whole surface, bundled so it can be handed down without a
+ * train of parameters behind it.
+ */
+internal data class LikeControls(
+    val usesRatings: Boolean,
+    val glyph: LikeGlyph,
+    val liked: Boolean,
+    val rating: Double?,
+    val onToggleLike: () -> Unit,
+    val onSetRating: (Double?) -> Unit,
+)
+
+/** Four stars and up is a like. Matches `LikePolicy.ratingThreshold` in the core. */
+private const val LIKE_THRESHOLD = 4.0
