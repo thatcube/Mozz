@@ -75,7 +75,7 @@ class MozzCore private constructor(private val handle: Long) : Closeable {
 suspend inline fun <reified T> MozzCore.call(request: CoreRequest): T? {
     val text = callRaw(MozzCore.json.encodeToString(request.copy(id = nextId())))
     val envelope = MozzCore.json.decodeFromString<Envelope<T>>(text)
-    if (!envelope.ok) throw MozzCoreException(envelope.error ?: "unknown error")
+    if (!envelope.ok) coreFailure(request.cmd, envelope.error)
     return envelope.payload
 }
 
@@ -90,8 +90,22 @@ suspend inline fun <reified T> MozzCore.require(request: CoreRequest): T =
 suspend inline fun <reified T> MozzCore.callPage(request: CoreRequest): Page<T> {
     val text = callRaw(MozzCore.json.encodeToString(request.copy(id = nextId())))
     val envelope = MozzCore.json.decodeFromString<Envelope<T>>(text)
-    if (!envelope.ok) throw MozzCoreException(envelope.error ?: "unknown error")
+    if (!envelope.ok) coreFailure(request.cmd, envelope.error)
     return Page(envelope.payload, envelope.nextCursor)
+}
+
+/**
+ * Fail loudly, then throw.
+ *
+ * Every caller of the helpers above wraps them in `runCatching` — one artwork
+ * URL that will not resolve should not take down a screen — which means an FFI
+ * error otherwise leaves no trace anywhere. This is the only place it is
+ * guaranteed to be seen, so it logs before it throws.
+ */
+fun coreFailure(cmd: String, message: String?): Nothing {
+    val text = message ?: "unknown error"
+    android.util.Log.w("Mozz", "core refused $cmd: $text")
+    throw MozzCoreException(text)
 }
 
 class MozzCoreException(message: String) : Exception(message)

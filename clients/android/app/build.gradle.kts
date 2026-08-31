@@ -44,6 +44,10 @@ android {
 
     buildFeatures {
         compose = true
+        // Needed only to tell a debug build from a release one at runtime, which
+        // gates the image logger — it prints artwork URLs, and those carry the
+        // server token.
+        buildConfig = true
     }
 
     compileOptions {

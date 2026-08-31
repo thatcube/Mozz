@@ -1,6 +1,11 @@
 package com.thatcube.mozz
 
 import android.app.Application
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.util.DebugLogger
 import com.thatcube.mozz.core.MozzCore
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
@@ -19,7 +24,25 @@ import java.io.File
  * It is never closed: the process ending is what closes it, and Android gives no
  * reliable "app is quitting" callback to do it in.
  */
-class MozzApplication : Application() {
+class MozzApplication : Application(), SingletonImageLoader.Factory {
+
+    /**
+     * Coil's loader, built here rather than left to its defaults.
+     *
+     * The network fetcher is registered explicitly rather than left to
+     * `ServiceLoader` discovery, which does not survive this build: without it
+     * every cover in the app failed to load, silently, because Coil treats a
+     * missing fetcher the same as an image that has not arrived yet.
+     *
+     * The logger is debug-only on purpose. Artwork URLs carry the Plex token as a
+     * query parameter, and logcat is readable by more than this app — a token in
+     * a release log is a credential leak, not a diagnostic.
+     */
+    override fun newImageLoader(context: PlatformContext): ImageLoader =
+        ImageLoader.Builder(context)
+            .components { add(OkHttpNetworkFetcherFactory()) }
+            .apply { if (BuildConfig.DEBUG) logger(DebugLogger()) }
+            .build()
 
     val core: MozzCore by lazy {
         MozzCore.open(File(filesDir, "library.sqlite").absolutePath)
