@@ -227,12 +227,15 @@ data class Morph(
     val surfaceHeight: Float get() = lerp(dockBottom, height, p) - surfaceTop
 
     /**
-     * Square at the pill, square-ish at full screen, and never a stadium in
-     * between: the radius eases to a large-but-finite corner rather than to zero,
-     * because a rectangle with hard corners appearing mid-gesture reads as the
-     * animation breaking.
+     * The surface's corner, from the pill's to the open player's.
+     *
+     * Never square. It used to ease to zero, which meant the moment you started
+     * pulling the player down its top corners were hard — a sheet with square
+     * corners does not read as sitting over anything. iOS keeps 24pt at full
+     * screen for the same reason, and the library showing through those corners
+     * is the point rather than a leak.
      */
-    val surfaceRadius: Float get() = lerp(dockRadiusPx, 0f, easeOutQuad(p))
+    val surfaceRadius: Float get() = lerp(dockRadiusPx, expandedRadiusPx, p)
 
     // Travelling artwork ------------------------------------------------------
     //
@@ -306,6 +309,9 @@ data class Morph(
     /** The artwork backdrop, which has to be there before the body it sits behind. */
     val backdropAlpha: Float get() = ((p - 0.12f) / 0.38f).coerceIn(0f, 1f)
 
+    /** iOS's `expandedRadius`, expressed against the dock's own corner. */
+    val expandedRadiusPx: Float get() = dockRadiusPx * 1.33f
+
     private val expandedArtInsetPx: Float get() = dockMarginPx * 2.6f
     private val expandedArtRadiusPx: Float get() = dockArtRadiusPx * 2.2f
     private val cardArtRadiusPx: Float get() = dockArtRadiusPx * 1.4f
@@ -314,4 +320,3 @@ data class Morph(
 
 internal fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-private fun easeOutQuad(t: Float): Float = 1f - (1f - t) * (1f - t)

@@ -176,8 +176,10 @@ internal fun PlayerBody(
         ?: if (ratingEdited) (rating ?: 0.0) >= LIKE_THRESHOLD else track.isLiked
 
     val likes = LikeControls(
-        usesRatings = capabilities?.supportsRatings == true,
-        glyph = capabilities?.likeGlyph ?: LikeGlyph.HEART,
+        // Null until the server has answered, which is a different thing from
+        // "no". Nothing is drawn in that case — see StarAndOverflow.
+        usesRatings = capabilities?.supportsRatings,
+        glyph = capabilities?.likeGlyph,
         liked = liked,
         rating = rating,
         onToggleLike = {
@@ -1085,7 +1087,13 @@ private fun StarAndOverflow(likes: LikeControls) {
         // Where the server keeps stars, this is a rating control and a like is
         // just five of them; where it keeps favourites, it is a heart and there
         // is nothing finer to set. iOS forks on the same question.
-        if (likes.usesRatings) {
+        //
+        // Until the server has answered, neither is drawn. A guess here is not a
+        // neutral placeholder: a heart that becomes a star a moment later has
+        // claimed this library works a way it does not.
+        if (likes.usesRatings == null) {
+            Spacer(Modifier.width(MIN_HIT))
+        } else if (likes.usesRatings) {
             FluidRatingControl(rating = likes.rating, onSet = likes.onSetRating)
         } else {
             Box(
@@ -1629,8 +1637,9 @@ private const val LYRIC_LIGHT_MS = 220
  * train of parameters behind it.
  */
 internal data class LikeControls(
-    val usesRatings: Boolean,
-    val glyph: LikeGlyph,
+    /** Null while the server has not said yet. */
+    val usesRatings: Boolean?,
+    val glyph: LikeGlyph?,
     val liked: Boolean,
     val rating: Double?,
     val onToggleLike: () -> Unit,

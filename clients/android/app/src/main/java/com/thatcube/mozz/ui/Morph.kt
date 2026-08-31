@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -162,7 +163,31 @@ internal fun MorphHost(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = frame().bodyAlpha }
+                .graphicsLayer {
+                    val m = frame()
+                    alpha = m.bodyAlpha
+                    // Travel with the surface rather than merely fading in place.
+                    // The body is laid out full-screen and kept that way — a
+                    // child of the morphing surface would be re-measured every
+                    // frame, which is what the queue can least afford — so it
+                    // takes the surface's transform here instead, in the draw
+                    // phase. Anchored top-centre because that is the corner the
+                    // surface itself is pinned by as it shrinks toward the pill.
+                    transformOrigin = TransformOrigin(0.5f, 0f)
+                    translationY = m.surfaceTop
+                    translationX = (m.surfaceLeft + m.surfaceWidth / 2f) - m.width / 2f
+                    val shrink = if (m.width > 0f) m.surfaceWidth / m.width else 1f
+                    scaleX = shrink
+                    scaleY = shrink
+                    // Clipped to the surface's corner, divided back out by the
+                    // scale so it lands on exactly that radius once transformed.
+                    // Without this the body's square corners show outside the
+                    // rounded surface it is supposed to be inside.
+                    shape = RoundedCornerShape(
+                        if (shrink > 0f) m.surfaceRadius / shrink else m.surfaceRadius
+                    )
+                    clip = true
+                }
                 // During the collapse it is still on screen but no longer the
                 // thing being used, so it stops taking touches a beat early.
                 .then(if (expanded) Modifier else Modifier.blockTouches()),

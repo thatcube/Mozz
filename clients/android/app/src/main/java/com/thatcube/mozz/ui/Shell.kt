@@ -142,11 +142,15 @@ fun MozzShell(
      */
     var dockMounted by remember { mutableStateOf(true) }
 
-    // What this server can do, asked once. The like control differs per backend
-    // and the client should not be guessing from its name.
-    var capabilities by remember(account.serverId) { mutableStateOf<ServerCapabilities?>(null) }
+    // What this server can do. Seeded from the last answer so the like control
+    // is right the moment it appears, then refreshed — asking costs a round trip,
+    // and a control that guesses and corrects itself has told the user something
+    // false about their own library in between.
+    var capabilities by remember(account.serverId) {
+        mutableStateOf(server.cachedCapabilities(account.serverId))
+    }
     LaunchedEffect(account.serverId) {
-        capabilities = runCatching { server.capabilities(account.serverId) }.getOrNull()
+        runCatching { server.capabilities(account.serverId) }.getOrNull()?.let { capabilities = it }
     }
 
     // How much of the bottom navigation is on screen. Driven by scrolling, and

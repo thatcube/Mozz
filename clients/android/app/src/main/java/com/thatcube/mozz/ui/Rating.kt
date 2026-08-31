@@ -68,8 +68,15 @@ object RatingTuning {
      */
     const val HOLD_MS = 180L
 
-    /** How far above the star the strip sits, so a finger does not cover it. */
-    val revealYOffset: Dp = (-78).dp
+    /**
+     * Clearance between the bubble's bottom edge and the star's top.
+     *
+     * Not iOS's `revealYOffset` of −78, which is a *centre-to-centre* lift: the
+     * strip there is centred on the star and raised, so with a bubble around
+     * 100pt tall the visible gap comes out at a few points. Read as a gap it puts
+     * the bubble most of an inch away, which is what it did here.
+     */
+    val bubbleGap: Dp = 10.dp
     val bubbleCorner: Dp = 24.dp
 }
 
@@ -347,7 +354,7 @@ private fun RatingBubble(
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
-    val gap = with(density) { -RatingTuning.revealYOffset.roundToPx() }
+    val gap = with(density) { RatingTuning.bubbleGap.roundToPx() }
     val margin = with(density) { 12.dp.roundToPx() }
 
     val position = remember(gap, margin) {

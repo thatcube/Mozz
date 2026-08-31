@@ -273,10 +273,58 @@ class MozzServer(
      * guessed from the backend's name would be wrong the first time a server grew
      * a feature. The core fetches this once per session and remembers it.
      */
-    suspend fun capabilities(serverId: String): ServerCapabilities? =
-        core.call<ServerCapabilities>(
+    suspend fun capabilities(serverId: String): ServerCapabilities? {
+        val fresh = core.call<ServerCapabilities>(
             CoreRequest(cmd = "capabilities", serverId = serverId)
         )
+        if (fresh != null) rememberCapabilities(serverId, fresh)
+        return fresh
+    }
+
+    /**
+     * What this server could do last time it was asked.
+     *
+     * Answering this needs a network round trip, and until it lands a client has
+     * to either show nothing or guess. Guessing is worse than waiting: a heart
+     * that turns into a star a moment later has told the user something false
+     * about their own library. Remembering the last answer means the question is
+     * only ever open on the very first run.
+     *
+     * Deliberately separate from the account file. Capabilities are a fact about
+     * the server that we cache, not part of the identity we signed in with, and
+     * losing this file costs one round trip rather than an account.
+     */
+    fun cachedCapabilities(serverId: String): ServerCapabilities? {
+        if (!capabilitiesFile.exists()) return null
+        return try {
+            MozzCore.json
+                .decodeFromString<Map<String, ServerCapabilities>>(capabilitiesFile.readText())[serverId]
+        } catch (error: Exception) {
+            null
+        }
+    }
+
+    private fun rememberCapabilities(serverId: String, value: ServerCapabilities) {
+        val existing = try {
+            if (capabilitiesFile.exists()) {
+                MozzCore.json.decodeFromString<Map<String, ServerCapabilities>>(
+                    capabilitiesFile.readText()
+                )
+            } else {
+                emptyMap()
+            }
+        } catch (error: Exception) {
+            emptyMap()
+        }
+        runCatching {
+            capabilitiesFile.writeText(
+                MozzCore.json.encodeToString(existing + (serverId to value))
+            )
+        }
+    }
+
+    private val capabilitiesFile: java.io.File
+        get() = java.io.File(accountsFile.parentFile, "capabilities.json")
 
     // MARK: Saved accounts
 
