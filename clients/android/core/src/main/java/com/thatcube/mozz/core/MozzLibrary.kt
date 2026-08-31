@@ -105,6 +105,47 @@ class MozzLibrary(private val core: MozzCore) {
     suspend fun servers(): List<Server> =
         core.call<List<Server>>(CoreRequest(cmd = "servers")) ?: emptyList()
 
+    /**
+     * Lyrics for one track.
+     *
+     * Resolved by the core, which asks the server first and falls back to
+     * LRCLIB — the same order, and the same caching, as the iPhone. Set
+     * [useLRCLIB] to false to honour a "no third-party lookups" preference.
+     */
+    suspend fun lyrics(
+        serverId: String,
+        remoteId: String,
+        useLRCLIB: Boolean = true,
+    ): Lyrics = core.require(
+        CoreRequest(
+            cmd = "lyrics",
+            serverId = serverId,
+            remoteId = remoteId,
+            useLRCLIB = useLRCLIB,
+        )
+    )
+
+    /**
+     * The player's backdrop tones for one piece of artwork.
+     *
+     * The caller decodes and downscales the image — that is platform work, and
+     * Foundation has no image decoder off Apple — and passes raw RGBA. Returns
+     * null when the artwork yields nothing usable, which is a fact about the
+     * cover rather than an error.
+     */
+    suspend fun artworkTones(
+        rgba: ByteArray,
+        width: Int,
+        height: Int,
+    ): ArtworkTones? = core.call(
+        CoreRequest(
+            cmd = "artworkTones",
+            pixels = android.util.Base64.encodeToString(rgba, android.util.Base64.NO_WRAP),
+            width = width,
+            height = height,
+        )
+    )
+
     // MARK: History
 
     /**

@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
             is AppState.Ready -> HomeScreen(
                 account = state.account,
                 library = (application as MozzApplication).library,
+                server = (application as MozzApplication).server,
                 playback = (application as MozzApplication).playback,
                 onResync = viewModel::resync,
                 onSignOut = viewModel::signOut,

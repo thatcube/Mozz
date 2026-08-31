@@ -31,7 +31,15 @@ SVG_NS = "{http://www.w3.org/2000/svg}"
 
 # The only colour names the brand files use. Kept deliberately short: an
 # unrecognised name should fail loudly rather than be guessed at.
-NAMED_COLOURS = {"white": "#FFFFFFFF", "black": "#FF000000", "none": None}
+NAMED_COLOURS = {
+    "white": "#FFFFFFFF",
+    "black": "#FF000000",
+    "none": None,
+    # Icons are drawn in whichever colour the caller tints them, so the value
+    # baked in only has to be opaque. Compose's Icon() tints the painter; a bare
+    # Image would show black.
+    "currentColor": "#FF000000",
+}
 
 
 def colour(value):
@@ -77,13 +85,39 @@ def rect_to_path(element):
     return f"M{trim(x)},{trim(y)} h{trim(width)} v{trim(height)} h-{trim(width)} z"
 
 
-def walk(element, inherited_alpha, out):
+# Presentation attributes that a path inherits from its ancestors. The icon sets
+# set them once on <svg> and never repeat them on the paths, so a converter that
+# only looks at the element in hand renders nothing at all.
+INHERITED = (
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke-linecap",
+    "stroke-linejoin",
+)
+
+CAPS = {"butt": "butt", "round": "round", "square": "square"}
+JOINS = {"miter": "miter", "round": "round", "bevel": "bevel"}
+
+
+def inherit(element, inherited):
+    resolved = dict(inherited)
+    for name in INHERITED:
+        value = element.get(name)
+        if value is not None:
+            resolved[name] = value
+    return resolved
+
+
+def walk(element, inherited_alpha, out, inherited=None):
+    inherited = inherited or {}
     for child in element:
         tag = child.tag.replace(SVG_NS, "")
         alpha = inherited_alpha * number(child.get("opacity"), 1.0)
+        attributes_in_scope = inherit(child, inherited)
 
         if tag == "g":
-            walk(child, alpha, out)
+            walk(child, alpha, out, attributes_in_scope)
             continue
 
         if tag == "path":
@@ -95,27 +129,46 @@ def walk(element, inherited_alpha, out):
         else:
             continue
 
-        fill = colour(child.get("fill"))
-        if fill is None:
+        fill = colour(attributes_in_scope.get("fill"))
+        stroke = colour(attributes_in_scope.get("stroke"))
+        if fill is None and stroke is None:
             continue
 
-        attributes = [f'android:fillColor="{fill}"']
-        if alpha < 1.0:
-            attributes.append(f'android:fillAlpha="{alpha:g}"')
+        attributes = []
+        if fill is not None:
+            attributes.append(f'android:fillColor="{fill}"')
+            if alpha < 1.0:
+                attributes.append(f'android:fillAlpha="{alpha:g}"')
+        if stroke is not None:
+            attributes.append(f'android:strokeColor="{stroke}"')
+            width = attributes_in_scope.get("stroke-width")
+            if width:
+                attributes.append(f'android:strokeWidth="{number(width, 1.0):g}"')
+            cap = CAPS.get(attributes_in_scope.get("stroke-linecap", ""))
+            if cap:
+                attributes.append(f'android:strokeLineCap="{cap}"')
+            join = JOINS.get(attributes_in_scope.get("stroke-linejoin", ""))
+            if join:
+                attributes.append(f'android:strokeLineJoin="{join}"')
+            if alpha < 1.0:
+                attributes.append(f'android:strokeAlpha="{alpha:g}"')
         attributes.append(f'android:pathData="{html.escape(data, quote=True)}"')
         out.append("    <path\n        " + "\n        ".join(attributes) + " />")
 
 
-def convert(source, size, scale):
+def convert(source, size, scale, rotate=0.0):
     root = ElementTree.parse(source).getroot()
     viewbox = (root.get("viewBox") or "0 0 32 32").split()
     viewport_width, viewport_height = float(viewbox[2]), float(viewbox[3])
 
     paths = []
-    walk(root, 1.0, paths)
+    # Seeded from <svg> itself, not from an empty scope: the icon sets declare
+    # fill/stroke once on the root element and never repeat them, so starting
+    # empty converts every icon into nothing at all.
+    walk(root, 1.0, paths, inherit(root, {}))
 
     body = "\n".join(paths)
-    if scale != 1.0:
+    if scale != 1.0 or rotate:
         # Centre the artwork at the requested scale — what an adaptive launcher
         # icon needs, where the art must sit inside a safe zone rather than fill
         # the canvas.
@@ -125,6 +178,9 @@ def convert(source, size, scale):
             f'    <group\n'
             f'        android:scaleX="{scale:g}"\n'
             f'        android:scaleY="{scale:g}"\n'
+            f'        android:rotation="{rotate:g}"\n'
+            f'        android:pivotX="{viewport_width / 2:g}"\n'
+            f'        android:pivotY="{viewport_height / 2:g}"\n'
             f'        android:translateX="{offset_x:g}"\n'
             f'        android:translateY="{offset_y:g}">\n'
             + "\n".join("    " + line for line in body.split("\n"))
@@ -150,9 +206,10 @@ def main():
     parser.add_argument("destination")
     parser.add_argument("--size", type=int, default=32, help="intrinsic dp size")
     parser.add_argument("--scale", type=float, default=1.0, help="scale the art within the viewport")
+    parser.add_argument("--rotate", type=float, default=0.0, help="degrees clockwise about the centre")
     arguments = parser.parse_args()
 
-    xml = convert(arguments.source, arguments.size, arguments.scale)
+    xml = convert(arguments.source, arguments.size, arguments.scale, arguments.rotate)
     with open(arguments.destination, "w") as handle:
         handle.write(xml)
     print(f"{arguments.destination}: {xml.count('<path')} paths", file=sys.stderr)

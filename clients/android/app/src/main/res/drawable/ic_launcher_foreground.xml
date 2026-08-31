@@ -9,6 +9,9 @@
     <group
         android:scaleX="0.62"
         android:scaleY="0.62"
+        android:rotation="0"
+        android:pivotX="16"
+        android:pivotY="16"
         android:translateX="6.08"
         android:translateY="6.08">
         <path

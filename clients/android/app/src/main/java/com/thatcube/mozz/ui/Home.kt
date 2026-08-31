@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import com.thatcube.mozz.core.MozzServer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -66,11 +70,13 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     account: ServerAccount,
     library: MozzLibrary,
+    server: MozzServer,
     playback: PlayerController,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val playbackState by playback.state.collectAsStateWithLifecycle()
+    var playerOpen by remember { mutableStateOf(false) }
     val navigator = rememberListDetailPaneScaffoldNavigator<String>()
     val scope = rememberCoroutineScope()
 
@@ -87,76 +93,93 @@ fun HomeScreen(
         loading = false
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(account.serverName, style = MaterialTheme.typography.titleMedium) },
-                actions = {
-                    TextButton(
-                        onClick = onResync,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    ) { Text("Refresh") }
-                    TextButton(
-                        onClick = onSignOut,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    ) { Text("Sign out") }
-                },
-            )
-        },
-        bottomBar = {
-            NowPlayingBar(
-                state = playbackState,
-                onPlayPause = playback::togglePlayPause,
-                onNext = { playback.next() },
-            )
-        },
-    ) { insets ->
-        Box(modifier = Modifier.fillMaxSize().padding(insets)) {
-            if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(strokeWidth = 2.dp)
-                }
-            } else {
-                NavigableListDetailPaneScaffold(
-                    navigator = navigator,
-                    listPane = {
-                        AnimatedPane {
-                            LibraryList(
-                                liked = liked,
-                                albums = albums,
-                                albumTotal = counts?.albums ?: albums.size,
-                                onPlayLiked = { index -> playback.play(liked, index) },
-                                onOpenAlbum = { album ->
-                                    scope.launch {
-                                        navigator.navigateTo(
-                                            ListDetailPaneScaffoldRole.Detail,
-                                            album.groupKey.ifEmpty { album.remoteId },
-                                        )
-                                    }
-                                },
-                            )
-                        }
-                    },
-                    detailPane = {
-                        AnimatedPane {
-                            val key = navigator.currentDestination?.contentKey
-                            val album = albums.firstOrNull {
-                                it.groupKey.ifEmpty { it.remoteId } == key
-                            }
-                            if (album == null) {
-                                EmptyDetail()
-                            } else {
-                                AlbumDetail(account.serverId, album, library, playback)
-                            }
-                        }
+    // The player sits above everything, the now-playing bar included: it is a
+    // full screen, not a pane, and a transport bar peeking out from under it
+    // would be two sets of controls for one thing.
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(account.serverName, style = MaterialTheme.typography.titleMedium) },
+                    actions = {
+                        TextButton(
+                            onClick = onResync,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        ) { Text("Refresh") }
+                        TextButton(
+                            onClick = onSignOut,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        ) { Text("Sign out") }
                     },
                 )
+            },
+            bottomBar = {
+                NowPlayingBar(
+                    state = playbackState,
+                    onPlayPause = playback::togglePlayPause,
+                    onNext = { playback.next() },
+                    onOpen = { playerOpen = true },
+                    server = server,
+                )
+            },
+        ) { insets ->
+            Box(modifier = Modifier.fillMaxSize().padding(insets)) {
+                if (loading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(strokeWidth = 2.dp)
+                    }
+                } else {
+                    NavigableListDetailPaneScaffold(
+                        navigator = navigator,
+                        listPane = {
+                            AnimatedPane {
+                                LibraryList(
+                                    liked = liked,
+                                    albums = albums,
+                                    albumTotal = counts?.albums ?: albums.size,
+                                    server = server,
+                                    onPlayLiked = { index -> playback.play(liked, index) },
+                                    onOpenAlbum = { album ->
+                                        scope.launch {
+                                            navigator.navigateTo(
+                                                ListDetailPaneScaffoldRole.Detail,
+                                                album.groupKey.ifEmpty { album.remoteId },
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                        },
+                        detailPane = {
+                            AnimatedPane {
+                                val key = navigator.currentDestination?.contentKey
+                                val album = albums.firstOrNull {
+                                    it.groupKey.ifEmpty { it.remoteId } == key
+                                }
+                                if (album == null) {
+                                    EmptyDetail()
+                                } else {
+                                    AlbumDetail(account.serverId, album, library, playback)
+                                }
+                            }
+                        },
+                    )
+                }
             }
         }
+
+        PlayerSheet(
+            visible = playerOpen,
+            state = playbackState,
+            server = server,
+            library = library,
+            playback = playback,
+            onCollapse = { playerOpen = false },
+        )
     }
 }
 
@@ -165,6 +188,7 @@ private fun LibraryList(
     liked: List<Track>,
     albums: List<Album>,
     albumTotal: Int,
+    server: MozzServer,
     onPlayLiked: (Int) -> Unit,
     onOpenAlbum: (Album) -> Unit,
 ) {
@@ -183,7 +207,7 @@ private fun LibraryList(
 
         item { SectionHeader("Albums", "%,d".format(albumTotal)) }
         items(albums, key = { "album-${it.id}" }) { album ->
-            AlbumRow(album, onClick = { onOpenAlbum(album) })
+            AlbumRow(album, server, onClick = { onOpenAlbum(album) })
         }
     }
 }
@@ -249,9 +273,21 @@ private fun TrackRow(track: Track, onClick: (() -> Unit)? = null) {
 }
 
 @Composable
-private fun AlbumRow(album: Album, onClick: () -> Unit) {
+private fun AlbumRow(album: Album, server: MozzServer, onClick: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+        Artwork(
+            server = server,
+            serverId = album.serverId,
+            artworkKey = album.artworkKey,
+            size = 160,
+            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(6.dp)),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 album.title,
                 style = MaterialTheme.typography.bodyLarge,
@@ -266,6 +302,7 @@ private fun AlbumRow(album: Album, onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
@@ -329,21 +366,31 @@ private fun AlbumDetail(
 @Composable
 private fun NowPlayingBar(
     state: PlaybackState,
+    server: MozzServer,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onOpen: () -> Unit,
 ) {
     val track = state.track ?: return
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Artwork(
+                server = server,
+                serverId = track.serverId,
+                artworkKey = track.artworkKey,
+                size = 128,
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
+            )
+            Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     track.title,
@@ -360,7 +407,12 @@ private fun NowPlayingBar(
                 )
             }
             Spacer(Modifier.width(12.dp))
-            TextButton(onClick = onPlayPause) {
+            TextButton(
+                onClick = onPlayPause,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+            ) {
                 Text(if (state.isPlaying) "Pause" else "Play")
             }
             TextButton(

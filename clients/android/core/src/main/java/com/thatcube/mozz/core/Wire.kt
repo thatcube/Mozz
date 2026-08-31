@@ -47,6 +47,11 @@ data class CoreRequest(
     val artworkKey: String? = null,
     val size: Int? = null,
     val maxBitrateKbps: Int? = null,
+    val useLRCLIB: Boolean? = null,
+    /** Base64 RGBA, 8 bits per channel, `width * height * 4` bytes. */
+    val pixels: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 
     // Listening history.
     val eventKind: String? = null,
@@ -147,6 +152,58 @@ data class Playlist(
     val trackCount: Int? = null,
     val artworkKey: String? = null,
     val description: String? = null,
+)
+
+/** One line of lyrics. [start] is seconds from the start; null when unsynced. */
+@Serializable
+data class LyricLine(val text: String, val start: Double? = null)
+
+@Serializable
+data class Lyrics(
+    val lines: List<LyricLine> = emptyList(),
+    val isSynced: Boolean = false,
+    val source: String? = null,
+    /**
+     * When there are no lines, whether to stay quiet rather than say "no lyrics".
+     *
+     * True for a negative the core does not trust — offline, LRCLIB throttled, a
+     * source never asked. Asserting "this song has no lyrics" then would be a
+     * lie, and a sticky one.
+     */
+    val staySilent: Boolean = false,
+) {
+    val isEmpty: Boolean get() = lines.all { it.text.isBlank() }
+
+    /** The index of the line being sung at [seconds], or null before the first. */
+    fun lineIndex(seconds: Double): Int? {
+        if (!isSynced) return null
+        var found: Int? = null
+        lines.forEachIndexed { index, line ->
+            val start = line.start ?: return@forEachIndexed
+            if (start <= seconds) found = index
+        }
+        return found
+    }
+}
+
+/** A colour in 0..1 sRGB, as the core reports it. */
+@Serializable
+data class ArtworkTone(val red: Double, val green: Double, val blue: Double)
+
+/**
+ * The player's backdrop, top to bottom.
+ *
+ * Derived by the core from the artwork's pixels, so every Mozz client paints the
+ * same album the same way. The tuning that decides these — how hard vibrancy is
+ * rewarded, how far accents are pulled toward the dominant, how bright a tone may
+ * get before white text stops being legible — lives in `MozzCore.ArtworkPalette`
+ * rather than being guessed at per platform.
+ */
+@Serializable
+data class ArtworkTones(
+    val top: ArtworkTone,
+    val middle: ArtworkTone,
+    val bottom: ArtworkTone,
 )
 
 @Serializable
