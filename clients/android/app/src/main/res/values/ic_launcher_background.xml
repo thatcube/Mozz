@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Black, not the brand crimson. The mark is crimson; a crimson field
+         behind it would leave the logo with nothing to sit on, and Mozz's
+         identity is a dark ground with one colour on it. -->
+    <color name="ic_launcher_background">#FF000000</color>
+</resources>

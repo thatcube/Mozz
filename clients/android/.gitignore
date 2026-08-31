@@ -1,0 +1,10 @@
+local.properties
+.gradle/
+build/
+*/build/
+# Staged by the stageSwiftCore task from .build/android-stage-<arch>; it is
+# ~150 MB of Swift runtime and is rebuilt from Sources/, so it is not committed.
+core/src/main/jniLibs/
+.cxx/
+*/.cxx/
+.idea/
