@@ -33,48 +33,45 @@
 <rect x="10" y="3" width="2" height="1" fill="#3E0606"/>
 <rect x="12" y="29" width="8" height="1" fill="#3E0606"/>
 <g opacity="0.63">
-<rect x="20" y="11" width="1" height="1" fill="#721225"/>
-<rect x="21" y="10" width="1" height="1" fill="#721225"/>
-<rect x="22" y="9" width="1" height="1" fill="#721225"/>
-<rect x="23" y="8" width="1" height="1" fill="#721225"/>
-<rect x="24" y="6" width="1" height="1" fill="#721225"/>
-<rect x="24" y="7" width="1" height="1" fill="#721225"/>
-<rect x="24" y="8" width="1" height="1" fill="#721225"/>
-<rect x="23" y="9" width="1" height="1" fill="#721225"/>
-<rect x="22" y="10" width="1" height="1" fill="#721225"/>
-<rect x="21" y="11" width="1" height="1" fill="#721225"/>
-<rect x="21" y="12" width="2" height="1" fill="#721225"/>
-<rect x="20" y="13" width="2" height="1" fill="#721225"/>
-<rect x="19" y="14" width="2" height="1" fill="#721225"/>
-<rect x="22" y="11" width="1" height="1" fill="#721225"/>
-<rect x="23" y="10" width="1" height="1" fill="#721225"/>
-<rect x="24" y="9" width="1" height="1" fill="#721225"/>
-<rect x="25" y="7" width="1" height="1" fill="#721225"/>
-<rect x="25" y="8" width="1" height="1" fill="#721225"/>
-<rect x="26" y="8" width="1" height="1" fill="#721225"/>
-<rect x="25" y="9" width="2" height="1" fill="#721225"/>
-<rect x="24" y="10" width="4" height="1" fill="#721225"/>
-<rect x="23" y="11" width="1" height="1" fill="#721225"/>
-<rect x="23" y="12" width="2" height="1" fill="#721225"/>
-<rect x="24" y="11" width="4" height="1" fill="#721225"/>
-<rect x="21" y="9" width="1" height="1" fill="#721225"/>
-<rect x="22" y="8" width="1" height="1" fill="#721225"/>
-<rect x="23" y="7" width="1" height="1" fill="#721225"/>
-<rect x="23" y="6" width="1" height="1" fill="#721225"/>
-<rect x="21" y="4" width="1" height="5" fill="#721225"/>
-<rect x="22" y="5" width="1" height="5" fill="#721225"/>
-<rect x="20" y="5" width="1" height="2" fill="#721225"/>
-<rect x="19" y="7" width="1" height="2" fill="#721225"/>
-<rect x="20" y="7" width="1" height="3" fill="#721225"/>
+<path d="M21 10H22V11H21V10Z" fill="#721225"/>
+<path d="M23 8H24V9H23V8Z" fill="#721225"/>
+<path d="M24 6H25V7H24V6Z" fill="#721225"/>
+<path d="M24 7H25V8H24V7Z" fill="#721225"/>
+<path d="M24 8H25V9H24V8Z" fill="#721225"/>
+<path d="M23 9H24V10H23V9Z" fill="#721225"/>
+<path d="M22 10H23L24 12L22 11V10Z" fill="#721225"/>
+<path d="M21 11H22V12H21V11Z" fill="#721225"/>
+<path d="M21 12H23V13H21V12Z" fill="#721225"/>
+<path d="M20 13H22V14H20V13Z" fill="#721225"/>
+<path d="M19 14H21V15H19V14Z" fill="#721225"/>
+<path d="M22 11L24 12H23H22V11Z" fill="#721225"/>
+<path d="M23 10H24V11V12L23 10Z" fill="#721225"/>
+<path d="M24 9H25V10H24V9Z" fill="#721225"/>
+<path d="M25 7H26V8H25V7Z" fill="#721225"/>
+<path d="M25 8H26V9H25V8Z" fill="#721225"/>
+<path d="M26 8H27V9H26V8Z" fill="#721225"/>
+<path d="M25 9H27V10H25V9Z" fill="#721225"/>
+<path d="M24 10H28V11H24V10Z" fill="#721225"/>
+<path d="M23 12H25V13H23V12Z" fill="#721225"/>
+<path d="M24 11H28V12H24V11Z" fill="#721225"/>
+<path d="M21 9H22V10H21V9Z" fill="#721225"/>
+<path d="M23 7H24V8H23V7Z" fill="#721225"/>
+<path d="M23 6H24V7H23V6Z" fill="#721225"/>
+<path d="M21 4H22V9H21V4Z" fill="#721225"/>
+<path d="M22 5H23V10H22V5Z" fill="#721225"/>
+<path d="M20 5H21V7H20V5Z" fill="#721225"/>
+<path d="M19 7H20V9H19V7Z" fill="#721225"/>
+<path d="M20 7H21V10H20V7Z" fill="#721225"/>
+<path d="M20 9H21V13H20V9Z" fill="#721225"/>
+<path d="M19 9H20V12H19V9Z" fill="#721225"/>
+<path d="M23 5H24V6H23V5Z" fill="#721225"/>
+<path d="M18 9H19V12H18V9Z" fill="#721225"/>
+<path d="M23 7H24V8H23V7Z" fill="#721225"/>
 <rect x="19" y="8" width="1" height="3" fill="#721225"/>
-<rect x="20" y="9" width="1" height="3" fill="#721225"/>
-<rect x="19" y="9" width="1" height="3" fill="#721225"/>
 <rect x="20" y="8" width="1" height="2" fill="#CA0028"/>
 <rect x="19" y="10" width="1" height="1" fill="#CA0028"/>
 <rect x="21" y="6" width="1" height="2" fill="#CA0028"/>
 <rect x="22" y="5" width="1" height="1" fill="#CA0028"/>
-<rect x="23" y="5" width="1" height="1" fill="#721225"/>
-<rect x="18" y="9" width="1" height="3" fill="#721225"/>
 </g>
 <g opacity="0.63">
 <rect x="12" y="21" width="1" height="1" transform="rotate(180 12 21)" fill="#721225"/>
@@ -111,13 +108,13 @@
 <rect x="12" y="25" width="1" height="3" transform="rotate(180 12 25)" fill="#721225"/>
 <rect x="13" y="24" width="1" height="3" transform="rotate(180 13 24)" fill="#721225"/>
 <rect x="12" y="23" width="1" height="3" transform="rotate(180 12 23)" fill="#721225"/>
-<rect x="13" y="23" width="1" height="3" transform="rotate(180 13 23)" fill="#721225"/>
+<rect x="13" y="23" width="1" height="5" transform="rotate(180 13 23)" fill="#721225"/>
 <rect x="12" y="24" width="1" height="2" transform="rotate(180 12 24)" fill="#CA0028"/>
 <rect x="13" y="22" width="1" height="1" transform="rotate(180 13 22)" fill="#CA0028"/>
 <rect x="11" y="26" width="1" height="2" transform="rotate(180 11 26)" fill="#CA0028"/>
 <rect x="10" y="27" width="1" height="1" transform="rotate(180 10 27)" fill="#CA0028"/>
 <rect x="9" y="27" width="1" height="1" transform="rotate(180 9 27)" fill="#721225"/>
-<rect x="14" y="23" width="1" height="3" transform="rotate(180 14 23)" fill="#721225"/>
+<rect x="14" y="23" width="1" height="4" transform="rotate(180 14 23)" fill="#721225"/>
 </g>
 <g opacity="0.63">
 <rect x="3" y="16" width="5" height="1" fill="#D6002B"/>
@@ -125,22 +122,22 @@
 <rect x="3" y="12" width="3" height="1" fill="#A80022"/>
 <rect x="3" y="14" width="8" height="1" fill="#A80022"/>
 <rect x="7" y="15" width="4" height="1" fill="#A80022"/>
-<rect x="3" y="15" width="8" height="1" fill="#D6002B"/>
+<rect x="3" y="15" width="9" height="1" fill="#D6002B"/>
 <rect x="3" y="14" width="4" height="1" fill="#D6002B"/>
 <rect x="3" y="17" width="2" height="1" fill="#D6002B"/>
-<rect x="16" y="7" width="1" height="4" fill="#D6002B"/>
+<rect x="16" y="7" width="1" height="5" fill="#D6002B"/>
 <rect x="14" y="3" width="1" height="7" fill="#D6002B"/>
 <rect x="13" y="3" width="1" height="2" fill="#D6002B"/>
 <rect x="12" y="3" width="1" height="4" fill="#A80022"/>
 <rect x="13" y="5" width="1" height="5" fill="#A80022"/>
 <rect x="14" y="9" width="1" height="2" fill="#A80022"/>
 <rect x="15" y="3" width="1" height="8" fill="#D6002B"/>
-<rect x="13" y="10" width="1" height="1" fill="#860000"/>
+<rect x="13" y="10" width="1" height="2" fill="#860000"/>
 <rect x="10" y="13" width="1" height="1" fill="#860000"/>
 <rect x="6" y="12" width="4" height="1" fill="#860000"/>
 <rect x="4" y="11" width="4" height="1" fill="#860000"/>
 <rect x="4" y="10" width="1" height="1" fill="#860000"/>
-<rect x="12" y="10" width="1" height="1" fill="#730D0D"/>
+<rect x="12" y="10" width="1" height="2" fill="#730D0D"/>
 <rect x="9" y="5" width="1" height="2" fill="#730D0D"/>
 <rect x="8" y="5" width="1" height="2" fill="#671212"/>
 <rect x="5" y="8" width="2" height="1" fill="#671212"/>
@@ -152,6 +149,7 @@
 <rect x="8" y="7" width="1" height="1" fill="#400000"/>
 <rect x="8" y="8" width="2" height="2" fill="#400000"/>
 <rect x="10" y="10" width="1" height="1" fill="#400000"/>
+<rect x="11" y="11" width="1" height="1" fill="#400000"/>
 <rect x="9" y="10" width="1" height="1" fill="#671212"/>
 <rect x="10" y="9" width="1" height="1" fill="#671212"/>
 <rect x="10" y="11" width="1" height="1" fill="#671212"/>
@@ -166,6 +164,7 @@
 <rect x="10" y="4" width="1" height="2" fill="#860000"/>
 <rect x="11" y="10" width="1" height="1" fill="#671212"/>
 <rect x="11" y="12" width="1" height="1" fill="#671212"/>
+<rect x="12" y="13" width="1" height="1" fill="#671212"/>
 <rect x="12" y="12" width="1" height="1" fill="#671212"/>
 <rect x="10" y="12" width="1" height="1" fill="#730D0D"/>
 <rect x="11" y="13" width="1" height="1" fill="#730D0D"/>
@@ -174,25 +173,25 @@
 </g>
 <g opacity="0.63">
 <rect x="29" y="17" width="4" height="1" transform="rotate(180 29 17)" fill="#D6002B"/>
-<rect x="29" y="16" width="8" height="1" transform="rotate(180 29 16)" fill="#D6002B"/>
+<rect x="29" y="16" width="9" height="1" transform="rotate(180 29 16)" fill="#D6002B"/>
 <rect x="29" y="15" width="5" height="1" transform="rotate(180 29 15)" fill="#D6002B"/>
 <rect x="29" y="19" width="7" height="1" transform="rotate(180 29 19)" fill="#A80022"/>
 <rect x="29" y="20" width="3" height="1" transform="rotate(180 29 20)" fill="#A80022"/>
 <rect x="29" y="18" width="8" height="1" transform="rotate(180 29 18)" fill="#A80022"/>
 <rect x="25" y="17" width="4" height="1" transform="rotate(180 25 17)" fill="#A80022"/>
-<rect x="16" y="25" width="1" height="4" transform="rotate(180 16 25)" fill="#D6002B"/>
+<rect x="16" y="25" width="1" height="5" transform="rotate(180 16 25)" fill="#D6002B"/>
 <rect x="18" y="29" width="1" height="7" transform="rotate(180 18 29)" fill="#D6002B"/>
 <rect x="19" y="29" width="1" height="2" transform="rotate(180 19 29)" fill="#D6002B"/>
 <rect x="20" y="29" width="1" height="4" transform="rotate(180 20 29)" fill="#A80022"/>
 <rect x="19" y="27" width="1" height="5" transform="rotate(180 19 27)" fill="#A80022"/>
 <rect x="18" y="23" width="1" height="2" transform="rotate(180 18 23)" fill="#A80022"/>
 <rect x="17" y="29" width="1" height="8" transform="rotate(180 17 29)" fill="#D6002B"/>
-<rect x="19" y="22" width="1" height="1" transform="rotate(180 19 22)" fill="#860000"/>
-<rect x="22" y="19" width="1" height="1" transform="rotate(180 22 19)" fill="#860000"/>
+<rect x="19" y="22" width="1" height="3" transform="rotate(180 19 22)" fill="#860000"/>
+<rect x="22" y="19" width="3" height="1" transform="rotate(180 22 19)" fill="#860000"/>
 <rect x="26" y="20" width="4" height="1" transform="rotate(180 26 20)" fill="#860000"/>
 <rect x="28" y="21" width="4" height="1" transform="rotate(180 28 21)" fill="#860000"/>
 <rect x="28" y="22" width="1" height="1" transform="rotate(180 28 22)" fill="#860000"/>
-<rect x="20" y="22" width="1" height="1" transform="rotate(180 20 22)" fill="#730D0D"/>
+<rect x="20" y="22" width="1" height="2" transform="rotate(180 20 22)" fill="#730D0D"/>
 <rect x="23" y="27" width="1" height="2" transform="rotate(180 23 27)" fill="#730D0D"/>
 <rect x="24" y="27" width="1" height="2" transform="rotate(180 24 27)" fill="#671212"/>
 <rect x="27" y="24" width="2" height="1" transform="rotate(180 27 24)" fill="#671212"/>
@@ -205,6 +204,7 @@
 <rect x="24" y="24" width="2" height="2" transform="rotate(180 24 24)" fill="#400000"/>
 <rect x="22" y="22" width="1" height="1" transform="rotate(180 22 22)" fill="#400000"/>
 <rect x="21" y="21" width="1" height="1" transform="rotate(180 21 21)" fill="#400000"/>
+<rect x="20" y="20" width="1" height="1" transform="rotate(180 20 20)" fill="#400000"/>
 <rect x="23" y="22" width="1" height="1" transform="rotate(180 23 22)" fill="#671212"/>
 <rect x="22" y="23" width="1" height="1" transform="rotate(180 22 23)" fill="#671212"/>
 <rect x="22" y="21" width="1" height="1" transform="rotate(180 22 21)" fill="#671212"/>
@@ -218,9 +218,19 @@
 <rect x="21" y="28" width="1" height="4" transform="rotate(180 21 28)" fill="#860000"/>
 <rect x="22" y="28" width="1" height="2" transform="rotate(180 22 28)" fill="#860000"/>
 <rect x="21" y="22" width="1" height="1" transform="rotate(180 21 22)" fill="#671212"/>
-<rect x="22" y="20" width="1" height="1" transform="rotate(180 22 20)" fill="#730D0D"/>
+<rect x="22" y="20" width="2" height="1" transform="rotate(180 22 20)" fill="#730D0D"/>
 <rect x="21" y="24" width="1" height="2" transform="rotate(180 21 24)" fill="#730D0D"/>
 <rect x="22" y="28" width="1" height="2" transform="rotate(180 22 28)" fill="#860000"/>
 </g>
-<path d="M12 19H13V20H19V19H20V18H21V20H20V21H19V22H13V21H12V20H11V18H12V19ZM15 13H14V14H13V15H15V16H11V14H12V13H13V12H11V11H15V13ZM21 13H20V14H19V15H21V16H17V14H18V13H19V12H17V11H21V13Z" fill="white"/>
+<path d="M12 12H15V13H12V12Z" fill="white"/>
+<path d="M17 12H20V13H17V12Z" fill="white"/>
+<path d="M13 13H15V14H13V13Z" fill="white"/>
+<path d="M18 13H20V14H18V13Z" fill="white"/>
+<path d="M12 14H14V15H12V14Z" fill="white"/>
+<path d="M17 14H19V15H17V14Z" fill="white"/>
+<path d="M12 15H15V16H12V15Z" fill="white"/>
+<path d="M17 15H20V16H17V15Z" fill="white"/>
+<path d="M13 18H14V19H13V18Z" fill="white"/>
+<path d="M18 18H19V19H18V18Z" fill="white"/>
+<path d="M14 19H18V20H14V19Z" fill="white"/>
 </svg>
