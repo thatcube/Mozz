@@ -1,6 +1,7 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+import MozzEnrichment
 import MozzJellyfin
 import MozzPlex
 import MozzSubsonic
@@ -75,6 +76,19 @@ struct WireStream: Encodable {
     var url: String
     var isTranscoded: Bool
     var sessionID: String?
+}
+
+struct WireLyricLine: Encodable {
+    var text: String
+    /// Seconds from the start of the track; absent for unsynced lyrics.
+    var start: TimeInterval?
+}
+
+struct WireLyrics: Encodable {
+    var lines: [WireLyricLine]
+    var isSynced: Bool
+    var source: String?
+    var staySilent: Bool
 }
 
 struct WireURL: Encodable {
@@ -306,6 +320,38 @@ func dispatchServerCommand(
             url: source.url.absoluteString,
             isTranscoded: source.isTranscoded,
             sessionID: source.sessionID
+        ))
+
+    case "lyrics":
+        guard let remoteId = request.remoteId, let serverId = request.serverId else {
+            return session.failure(request, "lyrics needs remoteId and serverId")
+        }
+        guard let record = try await session.repository.track(
+            serverId: serverId, remoteId: remoteId
+        ) else {
+            return session.failure(request, "no track \(remoteId)")
+        }
+        // The backend is deliberately optional. A server that carries no lyrics
+        // for this track — or one that is not attached at the moment — still gets
+        // the LRCLIB fallback, which is where most lyrics come from anyway.
+        let lyricsBackend = try requireBackend(request, session)
+        let resolution = await LyricsService().resolve(
+            track: record.toDomain(),
+            backend: lyricsBackend,
+            context: .visible,
+            useLRCLIB: request.useLRCLIB ?? true,
+            userInitiated: true
+        )
+        return session.success(request, WireLyrics(
+            lines: (resolution.lyrics?.lines ?? []).map {
+                WireLyricLine(text: $0.text, start: $0.start)
+            },
+            isSynced: resolution.lyrics?.isSynced ?? false,
+            source: resolution.lyrics?.source?.rawValue,
+            // Distinguishes "this track has no lyrics" from "we could not find
+            // out" — the client must stay quiet for the second rather than
+            // asserting a negative it cannot support.
+            staySilent: resolution.staySilent
         ))
 
     case "artworkURL":
