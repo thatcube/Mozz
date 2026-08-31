@@ -41,8 +41,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.thatcube.mozz.R
 import kotlin.math.roundToInt
@@ -94,6 +98,10 @@ fun ratingAtX(x: Float, starSize: Float, spacing: Float): Double? {
 /** Trailing zeroes are noise on a star count: 4.0 reads as "4", 4.5 as "4.5". */
 fun formatRating(value: Double): String =
     if (value % 1.0 == 0.0) value.toInt().toString() else "%.1f".format(value)
+
+/** "1 star", but "1.5 stars" — the only singular is exactly one. */
+fun ratingLabel(value: Double): String =
+    if (value == 1.0) "1 star" else formatRating(value) + " stars"
 
 /**
  * A row of five stars showing [value], half steps included.
@@ -162,8 +170,6 @@ fun FluidRatingControl(
     var dragging by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<Double?>(null) }
     var pickerOpen by remember { mutableStateOf(false) }
-    var starCentre by remember { mutableFloatStateOf(0f) }
-    var starTop by remember { mutableFloatStateOf(0f) }
     var pressed by remember { mutableStateOf(false) }
 
     val press by animateFloatAsState(
@@ -175,11 +181,6 @@ fun FluidRatingControl(
     Box(
         modifier = modifier
             .size(MIN_HIT)
-            .onGloballyPositioned {
-                val bounds = it.boundsInRoot()
-                starCentre = bounds.center.x
-                starTop = bounds.top
-            }
             .pointerInput(rating) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -229,30 +230,27 @@ fun FluidRatingControl(
         contentAlignment = Alignment.Center,
     ) {
         CollapsedStar(rating = rating, scale = press)
-    }
 
-    // Drawn in a popup so it sits above the travelling artwork, which would
-    // otherwise cover a strip drawn inside the player's own hierarchy.
-    if (dragging) {
-        RatingBubble(anchorX = starCentre, anchorY = starTop) {
+        // Declared inside the star, so the popup anchors on the star rather than
+        // on whatever happens to contain the control. A popup also sits above the
+        // travelling artwork, which would otherwise cover a strip drawn inside
+        // the player's own hierarchy.
+        if (dragging) {
+            RatingBubble {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 RatingStrip(preview)
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    preview?.let { "${formatRating(it)} stars" } ?: "No rating",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = PlayerForegroundMuted,
-                )
+                    Text(
+                        preview?.let(::ratingLabel) ?: "No rating",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = PlayerForegroundMuted,
+                    )
+                }
             }
         }
-    }
 
-    if (pickerOpen) {
-        RatingBubble(
-            anchorX = starCentre,
-            anchorY = starTop,
-            onDismiss = { pickerOpen = false },
-        ) {
+        if (pickerOpen) {
+            RatingBubble(onDismiss = { pickerOpen = false }) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(RatingTuning.stripStarSpacing),
@@ -292,7 +290,8 @@ fun FluidRatingControl(
                                 pickerOpen = false
                             }
                             .padding(horizontal = 14.dp, vertical = 8.dp),
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -325,7 +324,7 @@ private fun CollapsedStar(rating: Double?, scale: Float) {
         if (rating != null) {
             Text(
                 formatRating(rating),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = PlayerForeground,
             )
@@ -333,42 +332,58 @@ private fun CollapsedStar(rating: Double?, scale: Float) {
     }
 }
 
-/** A bubble above the star. Solid rather than glass — that is an iOS-only look. */
+/**
+ * A bubble sitting above the star. Solid rather than glass — that is iOS-only.
+ *
+ * Positioned by a provider rather than an offset, because `Popup`'s `offset` is
+ * measured from the anchor, not from the window. Feeding it absolute coordinates
+ * put the bubble in the corner of the screen with most of it cut off. A provider
+ * is handed the anchor's bounds and the window's size, so it can do the two
+ * things that actually matter: centre on the star, and stay on screen.
+ */
 @Composable
 private fun RatingBubble(
-    anchorX: Float,
-    anchorY: Float,
     onDismiss: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
+    val gap = with(density) { -RatingTuning.revealYOffset.roundToPx() }
+    val margin = with(density) { 12.dp.roundToPx() }
+
+    val position = remember(gap, margin) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize,
+            ): IntOffset {
+                val x = anchorBounds.center.x - popupContentSize.width / 2
+                val above = anchorBounds.top - popupContentSize.height - gap
+                // Below the star when there is no room above it, which is the
+                // case whenever the control sits near the top of the window.
+                val y = if (above >= margin) above else anchorBounds.bottom + gap
+                return IntOffset(
+                    x.coerceIn(margin, maxOf(margin, windowSize.width - popupContentSize.width - margin)),
+                    y.coerceIn(margin, maxOf(margin, windowSize.height - popupContentSize.height - margin)),
+                )
+            }
+        }
+    }
+
     Popup(
-        offset = IntOffset(
-            x = anchorX.roundToInt(),
-            y = (anchorY + with(density) { RatingTuning.revealYOffset.toPx() }).roundToInt(),
-        ),
+        popupPositionProvider = position,
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = onDismiss != null),
     ) {
         Box(
             modifier = Modifier
-                // Centred on the star: the popup offset places its top-left, so
-                // the body shifts itself back by half its own width.
-                .offsetHalfWidth()
                 .clip(RoundedCornerShape(RatingTuning.bubbleCorner))
                 .background(RatingBubbleBackground)
                 .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
             content()
         }
-    }
-}
-
-/** Shift a composable left by half its measured width. */
-private fun Modifier.offsetHalfWidth(): Modifier = this.layout { measurable, constraints ->
-    val placeable = measurable.measure(constraints)
-    layout(placeable.width, placeable.height) {
-        placeable.place(-placeable.width / 2, 0)
     }
 }
 
