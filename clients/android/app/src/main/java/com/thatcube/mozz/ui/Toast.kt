@@ -165,6 +165,7 @@ fun ToastOverlay(
                 Text(
                     shown.message,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false).padding(vertical = 9.dp),
@@ -172,9 +173,16 @@ fun ToastOverlay(
                 shown.action?.let { action ->
                     Spacer(Modifier.width(0.dp))
                     TextButton(onClick = { toasts.perform(shown) }) {
+                        // Brightness and weight, not hue. The accent is red, and
+                        // red inside the player is the one colour that has
+                        // already been ruled out there — a toast that can appear
+                        // over the transport has to obey the same rule the
+                        // transport does. The message recedes and the action
+                        // steps forward, which is the whole job.
                         Text(
                             action.title,
                             style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
