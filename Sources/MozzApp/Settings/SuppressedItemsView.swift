@@ -34,6 +34,7 @@ struct SuppressedItemsView: View {
                 }
             }
         }
+        .mozzGroupedList()
         .navigationTitle("Not Recommended")
         .inlineNavigationTitle()
         .task { await reload() }

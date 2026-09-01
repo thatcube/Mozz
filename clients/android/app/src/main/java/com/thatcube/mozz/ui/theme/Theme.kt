@@ -2,6 +2,8 @@ package com.thatcube.mozz.ui.theme
 
 import android.app.Activity
 import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -16,8 +18,12 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -160,7 +166,11 @@ private val MozzBlack = darkColorScheme(
     onBackground = Color(0xFFF2F2F2),
     surface = Color(0xFF000000),
     onSurface = Color(0xFFF2F2F2),
-    surfaceVariant = Color(0xFF141414),
+    // The same black as the floor, deliberately. Black is not the bottom of an
+    // elevation ladder, it is the absence of one: nothing in the app is a
+    // lighter shade of the page, and `outline` does all the separating. Use
+    // `mozzSurface` rather than painting this directly, or a card goes invisible.
+    surfaceVariant = Color(0xFF000000),
     onSurfaceVariant = Color(0xFF9A9A9A),
     // Faint, but present. On a true-black page a #1C1C1C rule is not a hairline,
     // it is nothing — and separation is the only structure a page has once the
@@ -199,6 +209,25 @@ private val MozzTypography = Typography().let { base ->
         titleMedium = base.titleMedium.copy(fontWeight = FontWeight.Medium),
         labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
     )
+}
+
+/**
+ * A raised surface — a card, a field, a tile — in the one way each mode allows.
+ *
+ * In Dim and Light that is a lifted fill and no border. In Black the fill is the
+ * page's own black and a hairline is the only thing marking where the surface
+ * begins, which is the whole rule of that mode in one modifier.
+ *
+ * Painting `surfaceVariant` directly is what this replaces: in Black that colour
+ * is now the background, so a card drawn with it simply disappears.
+ */
+@Composable
+fun Modifier.mozzSurface(shape: Shape): Modifier {
+    val scheme = MaterialTheme.colorScheme
+    if (!LocalMozzBlackout.current) {
+        return this.clip(shape).background(scheme.surfaceVariant)
+    }
+    return this.clip(shape).background(scheme.background).border(1.dp, scheme.outline, shape)
 }
 
 /** Centred, muted, small — the voice for anything explanatory. */

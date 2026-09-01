@@ -386,6 +386,7 @@ fun AlbumCell(album: Album, server: MozzServer, width: Dp, onClick: () -> Unit) 
             artworkKey = album.artworkKey,
             pixels = artworkPixels(width),
             modifier = Modifier.size(width).clip(RoundedCornerShape(8.dp)),
+            shape = RoundedCornerShape(8.dp),
         )
         Spacer(Modifier.height(8.dp))
         Text(
@@ -417,6 +418,7 @@ fun ArtistCell(artist: Artist, server: MozzServer, width: Dp, onClick: () -> Uni
             artworkKey = artist.heroArtworkKey ?: artist.artworkKey,
             pixels = artworkPixels(width),
             modifier = Modifier.size(width).clip(CircleShape),
+            shape = CircleShape,
         )
         Spacer(Modifier.height(8.dp))
         Text(
@@ -440,6 +442,7 @@ fun PlaylistCell(playlist: Playlist, server: MozzServer, width: Dp, onClick: () 
             artworkKey = playlist.artworkKey,
             pixels = artworkPixels(width),
             modifier = Modifier.size(width).clip(RoundedCornerShape(8.dp)),
+            shape = RoundedCornerShape(8.dp),
         )
         Spacer(Modifier.height(8.dp))
         Text(

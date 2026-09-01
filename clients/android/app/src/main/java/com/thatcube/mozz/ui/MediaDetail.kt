@@ -372,6 +372,7 @@ private fun NarrowHero(
                     .size(CENTERED_ART)
                     .shadow(18.dp, if (circular) CircleShape else RoundedCornerShape(14.dp))
                     .clip(if (circular) CircleShape else RoundedCornerShape(14.dp)),
+                shape = if (circular) CircleShape else RoundedCornerShape(14.dp),
             )
             Spacer(Modifier.height(16.dp))
             TitleBlock(title, subtitle, meta, TextAlign.Center)
@@ -431,6 +432,7 @@ private fun WideHero(
                     .size(side)
                     .shadow(20.dp, if (circular) CircleShape else RoundedCornerShape(14.dp))
                     .clip(if (circular) CircleShape else RoundedCornerShape(14.dp)),
+                shape = if (circular) CircleShape else RoundedCornerShape(14.dp),
             )
             Spacer(Modifier.width(28.dp))
             Column(

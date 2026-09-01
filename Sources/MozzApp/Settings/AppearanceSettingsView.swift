@@ -8,6 +8,11 @@ struct AppearanceSettingsView: View {
     @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
     @AppStorage("mozz.liquidGlass") private var liquidGlassEnabled = true
 
+    @Environment(\.colorScheme) private var scheme
+    private var blackout: Bool {
+        scheme == .dark && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
+
     var body: some View {
         Form {
             Section {
@@ -20,8 +25,18 @@ struct AppearanceSettingsView: View {
             }
             Section {
                 Toggle("Liquid Glass", isOn: $liquidGlassEnabled)
+                    .disabled(blackout)
+            } footer: {
+                // Rather than leave a switch that flips and changes nothing:
+                // glass is a lit, frosted surface, which is a lighter shade of
+                // whatever is behind it by definition — the one thing Black
+                // does not allow.
+                if blackout {
+                    Text("Off in Black, which has no lifted surfaces.")
+                }
             }
         }
+        .mozzGroupedList()
         .mozzReadableWidth()
         .navigationTitle("Appearance")
         .inlineNavigationTitle()

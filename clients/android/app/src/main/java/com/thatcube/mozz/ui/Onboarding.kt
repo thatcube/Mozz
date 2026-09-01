@@ -1,5 +1,6 @@
 package com.thatcube.mozz.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.R
 import com.thatcube.mozz.core.MusicLibrary
 import com.thatcube.mozz.core.SyncStatus
+import com.thatcube.mozz.ui.theme.LocalMozzBlackout
 import com.thatcube.mozz.ui.theme.quietBody
 
 /**
@@ -179,6 +181,13 @@ fun LibraryPickerScreen(
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = MaterialTheme.shapes.large,
+            // In Black the card's colour is the page's, so the hairline is the
+            // only thing that makes it a card.
+            border = if (LocalMozzBlackout.current) {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            } else {
+                null
+            },
             modifier = Modifier.fillMaxWidth(),
         ) {
             LazyColumn(contentPadding = PaddingValues(vertical = 4.dp)) {

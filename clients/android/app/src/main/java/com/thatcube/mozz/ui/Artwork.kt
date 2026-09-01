@@ -1,8 +1,11 @@
 package com.thatcube.mozz.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -12,16 +15,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.SingletonImageLoader
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.Track
+import com.thatcube.mozz.ui.theme.LocalMozzBlackout
 
 /**
  * Album art for one artwork key.
@@ -45,7 +51,16 @@ fun Artwork(
     /** Pixels to ask for — see [artworkPixels], which is how callers get one. */
     pixels: Int,
     modifier: Modifier = Modifier,
+    /**
+     * The shape the caller has clipped this to.
+     *
+     * Only used to draw the empty frame's hairline in Black, where the
+     * placeholder wash is black like everything else and a coverless album
+     * would otherwise be nothing at all. Pass the same shape as the `clip`.
+     */
+    shape: Shape = RoundedCornerShape(6.dp),
 ) {
+    val blackout = LocalMozzBlackout.current
     var url by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(serverId, artworkKey, pixels) {
@@ -62,8 +77,17 @@ fun Artwork(
     Box(
         // A faint wash rather than an opaque surface: in the player this sits on
         // the artwork backdrop, and a solid placeholder reads as a black hole
-        // punched in it.
-        modifier = modifier.background(Color.White.copy(alpha = 0.06f)),
+        // punched in it. In Black the wash goes too — nothing is a lighter shade
+        // of the page there — and a hairline marks the empty frame instead.
+        modifier = modifier
+            .background(if (blackout) Color.Transparent else Color.White.copy(alpha = 0.06f))
+            .then(
+                if (blackout) {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                } else {
+                    Modifier
+                }
+            ),
         contentAlignment = Alignment.Center,
     ) {
         val current = url

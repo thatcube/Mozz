@@ -77,6 +77,7 @@ struct DiagnosticsView: View {
                 }
             }
         }
+        .mozzGroupedList()
         .mozzReadableWidth()
         .navigationTitle("Diagnostics")
         .inlineNavigationTitle()

@@ -117,6 +117,10 @@ extension View {
         modifier(MozzReadableWidth(maxWidth: maxWidth))
     }
 
+    /// A settings-style list that obeys Black: black rows, separators doing the
+    /// separating. A no-op in Dim and Light.
+    func mozzGroupedList() -> some View { modifier(MozzGroupedList()) }
+
     /// A circular Liquid Glass background (iOS 26+) — sized by the caller's frame
     /// so the search-cancel ✕ can exactly match the field height. Falls back to a
     /// material circle on iOS 17–25 and the macOS test host.
@@ -161,6 +165,33 @@ private struct MozzScreenBackground: ViewModifier {
         content
             .scrollContentBackground(.hidden)
             .background(Color.mozzBackground.ignoresSafeArea())
+    }
+}
+
+/// Backing modifier for `mozzGroupedList()`.
+///
+/// A grouped `Form` draws its rows on `secondarySystemGroupedBackground`, a grey
+/// card floating on the page. That is the right look everywhere except Black,
+/// where the rule is that nothing is a lighter shade of the page: the rows go
+/// black and the separators the list already draws are what tells one from the
+/// next. Left alone outside Black, so Dim and Light keep the system's cards.
+private struct MozzGroupedList: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+
+    private var blackout: Bool {
+        scheme == .dark && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
+
+    func body(content: Content) -> some View {
+        if blackout {
+            content
+                .scrollContentBackground(.hidden)
+                .background(Color.black.ignoresSafeArea())
+                .listRowBackground(Color.black)
+        } else {
+            content
+        }
     }
 }
 
@@ -262,9 +293,14 @@ extension Color {
     //
     //           Standard Dark   OLED Dark   Light
     //  background   #1C1C1E       #000000    #F2F2F7   page / floor
-    //  surface      #2C2C2E       #121212    #FFFFFF   cards, list rows
-    //  surfaceRaised#3A3A3C       #1C1C1E    #FFFFFF   sheets, detail, popovers
-    //  chrome       #2C2C2E       #1C1C1E    material  nav / island / player solid
+    //  surface      #2C2C2E       #000000    #FFFFFF   cards, list rows
+    //  surfaceRaised#3A3A3C       #000000    #FFFFFF   sheets, detail, popovers
+    //  chrome       #2C2C2E       #000000    material  nav / island / player solid
+    //
+    // Every OLED tier is the same black on purpose. Black is not the bottom of
+    // an elevation ladder, it is the absence of one: nothing in the app is a
+    // lighter shade of the page, and what separates one region from another is
+    // `mozzHairline` and nothing else.
 
     /// Layer 0 — the page/screen background (the "floor"). Darkest in dark mode.
     static var mozzBackground: Color {
@@ -280,7 +316,7 @@ extension Color {
     /// Layer 1 — cards, list rows, content surfaces. One step above the floor.
     static var mozzSurface: Color {
         #if canImport(UIKit)
-        mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x2C2C2E, darkOLED: 0x121212)
+        mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x2C2C2E, darkOLED: 0x000000)
         #else
         Color(white: 0.17)
         #endif
@@ -289,7 +325,7 @@ extension Color {
     /// Layer 2 — sheets, context menus, popovers, the media-detail hero body.
     static var mozzSurfaceRaised: Color {
         #if canImport(UIKit)
-        mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x3A3A3C, darkOLED: 0x1C1C1E)
+        mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x3A3A3C, darkOLED: 0x000000)
         #else
         Color(white: 0.23)
         #endif
@@ -361,12 +397,39 @@ extension Color {
     /// Adapts to light/dark so it reads as a calm empty frame in both.
     static var mozzArtworkPlaceholder: Color {
         #if canImport(UIKit)
-        Color(uiColor: .secondarySystemFill)
+        // Black leaves an empty cover black like everything else; the frame is
+        // drawn by `ArtworkPlaceholder`'s hairline, so the tile is still a tile.
+        Color(uiColor: UIColor { traits in
+            if traits.userInterfaceStyle == .dark, mozzOLED { return UIColor(hex: 0x000000) }
+            return .secondarySystemFill
+        })
         #elseif canImport(AppKit)
         Color(nsColor: .quaternaryLabelColor)
         #else
         Color.gray.opacity(0.2)
         #endif
+    }
+
+    /// The one line that does the separating.
+    ///
+    /// In Dim and in Light it is the edge under a divider, barely there because
+    /// the surfaces above and below it already differ. In Black it is the only
+    /// thing that differs, so it is drawn brighter — on a true-black page a
+    /// #1C1C1C rule is not faint, it is nothing.
+    static var mozzHairline: Color {
+        #if canImport(UIKit)
+        mozzSurfaceColor(light: 0xDCDCDC, darkStandard: 0x3A3A3C, darkOLED: 0x3A3A3A)
+        #else
+        Color.gray.opacity(0.3)
+        #endif
+    }
+
+    /// Whether Black is in effect for a view being drawn in this scheme.
+    ///
+    /// The colour tokens can read `mozzOLED` on its own because they are already
+    /// inside a dark branch; a view has to ask both questions.
+    static func mozzIsBlackout(_ scheme: ColorScheme) -> Bool {
+        scheme == .dark && mozzOLED
     }
 
     /// Layer 3 — the opaque "chrome" surface for nav / island / player when Liquid
@@ -375,7 +438,7 @@ extension Color {
     /// tab bar, island, and player all match.
     static var mozzChrome: Color {
         #if canImport(UIKit)
-        mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x2C2C2E, darkOLED: 0x1C1C1E)
+        mozzSurfaceColor(light: 0xFFFFFF, darkStandard: 0x2C2C2E, darkOLED: 0x000000)
         #elseif canImport(AppKit)
         Color(nsColor: .underPageBackgroundColor)
         #else
@@ -388,7 +451,10 @@ extension Color {
     /// UIKit-only and won't compile for the macOS host used by `swift test`.
     static var mozzSecondaryBackground: Color {
         #if canImport(UIKit)
-        Color(uiColor: .secondarySystemBackground)
+        Color(uiColor: UIColor { traits in
+            if traits.userInterfaceStyle == .dark, mozzOLED { return UIColor(hex: 0x000000) }
+            return .secondarySystemBackground
+        })
         #elseif canImport(AppKit)
         Color(nsColor: .underPageBackgroundColor)
         #else

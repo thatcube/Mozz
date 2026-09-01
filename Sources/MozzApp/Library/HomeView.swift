@@ -182,6 +182,12 @@ struct HomeShortcutTile<Leading: View>: View {
     var subtitle: String?
     @ViewBuilder var leading: () -> Leading
 
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+    private var blackout: Bool {
+        scheme == .dark && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             leading()
@@ -206,6 +212,14 @@ struct HomeShortcutTile<Leading: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.mozzSurface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // In Black the card's fill IS the page, so without this the tile is a
+        // label floating in nothing. The hairline is what makes it a card.
+        .overlay {
+            if blackout {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.mozzHairline, lineWidth: 1)
+            }
+        }
     }
 }
 

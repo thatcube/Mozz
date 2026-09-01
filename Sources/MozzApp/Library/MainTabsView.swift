@@ -493,8 +493,19 @@ struct MainTabBar: View {
     @AppStorage("mozz.liquidGlass") private var liquidGlassEnabled = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @StateObject private var power = LowPowerModeObserver()
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+
+    /// Black turns the glass off. Glass is a lit, frosted surface — it is a
+    /// lighter shade of whatever is behind it by definition, which is the one
+    /// thing Black does not allow. The solid path already exists for Low Power
+    /// and Reduce Transparency; this is a third reason to take it.
+    private var blackout: Bool {
+        scheme == .dark && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
+
     private var useGlass: Bool {
-        liquidGlassEnabled && !power.isLowPower && !reduceTransparency
+        liquidGlassEnabled && !power.isLowPower && !reduceTransparency && !blackout
     }
 
     /// Blobby spring shared by the minimize morph and the selection-blob slide.
@@ -515,7 +526,17 @@ struct MainTabBar: View {
     @State private var blobDownX: CGFloat = 0
     @State private var blobMoved = false
     private static let blobDragSlop: CGFloat = 10
-    /// Tab under the finger while dragging (drives the accent colour live).
+    /// Tab under the finger while dragging, and — until the selection catches up
+    /// — the tab a finished touch is about to select.
+    ///
+    /// It has to outlive the touch. A stationary tap is committed by the tab's
+    /// own Button, which fires on touch-up, and nothing orders that against the
+    /// touch reader's `onEnded`. Clearing this there first drops `activeTab`
+    /// back to the previously selected tab for a frame or two in between. That
+    /// was invisible while `accent` only chose a colour, because colour changes
+    /// animate through; it became a visible glitch once `accent` also chose
+    /// between the outline glyph and the filled one — filled, unfilled, filled
+    /// again. So the touch leaves it on its target and `selected` releases it.
     @State private var hoverTab: AppTab?
     private static let leadSpring = Animation.spring(response: 0.24, dampingFraction: 0.72)
     private static let trailSpring = Animation.spring(response: 0.46, dampingFraction: 0.70)
@@ -579,8 +600,16 @@ struct MainTabBar: View {
                 // refraction — that's a private effect exclusive to UITabBar /
                 // UISegmentedControl, not reachable from public glass APIs.
                 if selShown {
+                    // A wash in Dim and Light; in Black an outline, because a
+                    // lifted capsule is exactly the lighter-shade-of-the-page
+                    // this mode does without.
                     Capsule()
-                        .fill(Color.primary.opacity(0.14))
+                        .fill(blackout ? Color.clear : Color.primary.opacity(0.14))
+                        .overlay {
+                            if blackout {
+                                Capsule().strokeBorder(Color.mozzHairline, lineWidth: 1)
+                            }
+                        }
                         .frame(width: blobW, height: blobH)
                         .position(x: blobCenter, y: h / 2)
                         .opacity(selFade)
@@ -599,6 +628,8 @@ struct MainTabBar: View {
                 }
             }
             .frame(width: W, height: h, alignment: .topLeading)
+            // The selection has arrived; the hand-over is done.
+            .onChange(of: selected) { _, _ in hoverTab = nil }
             .contentShape(Rectangle())
             // Touch anywhere on the bar to GRAB the selection blob to your finger
             // (it springs over instantly — even a stationary press, no swipe), then
@@ -714,11 +745,17 @@ struct MainTabBar: View {
         let wasGrab = draggingBlob
         draggingBlob = false
         blobMoved = false
-        hoverTab = nil
         // Centre-gap touches belong to the island (see onBlobTouchChanged) — never
         // let a release there undock/navigate.
-        if barTouchIgnored(x: x, W: W, expanded: expanded) { return }
+        if barTouchIgnored(x: x, W: W, expanded: expanded) {
+            hoverTab = nil
+            return
+        }
         let target = tab(at: x, W: W, expanded: expanded)
+        // Held rather than cleared — see `hoverTab`. Released by the `selected`
+        // observer below, or immediately when this tab is already the selection
+        // (nothing is coming to release it).
+        hoverTab = target == selected ? nil : target
         if moved {
             // Genuine drag: the touch reader owns the commit. The Button the touch
             // began on won't fire (the touch ended elsewhere), so this is the only
@@ -782,16 +819,28 @@ struct MainTabBar: View {
             // Pre-26 fallback: a single material capsule (no blob morph).
             Capsule().fill(.ultraThinMaterial).frame(height: h)
         } else {
-            // Solid chrome (Liquid Glass off / Low Power / Reduce Transparency):
-            // two opaque capsules matching the player + island surface.
+            // Solid chrome (Liquid Glass off / Low Power / Reduce Transparency /
+            // Black): two opaque capsules matching the player + island surface.
+            // In Black that surface is the page's own black, so the bar needs an
+            // edge or there is nothing to say where it starts.
             ZStack(alignment: .topLeading) {
-                Capsule().fill(Color.mozzChrome)
+                barCapsule
                     .frame(width: max(blobW, 1), height: blobH)
                     .position(x: leftCX, y: h / 2)
-                Capsule().fill(Color.mozzChrome)
+                barCapsule
                     .frame(width: max(blobW, 1), height: blobH)
                     .position(x: rightCX, y: h / 2)
             }
+        }
+    }
+
+    @ViewBuilder private var barCapsule: some View {
+        if blackout {
+            Capsule()
+                .fill(Color.black)
+                .overlay(Capsule().strokeBorder(Color.mozzHairline, lineWidth: 1))
+        } else {
+            Capsule().fill(Color.mozzChrome)
         }
     }
 

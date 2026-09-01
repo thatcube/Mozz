@@ -10,6 +10,9 @@ struct ArtworkPlaceholder: View {
     /// Music-note glyph size as a fraction of the box's shorter side.
     var iconScale: CGFloat = 0.32
 
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
@@ -21,8 +24,22 @@ struct ArtworkPlaceholder: View {
                         .foregroundStyle(.secondary)
                         .opacity(0.35)
                 )
+                // In Black the fill is the page's own black, so the tile would
+                // have no edge at all — a note floating in the middle of
+                // nothing. The hairline is what makes it a cover-shaped hole.
+                // The caller clips this whole view to the artwork's shape, so a
+                // plain inset border follows the corner radius it is given.
+                .overlay {
+                    if blackout {
+                        Rectangle().strokeBorder(Color.mozzHairline, lineWidth: 1)
+                    }
+                }
                 .frame(width: geo.size.width, height: geo.size.height)
         }
+    }
+
+    private var blackout: Bool {
+        scheme == .dark && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
     }
 }
 

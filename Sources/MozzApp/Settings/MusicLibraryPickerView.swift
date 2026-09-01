@@ -50,6 +50,7 @@ struct MusicLibraryPickerView: View {
                 }
             }
         }
+        .mozzGroupedList()
         .navigationTitle("Music Library")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

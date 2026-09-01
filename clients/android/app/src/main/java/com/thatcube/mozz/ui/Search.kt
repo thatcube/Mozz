@@ -59,6 +59,7 @@ import com.thatcube.mozz.core.SearchResults
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.Track
 import com.thatcube.mozz.playback.PlayerController
+import com.thatcube.mozz.ui.theme.mozzSurface
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -244,8 +245,7 @@ private fun SearchField(
             .fillMaxWidth()
             .padding(horizontal = inset)
             .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .mozzSurface(RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -318,6 +318,7 @@ fun ArtistRow(artist: Artist, server: MozzServer, onClick: () -> Unit) {
             artworkKey = artist.heroArtworkKey ?: artist.artworkKey,
             pixels = artworkPixels(52.dp),
             modifier = Modifier.size(52.dp).clip(CircleShape),
+            shape = CircleShape,
         )
         Spacer(Modifier.width(14.dp))
         Text(

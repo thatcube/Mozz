@@ -54,6 +54,16 @@ public struct MozzRootScene: Scene {
 /// Switches between the restore splash, onboarding, and the main tabbed UI.
 struct RootView: View {
     @EnvironmentObject private var env: AppEnvironment
+    /// The theme override belongs to the app, not to the library.
+    ///
+    /// It was applied inside `MainTabsView`, so onboarding, the setup screen and
+    /// the restore splash all ignored it: someone who had chosen Dark got a
+    /// white sign-in screen, and the app only became theirs once it had
+    /// something to show them. Read here so every screen obeys it.
+    @AppStorage(Color.MozzAppearance.storageKey) private var appearanceRaw = Color.MozzAppearance.default.rawValue
+    /// Observed so the elevation tokens rebuild the instant Dim↔Black changes;
+    /// the flavour is not a trait, so nothing else would notice.
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
 
     var body: some View {
         Group {
@@ -71,6 +81,7 @@ struct RootView: View {
                 MainTabsView()
             }
         }
+        .preferredColorScheme((Color.MozzAppearance(rawValue: appearanceRaw) ?? .system).colorScheme)
         .animation(.default, value: env.active == nil)
         .animation(.default, value: env.isRestoring)
         .animation(.default, value: env.isSettingUp)

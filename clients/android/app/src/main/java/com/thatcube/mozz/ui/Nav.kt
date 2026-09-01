@@ -3,6 +3,7 @@ package com.thatcube.mozz.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thatcube.mozz.R
+import com.thatcube.mozz.ui.theme.LocalMozzBlackout
 
 /**
  * The app's three places.
@@ -148,6 +150,7 @@ private fun NavItem(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val blackout = LocalMozzBlackout.current
     val scale by animateFloatAsState(
         targetValue = if (selected) 1.08f else 1f,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = 520f),
@@ -180,8 +183,21 @@ private fun NavItem(
                 .size(width = 64.dp, height = 40.dp)
                 .clip(RoundedCornerShape(percent = 50))
                 // A faint wash, not a filled pill: the one saturated colour in
-                // this app means "the action", and a tab is not that.
-                .background(scheme.onBackground.copy(alpha = 0.10f * indicator)),
+                // this app means "the action", and a tab is not that. In Black
+                // even the wash is too much — it is a lighter shade of the page,
+                // which is the one thing that mode does without — so selection
+                // is carried by an outline instead.
+                .then(
+                    if (blackout) {
+                        Modifier.border(
+                            1.dp,
+                            scheme.outline.copy(alpha = indicator),
+                            RoundedCornerShape(percent = 50),
+                        )
+                    } else {
+                        Modifier.background(scheme.onBackground.copy(alpha = 0.10f * indicator))
+                    }
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

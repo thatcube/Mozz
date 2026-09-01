@@ -60,15 +60,20 @@ internal static class DesktopPalette
             Set(app, "SliderThumbBackgroundPressed", "#000000");
             Set(app, "SliderThumbBackgroundDisabled", "#98989F");
             SetHeroScrim(app, "#F2F2F7");
+            SetSurfaceBorder(app, null);
             return;
         }
 
         Set(app, "AppBackground", blackout ? "#000000" : "#0B0B0D");
         Set(app, "SidebarBackground", blackout ? "#000000" : "#121214");
         Set(app, "BarBackground", blackout ? "#000000" : "#141416");
-        Set(app, "SurfaceRaised", blackout ? "#141414" : "#1C1C20");
-        Set(app, "SurfaceHover", blackout ? "#1E1E1E" : "#232328");
-        Set(app, "SurfaceSelected", blackout ? "#242424" : "#2A2A30");
+        // Black at rest, with `SurfaceBorder` doing the separating. Hover and
+        // selection keep the smallest lift that still reads as feedback: they
+        // are transient states rather than chrome, and a row that does nothing
+        // under the pointer reads as broken rather than as restrained.
+        Set(app, "SurfaceRaised", blackout ? "#000000" : "#1C1C20");
+        Set(app, "SurfaceHover", blackout ? "#151515" : "#232328");
+        Set(app, "SurfaceSelected", blackout ? "#1E1E1E" : "#2A2A30");
         Set(app, "Divider", blackout ? "#2A2A2A" : "#232327");
         Set(app, "TextPrimary", "#F2F2F4");
         Set(app, "TextSecondary", "#9A9AA2");
@@ -89,6 +94,22 @@ internal static class DesktopPalette
         Set(app, "SliderThumbBackgroundPressed", "#FFFFFF");
         Set(app, "SliderThumbBackgroundDisabled", "#6A6A72");
         SetHeroScrim(app, blackout ? "#000000" : "#0B0B0D");
+        SetSurfaceBorder(app, blackout ? "#3A3A3A" : null);
+    }
+
+    /// <summary>
+    /// The hairline that replaces elevation in Black.
+    ///
+    /// Passing null gives a transparent brush and a zero thickness, so every
+    /// surface that opts into these two resources is untouched in Dim and Light
+    /// — the border is not "off", it takes up no space at all, which matters
+    /// because a 1px border would otherwise shift each card's contents.
+    /// </summary>
+    private static void SetSurfaceBorder(Application app, string? color)
+    {
+        app.Resources["SurfaceBorder"] = new SolidColorBrush(
+            color is null ? Colors.Transparent : Color.Parse(color));
+        app.Resources["SurfaceBorderThickness"] = new Thickness(color is null ? 0 : 1);
     }
 
     /// <summary>

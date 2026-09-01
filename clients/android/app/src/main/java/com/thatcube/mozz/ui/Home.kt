@@ -56,6 +56,7 @@ import com.thatcube.mozz.core.Playlist
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.Track
 import com.thatcube.mozz.playback.PlayerController
+import com.thatcube.mozz.ui.theme.mozzSurface
 
 /**
  * What someone sees when they open the app.
@@ -270,8 +271,7 @@ private fun ShortcutTile(
         modifier = Modifier
             .fillMaxWidth()
             .height(SHORTCUT_ART)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .mozzSurface(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -336,6 +336,7 @@ fun TrackCell(track: Track, server: MozzServer, width: Dp, onClick: () -> Unit) 
             artworkKey = track.artworkKey,
             pixels = artworkPixels(width),
             modifier = Modifier.size(width).clip(RoundedCornerShape(8.dp)),
+            shape = RoundedCornerShape(8.dp),
         )
         Spacer(Modifier.height(8.dp))
         Text(

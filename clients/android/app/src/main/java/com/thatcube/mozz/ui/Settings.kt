@@ -49,6 +49,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.MusicLibrary
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.Suppression
+import com.thatcube.mozz.ui.theme.mozzSurface
 import kotlinx.coroutines.launch
 import com.thatcube.mozz.ui.theme.LocalMozzSettings
 import com.thatcube.mozz.ui.theme.MozzAppearance
@@ -504,8 +505,7 @@ private fun SettingsSection(
         Column(
             modifier = Modifier
                 .padding(horizontal = inset - 8.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .mozzSurface(RoundedCornerShape(14.dp)),
             content = content,
         )
     }

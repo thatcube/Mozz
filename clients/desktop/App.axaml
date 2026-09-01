@@ -46,6 +46,13 @@
             <SolidColorBrush x:Key="SurfaceSelected" Color="#2A2A30" />
             <SolidColorBrush x:Key="Divider" Color="#232327" />
 
+            <!-- What separates a raised surface from the page in Black, where the
+                 two are the same colour. Transparent and zero-width in Dim and
+                 Light, so every surface that opts in is unchanged there.
+                 DesktopPalette swaps both. -->
+            <SolidColorBrush x:Key="SurfaceBorder" Color="Transparent" />
+            <Thickness x:Key="SurfaceBorderThickness">0</Thickness>
+
             <!-- The wash under an artist banner's name. Declared here so the
                  template can bind it at load; DesktopPalette replaces it with
                  one that fades into whichever background is in effect. -->
@@ -286,6 +293,8 @@
         <Style Selector="Button.secondaryAction">
             <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
+            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
         </Style>
         <Style Selector="Button.secondaryAction:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
@@ -315,9 +324,14 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
 
+        <!-- Also the artwork placeholder: in Black its fill is the page's own
+             black, so the hairline is the only thing that makes a coverless
+             album a cover-shaped hole rather than nothing. -->
         <Style Selector="Border.albumArt">
             <Setter Property="CornerRadius" Value="7" />
             <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
+            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
             <Setter Property="ClipToBounds" Value="True" />
         </Style>
 

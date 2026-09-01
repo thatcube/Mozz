@@ -55,7 +55,8 @@
                              CornerRadius="8"
                              FontSize="13"
                              Background="{DynamicResource SurfaceRaised}"
-                             BorderThickness="0"
+                             BorderBrush="{DynamicResource SurfaceBorder}"
+                             BorderThickness="{DynamicResource SurfaceBorderThickness}"
                              Padding="4,9,11,9">
                         <TextBox.InnerLeftContent>
                             <controls:TablerIcon Size="16" Data="{StaticResource IconSearch}"
@@ -227,7 +228,7 @@
                                            <Button Classes="tile" Width="410" Margin="0,0,20,16"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}"
+                                               <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
                                                        CornerRadius="12" ClipToBounds="True">
                                                    <Grid ColumnDefinitions="88,*" Height="88">
                                                        <Border Grid.Column="0" Background="{DynamicResource Accent}"
@@ -278,7 +279,9 @@
                                            <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}">
                                                <Border Width="300" Margin="0,0,20,12" Padding="8" CornerRadius="8"
-                                                       Background="{DynamicResource SurfaceRaised}">
+                                                       Background="{DynamicResource SurfaceRaised}"
+                                                       BorderBrush="{DynamicResource SurfaceBorder}"
+                                                       BorderThickness="{DynamicResource SurfaceBorderThickness}">
                                                    <Grid ColumnDefinitions="44,*,64" Height="44">
                                                        <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
@@ -332,7 +335,7 @@
                                            <Button Classes="tile" Width="216" Margin="0,0,20,22"
                                                    Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}"
+                                               <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
                                                        CornerRadius="12" Padding="18" Height="148">
                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
@@ -359,7 +362,6 @@
                              DoubleTapped="OnTrackActivated"
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent"
-                             BorderThickness="0"
                              Padding="0,0,8,0">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -686,7 +688,7 @@
                                             <Button Classes="tile" Width="216" Margin="0,0,20,24"
                                                     Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                     CommandParameter="{Binding}">
-                                                <Border Background="{DynamicResource SurfaceRaised}"
+                                                <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
                                                         CornerRadius="12" Padding="18" Height="148">
                                                     <StackPanel Spacing="8" VerticalAlignment="Center">
                                                         <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
@@ -797,7 +799,7 @@
 
                             <DataTemplate DataType="vm:PlaylistHeroRow">
                                 <Grid ColumnDefinitions="236,*" Margin="0,0,0,28">
-                                    <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource SurfaceRaised}"
+                                    <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
                                             CornerRadius="13" Padding="28">
                                         <controls:TablerIcon Size="74" Data="{StaticResource IconPlaylist}"
                                                              Brush="{DynamicResource Accent}"
@@ -901,7 +903,9 @@
                                             <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
                                                     CommandParameter="{Binding Track}">
                                                 <Border Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
-                                                        Background="{DynamicResource SurfaceRaised}">
+                                                        Background="{DynamicResource SurfaceRaised}"
+                                                        BorderBrush="{DynamicResource SurfaceBorder}"
+                                                        BorderThickness="{DynamicResource SurfaceBorderThickness}">
                                                     <Grid ColumnDefinitions="44,*,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
@@ -970,7 +974,7 @@
                     <ScrollViewer IsVisible="{Binding ShowSettings}">
                      <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,8,28">
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconServer}" Brush="{DynamicResource Accent}" />
@@ -997,7 +1001,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18"
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18"
                                IsVisible="{Binding HasSettingsLibraries}">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
@@ -1030,7 +1034,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconVolume}" Brush="{DynamicResource Accent}" />
@@ -1041,7 +1045,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconWaveform}" Brush="{DynamicResource Accent}" />
@@ -1086,7 +1090,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconQuote}" Brush="{DynamicResource Accent}" />
@@ -1097,7 +1101,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconSparkles}" Brush="{DynamicResource Accent}" />
@@ -1141,7 +1145,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="14">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconPalette}" Brush="{DynamicResource Accent}" />
@@ -1166,7 +1170,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconStethoscope}" Brush="{DynamicResource Accent}" />
@@ -1179,7 +1183,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="18">
+                       <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}" CornerRadius="12" Padding="18">
                          <StackPanel Spacing="12">
                            <StackPanel Orientation="Horizontal" Spacing="10">
                              <controls:TablerIcon Size="21" Data="{StaticResource IconInfo}" Brush="{DynamicResource Accent}" />
@@ -1211,7 +1215,7 @@
                           <ItemsControl ItemsSource="{Binding Connect.Accounts}">
                             <ItemsControl.ItemTemplate>
                               <DataTemplate>
-                                <Border Background="{DynamicResource SurfaceRaised}"
+                                <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
                                         CornerRadius="10" Padding="15,13" Margin="0,0,0,9">
                                   <Grid ColumnDefinitions="*,Auto,Auto">
                                     <StackPanel Grid.Column="0" Spacing="3">
@@ -1247,17 +1251,23 @@
                           <StackPanel Spacing="9" IsVisible="{Binding Connect.NeedsCredentials}">
                             <TextBox Text="{Binding Connect.ServerUrl}"
                                      PlaceholderText="192.168.1.10:8096"
-                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
-                                     Background="{DynamicResource SurfaceRaised}" />
+                                     CornerRadius="8" Padding="11,9"
+                                     Background="{DynamicResource SurfaceRaised}"
+                                     BorderBrush="{DynamicResource SurfaceBorder}"
+                                     BorderThickness="{DynamicResource SurfaceBorderThickness}" />
                             <TextBox Text="{Binding Connect.Username}"
                                      PlaceholderText="Username"
-                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
-                                     Background="{DynamicResource SurfaceRaised}" />
+                                     CornerRadius="8" Padding="11,9"
+                                     Background="{DynamicResource SurfaceRaised}"
+                                     BorderBrush="{DynamicResource SurfaceBorder}"
+                                     BorderThickness="{DynamicResource SurfaceBorderThickness}" />
                             <TextBox Text="{Binding Connect.Password}"
                                      PasswordChar="•"
                                      PlaceholderText="Password"
-                                     CornerRadius="8" Padding="11,9" BorderThickness="0"
-                                     Background="{DynamicResource SurfaceRaised}" />
+                                     CornerRadius="8" Padding="11,9"
+                                     Background="{DynamicResource SurfaceRaised}"
+                                     BorderBrush="{DynamicResource SurfaceBorder}"
+                                     BorderThickness="{DynamicResource SurfaceBorderThickness}" />
                           </StackPanel>
 
                           <TextBlock Classes="secondary" TextWrapping="Wrap"
@@ -1271,6 +1281,8 @@
                                it large invites exactly the wrong thing. -->
                           <Border IsVisible="{Binding Connect.PlexLinkUrl, Converter={x:Static ObjectConverters.IsNotNull}}"
                                   Background="{DynamicResource SurfaceRaised}"
+                                  BorderBrush="{DynamicResource SurfaceBorder}"
+                                  BorderThickness="{DynamicResource SurfaceBorderThickness}"
                                   CornerRadius="10" Padding="15,14">
                             <StackPanel Spacing="11">
                               <TextBlock Text="Approve Mozz in your browser"

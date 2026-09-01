@@ -526,7 +526,13 @@ struct NowPlayingMorphContainer: View {
     /// with Reduce Transparency on (accessibility) — all cases where a consistent
     /// opaque surface is smoother / preferred.
     private var useGlassSurface: Bool {
-        liquidGlassEnabled && !power.isLowPower && !reduceTransparency
+        // Black takes the glass off here for the same reason the tab bar does:
+        // glass is a lit, frosted surface, which is a lighter shade of whatever
+        // is behind it by definition. The two have to agree — the dock and the
+        // bar sit against each other at the bottom of the screen and read as one
+        // navigation surface, so one of them frosted and the other flat black is
+        // worse than either choice made twice.
+        liquidGlassEnabled && !power.isLowPower && !reduceTransparency && !blackout
     }
 
     /// Opaque chrome surface used when glass is off — a theme-aware elevated color
@@ -571,6 +577,16 @@ struct NowPlayingMorphContainer: View {
         .frame(width: m.surfaceW, height: m.surfaceH, alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: m.radius, style: .continuous))
         .liquidGlass(radius: m.radius, enabled: useGlassSurface, fallbackFill: cheapSurfaceFill)
+        // The same hairline the tab bar draws, and it fades out as the player
+        // opens: a full-screen player is the page, and a page has no outline.
+        .overlay {
+            if blackout {
+                RoundedRectangle(cornerRadius: m.radius, style: .continuous)
+                    .strokeBorder(Color.mozzHairline, lineWidth: 1)
+                    .opacity(1 - Double(m.p))
+                    .allowsHitTesting(false)
+            }
+        }
         .position(x: m.surfaceCenterX, y: m.surfaceCenterY)
     }
 

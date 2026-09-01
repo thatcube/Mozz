@@ -19,6 +19,11 @@ struct OnboardingView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isLoadingDemo = false
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+    private var blackout: Bool {
+        scheme == .dark && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
 
     private var isWide: Bool { horizontalSizeClass == .regular }
 
@@ -139,6 +144,15 @@ struct OnboardingView: View {
         }
         .background(Color.mozzSecondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // In Black the card's fill is the page's own black, so the hairline is
+        // what makes these three rows one surface rather than three labels
+        // floating in nothing.
+        .overlay {
+            if blackout {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.mozzHairline, lineWidth: 1)
+            }
+        }
         .tint(.primary)
     }
 

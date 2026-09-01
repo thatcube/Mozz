@@ -165,6 +165,7 @@ struct SettingsView: View {
                     Text("Free and open source, GPL-3.0. A star or a tip means a lot — thanks!")
                 }
             }
+            .mozzGroupedList()
             .mozzReadableWidth()
             .navigationTitle("Settings")
             .toolbar {

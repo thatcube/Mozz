@@ -27,9 +27,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -48,6 +53,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.playback.PlaybackState
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.playback.RepeatMode
+import com.thatcube.mozz.ui.theme.LocalMozzBlackout
 import kotlin.math.roundToInt
 
 /**
@@ -125,6 +131,9 @@ internal fun MorphHost(
      */
     val panelSettled = { expanded && queueProgress() > 0.995f }
 
+    val blackoutSurface = LocalMozzBlackout.current
+    val hairline = MaterialTheme.colorScheme.outline
+
     Box(modifier = Modifier.fillMaxSize()) {
         // The surface. One rounded rectangle that is a pill at rest and the whole
         // screen when open.
@@ -137,6 +146,28 @@ internal fun MorphHost(
                     clip = true
                 }
                 .background(MaterialTheme.colorScheme.surfaceVariant)
+                // In Black the dock's fill is the page's own black, so without
+                // an edge the collapsed pill is not there at all. Drawn rather
+                // than a `border` modifier because the shape is animated per
+                // frame, and faded out as the player opens: a full-screen player
+                // is the page, and a page has no outline. Inset by half the
+                // stroke so the graphicsLayer's clip doesn't eat its outer half.
+                .then(
+                    if (!blackoutSurface) Modifier else Modifier.drawWithContent {
+                        drawContent()
+                        val open = progress()
+                        if (open >= 0.999f) return@drawWithContent
+                        val w = 1.dp.toPx()
+                        val r = frame().surfaceRadius        // already in pixels
+                        drawRoundRect(
+                            color = hairline.copy(alpha = hairline.alpha * (1f - open)),
+                            topLeft = Offset(w / 2f, w / 2f),
+                            size = Size(size.width - w, size.height - w),
+                            cornerRadius = CornerRadius(r - w / 2f),
+                            style = Stroke(width = w),
+                        )
+                    }
+                )
                 // Collapsed, the whole pill is the tap target. Expanded the
                 // modifier is removed outright rather than disabled: a disabled
                 // `clickable` is still a pointer region, and this one grows to
