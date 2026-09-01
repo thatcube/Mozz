@@ -379,6 +379,12 @@ fun MozzShell(
             // Clear of the bottom furniture: the navigation bar and the dock.
             // With the player open that furniture is not there, but the number
             // still lands the card above the transport rather than over it.
+            // One number, whether the player is open or not — which is all
+            // iOS does. It looked deliberately placed in the player there
+            // because the layout leaves a gap exactly where this lands, not
+            // because anything was measuring the player. Now that the Android
+            // player has the same proportions, the same constant lands in the
+            // same gap, and there is no second case to keep in step.
             bottomInset = Dock.reserve(hasTrack, hasBottomNav = !wide),
             modifier = Modifier.align(Alignment.BottomCenter),
         )

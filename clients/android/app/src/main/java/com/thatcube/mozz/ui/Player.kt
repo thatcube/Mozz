@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -310,13 +311,35 @@ internal fun PlayerBody(
                         // it has nothing left to shrink.
                         .widthIn(max = SINGLE_COLUMN_MAX)
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
+                        .padding(horizontal = HERO_SIDE_INSET),
                 ) {
                     // One box, two occupants. The cover is drawn into it by the
                     // morph; a panel, when there is one, takes the same space —
                     // which is what "replaces the artwork" has to mean if the
                     // transport is not to move under the user's thumb.
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                    // iOS drops the cover 26 below the grabber; the grabber's
+                    // own box already contributes 8 of that.
+                    Spacer(Modifier.height(GRABBER_TO_ART))
+
+                    // A square when it holds the cover; greedy when a panel has
+                    // taken its place.
+                    //
+                    // This is the difference between iOS's proportions and the
+                    // ones this had. Giving the cover `weight(1f)` pools every
+                    // spare pixel AROUND it — dead air above and below the
+                    // record — and leaves the controls crushed against the
+                    // bottom edge. iOS fixes the cover at `width - 64` and lets
+                    // the slack fall BELOW the transport, which is why its
+                    // buttons sit where a thumb already is and why there is
+                    // somewhere for a toast to go.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (panel != null) Modifier.weight(1f)
+                                else Modifier.aspectRatio(1f)
+                            ),
+                    ) {
                         ArtSlot(onArtSlot, Modifier.fillMaxSize())
                         androidx.compose.animation.AnimatedVisibility(
                             visible = panel != null,
@@ -351,13 +374,19 @@ internal fun PlayerBody(
                         exit = fadeOut() + shrinkVertically(),
                     ) {
                         Column {
-                            Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(ART_TO_TITLES))
                             Chrome(
                                 state, playback, queueProgress, panelOpen = panel != null,
                                 likes = likes,
                             )
                         }
                     }
+
+                    // iOS's `Spacer(minLength: 8)`: the leftover height lands
+                    // here, under the transport, rather than being spent on
+                    // padding the cover. With a panel open there is no leftover
+                    // — the panel took it — so this stands down.
+                    if (panel == null) Spacer(Modifier.weight(1f))
                 }
             }
 
@@ -528,9 +557,13 @@ private fun Chrome(
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         HeroTitles(state, queueProgress, likes)
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(TITLES_TO_SCRUBBER))
         Scrubber(state, playback)
-        Spacer(Modifier.height(16.dp))
+        // iOS's 54, and the single biggest reason its transport reads as
+        // reachable rather than crammed. At 16 the buttons crowd the scrubber's
+        // own time row, which puts a seek gesture and a skip button within a
+        // thumb-width of each other.
+        Spacer(Modifier.height(SCRUBBER_TO_TRANSPORT))
         // Shuffle and repeat move to the pills above the queue when it is open,
         // so the transport drops to the three controls that are still its job.
         Transport(state, playback, compact = panelOpen)
@@ -1076,6 +1109,15 @@ private fun NowPlayingCard(
         }
     }
 }
+
+// The expanded player's vertical rhythm, taken from iOS's `header` +
+// `bottomChrome`: a cover inset 32 a side, then 22 to the titles, 22 to the
+// scrubber, and 54 to the transport, with every remaining pixel below that.
+private val HERO_SIDE_INSET = 32.dp
+private val GRABBER_TO_ART = 18.dp
+private val ART_TO_TITLES = 22.dp
+private val TITLES_TO_SCRUBBER = 22.dp
+private val SCRUBBER_TO_TRANSPORT = 54.dp
 
 /** How far into its arrival the card's row is, at queue progress [q]. */
 private fun cardArrival(q: Float): Float =
