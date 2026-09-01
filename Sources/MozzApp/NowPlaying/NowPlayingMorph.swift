@@ -207,8 +207,20 @@ struct NowPlayingMorphContainer: View {
     /// drag-reorder in the queue, or the lyrics' idle takeover.
     private var chromeHidden: Bool { reorderChromeHidden || lyricsImmersive }
 
+    /// True when the Black dark style is in effect.
+    ///
+    /// Black is not a darker Dark. It is the mode where nothing takes its colour
+    /// from the artwork: every background in the app is black, and a cover is
+    /// only ever seen inside its own frame. The player's drifting artwork field
+    /// is the largest thing that rule applies to.
+    private var blackout: Bool {
+        systemColorScheme == .dark
+            && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
+
     private var bgStyle: PlayerBackgroundStyle {
-        PlayerBackgroundStyle(rawValue: bgStyleRaw) ?? .default
+        if blackout { return .oled }
+        return PlayerBackgroundStyle(rawValue: bgStyleRaw) ?? .default
     }
     /// The color scheme the player surface presents its content in: forced dark on
     /// the artwork/OLED backdrops (the surface is dark regardless of the app's

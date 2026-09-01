@@ -10,7 +10,9 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -115,6 +117,20 @@ class MozzSettings(context: Context) {
  */
 val LocalMozzSettings = compositionLocalOf<MozzSettings?> { null }
 
+/**
+ * Whether the Black dark style is in effect.
+ *
+ * Black is not a darker Dark. It is the mode where nothing takes its colour from
+ * the artwork: every background in the app is black, and a cover is only ever
+ * seen inside its own frame. Two places have to know — the player, whose backdrop
+ * is otherwise a field sampled from the current cover, and the detail pages,
+ * whose hero otherwise bleeds a colour taken from it across the whole page.
+ *
+ * The same rule, in the same words, is in `MediaDetailScaffold.swift` and
+ * `NowPlayingMorph.swift`.
+ */
+val LocalMozzBlackout = staticCompositionLocalOf { false }
+
 // The surface ladder, matching `Color.mozz*` on iOS tier for tier. In dark mode
 // higher surfaces are LIGHTER (Material's rule: darkest is furthest away); in
 // light mode the floor is a soft grey and content is white.
@@ -146,8 +162,11 @@ private val MozzBlack = darkColorScheme(
     onSurface = Color(0xFFF2F2F2),
     surfaceVariant = Color(0xFF141414),
     onSurfaceVariant = Color(0xFF9A9A9A),
-    outline = Color(0xFF2A2A2A),
-    outlineVariant = Color(0xFF1C1C1C),
+    // Faint, but present. On a true-black page a #1C1C1C rule is not a hairline,
+    // it is nothing — and separation is the only structure a page has once the
+    // backgrounds all agree.
+    outline = Color(0xFF3A3A3A),
+    outlineVariant = Color(0xFF262626),
     error = Crimson,
 )
 
@@ -221,9 +240,12 @@ fun MozzTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = scheme,
-        typography = MozzTypography,
-        content = content,
-    )
+    val blackout = dark && (settings?.darkStyle ?: MozzDarkStyle.DEFAULT) == MozzDarkStyle.BLACK
+    CompositionLocalProvider(LocalMozzBlackout provides blackout) {
+        MaterialTheme(
+            colorScheme = scheme,
+            typography = MozzTypography,
+            content = content,
+        )
+    }
 }

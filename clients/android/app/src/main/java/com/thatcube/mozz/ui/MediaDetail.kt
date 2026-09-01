@@ -67,6 +67,7 @@ import coil3.request.allowHardware
 import coil3.toBitmap
 import com.thatcube.mozz.R
 import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.ui.theme.LocalMozzBlackout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -205,6 +206,15 @@ fun MediaDetail(
     serverId: String,
     artworkKey: String?,
     style: HeroStyle,
+    /**
+     * Whether the artwork is a person, and so drawn round.
+     *
+     * A property of the subject, not of the hero style. Deriving it from
+     * `FULL_BLEED` was wrong in both directions: Liked Songs and the mixes are
+     * full-bleed and are not people, and in Black every hero is framed, so the
+     * style stops saying anything about shape at all.
+     */
+    circular: Boolean = false,
     title: String,
     subtitle: String? = null,
     meta: String? = null,
@@ -214,7 +224,15 @@ fun MediaDetail(
     actions: @Composable () -> Unit,
     content: LazyListScope.() -> Unit,
 ) {
-    val colors = rememberDetailColors(server, serverId, artworkKey, seed = title)
+    // Black takes no colour from the artwork, and a full-bleed hero IS the
+    // artwork bleeding into the page — so in Black the hero is always the framed
+    // one and the page stays black behind it. See `LocalMozzBlackout`.
+    val blackout = LocalMozzBlackout.current
+    // Not merely overridden afterwards: in Black the palette is never derived at
+    // all, so the cover is not decoded a second time to be averaged.
+    val colors = if (blackout) DetailColors(Color.Black, Color.Black)
+    else rememberDetailColors(server, serverId, artworkKey, seed = title)
+    val heroStyle = if (blackout) HeroStyle.CENTERED else style
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     var headerHeight by remember { mutableStateOf(0) }
@@ -256,9 +274,9 @@ fun MediaDetail(
                 item(key = "hero") {
                     Box(modifier = Modifier.onSizeChanged { headerHeight = it.height }) {
                         if (wide) {
-                            WideHero(server, serverId, artworkKey, style, title, subtitle, meta, colors, actions)
+                            WideHero(server, serverId, artworkKey, heroStyle, circular, title, subtitle, meta, colors, actions)
                         } else {
-                            NarrowHero(server, serverId, artworkKey, style, title, subtitle, meta, colors, actions)
+                            NarrowHero(server, serverId, artworkKey, heroStyle, circular, title, subtitle, meta, colors, actions)
                         }
                     }
                 }
@@ -289,6 +307,7 @@ private fun NarrowHero(
     serverId: String,
     artworkKey: String?,
     style: HeroStyle,
+    circular: Boolean,
     title: String,
     subtitle: String?,
     meta: String?,
@@ -351,8 +370,8 @@ private fun NarrowHero(
                 pixels = artworkPixels(CENTERED_ART),
                 modifier = Modifier
                     .size(CENTERED_ART)
-                    .shadow(18.dp, RoundedCornerShape(14.dp))
-                    .clip(RoundedCornerShape(14.dp)),
+                    .shadow(18.dp, if (circular) CircleShape else RoundedCornerShape(14.dp))
+                    .clip(if (circular) CircleShape else RoundedCornerShape(14.dp)),
             )
             Spacer(Modifier.height(16.dp))
             TitleBlock(title, subtitle, meta, TextAlign.Center)
@@ -376,6 +395,7 @@ private fun WideHero(
     serverId: String,
     artworkKey: String?,
     style: HeroStyle,
+    circular: Boolean,
     title: String,
     subtitle: String?,
     meta: String?,
@@ -409,8 +429,8 @@ private fun WideHero(
                 pixels = artworkPixels(side),
                 modifier = Modifier
                     .size(side)
-                    .shadow(20.dp, if (style == HeroStyle.FULL_BLEED) CircleShape else RoundedCornerShape(14.dp))
-                    .clip(if (style == HeroStyle.FULL_BLEED) CircleShape else RoundedCornerShape(14.dp)),
+                    .shadow(20.dp, if (circular) CircleShape else RoundedCornerShape(14.dp))
+                    .clip(if (circular) CircleShape else RoundedCornerShape(14.dp)),
             )
             Spacer(Modifier.width(28.dp))
             Column(

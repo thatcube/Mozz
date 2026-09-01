@@ -19,11 +19,19 @@ struct MediaHero {
     /// Stable string used for the deterministic fallback color / placeholder when
     /// there's no artwork (offline demo).
     var seed: String
+    /// Whether the artwork is a person, and so drawn round.
+    ///
+    /// A property of the subject rather than of the style. It matters in Black,
+    /// where every hero is framed and the style therefore stops saying anything
+    /// about shape — and Liked Songs and the mixes are full-bleed without being
+    /// people.
+    var circular: Bool
 
-    init(style: Style, artwork: ArtworkRef?, seed: String) {
+    init(style: Style, artwork: ArtworkRef?, seed: String, circular: Bool = false) {
         self.style = style
         self.artwork = artwork
         self.seed = seed
+        self.circular = circular
     }
 }
 
@@ -46,8 +54,28 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
+    /// The app's effective scheme, read from the parent — this view forces dark on
+    /// its own subtree, which does not affect what it reads here.
+    @Environment(\.colorScheme) private var appColorScheme
+    @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
     @State private var bg: Color = Color(white: 0.12)
     @State private var deepBg: Color = .mozzDetailBackground
+
+    /// True when the Black dark style is in effect.
+    ///
+    /// Black is not a darker Dark. It is the mode where no page takes its colour
+    /// from artwork: every background is black, and a cover is only ever seen
+    /// inside its own frame. On this page that means two things — the hero is
+    /// always the centred, framed one (a full-bleed cover IS the background
+    /// bleeding into the page), and the colour extracted from the artwork is not
+    /// used at all.
+    private var blackout: Bool {
+        appColorScheme == .dark
+            && (Color.MozzDarkStyle(rawValue: darkStyleRaw) ?? .default) == .black
+    }
+
+    /// The hero this page actually draws. Black has only one.
+    private var style: MediaHero.Style { blackout ? .centeredArtwork : hero.style }
 
     private static var fullBleedHeight: CGFloat { 500 }
     private static var centeredArtworkSize: CGFloat { 240 }
@@ -123,6 +151,9 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         // on the artwork too means the background re-derives from that cover
         // instead of staying stuck on the seed-based placeholder color.
         .task(id: paletteToken) {
+            // Black takes no colour from the artwork, so there is nothing to
+            // derive and nothing to fade in.
+            guard !blackout else { bg = .black; deepBg = .black; return }
             // If the artwork was preloaded, resolve the palette synchronously so
             // it's correct on the first frame; otherwise fade it in when it lands.
             if let p = DominantColor.cachedPalette(
@@ -137,7 +168,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     }
 
     @ViewBuilder private var header: some View {
-        switch hero.style {
+        switch style {
         case .fullBleed: fullBleedHeader
         case .centeredArtwork: centeredHeader
         }
@@ -208,7 +239,8 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     private var centeredHeader: some View {
         VStack(spacing: 16) {
             ArtworkView(artwork: hero.artwork, seed: hero.seed,
-                        size: Self.centeredArtworkSize, cornerRadius: 14)
+                        size: Self.centeredArtworkSize, cornerRadius: 14,
+                        circular: hero.circular)
                 .shadow(color: .black.opacity(0.35), radius: 18, y: 10)
                 .padding(.top, 12)
             titleBlock(onDark: true)
@@ -275,7 +307,17 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// A fixed height keeps the proposal unambiguous, so short and tall pages lay
     /// out identically. Applied with `.background(alignment: .top)` so it always
     /// pins to the first row.
-    private var contentBackground: some View {
+    @ViewBuilder private var contentBackground: some View {
+        if blackout {
+            // Nothing to fade between: the hero's colour and the page's are the
+            // same black, so a gradient would only be a band of nothing.
+            Color.black.frame(maxWidth: .infinity).frame(height: 420)
+        } else {
+            tintedContentBackground
+        }
+    }
+
+    private var tintedContentBackground: some View {
         LinearGradient(
             stops: [
                 .init(color: bg, location: 0.0),

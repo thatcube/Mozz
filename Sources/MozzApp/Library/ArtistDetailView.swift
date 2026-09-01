@@ -42,7 +42,8 @@ struct ArtistDetailView: View {
 
     var body: some View {
         MediaDetailScaffold(
-            hero: MediaHero(style: .fullBleed, artwork: heroArtwork, seed: artist.name),
+            hero: MediaHero(style: .fullBleed, artwork: heroArtwork, seed: artist.name,
+                            circular: true),
             title: artist.name,
             meta: metaLine,
             contentHorizontalPadding: 0,

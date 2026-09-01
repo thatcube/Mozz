@@ -151,6 +151,7 @@ fun ArtistDetailPage(
         serverId = artist.serverId,
         artworkKey = artist.heroArtworkKey ?: artist.artworkKey,
         style = HeroStyle.FULL_BLEED,
+        circular = true,
         title = artist.name,
         meta = if (loaded && albums.isNotEmpty()) albumCount(albums.size) else null,
         wide = wide,

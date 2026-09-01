@@ -122,6 +122,14 @@ fun PlayerBackground(
     // taking the page's floor here would have put white text on near-white for
     // any track whose artwork yields nothing.
     val fallback = androidx.compose.ui.graphics.Color(0xFF141414)
+
+    // Black takes no colour from the artwork. Returning before the sampling means
+    // the cover is never decoded for its histogram either — the work and the
+    // field it produced are both gone, not hidden.
+    if (com.thatcube.mozz.ui.theme.LocalMozzBlackout.current) {
+        Canvas(modifier = modifier.fillMaxSize()) { drawRect(androidx.compose.ui.graphics.Color.Black) }
+        return
+    }
     // Deliberately not keyed on the artwork: the previous field stays up until
     // the next one has been computed. Resetting to null between tracks is what
     // made the background drop to black while the next cover loaded.
