@@ -395,30 +395,43 @@ internal fun PlayerBody(
                         enter = fadeIn() + expandVertically(),
                         exit = fadeOut() + shrinkVertically(),
                     ) {
-                        Column(modifier = Modifier.fillMaxHeight()) {
+                        // Greedy only when there IS a surplus to share. With a panel
+                        // open the panel is the thing entitled to the leftover height,
+                        // so this wraps its content and the gaps go back to being
+                        // fixed. Filling here regardless is a way to make the queue
+                        // vanish: the chrome takes the whole column, the panel's
+                        // `weight(1f)` resolves to nothing, and what is left is a
+                        // scrubber pinned to the top with the transport adrift below.
+                        val sharesSurplus = panel == null
+                        Column(
+                            modifier = if (sharesSurplus) Modifier.fillMaxHeight() else Modifier,
+                        ) {
                             Spacer(Modifier.height(ART_TO_TITLES))
                             HeroTitles(state, queueProgress, likes)
                             Spacer(Modifier.height(TITLES_TO_SCRUBBER))
                             Scrubber(state, playback)
                             Spacer(
-                                Modifier
-                                    .heightIn(min = SCRUBBER_TO_TRANSPORT)
-                                    .weight(1f)
+                                if (sharesSurplus) {
+                                    Modifier.heightIn(min = SCRUBBER_TO_TRANSPORT).weight(1f)
+                                } else {
+                                    Modifier.height(SCRUBBER_TO_TRANSPORT)
+                                }
                             )
-                            // Shuffle and repeat move to the pills above the
-                            // queue when it is open, so the transport drops to
-                            // the three controls that are still its job.
+                            // Shuffle and repeat move to the pills above the queue when
+                            // it is open, so the transport drops to the three controls
+                            // that are still its job.
                             Transport(state, playback, compact = panel != null)
-                            // An equal share of the surplus, on top of unequal
-                            // minimums — which is what leaves the transport
-                            // just above the middle of the band rather than
-                            // dead centre. Equal so that SwiftUI can state the
-                            // same rule: two plain Spacers split what is spare
-                            // evenly, and the minimums do the rest.
+                            // An equal share of the surplus, on top of unequal minimums
+                            // — which is what leaves the transport just above the middle
+                            // of the band rather than dead centre. Equal so that SwiftUI
+                            // can state the same rule: two plain Spacers split what is
+                            // spare evenly, and the minimums do the rest.
                             Spacer(
-                                Modifier
-                                    .heightIn(min = TRANSPORT_TO_ROW)
-                                    .weight(1f)
+                                if (sharesSurplus) {
+                                    Modifier.heightIn(min = TRANSPORT_TO_ROW).weight(1f)
+                                } else {
+                                    Modifier.height(TRANSPORT_TO_ROW)
+                                }
                             )
                         }
                     }

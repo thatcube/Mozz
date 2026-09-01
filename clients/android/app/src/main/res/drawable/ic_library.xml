@@ -9,12 +9,8 @@
     <path
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2"
-        android:pathData="M7 6V5q.2-1.8 2-2h6a2 2 0 0 1 2 2v1M5 9V8q.2-1.8 2-2h10a2 2 0 0 1 2 2v1" />
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2"
         android:strokeLineCap="round"
-        android:pathData="M19 21H5a2 2 0 0 1-2-2v-8q.2-1.8 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2Z" />
+        android:pathData="M19 5H5m12-3H7m12 20H5a2 2 0 0 1-2-2V10q.2-1.8 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z" />
     <path
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2"
