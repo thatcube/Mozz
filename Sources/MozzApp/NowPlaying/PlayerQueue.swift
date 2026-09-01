@@ -808,7 +808,15 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// reader ignores zero, so it survives rows being recycled out.
     @ViewBuilder private var upNextRows: some View {
         let items = playback.upNext
-        if !items.isEmpty {
+        if items.isEmpty {
+            // Otherwise the panel just stops: pills, then nothing, and no way to
+            // tell an empty queue from one that failed to load.
+            Text("Nothing in the queue")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
+        } else {
             let base = playback.history.count + 1
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Indices rather than `Array(items.enumerated())`: the live scroll
