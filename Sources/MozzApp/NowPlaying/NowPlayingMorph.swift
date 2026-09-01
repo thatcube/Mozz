@@ -164,7 +164,7 @@ struct NowPlayingMorphContainer: View {
     /// Whether the "open onto the queue when wide" default has already been spent.
     @State private var panelDefaulted = false
     /// Where the layout reported the artwork's slot. See `artSlot`.
-    @State private var artSlotCenter: CGPoint?
+    @State private var artSlotRect: CGRect?
     /// The panel being replaced during a swap, kept mounted underneath the incoming
     /// one until the cross-fade finishes. `nil` whenever no swap is in flight.
     @State private var panelSwapFrom: PlayerPanel?
@@ -288,6 +288,8 @@ struct NowPlayingMorphContainer: View {
                 let presentation = playerPresentation(wide: columns, panel: openPanel)
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
+                              safeLeading: safeGeo.safeAreaInsets.leading,
+                              safeTrailing: safeGeo.safeAreaInsets.trailing,
                               pRaw: p, receiving: receiving,
                               isExpanded: ui.isFullPresented, minimize: minimize,
                               // The artwork docks into the queue's card only when
@@ -298,7 +300,7 @@ struct NowPlayingMorphContainer: View {
                               contentLeft: contentLeft,
                               hasBottomBar: hasBottomBar,
                               presentation: presentation,
-                              measuredArtCenter: artSlotCenter,
+                              measuredArtRect: artSlotRect,
                               // A short window keeps the cover exactly where it is
                               // when a panel opens: the panel takes the transport's
                               // place in the column beside it, so there is nothing
@@ -613,7 +615,7 @@ struct NowPlayingMorphContainer: View {
                 // the body keeps this fixed full-screen frame through the
                 // collapse, so a measured slot never moves under the morph.
                 .coordinateSpace(name: Self.artSlotSpace)
-                .onPreferenceChange(ArtSlotKey.self) { artSlotCenter = $0 }
+                .onPreferenceChange(ArtSlotKey.self) { artSlotRect = $0 }
                 // Drag-to-dismiss anywhere the content doesn't claim the touch:
                 // a clear, hit-testable layer directly behind the body. Interactive
                 // children (buttons, scrubber, the queue scroll) sit in front and
@@ -803,34 +805,47 @@ struct NowPlayingMorphContainer: View {
     /// stranded out under the cover — which is the shape the reference layout
     /// pointedly does not have.
     private func shortPlayer(_ m: Morph) -> some View {
-        HStack(spacing: 24) {
-            artSlot(m)
+        HStack(spacing: 0) {
+            artSlot(m, flexible: true)
             VStack(spacing: 0) {
                 titleRow(m)
+                    .padding(.trailing, Self.shortColumnInset)
                 // The panel takes the TRANSPORT's place here, not the cover's.
                 // Sideways there is room for the record and the queue at once,
                 // and moving the record to make space for a list it is already
                 // sitting next to is motion for nothing.
                 ZStack(alignment: .top) {
-                    bottomChrome(m, showsButtons: false)
+                    bottomChrome(m, showsButtons: false, sideInset: 0)
+                        .padding(.trailing, Self.shortColumnInset)
                         .opacity(1 - Double(min(max(panelP, 0), 1)))
                         // A view at zero opacity still takes touches, and the
                         // scrubber sits exactly where the queue's first rows
                         // land — without this it swallows them.
                         .allowsHitTesting(panelP < 0.5)
+                    // The queue keeps its own 24pt row inset, which is the rail
+                    // the two above have just been moved onto.
                     panelColumn(m)
+                        .padding(.leading, -Self.shortColumnInset)
                 }
                 bottomButtonRow
+                    .padding(.trailing, Self.shortColumnInset)
                     .padding(.top, 10)
                     .opacity(chromeHidden ? 0 : 1)
                     .allowsHitTesting(!chromeHidden)
             }
+            // One rail for everything in this column — the title, the scrub bar
+            // and the queue's rows all start here. They were on three different
+            // insets, which is what read as misalignment.
+            .padding(.leading, Self.shortColumnInset)
             .frame(maxWidth: .infinity)
         }
         // No `singleColumnMax` here: running the controls to the window's edge is
         // the point of turning the phone, and capping the pair at 560 left a band
         // of dead space down both sides.
-        .padding(.horizontal, Self.heroSideInset)
+        // Clear of the notch. A phone on its side puts the safe area on the
+        // leading edge, and the cover was sitting under it.
+        .padding(.leading, max(Self.heroSideInset, m.safeLeading))
+        .padding(.trailing, max(Self.heroSideInset, m.safeTrailing))
         .padding(.top, 20)
         // The surface overhangs the screen by `bottomOverhang`; lift the whole
         // row out of that off-screen region, cover included.
@@ -943,10 +958,11 @@ struct NowPlayingMorphContainer: View {
     /// format badge, and the bottom button row + route label. Factored out so the
     /// whole block can fade away as one unit during a drag-reorder.
     @ViewBuilder
-    private func bottomChrome(_ m: Morph, showsButtons: Bool = true) -> some View {
+    private func bottomChrome(_ m: Morph, showsButtons: Bool = true,
+                              sideInset: CGFloat = 32) -> some View {
         VStack(spacing: 0) {
             scrubber
-                .padding(.horizontal, 32)
+                .padding(.horizontal, sideInset)
                 .padding(.top, 22)
             // The surplus height is SHARED between these two rather than all
             // of it landing under the transport.
@@ -1015,15 +1031,26 @@ struct NowPlayingMorphContainer: View {
     /// Safe to measure because the drawer body is laid out at a fixed full-screen
     /// size (see `surface`) and merely clipped as the surface shrinks, so this
     /// frame does not move during the collapse.
-    private func artSlot(_ m: Morph) -> some View {
-        Color.clear
-            .frame(width: m.expArtSide, height: m.expArtSide)
-            .background(
-                GeometryReader { g in
-                    Color.clear.preference(key: ArtSlotKey.self,
-                                           value: g.frame(in: .named(Self.artSlotSpace)).center)
-                }
-            )
+    @ViewBuilder
+    private func artSlot(_ m: Morph, flexible: Bool = false) -> some View {
+        let reporter = GeometryReader { g in
+            Color.clear.preference(key: ArtSlotKey.self,
+                                   value: g.frame(in: .named(Self.artSlotSpace)))
+        }
+        if flexible {
+            // Sideways the cover takes the height the row gives it and stays
+            // square, rather than being sized from a subtraction. The arithmetic
+            // version had to know every inset the layout was working with — safe
+            // areas included — and got it wrong by 90pt on a real phone. Here the
+            // layout decides and then says what it decided.
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .background(reporter)
+        } else {
+            Color.clear
+                .frame(width: m.expArtSide, height: m.expArtSide)
+                .background(reporter)
+        }
     }
 
     /// The coordinate space the slot is measured in: the drawer body's own, whose
@@ -1038,6 +1065,11 @@ struct NowPlayingMorphContainer: View {
             .padding(.top, m.safeTop + 8)
             .opacity(m.grabberOpacity)
     }
+
+    /// The rail everything in the sideways controls column sits on — the queue
+    /// panel's own row inset, so the scrub bar and the title line up with the
+    /// rows rather than each keeping a margin of its own.
+    private static let shortColumnInset: CGFloat = 24
 
     /// Side inset of the hero's title row (matches the scrubber below it).
     /// Doubles as the distance a scrolling title is allowed to bleed past its
@@ -2179,14 +2211,10 @@ private struct MarqueeLine: View {
 /// Where the expanded artwork's reserved slot actually landed, in the drawer
 /// body's coordinate space. See `artSlot`.
 private struct ArtSlotKey: PreferenceKey {
-    static var defaultValue: CGPoint? = nil
-    static func reduce(value: inout CGPoint?, nextValue: () -> CGPoint?) {
+    static var defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
         if let next = nextValue() { value = next }
     }
-}
-
-private extension CGRect {
-    var center: CGPoint { CGPoint(x: midX, y: midY) }
 }
 
 private struct ChromeRegionHeightKey: PreferenceKey {
@@ -2925,6 +2953,10 @@ private struct Morph {
     let height: CGFloat
     let safeTop: CGFloat
     let safeBottom: CGFloat
+    /// The horizontal safe area. Zero in portrait; on a phone laid sideways it is
+    /// the notch's side, and the cover sat under it without this.
+    let safeLeading: CGFloat
+    let safeTrailing: CGFloat
     /// Raw spring value; may briefly leave [0,1]. Everything below uses the
     /// clamped `p`, so the spring's overshoot can't wobble the surface.
     let pRaw: CGFloat
@@ -2951,7 +2983,7 @@ private struct Morph {
     /// and said so. Nil for the first frame, where the computed values below stand
     /// in. Measured rather than predicted because there are three arrangements now
     /// and a prediction has to be right in all of them.
-    let measuredArtCenter: CGPoint?
+    let measuredArtRect: CGRect?
     /// How far the player has moved aside to make room for a panel: 0 = its column
     /// centred in the window, 1 = in the left half with the panel beside it.
     ///
@@ -3074,6 +3106,10 @@ private struct Morph {
     /// screen and takes the transport with it. On a phone in portrait the width is
     /// always the smaller of the two, so this changes nothing there.
     var expArtSide: CGFloat {
+        // Sideways the slot is flexible, so its measured size is the answer —
+        // no loop, because nothing sizes that slot from this. Stacked, the slot
+        // IS this value, so the measurement would feed itself and is ignored.
+        if isShort, let side = measuredArtRect?.width, side > 0 { return side }
         let byHeight = isShort
             ? height - safeTop - safeBottom - shortArtReserve
             : (height - safeTop - safeBottom) * 0.52
@@ -3088,9 +3124,9 @@ private struct Morph {
     }
     /// Centred in the slot, so the cover travels with the column as it slides —
     /// unless the layout has reported where it really put the slot, which wins.
-    var expArtCenterX: CGFloat { measuredArtCenter?.x ?? (playerSlotW / 2) }
+    var expArtCenterX: CGFloat { measuredArtRect?.midX ?? (playerSlotW / 2) }
     var expArtCenterY: CGFloat {
-        measuredArtCenter?.y ?? (safeTop + Self.expArtTopGap + expArtSide / 2)
+        measuredArtRect?.midY ?? (safeTop + Self.expArtTopGap + expArtSide / 2)
     }
 
     // Morphing surface --------------------------------------------------------
