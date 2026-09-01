@@ -299,7 +299,11 @@ struct NowPlayingMorphContainer: View {
                               hasBottomBar: hasBottomBar,
                               presentation: presentation,
                               measuredArtCenter: artSlotCenter,
-                              panelShift: columns ? panelP : 0)
+                              // A short window keeps the cover exactly where it is
+                              // when a panel opens: the panel takes the transport's
+                              // place in the column beside it, so there is nothing
+                              // to slide out of the way.
+                              panelShift: (wide && !short) ? panelP : 0)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     // Enlarged, invisible tap target so edge taps open the player
@@ -758,15 +762,12 @@ struct NowPlayingMorphContainer: View {
                     .frame(maxWidth: Morph.singleColumnMax)
                     .frame(width: m.playerSlotW)
 
-                ZStack(alignment: .top) {
-                    ForEach(PlayerPanel.allCases, id: \.self) { panel in
-                        if panel == openPanel || panel == panelSwapFrom {
-                            panelBody(panel, m, beside: true)
-                                .zIndex(panel == openPanel ? 1 : 0)
-                        }
-                    }
+                // A third column only where there is width for one. Sideways the
+                // panel goes INSIDE the player's own column, in the transport's
+                // place — see `playerColumn`.
+                if !m.isShort {
+                    panelColumn(m).frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
             }
             .onChange(of: panelWantsOpen) { _, wantsOpen in
                 if wantsOpen != nil && !panelWasMounted { return }
@@ -789,13 +790,26 @@ struct NowPlayingMorphContainer: View {
     @ViewBuilder
     private func playerColumn(_ m: Morph) -> some View {
         if m.isShort {
-            HStack(spacing: 20) {
+            HStack(spacing: 24) {
                 artSlot(m)
                 VStack(spacing: 0) {
                     titleRow(m)
                         .padding(.horizontal, Self.heroSideInset)
-                    bottomChrome(m, showsButtons: false)
+                    // The panel takes the TRANSPORT's place here, not the
+                    // cover's. Sideways there is room for the record and the
+                    // queue at once, and moving the record to make space for a
+                    // list it is already sitting next to is motion for nothing.
+                    ZStack(alignment: .top) {
+                        bottomChrome(m, showsButtons: false)
+                            .opacity(1 - Double(min(max(panelP, 0), 1)))
+                            // A view at zero opacity still takes touches, and the
+                            // scrubber sits exactly where the queue's first rows
+                            // land — without this it swallows them.
+                            .allowsHitTesting(panelP < 0.5)
+                        panelColumn(m)
+                    }
                 }
+                .frame(maxWidth: .infinity)
             }
             // The same side inset the stacked form's controls keep. Without it the
             // cover sits flush against the screen's edge and reads as clipped.
@@ -807,6 +821,21 @@ struct NowPlayingMorphContainer: View {
             VStack(spacing: 0) {
                 header(m, showsGrabber: false)
                 bottomChrome(m, showsButtons: false)
+            }
+        }
+    }
+
+    /// The open panel, or nothing. Its own view because two layouts place it: a
+    /// column of its own beside the player, or inside the player's column in the
+    /// transport's place when the window is short.
+    @ViewBuilder
+    private func panelColumn(_ m: Morph) -> some View {
+        ZStack(alignment: .top) {
+            ForEach(PlayerPanel.allCases, id: \.self) { panel in
+                if panel == openPanel || panel == panelSwapFrom {
+                    panelBody(panel, m, beside: true)
+                        .zIndex(panel == openPanel ? 1 : 0)
+                }
             }
         }
     }
@@ -2997,7 +3026,12 @@ private struct Morph {
     /// phone the window is narrower than the cap, so nothing appears to be
     /// capped at all.
     static let singleColumnMax: CGFloat = 560
-    var playerColumnW: CGFloat { min(playerSlotW, Self.singleColumnMax) }
+    /// A short window ignores the cap: the reference layout runs the controls to
+    /// the window's edge beside a big cover, and capping the pair at 560 would
+    /// waste most of the width a phone on its side has.
+    var playerColumnW: CGFloat {
+        isShort ? playerSlotW : min(playerSlotW, Self.singleColumnMax)
+    }
 
     /// Whether the window is too short to stack the cover above the transport.
     ///
@@ -3031,7 +3065,11 @@ private struct Morph {
             : (height - safeTop - safeBottom) * 0.52
         // Side by side, the cover may take about half its column; stacked, it is
         // the column less the same 32pt inset the controls under it use.
-        let byWidth = isShort ? playerColumnW * 0.42 : playerColumnW - 64
+        // Sideways the cover is sized by the HEIGHT it has and takes the width
+        // that follows — about a third of the window, which is what the reference
+        // layout does; the width bound is only a rail for a very wide short
+        // window. Stacked, it is the column less the 32pt inset the controls use.
+        let byWidth = isShort ? width * 0.45 : playerColumnW - 64
         return max(0, min(byWidth, byHeight))
     }
     /// Centred in the slot, so the cover travels with the column as it slides —
