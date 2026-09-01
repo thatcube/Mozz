@@ -36,7 +36,10 @@ struct PlayerLikeControl: View {
             Image(mozz: isFavorite ? "heart.fill" : "heart")
                 .resizable().scaledToFit()
                 .frame(width: glyphSize, height: glyphSize)
-                .foregroundStyle(isFavorite ? Color.pink : Color.primary)
+                // The same neutral the star uses, in both states: this app spends
+                // its one saturated colour on the action, and a like is not that.
+                // The fill carries the state, exactly as it does for a rating.
+                .foregroundStyle(Color.primary)
                 .playerHitTarget()
         }
         .buttonStyle(PlayerButtonStyle(washDiameter: glyphSize + 20))

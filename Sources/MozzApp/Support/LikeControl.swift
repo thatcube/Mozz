@@ -46,7 +46,9 @@ struct LikeControl: View {
             Task { await env.setLiked(isFavorite, track: snapshot) }
         } label: {
             Image(mozz: liked ? "heart.fill" : "heart")
-                .foregroundStyle(liked ? Color.pink : Color.secondary)
+                // Neutral, like the rating chip beside it — the fill says liked,
+                // not a colour. (Android has never tinted this one.)
+                .foregroundStyle(liked ? Color.primary : Color.secondary)
                 .font(.body)
         }
         .buttonStyle(.plain)
