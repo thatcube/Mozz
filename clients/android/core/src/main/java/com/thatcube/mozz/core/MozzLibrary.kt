@@ -57,14 +57,74 @@ class MozzLibrary(private val core: MozzCore) {
         )
     ) ?: emptyList()
 
+    /**
+     * The albums credited to one artist.
+     *
+     * Sent as `remoteId`, not `artistRemoteId`: this command takes the artist as
+     * *the* subject rather than as a filter, and asking under the other name got
+     * "artistAlbums needs remoteId and serverId" back — which, because every
+     * caller wraps these in `runCatching`, looked exactly like an artist with no
+     * albums.
+     */
     suspend fun artistAlbums(serverId: String, artistRemoteId: String): List<Album> =
         core.call<List<Album>>(
             CoreRequest(
                 cmd = "artistAlbums",
                 serverId = serverId,
-                artistRemoteId = artistRemoteId,
+                remoteId = artistRemoteId,
             )
         ) ?: emptyList()
+
+    /**
+     * One artist, by remote id.
+     *
+     * The core answers with a hero artwork key already resolved: artists
+     * frequently have no picture of their own, and it falls back to a
+     * representative album cover so the page still has something to bloom from.
+     * Doing that here rather than in each client is what keeps the phone and the
+     * desktop from choosing different covers for the same artist.
+     */
+    suspend fun artist(serverId: String, remoteId: String): Artist? =
+        core.call<Artist>(
+            CoreRequest(cmd = "artist", serverId = serverId, remoteId = remoteId)
+        )
+
+    /**
+     * The songs the core ranks highest for one artist — the artist page's "Top
+     * Songs", and the list its Play button plays through.
+     */
+    suspend fun artistTopTracks(
+        serverId: String,
+        artistRemoteId: String,
+        limit: Int = 500,
+    ): List<Track> = core.call<List<Track>>(
+        CoreRequest(
+            cmd = "artistTopTracks",
+            serverId = serverId,
+            artistRemoteId = artistRemoteId,
+            limit = limit,
+        )
+    ) ?: emptyList()
+
+    /**
+     * Albums this artist appears on without being credited for — compilations,
+     * features, soundtracks.
+     *
+     * These arrive as headers, so their [Album.id] is 0; identify them by
+     * `remoteId`.
+     */
+    suspend fun artistAppearsOn(
+        serverId: String,
+        artistRemoteId: String,
+        limit: Int = 20,
+    ): List<Album> = core.call<AlbumPage>(
+        CoreRequest(
+            cmd = "artistAppearsOn",
+            serverId = serverId,
+            artistRemoteId = artistRemoteId,
+            limit = limit,
+        )
+    )?.items ?: emptyList()
 
     suspend fun playlists(serverId: String): List<Playlist> =
         core.call<List<Playlist>>(CoreRequest(cmd = "playlists", serverId = serverId))
@@ -90,6 +150,36 @@ class MozzLibrary(private val core: MozzCore) {
         core.call<List<Track>>(
             CoreRequest(cmd = "recentlyPlayedTracks", serverId = serverId, limit = limit)
         ) ?: emptyList()
+
+    // MARK: Recommendations
+
+    /**
+     * The precomputed shortcuts the home screen shows: Supermix, Daily Mixes,
+     * artist mixes, Replay, Mozz Weekly — in the core's own display order.
+     *
+     * Read only. They are produced by [generateHomeMixes] and [generateMozzWeekly]
+     * on a schedule, so opening Home never waits on a generator.
+     */
+    suspend fun homeMixes(): List<HomeMix> =
+        core.call<List<HomeMix>>(CoreRequest(cmd = "homeMixes")) ?: emptyList()
+
+    /** Rebuild the daily mixes. Costly on a large library — see `HomeMixSchedule`. */
+    suspend fun generateHomeMixes(serverId: String) {
+        core.call<Map<String, Boolean>>(
+            CoreRequest(cmd = "generateHomeMixes", serverId = serverId)
+        )
+    }
+
+    /** Rebuild the weekly rediscovery set. */
+    suspend fun generateMozzWeekly(serverId: String, limit: Int = 30) {
+        core.call<Map<String, String>>(
+            CoreRequest(cmd = "generateMozzWeekly", serverId = serverId, limit = limit)
+        )
+    }
+
+    /** One mix's tracks, in rank order. */
+    suspend fun mixTracks(setId: String): List<Track> =
+        core.call<List<Track>>(CoreRequest(cmd = "mixTracks", setId = setId)) ?: emptyList()
 
     /**
      * Search across artists, albums and tracks. [limit] is per type, not total.

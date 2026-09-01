@@ -1,8 +1,11 @@
 package com.thatcube.mozz.ui
 
+import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,350 +15,424 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import com.thatcube.mozz.core.MozzServer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.layout.AnimatedPane
-import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
-import androidx.compose.material3.adaptive.navigation.NavigableListDetailPaneScaffold
-import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.thatcube.mozz.R
 import com.thatcube.mozz.core.Album
-import com.thatcube.mozz.core.LibraryCounts
+import com.thatcube.mozz.core.HomeMix
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.core.Playlist
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.Track
-import com.thatcube.mozz.playback.PlaybackState
 import com.thatcube.mozz.playback.PlayerController
-import com.thatcube.mozz.ui.theme.quietBody
-import kotlinx.coroutines.launch
 
 /**
- * What someone sees once their catalogue is on the device.
+ * What someone sees when they open the app.
  *
- * Built on the list/detail scaffold from the first screen rather than as a
- * single column to be widened later: on a fold, a phone layout stretched to the
- * inner display is the thing that looks wrong, and retrofitting two panes means
- * rewriting navigation. Folded, this is one pane and back goes back. Unfolded,
- * the album sits beside the list.
+ * The same shape as the iPhone's Home, section for section: the shortcuts the
+ * core precomputed, then what was played recently, what arrived recently, and
+ * the playlists on the server. Everything here is read from the mirrored
+ * catalogue, so it is on screen before the network has been asked anything.
+ *
+ * The library itself is not here — it moved to its own tab, where iOS keeps it.
+ * A home screen that is a list of every album is a file browser.
  */
-@OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
+fun HomeRoot(
     account: ServerAccount,
     library: MozzLibrary,
     server: MozzServer,
     playback: PlayerController,
-    directive: androidx.compose.material3.adaptive.layout.PaneScaffoldDirective,
-    bottomReserve: androidx.compose.ui.unit.Dp,
+    nav: Navigator,
+    bottomReserve: Dp,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    // The shell's directive, not one of our own: the two must agree about how
-    // many columns this window has, or the app shows a phone's navigation over a
-    // tablet's layout.
-    //
-    // Keyed on the partition count because the activity survives a fold — it
-    // declares `configChanges` so the music does not stop — and the navigator
-    // therefore keeps whatever directive it was built with. Passing the new one
-    // as a parameter is not enough: folding a two-pane layout onto the cover
-    // screen left the album detail sitting beside the list on a single column.
-    // Rebuilding it costs the open destination, which is the right trade: folding
-    // the phone shut is a reasonable moment to be handed back the list.
-    val navigator = key(directive.maxHorizontalPartitions) {
-        rememberListDetailPaneScaffoldNavigator<String>(scaffoldDirective = directive)
-    }
-    val scope = rememberCoroutineScope()
-
-    var liked by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
-    var counts by remember { mutableStateOf<LibraryCounts?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    var mixes by remember { mutableStateOf<List<HomeMix>>(emptyList()) }
+    var recentlyPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var recentlyAdded by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var likedCount by remember { mutableStateOf(0) }
+    var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(account.serverId) {
-        loading = true
-        counts = library.counts(account.serverId)
-        liked = library.likedTracks(account.serverId)
-        albums = library.albums(account.serverId, limit = 200).rows.orEmpty()
-        loading = false
+        // Read everything first and assign once. The shelves are independent, and
+        // filling them one await at a time makes the page assemble itself in
+        // front of you.
+        val played = runCatching { library.recentlyPlayedTracks(account.serverId, limit = 20) }.getOrNull()
+        val added = runCatching { library.recentlyAddedAlbums(account.serverId, limit = 20) }.getOrNull()
+        val lists = runCatching { library.playlists(account.serverId) }.getOrNull()
+        val liked = runCatching { library.likedTracks(account.serverId) }.getOrNull()
+        val sets = runCatching { library.homeMixes() }.getOrNull()
+
+        if (played != null) recentlyPlayed = played
+        if (added != null) recentlyAdded = added
+        if (lists != null) playlists = lists
+        if (liked != null) likedCount = liked.size
+        if (sets != null) mixes = sets
+        loaded = true
+
+        // Then refresh the precomputed sets if they are stale, and re-read. This
+        // runs after the page is already up, because generating is the expensive
+        // part and nothing on screen is waiting for it.
+        HomeMixSchedule.refreshIfStale(context, library, account.serverId, mixes)
+        runCatching { library.homeMixes() }.getOrNull()?.let { mixes = it }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(account.serverName, style = MaterialTheme.typography.titleMedium) },
-                actions = {
-                    TextButton(
-                        onClick = onResync,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    ) { Text("Refresh") }
-                    TextButton(
-                        onClick = onSignOut,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    ) { Text("Sign out") }
-                },
-            )
-        },
-    ) { insets ->
-            Box(modifier = Modifier.fillMaxSize().padding(insets)) {
-                if (loading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(strokeWidth = 2.dp)
-                    }
-                } else {
-                    NavigableListDetailPaneScaffold(
-                        navigator = navigator,
-                        listPane = {
-                            AnimatedPane {
-                                LibraryList(
-                                    liked = liked,
-                                    albums = albums,
-                                    albumTotal = counts?.albums ?: albums.size,
-                                    server = server,
-                                    bottomReserve = bottomReserve,
-                                    onPlayLiked = { index -> playback.play(liked, index) },
-                                    onOpenAlbum = { album ->
-                                        scope.launch {
-                                            navigator.navigateTo(
-                                                ListDetailPaneScaffoldRole.Detail,
-                                                album.groupKey.ifEmpty { album.remoteId },
-                                            )
-                                        }
-                                    },
-                                )
-                            }
-                        },
-                        detailPane = {
-                            AnimatedPane {
-                                val key = navigator.currentDestination?.contentKey
-                                val album = albums.firstOrNull {
-                                    it.groupKey.ifEmpty { it.remoteId } == key
-                                }
-                                if (album == null) {
-                                    EmptyDetail()
-                                } else {
-                                    AlbumDetail(account.serverId, album, library, playback)
-                                }
-                            }
-                        },
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val inset = if (maxWidth >= WIDE_WINDOW) WIDE_INSET else 20.dp
+        val cell = shelfCell(maxWidth)
+        // Two across on a phone, the way iOS lays these out, and more only when
+        // there is genuinely room for another.
+        val tileColumns = cellColumns(maxWidth, ideal = 170.dp, gap = 12.dp, inset = inset)
+        val hasAnything = mixes.isNotEmpty() || recentlyPlayed.isNotEmpty() ||
+            recentlyAdded.isNotEmpty() || playlists.isNotEmpty() || likedCount > 0
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
+        ) {
+            item(key = "header") {
+                TabHeader("Home", inset = inset) {
+                    ServerMenu(account.serverName, onResync = onResync, onSignOut = onSignOut)
+                }
+            }
+
+            if (likedCount > 0 || mixes.isNotEmpty()) {
+                item(key = "made-for-you") {
+                    ShortcutGrid(
+                        likedCount = likedCount,
+                        mixes = mixes,
+                        server = server,
+                        serverId = account.serverId,
+                        columns = tileColumns,
+                        inset = inset,
+                        onLiked = { nav.open(Route.LikedSongs) },
+                        onMix = { nav.open(Route.MixPage(it)) },
                     )
                 }
             }
+
+            if (recentlyPlayed.isNotEmpty()) {
+                item(key = "recently-played") {
+                    Shelf("Recently Played", inset = inset) {
+                        itemsIndexed(recentlyPlayed, key = { _, t -> "played-${t.id}" }) { index, track ->
+                            TrackCell(track, server, cell) { playback.play(recentlyPlayed, index) }
+                        }
+                    }
+                }
+            }
+
+            if (recentlyAdded.isNotEmpty()) {
+                item(key = "recently-added") {
+                    Shelf("Recently Added", inset = inset, onSeeAll = { nav.open(Route.AllAlbums) }) {
+                        items(recentlyAdded, key = { "added-${it.serverId}-${it.remoteId}" }) { album ->
+                            AlbumCell(album, server, cell) { nav.open(Route.AlbumPage(album)) }
+                        }
+                    }
+                }
+            }
+
+            if (playlists.isNotEmpty()) {
+                item(key = "playlists") {
+                    Shelf("Your Playlists", inset = inset, onSeeAll = { nav.open(Route.AllPlaylists) }) {
+                        items(playlists, key = { "playlist-${it.remoteId}" }) { playlist ->
+                            PlaylistCell(playlist, server, cell) { nav.open(Route.PlaylistPage(playlist)) }
+                        }
+                    }
+                }
+            }
+
+            if (loaded && !hasAnything) {
+                item(key = "empty") {
+                    EmptyState(
+                        title = "Nothing Here Yet",
+                        detail = "Play something, or refresh to pull your library across.",
+                        icon = R.drawable.ic_home,
+                    )
+                }
+            }
+        }
     }
 }
 
+/** Past this, a window has room for wider margins and more columns. */
+val WIDE_WINDOW = 700.dp
+
+/**
+ * The server's own menu: refreshing the catalogue and signing out.
+ *
+ * Behind an overflow rather than sitting in a bar, because these are the two
+ * things you do least often and the header is for saying where you are.
+ */
 @Composable
-private fun LibraryList(
-    liked: List<Track>,
-    albums: List<Album>,
-    albumTotal: Int,
+private fun ServerMenu(serverName: String, onResync: () -> Unit, onSignOut: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_more_vert),
+                contentDescription = "Server options",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(serverName, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                onClick = {},
+                enabled = false,
+            )
+            DropdownMenuItem(
+                text = { Text("Refresh library") },
+                onClick = { open = false; onResync() },
+            )
+            DropdownMenuItem(
+                text = { Text("Sign out") },
+                onClick = { open = false; onSignOut() },
+            )
+        }
+    }
+}
+
+/**
+ * The quick-access grid: Liked Songs, then every precomputed mix.
+ *
+ * Laid out by hand in rows rather than as a lazy grid, because the set is small
+ * and bounded and a lazy grid nested in a lazy column is a measuring problem
+ * with no upside.
+ */
+@Composable
+private fun ShortcutGrid(
+    likedCount: Int,
+    mixes: List<HomeMix>,
     server: MozzServer,
-    bottomReserve: androidx.compose.ui.unit.Dp,
-    onPlayLiked: (Int) -> Unit,
-    onOpenAlbum: (Album) -> Unit,
+    serverId: String,
+    columns: Int,
+    inset: Dp,
+    onLiked: () -> Unit,
+    onMix: (HomeMix) -> Unit,
 ) {
-    LazyColumn(contentPadding = PaddingValues(bottom = bottomReserve)) {
-        item {
-            SectionHeader("Liked Songs", "%,d".format(liked.size))
-        }
-        if (liked.isEmpty()) {
-            item { Hint("Nothing liked on this server yet.") }
-        }
-        // Tapping a song plays from there through the rest of the list, which is
-        // what every music player does and what "play my liked songs" means.
-        itemsIndexed(liked.take(50), key = { _, track -> "liked-${track.id}" }) { index, track ->
-            TrackRow(track, server = server, onClick = { onPlayLiked(index) })
-        }
+    val cells: List<ShortcutCell> =
+        (if (likedCount > 0) listOf(ShortcutCell.Liked(likedCount)) else emptyList()) +
+            mixes.map(ShortcutCell::Mix)
 
-        item { SectionHeader("Albums", "%,d".format(albumTotal)) }
-        items(albums, key = { "album-${it.id}" }) { album ->
-            AlbumRow(album, server, onClick = { onOpenAlbum(album) })
-        }
-    }
-}
-
-@Composable
-private fun SectionHeader(title: String, trailing: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = inset),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium)
-        Text(
-            trailing,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        cells.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { cell ->
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (cell) {
+                            is ShortcutCell.Liked -> ShortcutTile(
+                                title = "Liked Songs",
+                                subtitle = songCount(cell.count),
+                                onClick = onLiked,
+                            ) { LikedSquare() }
+                            is ShortcutCell.Mix -> ShortcutTile(
+                                title = cell.mix.title,
+                                subtitle = cell.mix.subtitle ?: "Made for You",
+                                onClick = { onMix(cell.mix) },
+                            ) {
+                                Artwork(
+                                    server = server,
+                                    serverId = serverId,
+                                    artworkKey = cell.mix.artworkKey,
+                                    pixels = artworkPixels(SHORTCUT_ART),
+                                    modifier = Modifier.size(SHORTCUT_ART),
+                                )
+                            }
+                        }
+                    }
+                }
+                // Keeps the last row's tiles the same width as every other row's
+                // instead of stretching one across the whole window.
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 
-@Composable
-private fun Hint(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-    )
+private sealed interface ShortcutCell {
+    data class Liked(val count: Int) : ShortcutCell
+    data class Mix(val mix: HomeMix) : ShortcutCell
 }
 
+private val SHORTCUT_ART = 56.dp
+
 @Composable
-private fun TrackRow(track: Track, server: MozzServer? = null, onClick: (() -> Unit)? = null) {
+private fun ShortcutTile(
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    leading: @Composable () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .height(SHORTCUT_ART)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Given a server to ask, a song row carries its cover. Inside an album
-        // it does not: forty copies of the same sleeve is noise, not information.
-        if (server != null) {
-            Artwork(
-                server = server,
-                serverId = track.serverId,
-                artworkKey = track.artworkKey,
-                pixels = artworkPixels(44.dp),
-                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
-            )
-            Spacer(Modifier.width(14.dp))
-        }
-        Column(modifier = Modifier.weight(1f)) {
+        leading()
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
             Text(
-                track.title,
-                style = MaterialTheme.typography.bodyLarge,
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                track.artistName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            track.duration,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun AlbumRow(album: Album, server: MozzServer, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-        Artwork(
-            server = server,
-            serverId = album.serverId,
-            artworkKey = album.artworkKey,
-            pixels = artworkPixels(52.dp),
-            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(6.dp)),
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                album.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                listOfNotNull(album.artistName, album.year?.toString()).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    }
-}
-
-@Composable
-private fun EmptyDetail() {
-    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Pick an album.", style = quietBody)
-        }
-    }
-}
-
-@Composable
-private fun AlbumDetail(
-    serverId: String,
-    album: Album,
-    library: MozzLibrary,
-    playback: PlayerController,
-) {
-    var tracks by remember(album.id) { mutableStateOf<List<Track>>(emptyList()) }
-
-    LaunchedEffect(album.id) {
-        // Ask by group key when there is one: servers — Jellyfin especially —
-        // split one album across several entities, and the remote id alone
-        // returns a slice of it.
-        tracks = library.albumTracks(
-            serverId = serverId,
-            remoteId = album.remoteId,
-            groupKey = album.groupKey.ifEmpty { null },
-        )
-    }
-
-    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(album.title, style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.height(4.dp))
+            if (!subtitle.isNullOrEmpty()) {
                 Text(
-                    listOfNotNull(album.artistName, album.year?.toString()).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-            TrackRow(track, onClick = { playback.play(tracks, index) })
+    }
+}
+
+/**
+ * Liked Songs has no cover, so it gets a made one — the same red gradient and
+ * white heart as iOS, which is the app's one colour used where it means
+ * something.
+ */
+@Composable
+fun LikedSquare(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(SHORTCUT_ART)
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFFD64559), Color(0xFF801729)),
+                    start = Offset.Zero,
+                    end = Offset.Infinite,
+                )
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_heart_filled),
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** A song on a shelf: its album cover, its name, who made it. */
+@Composable
+fun TrackCell(track: Track, server: MozzServer, width: Dp, onClick: () -> Unit) {
+    Column(modifier = Modifier.width(width).clickable(onClick = onClick)) {
+        Artwork(
+            server = server,
+            serverId = track.serverId,
+            artworkKey = track.artworkKey,
+            pixels = artworkPixels(width),
+            modifier = Modifier.size(width).clip(RoundedCornerShape(8.dp)),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            track.title,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            track.artistName,
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalContentColor.current.copy(alpha = 0.6f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * When to rebuild the precomputed mixes.
+ *
+ * The same two rules the iPhone follows, for the same reasons. Daily mixes are
+ * gated on a stored timestamp rather than on the age of a set, because someone
+ * whose library has just finished syncing has no sets at all — and gating on
+ * "there are none" would re-run the generator every time Home appeared. Mozz
+ * Weekly is gated on its own age, because there is exactly one of it.
+ */
+private object HomeMixSchedule {
+    private const val PREFS = "mozz.home"
+    private const val GENERATED_AT = "homeMixesGeneratedAt"
+    private const val DAY_SECONDS = 24 * 60 * 60.0
+    private const val WEEK_SECONDS = 7 * DAY_SECONDS
+    private const val MOZZ_WEEKLY_ID = "mozz-weekly"
+
+    suspend fun refreshIfStale(
+        context: Context,
+        library: MozzLibrary,
+        serverId: String,
+        mixes: List<HomeMix>,
+    ) {
+        val now = System.currentTimeMillis() / 1000.0
+        val weekly = mixes.firstOrNull { it.id == MOZZ_WEEKLY_ID }
+        if (weekly == null || now - weekly.generatedAt >= WEEK_SECONDS) {
+            runCatching { library.generateMozzWeekly(serverId) }
+        }
+
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val last = prefs.getLong(GENERATED_AT, 0L).toDouble()
+        if (now - last >= DAY_SECONDS) {
+            runCatching { library.generateHomeMixes(serverId) }
+                .onSuccess { prefs.edit().putLong(GENERATED_AT, now.toLong()).apply() }
         }
     }
 }

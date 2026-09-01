@@ -48,6 +48,8 @@ data class CoreRequest(
     val size: Int? = null,
     val maxBitrateKbps: Int? = null,
     val useLRCLIB: Boolean? = null,
+    /** Which precomputed mix — a home mix or Mozz Weekly — a command is about. */
+    val setId: String? = null,
     /** Base64 RGBA, 8 bits per channel, `width * height * 4` bytes. */
     val pixels: String? = null,
     val width: Int? = null,
@@ -87,7 +89,8 @@ data class Page<T>(val rows: T?, val nextCursor: String?)
 
 @Serializable
 data class Artist(
-    val id: Long,
+    /** 0 for an artist that arrived as a header — identify by [remoteId]. */
+    val id: Long = 0,
     val remoteId: String,
     val serverId: String,
     val name: String,
@@ -101,7 +104,15 @@ data class Artist(
 
 @Serializable
 data class Album(
-    val id: Long,
+    /**
+     * The local row id, or 0 for an album that arrived as a *header*.
+     *
+     * "Appears On" is answered from a projection that carries no row id, because
+     * nothing needs one there. Identify an album by [remoteId] (with [groupKey]
+     * where there is one) rather than by this — that pair is what the core itself
+     * treats as the album's identity.
+     */
+    val id: Long = 0,
     val remoteId: String,
     val serverId: String,
     val title: String,
@@ -169,6 +180,33 @@ data class Track(
             else "%d:%02d".format(minutes, seconds)
         }
 }
+
+/**
+ * A page of albums that arrived as headers — the shape `artistAppearsOn` answers
+ * in. Distinct from [Page] because this cursor rides the payload rather than the
+ * envelope.
+ */
+@Serializable
+data class AlbumPage(
+    val items: List<Album> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+/**
+ * One precomputed shortcut on the home screen: a Daily Mix, Replay, Mozz Weekly.
+ *
+ * Generated on a schedule from the play log rather than fetched, so the grid is
+ * instant and works offline. [id] is the set id the tracks are read back with.
+ */
+@Serializable
+data class HomeMix(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val kind: String,
+    val artworkKey: String? = null,
+    val generatedAt: Double = 0.0,
+)
 
 @Serializable
 data class Playlist(

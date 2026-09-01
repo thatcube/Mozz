@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -97,6 +99,14 @@ fun MozzShell(
 
     var tab by remember { mutableStateOf(AppTab.HOME) }
 
+    // A history per tab, not one for the app: leaving a tab and coming back to
+    // where you were is what every phone app does, and losing your place is the
+    // thing people notice. Held here rather than inside the pages so back works
+    // from the shell — where the player's own back ladder already lives — and so
+    // switching tabs cannot lose a stack to recomposition.
+    val stacks = remember { AppTab.entries.associateWith { BrowseStack() } }
+    val stack = stacks.getValue(tab)
+
     // The single piece of player state the presentation rules read. Not one
     // value per layout: closing the queue means the same thing at every width,
     // so folding the device mid-song rearranges the screen without changing what
@@ -115,6 +125,10 @@ fun MozzShell(
     }
 
     val scope = rememberCoroutineScope()
+    val navigators = remember(library) {
+        stacks.mapValues { (_, entries) -> Navigator(entries, library, scope) }
+    }
+    val nav = navigators.getValue(tab)
     val density = LocalDensity.current
 
     // Morph progress: 0 docked, 1 full screen. An Animatable rather than a
@@ -252,7 +266,7 @@ fun MozzShell(
             if (wide) {
                 MozzNavRail(
                     selected = tab,
-                    onSelect = { tab = it },
+                    onSelect = { if (it == tab) stacks.getValue(it).popToRoot() else tab = it },
                     modifier = Modifier
                         .fillMaxHeight()
                         // The rail runs the full height of the window, so it has
@@ -280,11 +294,13 @@ fun MozzShell(
             ) {
                 TabContent(
                     tab = tab,
+                    stack = stack,
+                    nav = nav,
                     account = account,
                     library = library,
                     server = server,
                     playback = playback,
-                    directive = directive,
+                    wide = wide,
                     bottomReserve = Dock.reserve(hasTrack, hasBottomNav = !wide),
                     onResync = onResync,
                     onSignOut = onSignOut,
@@ -297,7 +313,12 @@ fun MozzShell(
         if (!wide) {
             MozzNavBar(
                 selected = tab,
-                onSelect = { tab = it; navShown.floatValue = 1f },
+                onSelect = {
+                    // Tapping the tab you are already on goes home, which is what
+                    // the gesture means everywhere else on this platform.
+                    if (it == tab) stacks.getValue(it).popToRoot() else tab = it
+                    navShown.floatValue = 1f
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = with(density) { safeBottomPx.toDp() })
@@ -389,6 +410,11 @@ fun MozzShell(
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
+        // Inside a tab, back goes back a page. Registered BEFORE the player's
+        // rungs so that an open player always wins: the page under it is still
+        // there, but it is not what the gesture is about.
+        BackHandler(enabled = !expanded && !stack.isEmpty) { stack.pop() }
+
         // The back ladder. Only the player's own collapse is scrubbable — the
         // other rungs are state changes with nothing to drag, and giving them a
         // progress gesture would just fight the panel's crossfade.
@@ -459,28 +485,135 @@ private val QueueDockSpring: AnimationSpec<Float> =
 @Composable
 private fun TabContent(
     tab: AppTab,
+    stack: BrowseStack,
+    nav: Navigator,
     account: ServerAccount,
     library: MozzLibrary,
     server: MozzServer,
     playback: PlayerController,
-    directive: androidx.compose.material3.adaptive.layout.PaneScaffoldDirective,
+    wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
-    when (tab) {
-        AppTab.HOME -> HomeScreen(
+    // Every page below is drawn straight onto the window, with no Material
+    // `Surface` above it to say what colour text should be — and Material's
+    // default is black, which on this background is a heading that simply is not
+    // there. Stated once, here, so no page has to remember it.
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+    // A pushed page replaces the tab's root rather than covering it. Both are
+    // full-screen and opaque, so keeping the root composed underneath would only
+    // buy a layout pass nobody sees — and a `LazyColumn` that keeps scrolling
+    // while it is hidden.
+    when (val route = stack.current) {
+        null -> when (tab) {
+            AppTab.HOME -> HomeRoot(
+                account = account,
+                library = library,
+                server = server,
+                playback = playback,
+                nav = nav,
+                bottomReserve = bottomReserve,
+                onResync = onResync,
+                onSignOut = onSignOut,
+            )
+            AppTab.LIBRARY -> LibraryRoot(
+                account = account,
+                library = library,
+                server = server,
+                nav = nav,
+                bottomReserve = bottomReserve,
+            )
+            AppTab.SEARCH -> ComingSoon("Search", "Everything on this server, by name.")
+        }
+
+        is Route.AlbumPage -> AlbumDetailPage(
+            album = route.album,
+            library = library,
+            server = server,
+            playback = playback,
+            wide = wide,
+            bottomReserve = bottomReserve,
+            onBack = nav::back,
+        )
+
+        is Route.ArtistPage -> ArtistDetailPage(
+            artist = route.artist,
+            library = library,
+            server = server,
+            playback = playback,
+            nav = nav,
+            wide = wide,
+            bottomReserve = bottomReserve,
+            onBack = nav::back,
+        )
+
+        is Route.PlaylistPage -> PlaylistDetailPage(
+            playlist = route.playlist,
+            library = library,
+            server = server,
+            playback = playback,
+            wide = wide,
+            bottomReserve = bottomReserve,
+            onBack = nav::back,
+        )
+
+        is Route.MixPage -> MixDetailPage(
+            mix = route.mix,
+            library = library,
+            server = server,
+            playback = playback,
+            wide = wide,
+            bottomReserve = bottomReserve,
+            onBack = nav::back,
+        )
+
+        Route.LikedSongs -> LikedSongsPage(
             account = account,
             library = library,
             server = server,
             playback = playback,
-            directive = directive,
+            wide = wide,
             bottomReserve = bottomReserve,
-            onResync = onResync,
-            onSignOut = onSignOut,
+            onBack = nav::back,
         )
-        AppTab.LIBRARY -> ComingSoon("Library", "Artists, albums and playlists, in one place.")
-        AppTab.SEARCH -> ComingSoon("Search", "Everything on this server, by name.")
+
+        Route.AllSongs -> SongsPage(
+            account = account,
+            library = library,
+            server = server,
+            playback = playback,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+
+        Route.AllAlbums -> AlbumsPage(
+            account = account,
+            library = library,
+            server = server,
+            nav = nav,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+
+        Route.AllArtists -> ArtistsPage(
+            account = account,
+            library = library,
+            server = server,
+            nav = nav,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+
+        Route.AllPlaylists -> PlaylistsPage(
+            account = account,
+            library = library,
+            server = server,
+            nav = nav,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+    }
     }
 }
 
