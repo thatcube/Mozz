@@ -10,6 +10,9 @@ struct ToastOverlayView: View {
     @EnvironmentObject private var toasts: ToastCenter
     /// Whether the now-playing island is showing, so we clear it too.
     var hasTrack: Bool
+    /// Whether there is a bottom bar to clear at all. Beside a rail there is
+    /// not — only the dock, which floats at the same height at every width.
+    var hasBottomBar: Bool = true
 
     var body: some View {
         VStack {
@@ -29,8 +32,8 @@ struct ToastOverlayView: View {
     /// Sit just above the tab bar, or above the island when playing, with a small
     /// gap. Uses the same `BottomBar` geometry the bar/island are laid out from.
     private var bottomInset: CGFloat {
-        let base = hasTrack ? BottomBar.islandTopFromEdge : BottomBar.edgeMargin + BottomBar.tabHeight
-        return base + 10
+        return BottomBar.dockTopFromEdge(hasTrack: hasTrack,
+                                         hasBottomBar: hasBottomBar) + 10
     }
 
     private func card(_ toast: Toast) -> some View {

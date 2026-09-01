@@ -39,11 +39,25 @@ struct NowPlayingMorphContainer: View {
     /// Tab-bar minimize progress (0 = docked island above the bar, 1 = island
     /// dropped into the bar's centre pill between the split blobs). Scroll-driven.
     var minimize: CGFloat = 0
+    /// Left edge of the content area — the rail's gutter when there is a rail,
+    /// otherwise zero. The dock centres over the *content*, not over the window,
+    /// so it does not sit visibly off-centre with a rail down one side.
+    var contentLeft: CGFloat = 0
+    /// Whether there is a bottom bar under the island. Beside a rail there is
+    /// not, and the island takes the bar's place at the bottom edge.
+    var hasBottomBar: Bool = true
+    /// Whether the window has room for two columns, which is what decides
+    /// between a panel *beside* the artwork and one *instead* of it.
+    var wide: Bool = false
 
-    init(playback: PlaybackEngine, ui: PlayerUIModel, minimize: CGFloat = 0) {
+    init(playback: PlaybackEngine, ui: PlayerUIModel, minimize: CGFloat = 0,
+         contentLeft: CGFloat = 0, hasBottomBar: Bool = true, wide: Bool = false) {
         self.playback = playback
         self.ui = ui
         self.minimize = minimize
+        self.contentLeft = contentLeft
+        self.hasBottomBar = hasBottomBar
+        self.wide = wide
         // Seeded here rather than lazily, because the controller owns tasks and a
         // ticker that must belong to exactly one instance for the player's lifetime.
         _lyrics = State(initialValue: LyricsController(playback: playback))
@@ -144,6 +158,8 @@ struct NowPlayingMorphContainer: View {
     /// (during a close) is kicked by `.onChange(of: panelWantsOpen)` instead, since
     /// `onAppear` won't fire again. This flag routes each open to exactly one of those.
     @State private var panelWasMounted = false
+    /// Whether the "open onto the queue when wide" default has already been spent.
+    @State private var panelDefaulted = false
     /// The panel being replaced during a swap, kept mounted underneath the incoming
     /// one until the cross-fade finishes. `nil` whenever no swap is in flight.
     @State private var panelSwapFrom: PlayerPanel?
@@ -259,11 +275,19 @@ struct NowPlayingMorphContainer: View {
             let safeTop = safeGeo.safeAreaInsets.top
             let safeBottom = safeGeo.safeAreaInsets.bottom
             GeometryReader { geo in
+                let presentation = playerPresentation(wide: wide, panel: openPanel)
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
                               pRaw: p, receiving: receiving,
                               isExpanded: ui.isFullPresented, minimize: minimize,
-                              queue: panelP)
+                              // The artwork docks into the queue's card only when
+                              // the panel has TAKEN the artwork's place. Beside it,
+                              // the cover stays where it is and there is no card to
+                              // dock into — so this stage of the morph never runs.
+                              queue: presentation == .panelBeside ? 0 : panelP,
+                              contentLeft: contentLeft,
+                              hasBottomBar: hasBottomBar,
+                              presentation: presentation)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     // Enlarged, invisible tap target so edge taps open the player
@@ -309,7 +333,7 @@ struct NowPlayingMorphContainer: View {
                     // shrinks into the centre pill (islandDropW) when minimized.
                     IslandContent(playback: playback, onExpand: { ui.isFullPresented = true },
                                   collapse: m.dropT, pillWidth: m.islandDropW,
-                                  maxPillWidth: m.islandW)
+                                  maxPillWidth: m.islandW, wide: wide)
                         .frame(width: m.islandDropW, height: m.islandDropH)
                         // Clip the mini controls to the pill shape so nothing
                         // renders past its edges (top included) during the collapse
@@ -410,6 +434,19 @@ struct NowPlayingMorphContainer: View {
                 .onAppear {
                     playerRating = playback.currentTrack?.rating
                     lyrics.load(track: playback.currentTrack)
+                }
+                // Opening onto the queue when there is a column for it, and onto
+                // the artwork when there is not, is a DEFAULT rather than a rule —
+                // hence the one-shot. Once someone has chosen, their choice
+                // survives rotating, folding and resizing.
+                .onChange(of: wide, initial: true) { _, isWide in
+                    guard isWide, !panelDefaulted else { return }
+                    panelDefaulted = true
+                    // Next runloop turn, not this one: with `initial: true` this
+                    // closure runs inside the first update pass, and the panel
+                    // state it sets is discarded there — the player opened with no
+                    // queue and no sign anything had been asked for.
+                    Task { @MainActor in setPanel(.queue) }
                 }
                 // Derive the adaptive backdrop palette from the artwork; resolve
                 // synchronously if cached (correct on first frame), else crossfade.
@@ -605,7 +642,10 @@ struct NowPlayingMorphContainer: View {
         // expand). Gated on `settled` + faded via color opacity, the shadow costs
         // nothing during the transition and rasterizes once at rest. Dropped while
         // the queue is open — the compact thumbnail carries no drop shadow.
-        let showShadow = settled && openPanel == nil
+        // Beside a panel the cover is still the cover: it never docks, so it keeps
+        // the shadow that says it is sitting above the backdrop.
+        let handsOverToCard = m.presentation == .panelInstead
+        let showShadow = settled && (openPanel == nil || !handsOverToCard)
         return MorphArtwork(track: playback.currentTrack, side: m.artSide,
                             cornerRadius: m.artRadius, resolveSide: m.expArtSide)
             .scaleEffect(pausedScale)
@@ -613,8 +653,9 @@ struct NowPlayingMorphContainer: View {
             .position(x: m.artCenterX, y: m.artCenterY)
             // Hidden once the queue settles: the card's own (scrolling) artwork
             // takes over at the identical slot, so it can scroll & clip with the
-            // list. Instant swap at a coincident position → no pop.
-            .opacity(panelSettled ? 0 : 1)
+            // list. Instant swap at a coincident position → no pop. Beside a panel
+            // there is no card and no hand-over — this IS the cover.
+            .opacity(panelSettled && handsOverToCard ? 0 : 1)
             .allowsHitTesting(false)
             .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.72),
                        value: isPlaying)
@@ -664,7 +705,58 @@ struct NowPlayingMorphContainer: View {
 
     // MARK: Drawer body (everything below the top edge; fades + clips on collapse)
 
+    @ViewBuilder
     private func drawerBody(_ m: Morph) -> some View {
+        if m.presentation == .panelBeside {
+            besideBody(m)
+        } else {
+            stackedBody(m)
+        }
+    }
+
+    /// The player with a panel in a column of its own.
+    ///
+    /// The cover does not move out of the way to make room for the queue,
+    /// because there is room for both — so the transport stays exactly where it
+    /// was, under the same thumb, and the queue simply appears next to it. That
+    /// is the whole reason `PlayerPresentation` exists rather than a width test
+    /// at each call site: one piece of state (`openPanel`), drawn two ways.
+    private func besideBody(_ m: Morph) -> some View {
+        VStack(spacing: 0) {
+            // Hoisted out of the header so it is centred on the window rather
+            // than on the left column. The geometry is unchanged: the header's
+            // own grabber block was exactly this tall, so the artwork below it
+            // still lands on `expArtTopGap`.
+            grabber(m)
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    header(m, showsGrabber: false)
+                    bottomChrome(m, showsButtons: false)
+                }
+                .frame(width: m.playerColumnW)
+
+                ZStack(alignment: .top) {
+                    ForEach(PlayerPanel.allCases, id: \.self) { panel in
+                        if panel == openPanel || panel == panelSwapFrom {
+                            panelBody(panel, m, beside: true)
+                                .zIndex(panel == openPanel ? 1 : 0)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .onChange(of: panelWantsOpen) { _, wantsOpen in
+                if wantsOpen != nil && !panelWasMounted { return }
+                drivePanel()
+            }
+
+            wideButtonRow(m)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onPreferenceChange(ChromeRegionHeightKey.self) { chromeRegionH = $0 }
+    }
+
+    private func stackedBody(_ m: Morph) -> some View {
         VStack(spacing: 0) {
             // Top region: the now-playing hero and the queue occupy the same
             // space and cross-fade. The queue is an overlay on the hero so it
@@ -702,7 +794,7 @@ struct NowPlayingMorphContainer: View {
                     ZStack(alignment: .top) {
                         ForEach(PlayerPanel.allCases, id: \.self) { panel in
                             if panel == openPanel || panel == panelSwapFrom {
-                                panelBody(panel, m)
+                                panelBody(panel, m, beside: false)
                                     // The arriving panel is always on top.
                                     .zIndex(panel == openPanel ? 1 : 0)
                             }
@@ -718,7 +810,7 @@ struct NowPlayingMorphContainer: View {
                     drivePanel()
                 }
 
-            bottomChrome(m)
+            bottomChrome(m, showsButtons: !wide)
                 // The chrome slides + fades fully out of the way in two cases, and
                 // the panel below grows into the space it leaves:
                 //   • a drag-reorder — so the controls never sit under the grabbed row;
@@ -744,6 +836,15 @@ struct NowPlayingMorphContainer: View {
                                                value: g.size.height)
                     }
                 )
+
+            // Keyed on the WIDTH, not on whether a panel happens to be open.
+            // Closing the panel on a wide screen centres the record, and keying
+            // this off the presentation would move all three controls at once —
+            // AirPlay from the left edge to the middle, the toggles from the
+            // right edge to the left. Toggling a panel should change what the
+            // panel shows, not relocate the control you would press to change it
+            // back. Android's rule, and its reasoning.
+            if wide { wideButtonRow(m) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onPreferenceChange(ChromeRegionHeightKey.self) { chromeRegionH = $0 }
@@ -753,7 +854,7 @@ struct NowPlayingMorphContainer: View {
     /// format badge, and the bottom button row + route label. Factored out so the
     /// whole block can fade away as one unit during a drag-reorder.
     @ViewBuilder
-    private func bottomChrome(_ m: Morph) -> some View {
+    private func bottomChrome(_ m: Morph, showsButtons: Bool = true) -> some View {
         VStack(spacing: 0) {
             scrubber
                 .padding(.horizontal, 32)
@@ -771,28 +872,32 @@ struct NowPlayingMorphContainer: View {
             Spacer(minLength: 54)
             transport
             Spacer(minLength: 20)
-            VStack(spacing: 10) {
-                bottomButtonRow
-                    .padding(.horizontal, 48)
-                #if canImport(UIKit)
-                routeLabel
-                #endif
+            // At a wide width this row is not part of the chrome: it spans both
+            // columns beneath them (`wideButtonRow`), so the AirPlay control sits
+            // under the record and the panel toggles sit over the column they act
+            // on. Here the three share one column, in iOS's order.
+            if showsButtons {
+                VStack(spacing: 10) {
+                    bottomButtonRow
+                        .padding(.horizontal, 48)
+                    #if canImport(UIKit)
+                    routeLabel
+                    #endif
+                }
+                // The surface overhangs the screen by `bottomOverhang`; lift the
+                // row out of that off-screen region so it sits at the safe-area
+                // bottom rather than 120pt below it.
+                .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
             }
-            // The surface overhangs the screen by `bottomOverhang`; lift the
-            // row out of that off-screen region so it sits at the safe-area
-            // bottom rather than 120pt below it.
-            .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// Grabber + reserved artwork slot + titles. Owns the dismiss drag so the
     /// scrubber and up-next scroll keep their own gestures.
-    private func header(_ m: Morph) -> some View {
+    private func header(_ m: Morph, showsGrabber: Bool = true) -> some View {
         VStack(spacing: 0) {
-            Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
-                .padding(.top, m.safeTop + 8)
-                .opacity(m.grabberOpacity)
+            if showsGrabber { grabber(m) }
 
             // Reserves the big artwork's rest space; the traveling artwork is
             // drawn as an absolute sibling so the layout offset never moves it.
@@ -807,6 +912,14 @@ struct NowPlayingMorphContainer: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .gesture(dragGesture)
+    }
+
+    /// The sheet's drag handle. Its own view because the beside layout centres it
+    /// on the window while the header it normally lives in is only half as wide.
+    private func grabber(_ m: Morph) -> some View {
+        Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
+            .padding(.top, m.safeTop + 8)
+            .opacity(m.grabberOpacity)
     }
 
     /// Side inset of the hero's title row (matches the scrubber below it).
@@ -843,7 +956,8 @@ struct NowPlayingMorphContainer: View {
             // means SwiftUI sizes the cluster first and gives the title what's
             // left — so the title zone re-fits itself whenever the rating
             // appears, changes width, or clears.
-            starOverflowCluster(interactive: openPanel == nil, emitsAnchor: openPanel == nil)
+            starOverflowCluster(interactive: m.presentation != .panelInstead,
+                                emitsAnchor: m.presentation != .panelInstead)
         }
         .font(.title3)
         // Lift the whole row UP a long way as the queue opens — it should travel
@@ -851,11 +965,14 @@ struct NowPlayingMorphContainer: View {
         // nudge. It stays fully visible through the early climb, then fades out
         // across a back-loaded window (RangeFadeOut) so you actually see it move
         // before it hands off to the card row catching below it.
-        .modifier(HeroLift(progress: panelHeroP,
+        // Beside a panel the hero row has nowhere to go and nothing to hand over
+        // to: the queue's card is not drawn, because the cover and the titles it
+        // would repeat are right there in the next column.
+        .modifier(HeroLift(progress: m.presentation == .panelBeside ? 0 : panelHeroP,
                            start: Self.heroLiftStart,
                            end: Self.heroLiftEnd,
                            distance: Self.heroRowLift))
-        .modifier(RangeFadeOut(progress: panelHeroP,
+        .modifier(RangeFadeOut(progress: m.presentation == .panelBeside ? 0 : panelHeroP,
                                start: Self.heroFadeStart,
                                end: Self.heroFadeEnd))
     }
@@ -946,16 +1063,21 @@ struct NowPlayingMorphContainer: View {
     /// The queue view shown in place of the hero when it is the open panel: a pinned
     /// grabber over the scrollable History / now-playing card / Continue-Playing
     /// list. The card scrolls as one unit with the list (see `PlayerQueuePanel`).
-    private func queueTop(_ m: Morph, bodyOpacity: Double = 1, showsCard: Bool = true) -> some View {
+    private func queueTop(_ m: Morph, bodyOpacity: Double = 1, showsCard: Bool = true,
+                          beside: Bool = false) -> some View {
         VStack(spacing: 0) {
-            Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
-                .padding(.top, m.safeTop + 8)
-                .contentShape(Rectangle())
-                .gesture(dragGesture)
+            // Beside the player the sheet's one grabber is hoisted above both
+            // columns, so this would be a second handle for the same sheet.
+            if !beside {
+                Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
+                    .padding(.top, m.safeTop + 8)
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture)
+            }
 
             PlayerQueuePanel(
                 playback: playback,
-                queueP: m.q,
+                queueP: panelOpenProgress(m),
                 bodyP: panelBodyP,
                 bodyRise: panelBodyRise(m),
                 bodyOpacity: bodyOpacity,
@@ -977,8 +1099,19 @@ struct NowPlayingMorphContainer: View {
                 reorderExtraHeight: reclaimableChromeHeight(m),
                 onPull: { raw in handleQueuePull(raw) },
                 onPullEnd: { raw, velocity in handleQueuePullEnd(raw, velocity) },
-                card: { nowPlayingCard(m).opacity(showsCard ? 1 : 0) },
-                queueControls: { shuffleRepeatPills }
+                // Beside the artwork there is no need to repeat the current
+                // track as a card — the cover and its titles are in the column
+                // next to this one. The shuffle/repeat pills DO stay: unlike
+                // Android's, this transport has never carried them, so the queue
+                // is the only place they exist.
+                card: {
+                    Group {
+                        if beside { EmptyView() }
+                        else { nowPlayingCard(m).opacity(showsCard ? 1 : 0) }
+                    }
+                },
+                queueControls: { shuffleRepeatPills },
+                showsNowPlayingCard: !beside
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1006,7 +1139,7 @@ struct NowPlayingMorphContainer: View {
     /// such gap, and by the time it unmounts the arriving one has had the full
     /// dissolve to settle, so the hand-over lands on identical pixels.
     @ViewBuilder
-    private func panelBody(_ panel: PlayerPanel, _ m: Morph) -> some View {
+    private func panelBody(_ panel: PlayerPanel, _ m: Morph, beside: Bool) -> some View {
         let isOutgoing = panelSwapFrom != nil && panel == panelSwapFrom
         let swapping = panelSwapFrom != nil
         let bodyOpacity: Double = {
@@ -1015,8 +1148,8 @@ struct NowPlayingMorphContainer: View {
         }()
         let showsCard = swapping ? isOutgoing : true
         switch panel {
-        case .queue: queueTop(m, bodyOpacity: bodyOpacity, showsCard: showsCard)
-        case .lyrics: lyricsTop(m, bodyOpacity: bodyOpacity, showsCard: showsCard)
+        case .queue: queueTop(m, bodyOpacity: bodyOpacity, showsCard: showsCard, beside: beside)
+        case .lyrics: lyricsTop(m, bodyOpacity: bodyOpacity, showsCard: showsCard, beside: beside)
         }
     }
 
@@ -1026,20 +1159,23 @@ struct NowPlayingMorphContainer: View {
     ///
     /// While immersive it grows DOWN into the height the transport chrome vacates,
     /// exactly as the queue does during a drag-reorder.
-    private func lyricsTop(_ m: Morph, bodyOpacity: Double = 1, showsCard: Bool = true) -> some View {
+    private func lyricsTop(_ m: Morph, bodyOpacity: Double = 1, showsCard: Bool = true,
+                           beside: Bool = false) -> some View {
         VStack(spacing: 0) {
-            Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
-                .padding(.top, m.safeTop + 8)
-                .contentShape(Rectangle())
-                .gesture(dragGesture)
+            if !beside {
+                Capsule().fill(.white.opacity(0.5)).frame(width: 40, height: 5)
+                    .padding(.top, m.safeTop + 8)
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture)
+            }
 
             PlayerLyricsPanel(
                 controller: lyrics,
-                lyricsP: m.q,
+                lyricsP: panelOpenProgress(m),
                 bodyP: panelBodyP,
                 bodyRise: panelBodyRise(m),
                 chromeReclaim: reclaimableChromeHeight(m),
-                cardReserve: Morph.queueArtSide + 26,
+                cardReserve: beside ? 0 : Morph.queueArtSide + 26,
                 // The same rail the queue's content uses, which is also where the
                 // travelling artwork docks — so the two panels' headers line up
                 // exactly and the artwork doesn't shift as it hands over.
@@ -1051,11 +1187,25 @@ struct NowPlayingMorphContainer: View {
                     lyrics.seek(toLine: index)
                     handleLyricsInteraction()
                 },
-                card: { nowPlayingCard(m).opacity(showsCard ? 1 : 0) }
+                card: {
+                    Group {
+                        if beside { EmptyView() }
+                        else { nowPlayingCard(m).opacity(showsCard ? 1 : 0) }
+                    }
+                }
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { drivePanel() }
+    }
+
+    /// How far the panel itself has arrived — which is what fades it in.
+    ///
+    /// Distinct from `Morph.queue`, the artwork's dock into the queue's card:
+    /// beside the artwork there is no card to dock into, so that stage of the
+    /// morph is pinned at zero while the panel still has to appear.
+    private func panelOpenProgress(_ m: Morph) -> CGFloat {
+        m.presentation == .panelBeside ? min(max(panelP, 0), 1) : m.q
     }
 
     /// How far a panel may grow DOWNWARD once the transport chrome is out of the
@@ -1429,7 +1579,9 @@ struct NowPlayingMorphContainer: View {
     private func armImmersiveCountdown() {
         immersiveCountdown?.cancel()
         immersiveCountdown = nil
-        guard !reduceMotion, isPlayingOrBuffering else { return }
+        // Nothing to take over beside a panel: the lyrics already have a column
+        // of their own, and hiding the transport there would buy them nothing.
+        guard !reduceMotion, !wide, isPlayingOrBuffering else { return }
         immersiveCountdown = Task { @MainActor in
             try? await Task.sleep(for: Self.immersiveDelay)
             guard !Task.isCancelled,
@@ -1556,25 +1708,64 @@ struct NowPlayingMorphContainer: View {
     /// (The equalizer lives in Settings for now.)
     private var bottomButtonRow: some View {
         HStack {
-            PlayerIconButton(glyph: .lyrics,
-                             tint: panelWantsOpen == .lyrics ? .primary : .secondary,
-                             haptics: false,
-                             isActive: panelWantsOpen == .lyrics,
-                             label: "Lyrics") {
-                setPanel(panelWantsOpen == .lyrics ? nil : .lyrics)
-            }
+            lyricsToggle
             Spacer()
             #if canImport(UIKit)
             routeControl
             #endif
             Spacer()
-            PlayerIconButton(glyph: .queue,
-                             tint: panelWantsOpen == .queue ? .primary : .secondary,
-                             haptics: false,
-                             isActive: panelWantsOpen == .queue,
-                             label: "Queue") {
-                setPanel(panelWantsOpen == .queue ? nil : .queue)
+            queueToggle
+        }
+    }
+
+    /// The same three controls, arranged for a window with two columns: the
+    /// output route under the record it belongs to, the two panel toggles over
+    /// on the side the panel occupies. One row spanning both columns rather than
+    /// one per column, so the three keep a shared baseline.
+    private func wideButtonRow(_ m: Morph) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                #if canImport(UIKit)
+                routeControl
+                #endif
+                Spacer(minLength: 12)
+                // The pair sits together: they share a job, and a gap between
+                // them would read as two unrelated controls.
+                HStack(spacing: 18) {
+                    lyricsToggle
+                    queueToggle
+                }
             }
+            .padding(.horizontal, 32)
+            #if canImport(UIKit)
+            routeLabel
+            #endif
+        }
+        // Clear of the surface's off-screen overhang, exactly as the single-column
+        // row is — this is the element that owns the bottom edge here.
+        .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 12)
+        .opacity(chromeHidden ? 0 : 1)
+        .offset(y: chromeHidden ? Self.reorderChromeDrop : 0)
+        .allowsHitTesting(!chromeHidden)
+    }
+
+    private var lyricsToggle: some View {
+        PlayerIconButton(glyph: .lyrics,
+                         tint: panelWantsOpen == .lyrics ? .primary : .secondary,
+                         haptics: false,
+                         isActive: panelWantsOpen == .lyrics,
+                         label: "Lyrics") {
+            setPanel(panelWantsOpen == .lyrics ? nil : .lyrics)
+        }
+    }
+
+    private var queueToggle: some View {
+        PlayerIconButton(glyph: .queue,
+                         tint: panelWantsOpen == .queue ? .primary : .secondary,
+                         haptics: false,
+                         isActive: panelWantsOpen == .queue,
+                         label: "Queue") {
+            setPanel(panelWantsOpen == .queue ? nil : .queue)
         }
     }
 
@@ -1930,6 +2121,13 @@ private struct IslandContent: View {
     /// doesn't re-truncate (which "races" the ellipsis) as the pill narrows during
     /// the collapse — the narrowing pill just clips the tail instead.
     var maxPillWidth: CGFloat = 0
+    /// Whether the pill has room for the controls a phone-width one cannot fit.
+    ///
+    /// On a phone the pill is the screen's width less a margin, and artwork plus a
+    /// title plus five controls is a row of things too small to hit. On a tablet
+    /// the space is there, and reaching into the player to shuffle is a trip you
+    /// should not have to make. Android's line, and its reasoning.
+    var wide: Bool = false
 
     @State private var dragX: CGFloat = 0        // live thumb-follow (0 at rest)
     @State private var navDir = 1                // +1 next, -1 previous
@@ -1943,12 +2141,17 @@ private struct IslandContent: View {
     /// trailing inset). Deterministic — no measurement, no feedback loop.
     private func zoneWidth(pill: CGFloat, collapse: CGFloat) -> CGFloat {
         let skip = (30 + 10) * (1 - collapse)     // skip button + its HStack gap
+        // Shuffle and repeat, when the pill is wide enough to carry them. They
+        // collapse away with the skip, since a pill dropped into the tab bar is
+        // never wide.
+        let extras = wide ? 2 * (30 + 10) * (1 - collapse) : 0
         let fixed = Morph.islandArtLeading        // 20 leading inset
                   + Morph.islandArtSide           // 34 artwork
                   + 10                            // artwork → text gap
                   + 10                            // text → play gap
                   + 30                            // play button
                   + skip
+                  + extras
                   + Morph.islandContentPad        // 12 trailing inset
         return max(pill - fixed, 1)
     }
@@ -2056,6 +2259,14 @@ private struct IslandContent: View {
             .contentShape(Rectangle())
             .highPriorityGesture(islandGesture)
 
+            if wide {
+                islandExtra(AppIcon.shuffle,
+                            active: playback.snapshot.isShuffled,
+                            label: playback.snapshot.isShuffled ? "Shuffle on" : "Shuffle off") {
+                    playback.toggleShuffle()
+                }
+            }
+
             Button { playback.togglePlayPause() } label: {
                 (playback.snapshot.status == .playing ? AppIcon.pause : AppIcon.play)
                     .styled(size: 20)
@@ -2078,6 +2289,19 @@ private struct IslandContent: View {
             .opacity((playback.snapshot.hasNext ? 1 : 0.4) * Double(1 - collapse))
             .frame(width: 30 * (1 - collapse))
             .allowsHitTesting(collapse < 0.5)
+
+            if wide {
+                let mode = playback.snapshot.repeatMode
+                // One glyph for all three modes, as the queue's own pill does —
+                // there is no repeat-one icon in this set, and the state is
+                // carried by the accent and read out by the label.
+                islandExtra(AppIcon.repeatTracks,
+                            active: mode != .off,
+                            label: mode == .one ? "Repeat one"
+                                 : (mode == .all ? "Repeat all" : "Repeat off")) {
+                    playback.cycleRepeatMode()
+                }
+            }
         }
         .padding(.leading, Morph.islandArtLeading)
         .padding(.trailing, Morph.islandContentPad)
@@ -2087,6 +2311,25 @@ private struct IslandContent: View {
         // accessibility sizes and overflow the pill — the same thing Apple does
         // for the tab bar / now-playing bar. Standard sizes still scale.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    /// One of the wide pill's extra controls. Same 30pt box as the transport
+    /// buttons beside it, dimmed when the mode is off, and collapsing away with
+    /// them if the pill ever drops into the tab bar.
+    private func islandExtra(_ icon: AppIcon, active: Bool, label: String,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            icon.styled(size: 18)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .foregroundStyle(active ? AnyShapeStyle(Color.accentColor)
+                                : AnyShapeStyle(Color.secondary))
+        .opacity(Double(1 - collapse))
+        .frame(width: 30 * (1 - collapse))
+        .allowsHitTesting(collapse < 0.5)
     }
 
     /// Lock a title/artist line (stops it following the thumb) when the track the
@@ -2517,6 +2760,13 @@ private struct Morph {
     /// Queue-open progress (0 = hero cover big-center, 1 = cover docked into the
     /// queue's compact-header thumbnail slot). Only meaningful while fully expanded.
     let queue: CGFloat
+    /// Left edge of the content area: the rail's gutter, or 0 with a bottom bar.
+    let contentLeft: CGFloat
+    /// Whether a bottom bar sits under the island. False beside a rail, where the
+    /// island takes the bar's place against the bottom edge.
+    let hasBottomBar: Bool
+    /// Which way the expanded player is laid out — decides where the cover flies to.
+    let presentation: PlayerPresentation
 
     var p: CGFloat { min(max(pRaw, 0), 1) }
     var q: CGFloat { min(max(queue, 0), 1) }
@@ -2551,11 +2801,26 @@ private struct Morph {
     // Anchored to the screen's bottom EDGE (matching the floating tab bar, which
     // sits `BottomBar.edgeMargin` from the edge), so the island floats a fixed
     // `islandBottomGap` above the tab bar regardless of the safe-area inset.
-    var islandW: CGFloat { width - 2 * Self.islandHMargin }
-    var islandBottom: CGFloat { height - BottomBar.edgeMargin - Self.tabBarHeight - Self.islandBottomGap }
+    /// The width the dock has to live in: the window, less any rail.
+    var contentW: CGFloat { width - contentLeft }
+    /// Full width of the content area less its margins — until the cap, past
+    /// which the island stops growing and simply centres itself, so on an iPad
+    /// it reads as a floating capsule rather than a bar welded across the window.
+    var islandW: CGFloat {
+        min(contentW - 2 * Self.islandHMargin, BottomBar.dockMaxWidth)
+    }
+    /// Beside a rail there is no bar to clear, so the island takes the bar's own
+    /// place — the same `edgeMargin` from the bottom edge. That is what keeps the
+    /// dock's geometry identical at every width, and therefore one morph.
+    var islandBottom: CGFloat {
+        hasBottomBar
+            ? height - BottomBar.edgeMargin - Self.tabBarHeight - Self.islandBottomGap
+            : height - BottomBar.edgeMargin
+    }
     var islandTop: CGFloat { islandBottom - Self.islandHeight }
     var islandCenterY: CGFloat { islandBottom - Self.islandHeight / 2 }
-    var islandLeft: CGFloat { (width - islandW) / 2 }
+    var islandLeft: CGFloat { contentLeft + (contentW - islandW) / 2 }
+    var islandCenterX: CGFloat { islandLeft + islandW / 2 }
     var islandArtCenterX: CGFloat { islandLeft + Self.islandArtLeading + Self.islandArtSide / 2 }
     var islandRadius: CGFloat { Self.islandHeight / 2 }
 
@@ -2568,7 +2833,20 @@ private struct Morph {
     // Expanded artwork --------------------------------------------------------
     // Matches the content width (scrubber / titles / buttons use 32pt side
     // padding), so the cover lines up flush with the controls below it.
-    var expArtSide: CGFloat { width - 64 }
+
+    /// The column the player itself gets: half the window beside a panel, all of
+    /// it otherwise. The split is of the *window*, not the content area — the
+    /// open player covers the rail as well as the page.
+    var playerColumnW: CGFloat { presentation == .panelBeside ? width / 2 : width }
+
+    /// Height is in this at all because a wide window is usually a short one: a
+    /// landscape iPad's cover, sized purely by width, runs off the bottom of the
+    /// screen and takes the transport with it. On a phone the width is always
+    /// the smaller of the two, so this changes nothing there.
+    var expArtSide: CGFloat {
+        max(0, min(playerColumnW - 64, (height - safeTop - safeBottom) * 0.52))
+    }
+    var expArtCenterX: CGFloat { playerColumnW / 2 }
     var expArtCenterY: CGFloat { safeTop + Self.expArtTopGap + expArtSide / 2 }
 
     // Morphing surface --------------------------------------------------------
@@ -2607,7 +2885,7 @@ private struct Morph {
 
     var surfaceW: CGFloat { lerp(lerp(islandW, width, p), centerPillW, dropT) }
     var surfaceH: CGFloat { lerp(surfaceH_p, BottomBar.minElementH, dropT) }
-    var surfaceCenterX: CGFloat { lerp(width / 2, centerPillCenterX, dropT) }
+    var surfaceCenterX: CGFloat { lerp(lerp(islandCenterX, width / 2, p), centerPillCenterX, dropT) }
     var surfaceCenterY: CGFloat { lerp(centerY_p, barCenterY, dropT) }
     var bottomEdge: CGFloat { surfaceCenterY + surfaceH / 2 }
     var radius: CGFloat { lerp(lerp(islandRadius, Self.expandedRadius, p), BottomBar.minElementH / 2, dropT) }
@@ -2646,7 +2924,7 @@ private struct Morph {
     private var dropArtCenterX: CGFloat {
         (centerPillCenterX - centerPillW / 2) + Self.islandArtLeading + Self.islandArtSide / 2
     }
-    var artCenterX: CGFloat { lerp(lerp(lerp(islandArtCenterX, width / 2, p), dropArtCenterX, dropT), queueArtCenterX, q) }
+    var artCenterX: CGFloat { lerp(lerp(lerp(islandArtCenterX, expArtCenterX, p), dropArtCenterX, dropT), queueArtCenterX, q) }
     var artCenterY: CGFloat { lerp(lerp(lerp(islandCenterY, expArtCenterY, p), barCenterY, dropT), queueArtCenterY, q) }
 
     // Opacities ---------------------------------------------------------------

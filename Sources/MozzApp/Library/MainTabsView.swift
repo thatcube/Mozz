@@ -21,6 +21,12 @@ struct MainTabsView: View {
     @StateObject private var ui = PlayerUIModel()
 
     @State private var selectedTab: AppTab = .home
+    /// Whether the window has room for two columns: an iPad, a Max phone in
+    /// landscape, a folding phone opened out. The one question the whole
+    /// adaptive layout turns on, asked once here and handed down, so the rail,
+    /// the dock and the player can never disagree about the answer.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    private var isWide: Bool { horizontalSizeClass == .regular }
     /// Appearance override (System/Light/Dark) and dark flavor (Dim/Black-OLED).
     /// Observed here so changes drive `preferredColorScheme` + a token rebuild.
     @AppStorage(Color.MozzAppearance.storageKey) private var appearanceRaw = Color.MozzAppearance.default.rawValue
@@ -118,6 +124,10 @@ struct MainTabsView: View {
             get: { minimize },
             set: { newValue in
                 if Date.now < expandLockUntil { return }
+                // A rail does not slide away, and the island has no centre pill
+                // to drop into without a bar — so while wide the drop is not a
+                // state the layout has.
+                if isWide { return }
                 minimize = newValue
             }
         )
@@ -144,7 +154,8 @@ struct MainTabsView: View {
     private var continueBannerInset: CGFloat {
         guard dockTop.isFinite, dockContainerHeight > 0, dockTop < dockContainerHeight else {
             // First frame only, before the measurement arrives.
-            return BottomBar.dockTopFromEdge(hasTrack: hasTrack) + Self.continueBannerGap
+            return BottomBar.dockTopFromEdge(hasTrack: hasTrack, hasBottomBar: !isWide)
+                + Self.continueBannerGap
         }
         // The measured value is the top of the tab bar. When a track is playing
         // the island sits above it — a fixed-height pill, so its offset is a
@@ -177,34 +188,57 @@ struct MainTabsView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            // The strip the rail floats in. The pages are padded clear of it, so
+            // without this the window's own colour shows down one side — the one
+            // place in the app where the page would visibly stop short of an
+            // edge. `mozzBackground` is the same floor every page paints, and it
+            // re-resolves with `darkStyleRaw` above, so Black takes it too.
+            if isWide {
+                Color.mozzBackground.ignoresSafeArea()
+            }
             pages
             // The floating tab bar sits a fixed distance from the true bottom
             // edge (not pinned to the safe area), so it ignores the bottom safe
             // area and pads up by `edgeMargin`.
-            MainTabBar(selected: $selectedTab, leftTab: leftTab,
-                       hasIsland: hasTrack, minimize: $minimize,
-                       onPressTab: pressTab)
-                .padding(.horizontal, BottomBar.hMargin)
-                .padding(.bottom, BottomBar.edgeMargin)
-                // Measured HERE, on the bar itself — before the full-height frame
-                // below, which would otherwise report the top of the screen
-                // instead of the top of the bar.
-                .measuringDockTop()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                // Ignore the bottom container inset AND the keyboard, so the
-                // floating bar stays pinned to the screen's bottom edge and the
-                // keyboard rises over it instead of shoving it up.
-                .ignoresSafeArea(.container, edges: .bottom)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
+            if isWide {
+                // Navigation MOVES rather than duplicating: there is never a
+                // rail and a bar at once, so there is never a question about
+                // which of them owns the selection.
+                SideNavRail(selected: $selectedTab, onPressTab: pressTab)
+                    .padding(.leading, SideNav.edgeMargin)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: .leading)
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+            } else {
+                MainTabBar(selected: $selectedTab, leftTab: leftTab,
+                           hasIsland: hasTrack, minimize: $minimize,
+                           onPressTab: pressTab)
+                    .padding(.horizontal, BottomBar.hMargin)
+                    .padding(.bottom, BottomBar.edgeMargin)
+                    // Measured HERE, on the bar itself — before the full-height frame
+                    // below, which would otherwise report the top of the screen
+                    // instead of the top of the bar.
+                    .measuringDockTop()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    // Ignore the bottom container inset AND the keyboard, so the
+                    // floating bar stays pinned to the screen's bottom edge and the
+                    // keyboard rises over it instead of shoving it up.
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+            }
             if hasTrack {
                 // Deliberately NOT measured: this container is full-screen (it
                 // morphs into the whole player), so its frame says nothing about
                 // where the docked island sits. The island is a fixed-height pill
                 // above the bar, so its offset is added to the measurement below.
-                NowPlayingMorphContainer(playback: playback, ui: ui, minimize: minimize)
+                NowPlayingMorphContainer(playback: playback, ui: ui,
+                                         minimize: minimize,
+                                         contentLeft: isWide ? SideNav.contentInset : 0,
+                                         hasBottomBar: !isWide,
+                                         wide: isWide)
                     .zIndex(100)
             }
-            ToastOverlayView(hasTrack: hasTrack)
+            ToastOverlayView(hasTrack: hasTrack, hasBottomBar: !isWide)
                 .zIndex(110)
             // Cross-device resume offer (ADR-0010). Sits BELOW the now-playing
             // morph on purpose: dismissing the full player animates it back down
@@ -213,6 +247,9 @@ struct MainTabsView: View {
             ContinueHereBanner(continuity: env.continuity,
                                isPlayerPresented: ui.isFullPresented)
                 .padding(.bottom, continueBannerInset)
+                // Clear of the rail, so the notice sits over the content it is
+                // about rather than half-under the navigation.
+                .padding(.leading, isWide ? SideNav.contentInset : 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 // Deliberately does NOT ignore the bottom container inset: the
                 // inset above is measured in this container's coordinate space,
@@ -322,7 +359,8 @@ struct MainTabsView: View {
             ForEach(AppTab.allCases, id: \.self) { tab in
                 if loadedTabs.contains(tab) {
                     page(for: tab)
-                        .reserveBottomBar(hasTrack: hasTrack)
+                        .reserveBottomBar(hasTrack: hasTrack, hasBottomBar: !isWide)
+                        .reserveSideRail(isWide)
                         // Inject the minimize binding ONLY into the selected tab's
                         // subtree (incl. its pushed subpages), so only the visible
                         // tab's scroll views drive the bar — background tabs get a
@@ -433,26 +471,59 @@ enum BottomBar {
     /// dock itself is positioned (it ignores the bottom container inset). Anything
     /// aligning to the dock has to use the same reference or it drifts by the
     /// size of the home indicator — which differs between iPhone and iPad.
-    static func dockTopFromEdge(hasTrack: Bool) -> CGFloat {
-        hasTrack ? islandTopFromEdge : edgeMargin + tabHeight
+    static func dockTopFromEdge(hasTrack: Bool, hasBottomBar: Bool = true) -> CGFloat {
+        guard hasBottomBar else { return hasTrack ? edgeMargin + islandHeight : edgeMargin }
+        return hasTrack ? islandTopFromEdge : edgeMargin + tabHeight
     }
     /// The same, for the collapsed dock — one row of blobs, no separate island.
     static var dockTopFromEdgeMinimized: CGFloat { edgeMargin + minElementH }
     /// Height reserved above the safe-area bottom so scrolled content clears the
     /// floating tab bar (and, when playing, the island above it). Approximate
     /// (assumes a ~34pt home-indicator inset); extra clearance is harmless.
-    static func reserved(hasTrack: Bool) -> CGFloat {
-        hasTrack ? islandTopFromEdge - 26 : edgeMargin + tabHeight - 26
+    static func reserved(hasTrack: Bool, hasBottomBar: Bool = true) -> CGFloat {
+        guard hasBottomBar else {
+            // No bar to clear — only the dock, which is the same floating pill
+            // at every width and sits `edgeMargin` from the bottom edge.
+            return hasTrack ? edgeMargin + islandHeight : 0
+        }
+        return hasTrack ? islandTopFromEdge - 26 : edgeMargin + tabHeight - 26
     }
+
+    /// The widest the docked island is allowed to get.
+    ///
+    /// Past this it stops growing and centres itself over the content, so on an
+    /// iPad it reads as a floating capsule rather than a bar welded across the
+    /// window. One rule covers both shapes: on a phone the content is narrower
+    /// than the cap, so the island is full width less `hMargin` and nothing
+    /// appears to be capped at all. Android's `Dock.maxWidth`, to the point.
+    static let dockMaxWidth: CGFloat = 640
 }
 
 private extension View {
     /// Reserves bottom safe-area space for the floating tab bar (+ island) so a
     /// tab's scrolled content isn't hidden behind them.
     @ViewBuilder
-    func reserveBottomBar(hasTrack: Bool) -> some View {
+    func reserveBottomBar(hasTrack: Bool, hasBottomBar: Bool) -> some View {
         self.safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: BottomBar.reserved(hasTrack: hasTrack))
+            Color.clear.frame(height: BottomBar.reserved(hasTrack: hasTrack,
+                                                         hasBottomBar: hasBottomBar))
+        }
+    }
+
+    /// Moves a page's content clear of the rail while its background still runs
+    /// under it — the same deal the floating tab bar has at the bottom.
+    ///
+    /// `safeAreaPadding`, not `padding`: a page's own background paints with
+    /// `ignoresSafeArea`, so widening the safe area moves the content and leaves
+    /// the paint where it was. Plain padding moved both, which left a strip of
+    /// bare shell down the left of every page — most visible on a media detail,
+    /// whose artwork gradient stopped short of the edge.
+    @ViewBuilder
+    func reserveSideRail(_ isWide: Bool) -> some View {
+        if isWide {
+            self.safeAreaPadding(.leading, SideNav.contentInset)
+        } else {
+            self
         }
     }
 }
@@ -878,7 +949,8 @@ private func lerpBar(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + 
 // MARK: - Tab press style
 
 /// Plain tab button style: a subtle scale dip while pressed for tactile feedback.
-private struct TabPressStyle: ButtonStyle {
+/// Shared with the rail, so a destination feels the same however it is stacked.
+struct TabPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.9 : 1)

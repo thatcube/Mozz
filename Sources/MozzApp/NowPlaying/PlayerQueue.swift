@@ -284,6 +284,11 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// controls block (beneath the card) so they can pin to the top as a sticky
     /// header when scrolling down into up-next.
     @ViewBuilder var queueControls: () -> Controls
+    /// Whether the card above is real. Beside the player it is not — the cover and
+    /// its titles are in the column next to this one — and the sticky controls
+    /// below have to know, because they wait on the card's measured height and
+    /// would otherwise wait forever for a card that is never laid out.
+    var showsNowPlayingCard: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Intrinsic height of the History section = the "card at top" snap detent,
@@ -527,7 +532,7 @@ struct PlayerQueuePanel<Card: View, Controls: View>: View {
     /// the up-next rows scroll under it. Scrolling back up, the descending card
     /// pushes it back down to its natural spot.
     @ViewBuilder private var pinnedQueueControls: some View {
-        if usesStickyHeaders, cardHeight > 0, queueControlsH > 0 {
+        if usesStickyHeaders, !showsNowPlayingCard || cardHeight > 0, queueControlsH > 0 {
             queueControlsBlock
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
