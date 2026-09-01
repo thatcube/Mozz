@@ -188,28 +188,22 @@ struct MainTabsView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // The strip the rail floats in. The pages are padded clear of it, so
-            // without this the window's own colour shows down one side — the one
-            // place in the app where the page would visibly stop short of an
-            // edge. `mozzBackground` is the same floor every page paints, and it
-            // re-resolves with `darkStyleRaw` above, so Black takes it too.
-            if isWide {
-                Color.mozzBackground.ignoresSafeArea()
+            // Navigation MOVES rather than duplicating: there is never a rail
+            // and a bar at once, so there is never a question about which of
+            // them owns the selection. The rail is a SIBLING of the pages, not a
+            // layer over them — the page begins where the column ends. See
+            // `SideNavRail`.
+            HStack(spacing: 0) {
+                if isWide {
+                    SideNavRail(selected: $selectedTab, onPressTab: pressTab)
+                        .ignoresSafeArea(.keyboard, edges: .bottom)
+                }
+                pages
             }
-            pages
             // The floating tab bar sits a fixed distance from the true bottom
             // edge (not pinned to the safe area), so it ignores the bottom safe
             // area and pads up by `edgeMargin`.
-            if isWide {
-                // Navigation MOVES rather than duplicating: there is never a
-                // rail and a bar at once, so there is never a question about
-                // which of them owns the selection.
-                SideNavRail(selected: $selectedTab, onPressTab: pressTab)
-                    .padding(.leading, SideNav.edgeMargin)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity,
-                           alignment: .leading)
-                    .ignoresSafeArea(.keyboard, edges: .bottom)
-            } else {
+            if !isWide {
                 MainTabBar(selected: $selectedTab, leftTab: leftTab,
                            hasIsland: hasTrack, minimize: $minimize,
                            onPressTab: pressTab)
@@ -233,7 +227,7 @@ struct MainTabsView: View {
                 // above the bar, so its offset is added to the measurement below.
                 NowPlayingMorphContainer(playback: playback, ui: ui,
                                          minimize: minimize,
-                                         contentLeft: isWide ? SideNav.contentInset : 0,
+                                         contentLeft: isWide ? SideNav.columnWidth : 0,
                                          hasBottomBar: !isWide,
                                          wide: isWide)
                     .zIndex(100)
@@ -249,7 +243,7 @@ struct MainTabsView: View {
                 .padding(.bottom, continueBannerInset)
                 // Clear of the rail, so the notice sits over the content it is
                 // about rather than half-under the navigation.
-                .padding(.leading, isWide ? SideNav.contentInset : 0)
+                .padding(.leading, isWide ? SideNav.columnWidth : 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 // Deliberately does NOT ignore the bottom container inset: the
                 // inset above is measured in this container's coordinate space,
@@ -360,7 +354,6 @@ struct MainTabsView: View {
                 if loadedTabs.contains(tab) {
                     page(for: tab)
                         .reserveBottomBar(hasTrack: hasTrack, hasBottomBar: !isWide)
-                        .reserveSideRail(isWide)
                         // Inject the minimize binding ONLY into the selected tab's
                         // subtree (incl. its pushed subpages), so only the visible
                         // tab's scroll views drive the bar — background tabs get a
@@ -507,23 +500,6 @@ private extension View {
         self.safeAreaInset(edge: .bottom, spacing: 0) {
             Color.clear.frame(height: BottomBar.reserved(hasTrack: hasTrack,
                                                          hasBottomBar: hasBottomBar))
-        }
-    }
-
-    /// Moves a page's content clear of the rail while its background still runs
-    /// under it — the same deal the floating tab bar has at the bottom.
-    ///
-    /// `safeAreaPadding`, not `padding`: a page's own background paints with
-    /// `ignoresSafeArea`, so widening the safe area moves the content and leaves
-    /// the paint where it was. Plain padding moved both, which left a strip of
-    /// bare shell down the left of every page — most visible on a media detail,
-    /// whose artwork gradient stopped short of the edge.
-    @ViewBuilder
-    func reserveSideRail(_ isWide: Bool) -> some View {
-        if isWide {
-            self.safeAreaPadding(.leading, SideNav.contentInset)
-        } else {
-            self
         }
     }
 }

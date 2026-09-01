@@ -47,39 +47,31 @@ func playerPresentation(wide: Bool, panel: PlayerPanel?) -> PlayerPresentation {
 /// rail. That is what lets one morph serve both instead of a phone morph and a
 /// tablet morph that drift apart.
 enum SideNav {
-    /// The rail's own width. Thicker than the bar is tall, because a vertical
-    /// item stacks a 30pt glyph over its label with nothing either side to
-    /// borrow room from, and "Library" has to fit without shrinking.
-    static let barWidth: CGFloat = 76
+    /// The rail's column. Android's 88dp, so a destination is the same size and
+    /// in the same place on both.
+    ///
+    /// It is a *column*, not a floating capsule: the page begins where this ends
+    /// and nothing runs underneath it. A navigation surface laid over the content
+    /// it navigates reads as something in the way, and neither iPadOS nor Android
+    /// does it — Apple Music's sidebar pushes its content aside, and Android's
+    /// rail is a sibling in a `Row`.
+    static let columnWidth: CGFloat = 88
 
-    /// Inset from the window's leading edge — the same margin the tab bar keeps
-    /// from the bottom, so the two read as one floating object rotated.
-    static let edgeMargin: CGFloat = BottomBar.edgeMargin
-
-    /// Gap between the rail and the content it sits beside.
-    static let contentGap: CGFloat = 12
-
-    /// What a page has to leave clear on its leading edge.
-    static var contentInset: CGFloat { edgeMargin + barWidth + contentGap }
+    /// What a page has to leave clear on its leading edge — the column, exactly,
+    /// since nothing overlaps any more.
+    static var contentInset: CGFloat { columnWidth }
 
     /// One destination: a 30pt glyph over an 11pt label, with the same air
     /// around it that the bar's items get.
     static let itemHeight: CGFloat = 64
     static let itemSpacing: CGFloat = 2
 
-    /// Padding above the first destination and below the last.
-    static let vPadding: CGFloat = 8
+    /// Air above the first destination, below the status bar.
+    static let topPadding: CGFloat = 12
 
-    /// The rail's height, which is its contents' — it is a capsule floating
-    /// beside the page, not a column ruled down the window.
-    static var barHeight: CGFloat {
-        let n = CGFloat(AppTab.allCases.count)
-        return 2 * vPadding + n * itemHeight + (n - 1) * itemSpacing
-    }
-
-    /// Inset of the selection lozenge inside the rail capsule, shared on every
-    /// edge so the lozenge stays concentric with it.
-    static let selectionInset: CGFloat = 5
+    /// Inset of the selection lozenge inside the column, so it has a margin to
+    /// breathe in rather than running edge to edge.
+    static let selectionInset: CGFloat = 6
 }
 
 /// The one place that decides whether navigation chrome is glass or solid, so
