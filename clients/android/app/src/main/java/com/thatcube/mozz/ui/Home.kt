@@ -25,8 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -78,8 +76,6 @@ fun HomeRoot(
     playback: PlayerController,
     nav: Navigator,
     bottomReserve: Dp,
-    onResync: () -> Unit,
-    onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
     var mixes by remember { mutableStateOf<List<HomeMix>>(emptyList()) }
@@ -131,7 +127,7 @@ fun HomeRoot(
         ) {
             item(key = "header") {
                 TabHeader("Home", inset = inset) {
-                    ServerMenu(account.serverName, onResync = onResync, onSignOut = onSignOut)
+                    SettingsButton { nav.open(Route.Settings) }
                 }
             }
 
@@ -195,48 +191,6 @@ fun HomeRoot(
 
 /** Past this, a window has room for wider margins and more columns. */
 val WIDE_WINDOW = 700.dp
-
-/**
- * The server's own menu: refreshing the catalogue and signing out.
- *
- * Behind an overflow rather than sitting in a bar, because these are the two
- * things you do least often and the header is for saying where you are.
- */
-@Composable
-private fun ServerMenu(serverName: String, onResync: () -> Unit, onSignOut: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(percent = 50))
-                .clickable { open = true },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painterResource(R.drawable.ic_more_vert),
-                contentDescription = "Server options",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(serverName, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                onClick = {},
-                enabled = false,
-            )
-            DropdownMenuItem(
-                text = { Text("Refresh library") },
-                onClick = { open = false; onResync() },
-            )
-            DropdownMenuItem(
-                text = { Text("Sign out") },
-                onClick = { open = false; onSignOut() },
-            )
-        }
-    }
-}
 
 /**
  * The quick-access grid: Liked Songs, then every precomputed mix.

@@ -301,7 +301,11 @@ fun MozzShell(
                     server = server,
                     playback = playback,
                     wide = wide,
-                    bottomReserve = Dock.reserve(hasTrack, hasBottomNav = !wide),
+                    bottomReserve = Dock.reserve(
+                        hasTrack,
+                        hasBottomNav = !wide,
+                        safeBottom = with(density) { safeBottomPx.toDp() },
+                    ),
                     onResync = onResync,
                     onSignOut = onSignOut,
                 )
@@ -319,9 +323,9 @@ fun MozzShell(
                     if (it == tab) stacks.getValue(it).popToRoot() else tab = it
                     navShown.floatValue = 1f
                 },
+                bottomInset = with(density) { safeBottomPx.toDp() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = with(density) { safeBottomPx.toDp() })
                     .graphicsLayer {
                         translationY = (1f - navShown.floatValue) * (navBarPx + safeBottomPx)
                     },
@@ -406,7 +410,11 @@ fun MozzShell(
             // because anything was measuring the player. Now that the Android
             // player has the same proportions, the same constant lands in the
             // same gap, and there is no second case to keep in step.
-            bottomInset = Dock.reserve(hasTrack, hasBottomNav = !wide),
+            bottomInset = Dock.reserve(
+                hasTrack,
+                hasBottomNav = !wide,
+                safeBottom = with(density) { safeBottomPx.toDp() },
+            ),
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
@@ -514,8 +522,6 @@ private fun TabContent(
                 playback = playback,
                 nav = nav,
                 bottomReserve = bottomReserve,
-                onResync = onResync,
-                onSignOut = onSignOut,
             )
             AppTab.LIBRARY -> LibraryRoot(
                 account = account,
@@ -603,6 +609,22 @@ private fun TabContent(
             nav = nav,
             onBack = nav::back,
             bottomReserve = bottomReserve,
+        )
+
+        Route.Settings -> SettingsPage(
+            account = account,
+            nav = nav,
+            bottomReserve = bottomReserve,
+            onResync = onResync,
+            onSignOut = onSignOut,
+        )
+
+        Route.SettingsAppearance -> AppearancePage(nav = nav, bottomReserve = bottomReserve)
+
+        is Route.SettingsSoon -> SettingsSoonPage(
+            title = route.title,
+            promise = route.promise,
+            nav = nav,
         )
 
         Route.AllPlaylists -> PlaylistsPage(

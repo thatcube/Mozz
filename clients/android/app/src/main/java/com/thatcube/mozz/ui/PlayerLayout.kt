@@ -105,11 +105,17 @@ object Dock {
      *
      * Generous on purpose. Content hidden behind the dock is a bug; a little extra
      * air under the last row is not.
+     *
+     * [safeBottom] is the window's own bottom inset — the gesture bar's strip.
+     * Nothing above this reserves it: the pages draw edge to edge so the artwork
+     * runs under the navigation, and the navigation and the dock both sit clear
+     * of the gesture bar. Leaving it out is what let the last row of a shelf
+     * scroll through the band beneath the tab labels.
      */
-    fun reserve(hasTrack: Boolean, hasBottomNav: Boolean): Dp {
+    fun reserve(hasTrack: Boolean, hasBottomNav: Boolean, safeBottom: Dp): Dp {
         val nav = if (hasBottomNav) navBarHeight else 0.dp
         val dock = if (hasTrack) height + gapAboveNav else 0.dp
-        return nav + dock + margin
+        return nav + dock + margin + safeBottom
     }
 }
 

@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thatcube.mozz.R
@@ -62,23 +63,36 @@ enum class AppTab(val title: String, val icon: Int, val selectedIcon: Int) {
 fun MozzNavBar(
     selected: AppTab,
     onSelect: (AppTab) -> Unit,
+    /**
+     * The window's bottom inset — the gesture bar's strip.
+     *
+     * The bar extends over it and pads its own contents up, rather than being
+     * lifted above it. Sitting above the inset left a band between the tab
+     * labels and the bottom edge that belonged to nobody, and the page scrolled
+     * through it: album covers slid past underneath the labels.
+     */
+    bottomInset: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(Dock.navBarHeight)
+            .height(Dock.navBarHeight + bottomInset)
             .background(MaterialTheme.colorScheme.background),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        AppTab.entries.forEach { tab ->
-            NavItem(
-                tab = tab,
-                selected = tab == selected,
-                onSelect = { onSelect(tab) },
-                modifier = Modifier.weight(1f),
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth().height(Dock.navBarHeight),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppTab.entries.forEach { tab ->
+                NavItem(
+                    tab = tab,
+                    selected = tab == selected,
+                    onSelect = { onSelect(tab) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }

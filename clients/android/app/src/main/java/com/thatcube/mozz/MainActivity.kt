@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -22,6 +23,7 @@ import com.thatcube.mozz.ui.LinkingScreen
 import com.thatcube.mozz.ui.SignInScreen
 import com.thatcube.mozz.ui.StartingScreen
 import com.thatcube.mozz.ui.SyncingScreen
+import com.thatcube.mozz.ui.theme.LocalMozzSettings
 import com.thatcube.mozz.ui.theme.MozzTheme
 
 class MainActivity : ComponentActivity() {
@@ -47,10 +49,16 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        val settings = (application as MozzApplication).settings
         setContent {
-            MozzTheme {
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                Root(state)
+            MozzTheme(settings) {
+                // Provided rather than passed down: the only thing that reads it
+                // is the appearance page, and threading it through six screens to
+                // reach one would be worse than a local.
+                CompositionLocalProvider(LocalMozzSettings provides settings) {
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    Root(state)
+                }
             }
         }
     }

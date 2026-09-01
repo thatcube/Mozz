@@ -116,7 +116,12 @@ fun PlayerBackground(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val fallback = androidx.compose.material3.MaterialTheme.colorScheme.background
+    // A fixed dark tone, not the theme's background. The player is always dark —
+    // its foreground is white over whatever colour the artwork turned out to be,
+    // the same way the detail pages force dark on iOS — so in the Light theme
+    // taking the page's floor here would have put white text on near-white for
+    // any track whose artwork yields nothing.
+    val fallback = androidx.compose.ui.graphics.Color(0xFF141414)
     // Deliberately not keyed on the artwork: the previous field stays up until
     // the next one has been computed. Resetting to null between tracks is what
     // made the background drop to black while the next cover loaded.

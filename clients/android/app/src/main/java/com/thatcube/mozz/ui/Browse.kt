@@ -60,6 +60,15 @@ sealed interface Route {
     data object AllArtists : Route
     data object AllAlbums : Route
     data object AllPlaylists : Route
+
+    data object Settings : Route
+    data object SettingsAppearance : Route
+
+    /**
+     * A settings page that exists in the map before it exists in code. Carries
+     * its own text so one destination covers every one of them.
+     */
+    data class SettingsSoon(val title: String, val promise: String) : Route
 }
 
 /**

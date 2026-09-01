@@ -12,6 +12,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.SecretStore
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.ui.ToastCenter
+import com.thatcube.mozz.ui.theme.MozzSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.MainScope
@@ -44,6 +45,12 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             .components { add(OkHttpNetworkFetcherFactory()) }
             .apply { if (BuildConfig.DEBUG) logger(DebugLogger()) }
             .build()
+
+    /**
+     * How the app is meant to look. Application-scoped so a theme change survives
+     * the activity being recreated — which a fold does on this hardware.
+     */
+    val settings: MozzSettings by lazy { MozzSettings(this) }
 
     val core: MozzCore by lazy {
         MozzCore.open(File(filesDir, "library.sqlite").absolutePath)
