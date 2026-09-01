@@ -975,7 +975,7 @@ struct NowPlayingMorphContainer: View {
             // transport just above the middle of the band it occupies, so the
             // player reads as two balanced halves.
             Spacer(minLength: 54)
-            transport
+            transport(m)
             Spacer(minLength: 20)
             // At a wide width this row is not part of the chrome: it spans both
             // columns beneath them (`wideButtonRow`), so the AirPlay control sits
@@ -984,7 +984,7 @@ struct NowPlayingMorphContainer: View {
             if showsButtons {
                 VStack(spacing: 10) {
                     bottomButtonRow
-                        .padding(.horizontal, 48)
+                        .padding(.horizontal, Self.heroSideInset)
                     #if canImport(UIKit)
                     routeLabel
                     #endif
@@ -1259,7 +1259,15 @@ struct NowPlayingMorphContainer: View {
                         else { nowPlayingCard(m).opacity(showsCard ? 1 : 0) }
                     }
                 },
-                queueControls: { shuffleRepeatPills },
+                // The pills stay on a phone. They are dropped only where the
+                // play controls have taken shuffle and repeat over, since a
+                // control with two homes on one screen is worse than a control
+                // in the wrong one.
+                queueControls: {
+                    Group {
+                        if showsPlayModes(m) { EmptyView() } else { shuffleRepeatPills }
+                    }
+                },
                 showsNowPlayingCard: !beside
             )
         }
@@ -1400,8 +1408,15 @@ struct NowPlayingMorphContainer: View {
                 .onTapGesture { if panelSettled { setPanel(nil) } }
                 .allowsHitTesting(panelSettled)
             VStack(alignment: .leading, spacing: 2) {
-                Text(playback.currentTrack?.title ?? "")
-                    .font(.headline).lineLimit(1)
+                // Scrolls rather than truncating, exactly as the hero title
+                // above it does. The title does not change when the queue
+                // opens, so it should not change how it behaves either — a
+                // name that was readable a moment ago should not become
+                // "Something From The Series Arcane Leag…" because a list
+                // appeared underneath it.
+                MarqueeLine(text: playback.currentTrack?.title ?? "",
+                            leadBleed: 0, trailBleed: 8)
+                    .font(.headline)
                 Text(playback.currentTrack?.artistName ?? "")
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -1837,22 +1852,81 @@ struct NowPlayingMorphContainer: View {
         }
     }
 
-    private var transport: some View {
+    /// The five transport columns, in the order they are drawn. The bottom
+    /// button row is laid on the SAME grid so lyrics, AirPlay and queue sit
+    /// directly under previous, play and next.
+    private static let transportColumns: [CGFloat] = [
+        PlayerControlMetrics.minHit,   // shuffle
+        PlayerControlMetrics.skipHit,  // previous
+        PlayerControlMetrics.playHit,  // play / pause
+        PlayerControlMetrics.skipHit,  // next
+        PlayerControlMetrics.minHit,   // repeat
+    ]
+
+    /// Whether shuffle and repeat join the play controls rather than sitting as
+    /// pills above the queue.
+    ///
+    /// Only on a genuinely large screen — an iPad or a desktop window. A phone
+    /// keeps them by the queue at every orientation, which is why this asks for
+    /// width AND height: a phone on its side is still a phone.
+    private func showsPlayModes(_ m: Morph) -> Bool { wide && !m.isShort }
+
+    private func transport(_ m: Morph) -> some View {
         let snapshot = playback.snapshot
         let playing = snapshot.status == .playing
-        return HStack(spacing: 44) {
+        let mode = snapshot.repeatMode
+        let modes = showsPlayModes(m)
+        return HStack(spacing: 0) {
+            if modes {
+                PlayerIconButton(glyph: .shuffle,
+                             glyphSize: 22,
+                             tint: snapshot.isShuffled ? .primary : .secondary,
+                             haptics: false,
+                                 label: snapshot.isShuffled ? "Shuffle on" : "Shuffle off") {
+                    playback.toggleShuffle()
+                }
+                .frame(width: Self.transportColumns[0])
+            } else {
+                // The column still exists when it is empty, so the three controls
+                // that remain sit exactly where they always have.
+                Color.clear.frame(width: Self.transportColumns[0], height: 0)
+            }
+            Spacer(minLength: 8)
             TransportSkipButton(travel: .backward,
                                 direction: snapshot.transportDirection,
                                 generation: snapshot.transportGeneration,
                                 isEnabled: snapshot.hasPrevious,
                                 label: "Previous") { playback.previous() }
+                .frame(width: Self.transportColumns[1])
+            Spacer(minLength: 8)
             PlayPauseButton(playing: playing) { playback.togglePlayPause() }
+                .frame(width: Self.transportColumns[2])
+            Spacer(minLength: 8)
             TransportSkipButton(travel: .forward,
                                 direction: snapshot.transportDirection,
                                 generation: snapshot.transportGeneration,
                                 isEnabled: snapshot.hasNext,
                                 label: "Next") { playback.next() }
+                .frame(width: Self.transportColumns[3])
+            Spacer(minLength: 8)
+            // One glyph for all three repeat modes, as the queue's pill did —
+            // there is no repeat-one icon in this set, and the state is carried
+            // by the accent and read out by the label.
+            if modes {
+                PlayerIconButton(glyph: .repeatTracks,
+                                 glyphSize: 22,
+                                 tint: mode != .off ? .primary : .secondary,
+                                 haptics: false,
+                                 label: mode == .one ? "Repeat one"
+                                      : (mode == .all ? "Repeat all" : "Repeat off")) {
+                    playback.cycleRepeatMode()
+                }
+                .frame(width: Self.transportColumns[4])
+            } else {
+                Color.clear.frame(width: Self.transportColumns[4], height: 0)
+            }
         }
+        .padding(.horizontal, Self.heroSideInset)
     }
 
     /// The bottom control row: the lyrics toggle, the current-output-route control
@@ -1861,14 +1935,24 @@ struct NowPlayingMorphContainer: View {
     /// so tapping one while the other is open swaps between them.
     /// (The equalizer lives in Settings for now.)
     private var bottomButtonRow: some View {
-        HStack {
-            lyricsToggle
-            Spacer()
+        // The transport's grid, with its outer two columns left empty: lyrics
+        // lands under previous, AirPlay under play, queue under next. Aligning
+        // them by eye with a different padding is what had them drifting apart
+        // at every width except the one it was tuned on.
+        HStack(spacing: 0) {
+            Color.clear.frame(width: Self.transportColumns[0], height: 0)
+            Spacer(minLength: 8)
+            lyricsToggle.frame(width: Self.transportColumns[1])
+            Spacer(minLength: 8)
             #if canImport(UIKit)
-            routeControl
+            routeControl.frame(width: Self.transportColumns[2])
+            #else
+            Color.clear.frame(width: Self.transportColumns[2], height: 0)
             #endif
-            Spacer()
-            queueToggle
+            Spacer(minLength: 8)
+            queueToggle.frame(width: Self.transportColumns[3])
+            Spacer(minLength: 8)
+            Color.clear.frame(width: Self.transportColumns[4], height: 0)
         }
     }
 
