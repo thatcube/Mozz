@@ -277,7 +277,7 @@ internal fun PlayerBody(
                         ArtSlot(onArtSlot, Modifier.weight(1f, fill = false))
                         Spacer(Modifier.height(28.dp))
                         Chrome(
-                            state, playback, queueProgress, panelOpen = false,
+                            state, playback, queueProgress, showsPlayModes = wide,
                             likes = likes,
                         )
                     }
@@ -296,6 +296,7 @@ internal fun PlayerBody(
                             // repeat a second time — both are already in the
                             // column next to this one.
                             showsNowPlayingCard = false,
+                            showsPlayModes = wide,
                             bottomInset = 0.dp,
                             onCardArtSlot = onCardArtSlot,
                             queueProgress = queueProgress,
@@ -361,6 +362,7 @@ internal fun PlayerBody(
                                 // what is playing — and it is where the
                                 // travelling cover lands.
                                 showsNowPlayingCard = true,
+                                showsPlayModes = wide,
                                 bottomInset = 0.dp,
                                 onCardArtSlot = onCardArtSlot,
                                 queueProgress = queueProgress,
@@ -423,7 +425,7 @@ internal fun PlayerBody(
                             // Shuffle and repeat move to the pills above the queue when
                             // it is open, so the transport drops to the three controls
                             // that are still its job.
-                            Transport(state, playback, compact = panel != null)
+                            Transport(state, playback, showsModes = wide)
                             // An equal share of the surplus, on top of unequal minimums
                             // — which is what leaves the transport just above the middle
                             // of the band rather than dead centre. Equal so that SwiftUI
@@ -613,7 +615,8 @@ private fun Chrome(
     state: PlaybackState,
     playback: PlayerController,
     queueProgress: () -> Float,
-    panelOpen: Boolean,
+    /** See `Transport`: shuffle and repeat ride here only on a big screen. */
+    showsPlayModes: Boolean,
     likes: LikeControls,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -627,7 +630,7 @@ private fun Chrome(
         Spacer(Modifier.height(SCRUBBER_TO_TRANSPORT))
         // Shuffle and repeat move to the pills above the queue when it is open,
         // so the transport drops to the three controls that are still its job.
-        Transport(state, playback, compact = panelOpen)
+        Transport(state, playback, showsModes = showsPlayModes)
         // The row of panel toggles sits below this. Without the gap, a thumb
         // reaching for pause lands on the queue.
         Spacer(Modifier.height(20.dp))
@@ -690,6 +693,7 @@ private fun Panel(
     playback: PlayerController,
     library: MozzLibrary,
     showsNowPlayingCard: Boolean,
+    showsPlayModes: Boolean,
     bottomInset: Dp,
     onCardArtSlot: (Rect) -> Unit,
     queueProgress: () -> Float,
@@ -704,6 +708,7 @@ private fun Panel(
             server = server,
             playback = playback,
             showsNowPlayingCard = showsNowPlayingCard,
+            showsPlayModes = showsPlayModes,
             bottomInset = bottomInset,
             onCardArtSlot = onCardArtSlot,
             queueProgress = queueProgress,
@@ -746,6 +751,9 @@ private fun QueuePane(
     server: MozzServer,
     playback: PlayerController,
     showsNowPlayingCard: Boolean,
+    /** See `Transport`: the pills appear only where the play row has not taken
+     *  shuffle and repeat over. */
+    showsPlayModes: Boolean,
     bottomInset: Dp,
     onCardArtSlot: (Rect) -> Unit,
     queueProgress: () -> Float,
@@ -827,7 +835,9 @@ private fun QueuePane(
                 }
             }
             item(key = "queue-controls") {
-                QueueControls(state, playback, Modifier.animateItem())
+                if (!showsPlayModes) {
+                    QueueControls(state, playback, Modifier.animateItem())
+                }
             }
         }
 
@@ -1665,8 +1675,16 @@ private val SCRUB_THUMB_HELD = 9.dp
 private fun Transport(
     state: PlaybackState,
     playback: PlayerController,
-    /** Queue open: shuffle and repeat are pills up there, so drop them here. */
-    compact: Boolean,
+    /**
+     * Whether shuffle and repeat join the play controls.
+     *
+     * A WIDTH decision, not a queue-state one. They used to drop out of this row
+     * the moment the queue opened and reappear as pills above it — so the two
+     * controls you touch least were the two that moved, and they had two homes
+     * depending on what else was on screen. iOS settled on one rule and this is
+     * it: pills by the queue on a phone, here on a big screen, and never both.
+     */
+    showsModes: Boolean,
 ) {
     val active = PlayerForeground
     val idle = PlayerForegroundMuted
@@ -1676,7 +1694,7 @@ private fun Transport(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (!compact) {
+        if (showsModes) {
             TransportButton(
                 icon = R.drawable.ic_shuffle,
                 label = if (state.shuffle) "Shuffle on" else "Shuffle off",
@@ -1710,7 +1728,7 @@ private fun Transport(
             onClick = { playback.next() },
         )
 
-        if (!compact) {
+        if (showsModes) {
             TransportButton(
                 icon = if (state.repeat == RepeatMode.ONE) R.drawable.ic_repeat_one
                 else R.drawable.ic_repeat,
