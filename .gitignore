@@ -38,6 +38,8 @@ WHAT_TO_TEST.txt
 # AI/agent working docs — kept local, never committed (keeps `main` human-authored)
 AGENTS.local.md
 CLAUDE.local.md
+# Symlink to AGENTS.local.md — the name Claude Code loads automatically.
+CLAUDE.md
 .ai/
 .agents/
 *.agent.md
