@@ -2,6 +2,7 @@ package com.thatcube.mozz.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -1562,48 +1564,88 @@ private fun TrackTitles(
 }
 
 /**
- * The scrubber.
+ * The scrubber — iOS's `SeekBar`, control for control.
  *
  * Drawn rather than assembled from `Slider`, which in Material 3 Expressive is a
  * chunky thumb, a gap, and a stop-indicator dot at the end of the track — three
- * pieces of vocabulary this app does not speak. A scrubber wants to be a line
- * with a position on it.
+ * pieces of vocabulary this app does not speak.
+ *
+ * The shape iOS settled on is a knob-less capsule that fills to the position: at
+ * rest it is a line, and under a finger the whole bar grows from 10 to 20, the
+ * fill and track both brighten, and the two time labels brighten and scale up
+ * away from the centre. The thumb is what a bar has instead of any of that, and
+ * a thumb is exactly the thing a fingertip covers at the moment you want to see
+ * it. The taller of the two heights is reserved always, so nothing below shifts
+ * when the bar grows.
  *
  * It holds its own position while a drag is in progress. Without that, the
- * twice-a-second position tick fights the finger: the thumb snaps back to
+ * twice-a-second position tick fights the finger: the fill snaps back to
  * wherever the player actually is between drag events. The seek happens once,
- * when the finger lifts.
+ * when the finger lifts — and the released target keeps being displayed until
+ * the player's own position catches up to it, because handing control straight
+ * back exposes the pre-seek position for up to one tick and makes the fill
+ * spring away and back.
  */
 @Composable
 private fun Scrubber(state: PlaybackState, playback: PlayerController) {
+    val haptics = LocalHapticFeedback.current
     var dragging by remember { mutableStateOf(false) }
     var draggedFraction by remember { mutableFloatStateOf(0f) }
-    val fraction = (if (dragging) draggedFraction else state.progress).coerceIn(0f, 1f)
-    // The thumb grows under the finger, so it is visible past the fingertip
-    // covering it.
-    val grip by animateFloatAsState(
+    /** The released target, held until the player's own position reaches it. */
+    var settling by remember { mutableStateOf<Float?>(null) }
+
+    val duration = state.durationMillis
+    LaunchedEffect(state.positionMillis, settling, duration) {
+        val target = settling ?: return@LaunchedEffect
+        if (duration > 0 &&
+            abs(state.positionMillis - (target * duration).toLong()) <= SCRUB_SETTLE_SLOP_MS
+        ) {
+            settling = null
+        }
+    }
+    // A seek the player never confirms must not freeze the bar for good.
+    LaunchedEffect(settling) {
+        if (settling == null) return@LaunchedEffect
+        delay(SCRUB_SETTLE_TIMEOUT_MS)
+        settling = null
+    }
+    LaunchedEffect(state.track?.id) {
+        settling = null
+        dragging = false
+    }
+
+    val fraction = (if (dragging) draggedFraction else settling ?: state.progress)
+        .coerceIn(0f, 1f)
+    val held by animateFloatAsState(
         targetValue = if (dragging) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 700f),
-        label = "scrub-grip",
+        animationSpec = tween(durationMillis = 340, easing = FastOutSlowInEasing),
+        label = "scrub-held",
     )
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(SCRUB_TOUCH_HEIGHT)
+                // The seeking height, always: the bar grows inside this and the
+                // labels below stay put.
+                .height(SCRUB_SEEK_HEIGHT)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
+                            settling = null
                             dragging = true
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             draggedFraction = (offset.x / size.width).coerceIn(0f, 1f)
                         },
-                        onHorizontalDrag = { change, delta ->
+                        // Absolute, like iOS: the fill goes where the finger is,
+                        // not where the accumulated deltas say it should be.
+                        onHorizontalDrag = { change, _ ->
                             change.consume()
                             draggedFraction =
-                                (draggedFraction + delta / size.width).coerceIn(0f, 1f)
+                                (change.position.x / size.width).coerceIn(0f, 1f)
                         },
                         onDragEnd = {
+                            settling = draggedFraction
                             playback.seekToFraction(draggedFraction)
                             dragging = false
                         },
@@ -1612,75 +1654,120 @@ private fun Scrubber(state: PlaybackState, playback: PlayerController) {
                 }
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
-                        playback.seekToFraction((offset.x / size.width).coerceIn(0f, 1f))
+                        val target = (offset.x / size.width).coerceIn(0f, 1f)
+                        settling = target
+                        playback.seekToFraction(target)
                     }
                 },
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val h = SCRUB_TRACK_HEIGHT.toPx()
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // iOS scales the painted bar inside its fixed reservation,
+                    // so pickup feels responsive without moving the labels.
+                    .graphicsLayer {
+                        val s = lerp(1f, SCRUB_SEEK_SCALE, held)
+                        scaleX = s
+                        scaleY = s
+                    },
+            ) {
+                val h = lerp(SCRUB_REST_HEIGHT.toPx(), SCRUB_SEEK_HEIGHT.toPx(), held)
                 val midY = size.height / 2
                 val r = h / 2
                 drawRoundRect(
-                    color = PlayerForegroundMuted.copy(alpha = 0.28f),
+                    color = PlayerForeground.copy(alpha = lerp(0.30f, 0.42f, held)),
                     topLeft = Offset(0f, midY - r),
                     size = Size(size.width, h),
                     cornerRadius = CornerRadius(r, r),
                 )
                 drawRoundRect(
-                    color = PlayerForeground,
+                    color = PlayerForeground.copy(alpha = lerp(0.82f, 1f, held)),
                     topLeft = Offset(0f, midY - r),
-                    size = Size(size.width * fraction, h),
+                    // Never narrower than it is tall, or the capsule's own round
+                    // ends squash into a lens at the start of a track.
+                    size = Size((size.width * fraction).coerceIn(h, size.width), h),
                     cornerRadius = CornerRadius(r, r),
-                )
-                drawCircle(
-                    color = PlayerForeground,
-                    radius = lerp(SCRUB_THUMB.toPx(), SCRUB_THUMB_HELD.toPx(), grip),
-                    center = Offset(size.width * fraction, midY),
                 )
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                clock((fraction * state.durationMillis).toLong()),
-                style = MaterialTheme.typography.labelMedium,
-                color = PlayerForegroundMuted,
-            )
-            // What the server is actually sending. Quiet, because it only
-            // matters to the people it matters to — and absent entirely when the
-            // server did not say, rather than guessed at.
-            state.track?.format?.let { format ->
-                Text(
-                    format,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = PlayerForegroundMuted,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(percent = 50))
-                        .background(PlayerForeground.copy(alpha = 0.10f))
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+        Spacer(Modifier.height(SCRUB_LABEL_SPACING))
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TimeLabel(
+                    clock((fraction * duration).toLong()),
+                    held,
+                    TransformOrigin(0f, 0.5f),
+                )
+                // Remaining, not total: what is left is the thing anyone actually
+                // reads off a scrubber mid-song. A real minus sign, not a hyphen.
+                TimeLabel(
+                    "−" + clock(duration - (fraction * duration).toLong()),
+                    held,
+                    TransformOrigin(1f, 0.5f),
                 )
             }
-            // Remaining, not total: what is left is the thing anyone actually
-            // reads off a scrubber mid-song.
-            Text(
-                "-" + clock(state.durationMillis - (fraction * state.durationMillis).toLong()),
-                style = MaterialTheme.typography.labelMedium,
-                color = PlayerForegroundMuted,
-            )
+            // What the server is actually sending. Centred in its own layer
+            // rather than placed between the labels, so it stays on the middle of
+            // the bar however wide the times either side of it run. Quiet,
+            // because it only matters to the people it matters to — and absent
+            // entirely when the server did not say, rather than guessed at.
+            state.track?.format?.let { FormatBadge(it) }
         }
     }
 }
 
-/** Thin, because it is a position indicator and not a control surface. */
-private val SCRUB_TRACK_HEIGHT = 4.dp
+@Composable
+private fun TimeLabel(text: String, held: Float, origin: TransformOrigin) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = if (held > 0.5f) FontWeight.SemiBold else FontWeight.Normal,
+        color = PlayerForeground.copy(alpha = lerp(0.5f, 1f, held)),
+        modifier = Modifier.graphicsLayer {
+            val s = lerp(1f, SCRUB_LABEL_SCALE, held)
+            scaleX = s
+            scaleY = s
+            transformOrigin = origin
+        },
+    )
+}
 
-/** Big enough to hit without looking, whatever the track's height. */
-private val SCRUB_TOUCH_HEIGHT = 28.dp
-private val SCRUB_THUMB = 6.dp
-private val SCRUB_THUMB_HELD = 9.dp
+@Composable
+private fun FormatBadge(label: String) {
+    val shape = RoundedCornerShape(percent = 50)
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        color = PlayerForeground.copy(alpha = 0.72f),
+        modifier = Modifier
+            .widthIn(max = 180.dp)
+            .clip(shape)
+            // A fixed light wash stays luminous across artwork colours; a
+            // material sampled the dark backdrop and made this pill look muddy.
+            .background(PlayerForeground.copy(alpha = 0.16f))
+            .border(0.5.dp, PlayerForeground.copy(alpha = 0.12f), shape)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+
+/** At rest, and under a finger. The taller is what the layout reserves. */
+private val SCRUB_REST_HEIGHT = 10.dp
+private val SCRUB_SEEK_HEIGHT = 20.dp
+
+/** Barely anything, and deliberately: the height change carries the state. */
+private const val SCRUB_SEEK_SCALE = 1.015f
+private const val SCRUB_LABEL_SCALE = 1.14f
+private val SCRUB_LABEL_SPACING = 10.dp
+
+/** How close the player has to get before the released target lets go. */
+private const val SCRUB_SETTLE_SLOP_MS = 1_000L
+private const val SCRUB_SETTLE_TIMEOUT_MS = 2_000L
 
 @Composable
 private fun Transport(
