@@ -22,10 +22,23 @@ enum SiriMediaSuggestions {
     /// so the only safe move is to ask before touching SiriKit at all.
     ///
     /// The embedded provisioning profile is the one readable record of what the
-    /// build may do. When there isn't one to read — a simulator build — assume
-    /// the entitlement is present and behave exactly as before, so this can
-    /// never quietly strip Siri out of a real release.
+    /// build may do. Every app installed on a device has one — development,
+    /// ad-hoc, TestFlight and App Store alike — so a device build that cannot
+    /// find one is a case that should not arise, and assuming the entitlement is
+    /// present there keeps this from ever quietly stripping Siri out of a real
+    /// release.
+    ///
+    /// A simulator build is the opposite: it has no profile because it is signed
+    /// with nothing, so it never carries the entitlement — and Siri could not
+    /// work there in any case. Treating "no profile" as "entitled" was true of
+    /// the device and false of the simulator, and the app died the moment
+    /// Settings scrolled the Siri section into view: reading the authorization
+    /// status is itself a SiriKit call, and SiriKit raises an Objective-C
+    /// exception rather than returning, which Swift cannot catch.
     static let isAvailable: Bool = {
+        #if targetEnvironment(simulator)
+        return false
+        #else
         guard let url = Bundle.main.url(forResource: "embedded",
                                         withExtension: "mobileprovision"),
               let data = try? Data(contentsOf: url)
@@ -41,6 +54,7 @@ enum SiriMediaSuggestions {
               let entitlements = (plist as? [String: Any])?["Entitlements"] as? [String: Any]
         else { return true }
         return entitlements["com.apple.developer.siri"] as? Bool ?? false
+        #endif
     }()
 
     /// Record that this is what someone chose to listen to.
