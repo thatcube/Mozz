@@ -976,6 +976,11 @@ struct NowPlayingMorphContainer: View {
             // player reads as two balanced halves.
             Spacer(minLength: 54)
             transport(m)
+                // The same rail the scrub bar above keeps. Without it the row
+                // spread to the full column while the scrubber stayed inset, so
+                // shuffle and repeat — the only two controls at the ends — hung
+                // 32pt out past everything else on the screen.
+                .padding(.horizontal, sideInset)
             Spacer(minLength: 20)
             // At a wide width this row is not part of the chrome: it spans both
             // columns beneath them (`wideButtonRow`), so the AirPlay control sits
