@@ -88,6 +88,13 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// Big enough to be the thing you look at, small enough to leave the titles
     /// room to breathe.
     private static var wideHeroCap: CGFloat { 300 }
+    /// How wide the page's column is allowed to get.
+    ///
+    /// Without a bound, a landscape iPad puts a song's title at one edge of the
+    /// window and its duration at the other, with a metre of nothing between —
+    /// two columns that are meant to be read as one row. The backgrounds still
+    /// span the whole window; only the things you read are held together.
+    private static var wideContentCap: CGFloat { 1000 }
     private static var centeredArtworkSize: CGFloat { 240 }
     /// Name for the ScrollView's coordinate space, so the full-bleed header can
     /// measure how far the page has been pulled down (overscroll) and reveal the
@@ -129,6 +136,10 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                         .padding(.horizontal, contentHorizontalPadding)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
+                        // Two frames on purpose: the inner one bounds and
+                        // centres what is read, the outer one lets the
+                        // background behind it still reach both window edges.
+                        .frame(maxWidth: isWide ? Self.wideContentCap : .infinity)
                         .frame(maxWidth: .infinity)
                         // Seamless bleed: the hero's color continues at the very
                         // top of the list, then eases into `deepBg` a few hundred
@@ -213,18 +224,33 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
                 // Held to the width the buttons read at rather than stretched
                 // across the window: a Play button half a metre wide is not
                 // easier to press, only further from the cover it plays.
-                actions().frame(maxWidth: 380)
+                // Held to the width the buttons read at rather than stretched
+                // across the window: a Play button half a metre wide is not
+                // easier to press, only further from the cover it plays. Wider
+                // than the phone's, because there is room here for Play,
+                // Shuffle and a download side by side instead of stacked.
+                actions().frame(maxWidth: 520)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 32)
         .padding(.top, topSafeInset + 52)
         .padding(.bottom, 24)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: Self.wideContentCap)
         .background {
             GeometryReader { geo in
                 Color.clear.task(id: geo.size.width) { heroWidth = geo.size.width }
             }
+        }
+        .frame(maxWidth: .infinity)
+        // The hero has no artwork behind it here — the cover is framed, not
+        // full-bleed — so without this the header sat on the page's deep base
+        // while the list below started at the hero colour, and the two met in a
+        // hard horizontal line across the window. Blooming into that colour
+        // under the hero puts the seam where the eye expects a transition. In
+        // Black the two colours are the same black and this draws nothing.
+        .background {
+            LinearGradient(colors: [deepBg, bg], startPoint: .top, endPoint: .bottom)
         }
     }
 

@@ -225,10 +225,25 @@ struct LikedSongsSquare: View {
     }
 }
 
+
+/// How wide one cell on a horizontal shelf is.
+///
+/// A phone's 150pt cell put seven covers across a landscape iPad and left the
+/// bottom two thirds of the window empty — the shelf read as a filmstrip rather
+/// than as the row of records it is. A roomy window gets a bigger cell, which is
+/// the same answer Compose's `cellWidth` gives on Android.
+enum ShelfMetrics {
+    static func cellWidth(_ sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        sizeClass == .regular ? 190 : 150
+    }
+}
+
 /// A horizontal shelf of album cells that push into the album detail.
 struct AlbumShelf: View {
     let title: String
     let albums: [AlbumRecord]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    private var cell: CGFloat { ShelfMetrics.cellWidth(horizontalSizeClass) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -237,7 +252,7 @@ struct AlbumShelf: View {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
                         NavigationLink(value: AppRoute.album(album)) {
-                            AlbumCell(album: album).frame(width: 150)
+                            AlbumCell(album: album).frame(width: cell)
                         }
                         .buttonStyle(.plain)
                     }
@@ -253,6 +268,8 @@ struct TrackShelf: View {
     @EnvironmentObject private var env: AppEnvironment
     let title: String
     let tracks: [TrackRecord]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    private var cell: CGFloat { ShelfMetrics.cellWidth(horizontalSizeClass) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -265,11 +282,11 @@ struct TrackShelf: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 ArtworkView(artwork: track.artworkKey.map(ArtworkRef.init(key:)),
-                                            seed: track.albumTitle ?? track.title, size: 150, cornerRadius: 8)
+                                            seed: track.albumTitle ?? track.title, size: cell, cornerRadius: 8)
                                 Text(track.title).font(.subheadline).lineLimit(1)
                                 Text(track.artistName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
-                            .frame(width: 150)
+                            .frame(width: cell)
                         }
                         .buttonStyle(.plain)
                     }
@@ -284,6 +301,8 @@ struct TrackShelf: View {
 struct PlaylistShelf: View {
     let title: String
     let playlists: [PlaylistRecord]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    private var cell: CGFloat { ShelfMetrics.cellWidth(horizontalSizeClass) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -294,14 +313,14 @@ struct PlaylistShelf: View {
                         NavigationLink(value: AppRoute.playlist(playlist)) {
                             VStack(alignment: .leading, spacing: 6) {
                                 ArtworkView(artwork: playlist.artworkKey.map(ArtworkRef.init(key:)),
-                                            seed: playlist.title, size: 150, cornerRadius: 8)
+                                            seed: playlist.title, size: cell, cornerRadius: 8)
                                 Text(playlist.title).font(.subheadline).lineLimit(1)
                                 if let count = playlist.trackCount {
                                     Text(count == 1 ? "1 song" : "\(count) songs")
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
-                            .frame(width: 150)
+                            .frame(width: cell)
                         }
                         .buttonStyle(.plain)
                     }

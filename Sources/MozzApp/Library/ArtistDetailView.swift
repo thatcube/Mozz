@@ -151,6 +151,7 @@ struct ArtistTopSongRow: View {
 struct ArtistAlbumShelf: View {
     let title: String
     let albums: [AlbumRecord]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.title3.bold()).padding(.horizontal, 16)
@@ -158,7 +159,8 @@ struct ArtistAlbumShelf: View {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(albums) { album in
                         NavigationLink(value: AppRoute.album(album)) {
-                            AlbumCell(album: album).frame(width: 150)
+                            AlbumCell(album: album)
+                                .frame(width: ShelfMetrics.cellWidth(horizontalSizeClass))
                         }
                         .buttonStyle(.plain)
                     }
