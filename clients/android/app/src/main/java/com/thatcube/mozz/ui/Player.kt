@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -368,25 +369,59 @@ internal fun PlayerBody(
                         }
                     }
 
+                    // The controls take the rest of the column and share it
+                    // out, rather than stacking tight and leaving one big void
+                    // at the bottom.
+                    //
+                    // iOS spends its whole surplus below the transport, which
+                    // is better than spending it around the cover but still
+                    // reads as "the layout ran out": a fifth of the screen of
+                    // nothing under the buttons. Splitting it puts the
+                    // transport near the middle of the space it actually
+                    // occupies — the band between the scrubber and the row
+                    // along the bottom — so the player reads as two balanced
+                    // halves instead of content and then a gap.
+                    //
+                    // Weighted rather than measured, because the surplus is
+                    // whatever a given screen has left: 207dp on this phone,
+                    // less on a short one, none at all in landscape. The
+                    // minimums are what it falls back to when there is nothing
+                    // to share.
                     AnimatedVisibility(
                         visible = !immersive,
+                        // With a panel open there is no surplus — the panel
+                        // took it — so this asks for none.
+                        modifier = if (panel == null) Modifier.weight(1f) else Modifier,
                         enter = fadeIn() + expandVertically(),
                         exit = fadeOut() + shrinkVertically(),
                     ) {
-                        Column {
+                        Column(modifier = Modifier.fillMaxHeight()) {
                             Spacer(Modifier.height(ART_TO_TITLES))
-                            Chrome(
-                                state, playback, queueProgress, panelOpen = panel != null,
-                                likes = likes,
+                            HeroTitles(state, queueProgress, likes)
+                            Spacer(Modifier.height(TITLES_TO_SCRUBBER))
+                            Scrubber(state, playback)
+                            Spacer(
+                                Modifier
+                                    .heightIn(min = SCRUBBER_TO_TRANSPORT)
+                                    .weight(1f)
+                            )
+                            // Shuffle and repeat move to the pills above the
+                            // queue when it is open, so the transport drops to
+                            // the three controls that are still its job.
+                            Transport(state, playback, compact = panel != null)
+                            // An equal share of the surplus, on top of unequal
+                            // minimums — which is what leaves the transport
+                            // just above the middle of the band rather than
+                            // dead centre. Equal so that SwiftUI can state the
+                            // same rule: two plain Spacers split what is spare
+                            // evenly, and the minimums do the rest.
+                            Spacer(
+                                Modifier
+                                    .heightIn(min = TRANSPORT_TO_ROW)
+                                    .weight(1f)
                             )
                         }
                     }
-
-                    // iOS's `Spacer(minLength: 8)`: the leftover height lands
-                    // here, under the transport, rather than being spent on
-                    // padding the cover. With a panel open there is no leftover
-                    // — the panel took it — so this stands down.
-                    if (panel == null) Spacer(Modifier.weight(1f))
                 }
             }
 
@@ -1118,6 +1153,7 @@ private val GRABBER_TO_ART = 18.dp
 private val ART_TO_TITLES = 22.dp
 private val TITLES_TO_SCRUBBER = 22.dp
 private val SCRUBBER_TO_TRANSPORT = 54.dp
+private val TRANSPORT_TO_ROW = 20.dp
 
 /** How far into its arrival the card's row is, at queue progress [q]. */
 private fun cardArrival(q: Float): Float =

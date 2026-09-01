@@ -721,9 +721,19 @@ struct NowPlayingMorphContainer: View {
             scrubber
                 .padding(.horizontal, 32)
                 .padding(.top, 22)
+            // The surplus height is SHARED between these two rather than all
+            // of it landing under the transport.
+            //
+            // A fixed 54 here and a greedy Spacer below spent every spare
+            // pixel in one place, which on a tall phone is close to a fifth of
+            // the screen of nothing beneath the buttons — it reads as the
+            // layout having run out rather than as breathing room. Two Spacers
+            // split what is spare evenly, and the unequal minimums leave the
+            // transport just above the middle of the band it occupies, so the
+            // player reads as two balanced halves.
+            Spacer(minLength: 54)
             transport
-                .padding(.top, 54)
-            Spacer(minLength: 8)
+            Spacer(minLength: 20)
             VStack(spacing: 10) {
                 bottomButtonRow
                     .padding(.horizontal, 48)

@@ -1,27 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Generated from Sources/MozzApp/Resources/Icons.xcassets/stack-2.imageset/stack-2.svg by tools/svg-to-vector-drawable.py.
+<!-- Generated from tools/icons/tabler-svg/library.svg by tools/svg-to-vector-drawable.py.
      Do not edit by hand; regenerate when the brand mark changes. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="32dp"
-    android:height="32dp"
+    android:width="24dp"
+    android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:strokeColor="#FF000000"
+        android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M12 4l-8 4l8 4l8 -4l-8 -4" />
+        android:pathData="M7 6V5q.2-1.8 2-2h6a2 2 0 0 1 2 2v1M5 9V8q.2-1.8 2-2h10a2 2 0 0 1 2 2v1" />
     <path
-        android:strokeColor="#FF000000"
+        android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M4 12l8 4l8 -4" />
+        android:pathData="M19 21H5a2 2 0 0 1-2-2v-8q.2-1.8 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2Z" />
     <path
-        android:strokeColor="#FF000000"
+        android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M4 16l8 4l8 -4" />
+        android:pathData="M10 17a1 1 0 1 0 2 0 1 1 0 0 0-2 0m2 0v-5l2 1" />
 </vector>
