@@ -87,6 +87,13 @@ struct PlexMetadata: Decodable {
     let index: Int?
     let parentIndex: Int?
     let thumb: String?
+    /// A playlist's cover.
+    ///
+    /// Plex gives a playlist a `thumb` only when someone has uploaded a poster
+    /// for it. Otherwise the cover is a mosaic of the first few albums in it,
+    /// served under `composite` — which is what Plex Web and Plexamp draw, and
+    /// what every playlist on a normal server actually has.
+    let composite: String?
     let parentThumb: String?
     let grandparentThumb: String?
     let addedAt: Double?

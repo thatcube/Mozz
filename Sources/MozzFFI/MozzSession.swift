@@ -281,6 +281,11 @@ private struct WirePlaylist: Encodable {
     var serverId: String
     var title: String
     var trackCount: Int?
+    /// The cover. Absent from this shape until now, which is why no client
+    /// outside the iPhone could draw one: the sync stored the key and nothing
+    /// ever carried it across.
+    var artworkKey: String?
+    var durationSeconds: Double?
 }
 
 private struct WireCounts: Encodable {
@@ -396,7 +401,8 @@ private func wire(_ r: TrackRecord) -> WireTrack {
 private func wire(_ r: PlaylistRecord) -> WirePlaylist {
     WirePlaylist(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
-        title: r.title, trackCount: r.trackCount
+        title: r.title, trackCount: r.trackCount,
+        artworkKey: r.artworkKey, durationSeconds: r.durationSeconds
     )
 }
 

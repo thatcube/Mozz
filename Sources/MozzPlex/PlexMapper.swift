@@ -80,7 +80,10 @@ enum PlexMapper {
             title: meta.title ?? "Playlist",
             trackCount: meta.leafCount,
             durationSeconds: meta.duration.map { Double($0) / 1000 },
-            artwork: artwork(meta.thumb),
+            // An uploaded poster if there is one, the server's mosaic otherwise.
+            // Reading `thumb` alone left every playlist on a stock Plex server
+            // with no cover at all.
+            artwork: artwork(meta.thumb ?? meta.composite),
             isSmart: false
         )
     }
