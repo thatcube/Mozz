@@ -163,6 +163,8 @@ struct NowPlayingMorphContainer: View {
     @State private var panelWasMounted = false
     /// Whether the "open onto the queue when wide" default has already been spent.
     @State private var panelDefaulted = false
+    /// Where the layout reported the artwork's slot. See `artSlot`.
+    @State private var artSlotCenter: CGPoint?
     /// The panel being replaced during a swap, kept mounted underneath the incoming
     /// one until the cross-fade finishes. `nil` whenever no swap is in flight.
     @State private var panelSwapFrom: PlayerPanel?
@@ -278,7 +280,12 @@ struct NowPlayingMorphContainer: View {
             let safeTop = safeGeo.safeAreaInsets.top
             let safeBottom = safeGeo.safeAreaInsets.bottom
             GeometryReader { geo in
-                let presentation = playerPresentation(wide: wide, panel: openPanel)
+                // A short window uses the two-column player whether or not the
+                // shell is wide: a phone on its side has the width for it and
+                // nowhere near the height for the stacked form.
+                let short = geo.size.height - safeTop - safeBottom < Morph.shortHeight
+                let columns = wide || short
+                let presentation = playerPresentation(wide: columns, panel: openPanel)
                 let m = Morph(width: geo.size.width, height: geo.size.height,
                               safeTop: safeTop, safeBottom: safeBottom,
                               pRaw: p, receiving: receiving,
@@ -287,11 +294,12 @@ struct NowPlayingMorphContainer: View {
                               // the panel has TAKEN the artwork's place. Beside it,
                               // the cover stays where it is and there is no card to
                               // dock into — so this stage of the morph never runs.
-                              queue: wide ? 0 : panelP,
+                              queue: columns ? 0 : panelP,
                               contentLeft: contentLeft,
                               hasBottomBar: hasBottomBar,
                               presentation: presentation,
-                              panelShift: wide ? panelP : 0)
+                              measuredArtCenter: artSlotCenter,
+                              panelShift: columns ? panelP : 0)
                 ZStack(alignment: .topLeading) {
                     surface(m)
                     // Enlarged, invisible tap target so edge taps open the player
@@ -596,6 +604,12 @@ struct NowPlayingMorphContainer: View {
 
             drawerBody(m)
                 .frame(width: m.width, height: m.surfaceHExpanded, alignment: .top)
+                // The space the artwork slot is measured in. Its origin is the
+                // body's top-left, which IS the screen's at full expansion — and
+                // the body keeps this fixed full-screen frame through the
+                // collapse, so a measured slot never moves under the morph.
+                .coordinateSpace(name: Self.artSlotSpace)
+                .onPreferenceChange(ArtSlotKey.self) { artSlotCenter = $0 }
                 // Drag-to-dismiss anywhere the content doesn't claim the touch:
                 // a clear, hit-testable layer directly behind the body. Interactive
                 // children (buttons, scrubber, the queue scroll) sit in front and
@@ -648,7 +662,7 @@ struct NowPlayingMorphContainer: View {
         // the queue is open — the compact thumbnail carries no drop shadow.
         // Beside a panel the cover is still the cover: it never docks, so it keeps
         // the shadow that says it is sitting above the backdrop.
-        let handsOverToCard = !wide
+        let handsOverToCard = !usesColumns(m)
         let showShadow = settled && (openPanel == nil || !handsOverToCard)
         return MorphArtwork(track: playback.currentTrack, side: m.artSide,
                             cornerRadius: m.artRadius, resolveSide: m.expArtSide)
@@ -715,7 +729,7 @@ struct NowPlayingMorphContainer: View {
         // panel is open would swap one layout for another mid-animation, and no
         // amount of interpolation survives the tree being rebuilt underneath it —
         // the player has to be the same layout before and after so it can slide.
-        if wide {
+        if m.presentation == .panelBeside || m.isShort || wide {
             besideBody(m)
         } else {
             stackedBody(m)
@@ -737,15 +751,12 @@ struct NowPlayingMorphContainer: View {
             // still lands on `expArtTopGap`.
             grabber(m)
             HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    header(m, showsGrabber: false)
-                    bottomChrome(m, showsButtons: false)
-                }
-                // Capped first, then centred in a slot that shrinks to the left
-                // half as the panel arrives. Two frames, because a cap applied
-                // after the slot has nothing left to shrink.
-                .frame(maxWidth: Morph.singleColumnMax)
-                .frame(width: m.playerSlotW)
+                playerColumn(m)
+                    // Capped first, then centred in a slot that shrinks to the
+                    // left half as the panel arrives. Two frames, because a cap
+                    // applied after the slot has nothing left to shrink.
+                    .frame(maxWidth: Morph.singleColumnMax)
+                    .frame(width: m.playerSlotW)
 
                 ZStack(alignment: .top) {
                     ForEach(PlayerPanel.allCases, id: \.self) { panel in
@@ -766,6 +777,38 @@ struct NowPlayingMorphContainer: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onPreferenceChange(ChromeRegionHeightKey.self) { chromeRegionH = $0 }
+    }
+
+    /// The record and its controls.
+    ///
+    /// Stacked — cover over titles over transport — wherever there is height for
+    /// it. In a short window (a phone on its side) the cover moves BESIDE the
+    /// controls instead, because stacked simply does not fit: see `Morph.isShort`.
+    /// Both forms hand the travelling cover its position by measurement, so
+    /// neither has to be predicted.
+    @ViewBuilder
+    private func playerColumn(_ m: Morph) -> some View {
+        if m.isShort {
+            HStack(spacing: 20) {
+                artSlot(m)
+                VStack(spacing: 0) {
+                    titleRow(m)
+                        .padding(.horizontal, Self.heroSideInset)
+                    bottomChrome(m, showsButtons: false)
+                }
+            }
+            // The same side inset the stacked form's controls keep. Without it the
+            // cover sits flush against the screen's edge and reads as clipped.
+            .padding(.leading, Self.heroSideInset)
+            .padding(.top, 12)
+            .contentShape(Rectangle())
+            .gesture(dragGesture)
+        } else {
+            VStack(spacing: 0) {
+                header(m, showsGrabber: false)
+                bottomChrome(m, showsButtons: false)
+            }
+        }
     }
 
     private func stackedBody(_ m: Morph) -> some View {
@@ -902,10 +945,7 @@ struct NowPlayingMorphContainer: View {
         VStack(spacing: 0) {
             if showsGrabber { grabber(m) }
 
-            // Reserves the big artwork's rest space; the traveling artwork is
-            // drawn as an absolute sibling so the layout offset never moves it.
-            Color.clear
-                .frame(width: m.expArtSide, height: m.expArtSide)
+            artSlot(m)
                 .padding(.top, 26)
 
             titleRow(m)
@@ -916,6 +956,37 @@ struct NowPlayingMorphContainer: View {
         .contentShape(Rectangle())
         .gesture(dragGesture)
     }
+
+    /// Reserves the big artwork's rest space, and REPORTS where that space landed.
+    ///
+    /// The travelling cover is drawn as an absolute sibling, so it has to be told
+    /// where the layout put the slot rather than deriving it from the same
+    /// constants twice. Deriving it worked while there was one arrangement; there
+    /// are three now (stacked, beside, and side-by-side in a short window) and a
+    /// predicted centre would have to be right in all of them forever. Android
+    /// measures for exactly this reason.
+    ///
+    /// Only the CENTRE is measured. The size stays computed — feeding a measured
+    /// side back into the frame that produced it is a loop.
+    ///
+    /// Safe to measure because the drawer body is laid out at a fixed full-screen
+    /// size (see `surface`) and merely clipped as the surface shrinks, so this
+    /// frame does not move during the collapse.
+    private func artSlot(_ m: Morph) -> some View {
+        Color.clear
+            .frame(width: m.expArtSide, height: m.expArtSide)
+            .background(
+                GeometryReader { g in
+                    Color.clear.preference(key: ArtSlotKey.self,
+                                           value: g.frame(in: .named(Self.artSlotSpace)).center)
+                }
+            )
+    }
+
+    /// The coordinate space the slot is measured in: the drawer body's own, whose
+    /// origin is the screen's at full expansion — the same space the morph's
+    /// geometry is expressed in.
+    static let artSlotSpace = "mozz.player.body"
 
     /// The sheet's drag handle. Its own view because the beside layout centres it
     /// on the window while the header it normally lives in is only half as wide.
@@ -959,8 +1030,8 @@ struct NowPlayingMorphContainer: View {
             // means SwiftUI sizes the cluster first and gives the title what's
             // left — so the title zone re-fits itself whenever the rating
             // appears, changes width, or clears.
-            starOverflowCluster(interactive: wide || openPanel == nil,
-                                emitsAnchor: wide || openPanel == nil)
+            starOverflowCluster(interactive: usesColumns(m) || openPanel == nil,
+                                emitsAnchor: usesColumns(m) || openPanel == nil)
         }
         .font(.title3)
         // Lift the whole row UP a long way as the queue opens — it should travel
@@ -971,11 +1042,11 @@ struct NowPlayingMorphContainer: View {
         // Beside a panel the hero row has nowhere to go and nothing to hand over
         // to: the queue's card is not drawn, because the cover and the titles it
         // would repeat are right there in the next column.
-        .modifier(HeroLift(progress: wide ? 0 : panelHeroP,
+        .modifier(HeroLift(progress: usesColumns(m) ? 0 : panelHeroP,
                            start: Self.heroLiftStart,
                            end: Self.heroLiftEnd,
                            distance: Self.heroRowLift))
-        .modifier(RangeFadeOut(progress: wide ? 0 : panelHeroP,
+        .modifier(RangeFadeOut(progress: usesColumns(m) ? 0 : panelHeroP,
                                start: Self.heroFadeStart,
                                end: Self.heroFadeEnd))
     }
@@ -1207,8 +1278,13 @@ struct NowPlayingMorphContainer: View {
     /// Distinct from `Morph.queue`, the artwork's dock into the queue's card:
     /// beside the artwork there is no card to dock into, so that stage of the
     /// morph is pinned at zero while the panel still has to appear.
+    /// Whether the player is drawn as two columns: because the shell is wide, or
+    /// because the window is too short to stack. Both mean the panel gets a column
+    /// of its own and the cover never docks into a card.
+    private func usesColumns(_ m: Morph) -> Bool { wide || m.isShort }
+
     private func panelOpenProgress(_ m: Morph) -> CGFloat {
-        wide ? min(max(panelP, 0), 1) : m.q
+        usesColumns(m) ? min(max(panelP, 0), 1) : m.q
     }
 
     /// How far a panel may grow DOWNWARD once the transport chrome is out of the
@@ -2057,6 +2133,19 @@ private struct MarqueeLine: View {
 /// Publishes the measured height of the transport-chrome region up the view tree,
 /// so the queue panel knows how far it may grow into the reclaimed space during a
 /// drag-reorder.
+/// Where the expanded artwork's reserved slot actually landed, in the drawer
+/// body's coordinate space. See `artSlot`.
+private struct ArtSlotKey: PreferenceKey {
+    static var defaultValue: CGPoint? = nil
+    static func reduce(value: inout CGPoint?, nextValue: () -> CGPoint?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
+}
+
 private struct ChromeRegionHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -2815,6 +2904,11 @@ private struct Morph {
     let hasBottomBar: Bool
     /// Which way the expanded player is laid out — decides where the cover flies to.
     let presentation: PlayerPresentation
+    /// Where the layout actually put the artwork's slot, once it has been laid out
+    /// and said so. Nil for the first frame, where the computed values below stand
+    /// in. Measured rather than predicted because there are three arrangements now
+    /// and a prediction has to be right in all of them.
+    let measuredArtCenter: CGPoint?
     /// How far the player has moved aside to make room for a panel: 0 = its column
     /// centred in the window, 1 = in the left half with the panel beside it.
     ///
@@ -2905,16 +2999,47 @@ private struct Morph {
     static let singleColumnMax: CGFloat = 560
     var playerColumnW: CGFloat { min(playerSlotW, Self.singleColumnMax) }
 
+    /// Whether the window is too short to stack the cover above the transport.
+    ///
+    /// A phone on its side has about 440pt of height. The stacked player needs the
+    /// cover, a title, a scrub bar, the transport AND the button row — which
+    /// overruns that by roughly 280pt however small the cover gets, so the buttons
+    /// simply fall off the bottom. Past this the cover moves BESIDE the controls
+    /// instead of above them, which is what every phone music player does on its
+    /// side. A portrait phone (874) and an iPad either way (834 / 1210) are never
+    /// short, so nothing about them changes.
+    var isShort: Bool { height - safeTop - safeBottom < Self.shortHeight }
+    static let shortHeight: CGFloat = 560
+
+    /// What the cover shares its column with when the window is short: the grabber
+    /// above it, and the button row and its safe-area margin below.
+    ///
+    /// Deliberately NOT including `bottomOverhang`. The surface runs 120pt off the
+    /// bottom of the screen and the button row pads itself back out of that, so
+    /// the overhang is not height the cover competes for — counting it left the
+    /// record two-thirds the size it had room for, with a band of empty black
+    /// under it.
+    var shortArtReserve: CGFloat { 13 + 12 + 56 + safeBottom + 12 }
+
     /// Height is in this at all because a wide window is usually a short one: a
     /// landscape iPad's cover, sized purely by width, runs off the bottom of the
-    /// screen and takes the transport with it. On a phone the width is always
-    /// the smaller of the two, so this changes nothing there.
+    /// screen and takes the transport with it. On a phone in portrait the width is
+    /// always the smaller of the two, so this changes nothing there.
     var expArtSide: CGFloat {
-        max(0, min(playerColumnW - 64, (height - safeTop - safeBottom) * 0.52))
+        let byHeight = isShort
+            ? height - safeTop - safeBottom - shortArtReserve
+            : (height - safeTop - safeBottom) * 0.52
+        // Side by side, the cover may take about half its column; stacked, it is
+        // the column less the same 32pt inset the controls under it use.
+        let byWidth = isShort ? playerColumnW * 0.42 : playerColumnW - 64
+        return max(0, min(byWidth, byHeight))
     }
-    /// Centred in the slot, so the cover travels with the column as it slides.
-    var expArtCenterX: CGFloat { playerSlotW / 2 }
-    var expArtCenterY: CGFloat { safeTop + Self.expArtTopGap + expArtSide / 2 }
+    /// Centred in the slot, so the cover travels with the column as it slides —
+    /// unless the layout has reported where it really put the slot, which wins.
+    var expArtCenterX: CGFloat { measuredArtCenter?.x ?? (playerSlotW / 2) }
+    var expArtCenterY: CGFloat {
+        measuredArtCenter?.y ?? (safeTop + Self.expArtTopGap + expArtSide / 2)
+    }
 
     // Morphing surface --------------------------------------------------------
     // The surface is anchored by its BOTTOM edge: it lands exactly on the
