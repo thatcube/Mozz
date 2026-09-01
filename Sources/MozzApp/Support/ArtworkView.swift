@@ -9,6 +9,15 @@ import MozzCore
 struct ArtworkPlaceholder: View {
     /// Music-note glyph size as a fraction of the box's shorter side.
     var iconScale: CGFloat = 0.32
+    /// The corner the caller will clip this to.
+    ///
+    /// The Black hairline has to be drawn in the SAME shape. It was a plain
+    /// rectangle, and clipping a square border to a rounded corner removes the
+    /// border exactly where the corner is — every placeholder read as a tile
+    /// with its corners snipped off, the dock's cover included.
+    var cornerRadius: CGFloat = 0
+    /// Artists are circles rather than rounded squares.
+    var circular: Bool = false
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
@@ -27,14 +36,22 @@ struct ArtworkPlaceholder: View {
                 // In Black the fill is the page's own black, so the tile would
                 // have no edge at all — a note floating in the middle of
                 // nothing. The hairline is what makes it a cover-shaped hole.
-                // The caller clips this whole view to the artwork's shape, so a
-                // plain inset border follows the corner radius it is given.
+                // Drawn in the caller's own shape, and with `strokeBorder` so it
+                // sits wholly inside it — a centred stroke would put half its
+                // width outside the clip and come back a half-hairline.
                 .overlay {
-                    if blackout {
-                        Rectangle().strokeBorder(Color.mozzHairline, lineWidth: 1)
-                    }
+                    if blackout { border }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+
+    @ViewBuilder private var border: some View {
+        if circular {
+            Circle().strokeBorder(Color.mozzHairline, lineWidth: 1)
+        } else {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(Color.mozzHairline, lineWidth: 1)
         }
     }
 
@@ -87,5 +104,7 @@ struct ArtworkView: View {
         return backend.artworkURL(for: artwork, size: pixels)
     }
 
-    private var placeholder: some View { ArtworkPlaceholder() }
+    private var placeholder: some View {
+        ArtworkPlaceholder(cornerRadius: cornerRadius, circular: circular)
+    }
 }

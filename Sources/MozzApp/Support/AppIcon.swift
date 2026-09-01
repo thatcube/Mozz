@@ -88,6 +88,7 @@ enum MozzIconMap {
         "xmark.circle.fill": "circle-x-filled",
         "xmark": "x",
         "waveform": "waveform",
+        "text.quote": "quote",
         "wand.and.stars": "wand",
         "text.line.first.and.arrowtriangle.forward": "playlist-add",
         "text.append": "playlist-add",
