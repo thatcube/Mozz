@@ -754,27 +754,26 @@ struct NowPlayingMorphContainer: View {
             // own grabber block was exactly this tall, so the artwork below it
             // still lands on `expArtTopGap`.
             grabber(m)
-            HStack(spacing: 0) {
-                playerColumn(m)
-                    // Capped first, then centred in a slot that shrinks to the
-                    // left half as the panel arrives. Two frames, because a cap
-                    // applied after the slot has nothing left to shrink.
-                    .frame(maxWidth: Morph.singleColumnMax)
-                    .frame(width: m.playerSlotW)
+            if m.isShort {
+                shortPlayer(m)
+            } else {
+                HStack(spacing: 0) {
+                    playerColumn(m)
+                        // Capped first, then centred in a slot that shrinks to
+                        // the left half as the panel arrives. Two frames, because
+                        // a cap applied after the slot has nothing left to shrink.
+                        .frame(maxWidth: Morph.singleColumnMax)
+                        .frame(width: m.playerSlotW)
 
-                // A third column only where there is width for one. Sideways the
-                // panel goes INSIDE the player's own column, in the transport's
-                // place — see `playerColumn`.
-                if !m.isShort {
                     panelColumn(m).frame(maxWidth: .infinity)
                 }
-            }
-            .onChange(of: panelWantsOpen) { _, wantsOpen in
-                if wantsOpen != nil && !panelWasMounted { return }
-                drivePanel()
-            }
 
-            wideButtonRow(m)
+                wideButtonRow(m)
+            }
+        }
+        .onChange(of: panelWantsOpen) { _, wantsOpen in
+            if wantsOpen != nil && !panelWasMounted { return }
+            drivePanel()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onPreferenceChange(ChromeRegionHeightKey.self) { chromeRegionH = $0 }
@@ -789,40 +788,55 @@ struct NowPlayingMorphContainer: View {
     /// neither has to be predicted.
     @ViewBuilder
     private func playerColumn(_ m: Morph) -> some View {
-        if m.isShort {
-            HStack(spacing: 24) {
-                artSlot(m)
-                VStack(spacing: 0) {
-                    titleRow(m)
-                        .padding(.horizontal, Self.heroSideInset)
-                    // The panel takes the TRANSPORT's place here, not the
-                    // cover's. Sideways there is room for the record and the
-                    // queue at once, and moving the record to make space for a
-                    // list it is already sitting next to is motion for nothing.
-                    ZStack(alignment: .top) {
-                        bottomChrome(m, showsButtons: false)
-                            .opacity(1 - Double(min(max(panelP, 0), 1)))
-                            // A view at zero opacity still takes touches, and the
-                            // scrubber sits exactly where the queue's first rows
-                            // land — without this it swallows them.
-                            .allowsHitTesting(panelP < 0.5)
-                        panelColumn(m)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
-            // The same side inset the stacked form's controls keep. Without it the
-            // cover sits flush against the screen's edge and reads as clipped.
-            .padding(.leading, Self.heroSideInset)
-            .padding(.top, 12)
-            .contentShape(Rectangle())
-            .gesture(dragGesture)
-        } else {
-            VStack(spacing: 0) {
-                header(m, showsGrabber: false)
-                bottomChrome(m, showsButtons: false)
-            }
+        VStack(spacing: 0) {
+            header(m, showsGrabber: false)
+            bottomChrome(m, showsButtons: false)
         }
+    }
+
+    /// The player laid sideways: the record on the left at the full height of the
+    /// window, everything else in a column beside it.
+    ///
+    /// The three utility controls belong to that column, NOT to a band across the
+    /// window under both of them. As a band they were a full row's worth of height
+    /// taken off the record for the sake of two buttons, with the AirPlay control
+    /// stranded out under the cover — which is the shape the reference layout
+    /// pointedly does not have.
+    private func shortPlayer(_ m: Morph) -> some View {
+        HStack(spacing: 24) {
+            artSlot(m)
+            VStack(spacing: 0) {
+                titleRow(m)
+                // The panel takes the TRANSPORT's place here, not the cover's.
+                // Sideways there is room for the record and the queue at once,
+                // and moving the record to make space for a list it is already
+                // sitting next to is motion for nothing.
+                ZStack(alignment: .top) {
+                    bottomChrome(m, showsButtons: false)
+                        .opacity(1 - Double(min(max(panelP, 0), 1)))
+                        // A view at zero opacity still takes touches, and the
+                        // scrubber sits exactly where the queue's first rows
+                        // land — without this it swallows them.
+                        .allowsHitTesting(panelP < 0.5)
+                    panelColumn(m)
+                }
+                bottomButtonRow
+                    .padding(.top, 10)
+                    .opacity(chromeHidden ? 0 : 1)
+                    .allowsHitTesting(!chromeHidden)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        // No `singleColumnMax` here: running the controls to the window's edge is
+        // the point of turning the phone, and capping the pair at 560 left a band
+        // of dead space down both sides.
+        .padding(.horizontal, Self.heroSideInset)
+        .padding(.top, 20)
+        // The surface overhangs the screen by `bottomOverhang`; lift the whole
+        // row out of that off-screen region, cover included.
+        .padding(.bottom, Morph.bottomOverhang + m.safeBottom + 20)
+        .contentShape(Rectangle())
+        .gesture(dragGesture)
     }
 
     /// The open panel, or nothing. Its own view because two layouts place it: a
@@ -3053,7 +3067,7 @@ private struct Morph {
     /// the overhang is not height the cover competes for — counting it left the
     /// record two-thirds the size it had room for, with a band of empty black
     /// under it.
-    var shortArtReserve: CGFloat { 13 + 12 + 56 + safeBottom + 12 }
+    var shortArtReserve: CGFloat { 13 + 20 + safeBottom + 20 }
 
     /// Height is in this at all because a wide window is usually a short one: a
     /// landscape iPad's cover, sized purely by width, runs off the bottom of the
