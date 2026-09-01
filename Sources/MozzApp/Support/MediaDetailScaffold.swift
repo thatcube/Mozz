@@ -58,6 +58,8 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// its own subtree, which does not affect what it reads here.
     @Environment(\.colorScheme) private var appColorScheme
     @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+    /// The hero row's own width, so the cover can be a fraction of it.
+    @State private var heroWidth: CGFloat = 0
     @State private var bg: Color = Color(white: 0.12)
     @State private var deepBg: Color = .mozzDetailBackground
 
@@ -77,7 +79,15 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// The hero this page actually draws. Black has only one.
     private var style: MediaHero.Style { blackout ? .centeredArtwork : hero.style }
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Wide enough for the hero to lie down. The same question Android asks of
+    /// its window, answered by the platform's own idea of a roomy layout.
+    private var isWide: Bool { horizontalSizeClass == .regular }
+
     private static var fullBleedHeight: CGFloat { 500 }
+    /// Big enough to be the thing you look at, small enough to leave the titles
+    /// room to breathe.
+    private static var wideHeroCap: CGFloat { 300 }
     private static var centeredArtworkSize: CGFloat { 240 }
     /// Name for the ScrollView's coordinate space, so the full-bleed header can
     /// measure how far the page has been pulled down (overscroll) and reveal the
@@ -168,9 +178,53 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     }
 
     @ViewBuilder private var header: some View {
-        switch style {
-        case .fullBleed: fullBleedHeader
-        case .centeredArtwork: centeredHeader
+        if isWide {
+            wideHeader
+        } else {
+            switch style {
+            case .fullBleed: fullBleedHeader
+            case .centeredArtwork: centeredHeader
+            }
+        }
+    }
+
+    /// The same hero laid across a wide window: cover on the left, everything
+    /// that describes it beside it, both aligned to the bottom.
+    ///
+    /// Android has had this; iOS has been a phone layout stretched to an iPad. A
+    /// 500pt banner across a landscape window pushes the first song below the
+    /// fold and leaves the right two thirds of the screen empty, and a 240pt
+    /// square centred in 1300pt of width is a stamp in a field. The rule is the
+    /// same one Compose's `WideHero` follows, including the height bound: a wide
+    /// window is usually a short one, so sizing the cover off width alone fills
+    /// the screen with it.
+    private var wideHeader: some View {
+        // Sized by its own content rather than given a height: the cover is a
+        // fraction of the window's width, so a fixed height would be right at one
+        // width and wrong at every other — and an iPad in Split View is a regular
+        // width barely wider than a phone.
+        let side = min(max(heroWidth, 1) * 0.32, Self.wideHeroCap)
+        return HStack(alignment: .bottom, spacing: 28) {
+            ArtworkView(artwork: hero.artwork, seed: hero.seed,
+                        size: side, cornerRadius: 14, circular: hero.circular)
+                .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
+            VStack(alignment: .leading, spacing: 18) {
+                titleBlock(onDark: true, alignment: .leading)
+                // Held to the width the buttons read at rather than stretched
+                // across the window: a Play button half a metre wide is not
+                // easier to press, only further from the cover it plays.
+                actions().frame(maxWidth: 380)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, topSafeInset + 52)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity)
+        .background {
+            GeometryReader { geo in
+                Color.clear.task(id: geo.size.width) { heroWidth = geo.size.width }
+            }
         }
     }
 
@@ -270,23 +324,27 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// Title + subtitle + meta. Always rendered light because it sits over the
     /// dark hero color (extracted colors are brightness-capped), so it reads in
     /// both light and dark mode.
-    @ViewBuilder private func titleBlock(onDark: Bool) -> some View {
-        VStack(spacing: 4) {
+    @ViewBuilder private func titleBlock(
+        onDark: Bool,
+        alignment: HorizontalAlignment = .center
+    ) -> some View {
+        let text: TextAlignment = alignment == .leading ? .leading : .center
+        VStack(alignment: alignment, spacing: 4) {
             Text(title)
-                .font(.title.bold())
-                .multilineTextAlignment(.center)
+                .font(alignment == .leading ? .largeTitle.bold() : .title.bold())
+                .multilineTextAlignment(text)
                 .foregroundStyle(.white)
             if let subtitle {
                 Text(subtitle)
                     .font(.title3)
                     .foregroundStyle(.white.opacity(0.9))
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(text)
             }
             if let meta {
                 Text(meta)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(text)
             }
         }
     }
