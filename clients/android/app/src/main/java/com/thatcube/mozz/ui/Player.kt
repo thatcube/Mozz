@@ -452,9 +452,19 @@ internal fun PlayerBody(
                         .padding(horizontal = 20.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (presentation == PlayerPresentation.PANEL_BESIDE) {
-                        // Two columns: casting belongs under the record, the
-                        // panel toggles under the panel they act on.
+                    // Keyed on the WIDTH, not on whether a panel happens to be
+                    // open. Closing the panel on a wide screen centres the
+                    // record, and keying this off the presentation moved all
+                    // three buttons at the same time — casting jumped from the
+                    // left edge to the middle, lyrics from the right edge to
+                    // the left. Toggling a panel should change what the panel
+                    // shows, not relocate the control you would press to change
+                    // it back. So on a wide screen this row is the same row
+                    // either way.
+                    if (wide) {
+                        // Casting belongs under the record; the panel toggles
+                        // sit over on the side the panel occupies, whether or
+                        // not one is open at this moment.
                         RouteButton()
                         Spacer(Modifier.weight(1f))
                         PanelToggles(panel, onPanel)
