@@ -622,8 +622,16 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
         throw MozzError.unsupported("attach needs token")
     }
     let identifier = request.clientIdentifier ?? fallbackClientIdentifier()
+    // An account may keep its identity across a change of address. Plex hands out
+    // several candidate addresses for one server — local, remote, relay — and
+    // which of them works depends on the network the phone is on right now. The
+    // catalogue, the likes and the play history are all keyed on this id, so
+    // deriving it from whichever address happened to answer means moving between
+    // Wi-Fi and cellular can orphan the library. When the caller already knows the
+    // account's id, that is the identity; the derived one is only for an account
+    // being met for the first time.
     var connection = ServerConnection(
-        id: mozzServerId(kind: kind, baseURL: baseURL, username: request.username),
+        id: request.serverId ?? mozzServerId(kind: kind, baseURL: baseURL, username: request.username),
         kind: kind,
         name: request.serverName ?? kind.rawValue.capitalized,
         baseURL: baseURL,

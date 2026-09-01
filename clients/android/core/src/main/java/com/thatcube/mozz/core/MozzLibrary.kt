@@ -196,6 +196,38 @@ class MozzLibrary(private val core: MozzCore) {
         core.call<List<Track>>(CoreRequest(cmd = "mixTracks", setId = setId)) ?: emptyList()
 
     /**
+     * Stop recommending one track, or everything by one artist.
+     *
+     * A hard exclusion the recommender honours from the next batch on, kept in
+     * the same store the iPhone writes, so telling one device is telling all of
+     * them once they sync. Reversible — see `unsuppress`.
+     */
+    suspend fun suppressTrack(serverId: String, remoteId: String) {
+        core.call<Map<String, Boolean>>(
+            CoreRequest(cmd = "suppressTrack", serverId = serverId, remoteId = remoteId)
+        )
+    }
+
+    /** Sent as `remoteId`: the artist is the subject here, not a filter. */
+    suspend fun suppressArtist(serverId: String, artistRemoteId: String) {
+        core.call<Map<String, Boolean>>(
+            CoreRequest(cmd = "suppressArtist", serverId = serverId, remoteId = artistRemoteId)
+        )
+    }
+
+    suspend fun unsuppressTrack(serverId: String, remoteId: String) {
+        core.call<Map<String, Boolean>>(
+            CoreRequest(cmd = "unsuppressTrack", serverId = serverId, remoteId = remoteId)
+        )
+    }
+
+    suspend fun unsuppressArtist(serverId: String, artistRemoteId: String) {
+        core.call<Map<String, Boolean>>(
+            CoreRequest(cmd = "unsuppressArtist", serverId = serverId, remoteId = artistRemoteId)
+        )
+    }
+
+    /**
      * Search across artists, albums and tracks. [limit] is per type, not total.
      *
      * Fast enough to run on every keystroke: 16 ms at the 95th percentile over

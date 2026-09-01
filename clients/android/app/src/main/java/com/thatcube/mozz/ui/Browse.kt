@@ -15,6 +15,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +25,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +45,7 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.Playlist
 import com.thatcube.mozz.core.Track
+import com.thatcube.mozz.playback.PlayerController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -111,6 +117,13 @@ class Navigator(
         val id = remoteId ?: return
         scope.launch {
             runCatching { library.artist(serverId, id) }.getOrNull()?.let { stack.push(Route.ArtistPage(it)) }
+        }
+    }
+
+    fun openAlbum(serverId: String, remoteId: String?) {
+        val id = remoteId ?: return
+        scope.launch {
+            runCatching { library.album(serverId, id) }.getOrNull()?.let { stack.push(Route.AlbumPage(it)) }
         }
     }
 }
@@ -185,6 +198,131 @@ fun SongRow(
             style = MaterialTheme.typography.labelMedium,
             color = LocalContentColor.current.copy(alpha = 0.6f),
         )
+        // Ambient rather than passed: every list in the app wants the same menu,
+        // and threading it through album, playlist, search, artist and songs
+        // would be five places to forget it. Absent — in a preview, or the
+        // player's own queue rows — the row simply has no overflow.
+        LocalTrackActions.current?.let { TrackMenu(track, it) }
+    }
+}
+
+/**
+ * What a row can do besides play.
+ *
+ * A bundle rather than six parameters, because every list in the app wants the
+ * same set and threading them individually through album, playlist, search and
+ * artist pages would be six places to forget one.
+ */
+/** Where a row finds [TrackActions]. Null means "this list has no menu". */
+val LocalTrackActions = staticCompositionLocalOf<TrackActions?> { null }
+
+@Stable
+class TrackActions(
+    private val library: MozzLibrary,
+    private val playback: PlayerController,
+    private val nav: Navigator,
+    private val scope: CoroutineScope,
+) {
+    fun playNext(track: Track) = playback.playNext(track)
+    fun addToQueue(track: Track) = playback.addToQueue(track)
+    fun goToArtist(track: Track) = nav.openArtist(track.serverId, track.artistRemoteId)
+    fun goToAlbum(track: Track) = nav.openAlbum(track.serverId, track.albumRemoteId)
+
+    fun setLiked(track: Track, liked: Boolean) {
+        scope.launch {
+            runCatching { library.setLiked(track.serverId, track.remoteId, liked, playback.deviceId) }
+        }
+    }
+
+    fun suppressTrack(track: Track) {
+        scope.launch { runCatching { library.suppressTrack(track.serverId, track.remoteId) } }
+    }
+
+    fun suppressArtist(track: Track) {
+        val artist = track.artistRemoteId ?: return
+        scope.launch { runCatching { library.suppressArtist(track.serverId, artist) } }
+    }
+}
+
+/**
+ * The per-row overflow.
+ *
+ * Same actions as the iPhone's, in the same order, minus the two it has that
+ * Android has no machinery for yet: downloads, and starting a station.
+ */
+@Composable
+private fun TrackMenu(track: Track, actions: TrackActions) {
+    var open by remember { mutableStateOf(false) }
+    // Held locally so the row reflects the tap immediately; the write goes to the
+    // database first and the server after, so there is nothing to wait for.
+    var liked by remember(track.id) { mutableStateOf(track.isLiked) }
+
+    Box {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_more_vert),
+                contentDescription = "More actions",
+                tint = LocalContentColor.current.copy(alpha = 0.6f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (liked) "Unlike" else "Like") },
+                leadingIcon = {
+                    Icon(
+                        painterResource(
+                            if (liked) R.drawable.ic_heart_filled else R.drawable.ic_heart
+                        ),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                },
+                onClick = {
+                    liked = !liked
+                    actions.setLiked(track, liked)
+                    open = false
+                },
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Play Next") },
+                onClick = { actions.playNext(track); open = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to Queue") },
+                onClick = { actions.addToQueue(track); open = false },
+            )
+            if (track.artistRemoteId != null) {
+                DropdownMenuItem(
+                    text = { Text("Go to Artist") },
+                    onClick = { actions.goToArtist(track); open = false },
+                )
+            }
+            if (track.albumRemoteId != null) {
+                DropdownMenuItem(
+                    text = { Text("Go to Album") },
+                    onClick = { actions.goToAlbum(track); open = false },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Don't recommend this track") },
+                onClick = { actions.suppressTrack(track); open = false },
+            )
+            if (track.artistRemoteId != null) {
+                DropdownMenuItem(
+                    text = { Text("Don't recommend this artist") },
+                    onClick = { actions.suppressArtist(track); open = false },
+                )
+            }
+        }
     }
 }
 

@@ -508,7 +508,13 @@ private fun TabContent(
     // `Surface` above it to say what colour text should be — and Material's
     // default is black, which on this background is a heading that simply is not
     // there. Stated once, here, so no page has to remember it.
-    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+    val scope = rememberCoroutineScope()
+    val actions = remember(library, playback, nav) { TrackActions(library, playback, nav, scope) }
+
+    CompositionLocalProvider(
+        LocalContentColor provides MaterialTheme.colorScheme.onBackground,
+        LocalTrackActions provides actions,
+    ) {
     // A pushed page replaces the tab's root rather than covering it. Both are
     // full-screen and opaque, so keeping the root composed underneath would only
     // buy a layout pass nobody sees — and a `LazyColumn` that keeps scrolling

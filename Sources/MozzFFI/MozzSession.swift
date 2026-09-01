@@ -255,6 +255,10 @@ private struct WireTrack: Encodable {
     var artistName: String
     var albumTitle: String?
     var albumRemoteId: String?
+    /// Who made it, as a reference rather than a name — so a row can offer "go to
+    /// artist" without a second lookup by title, which is ambiguous the moment two
+    /// artists share one.
+    var artistRemoteId: String?
     var trackNumber: Int?
     var discNumber: Int?
     var durationSeconds: Double
@@ -390,7 +394,8 @@ private func wire(_ r: TrackRecord) -> WireTrack {
     WireTrack(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
         title: r.title, artistName: r.artistName, albumTitle: r.albumTitle,
-        albumRemoteId: r.albumRemoteId, trackNumber: r.trackNumber,
+        albumRemoteId: r.albumRemoteId, artistRemoteId: r.artistRemoteId,
+        trackNumber: r.trackNumber,
         discNumber: r.discNumber, durationSeconds: r.duration,
         artworkKey: r.artworkKey, isFavorite: r.isFavorite,
         rating: r.rating, codec: r.codec, bitrateKbps: r.bitrateKbps,

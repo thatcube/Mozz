@@ -442,6 +442,33 @@ class PlayerController(
      * Track-level mirror the UI reads from; letting them drift by one means the
      * row you dragged is not the song that plays.
      */
+    /**
+     * Put a track directly after the one playing.
+     *
+     * Nothing is interrupted: Media3 keeps the current item through an insert, so
+     * this is a queue edit rather than a new queue — which is the whole
+     * difference between "play next" and "play".
+     */
+    fun playNext(track: Track) = enqueue(track) { player -> player.currentMediaItemIndex + 1 }
+
+    /** Put a track at the end of what is already lined up. */
+    fun addToQueue(track: Track) = enqueue(track) { player -> player.mediaItemCount }
+
+    private fun enqueue(track: Track, at: (Player) -> Int) = scope.launch {
+        connect()
+        val media = controller ?: return@launch
+        val item = mediaItem(track) ?: run { noteFailure(UNREACHABLE); return@launch }
+        // Nothing playing yet: an insert into an empty player is just a play.
+        if (media.mediaItemCount == 0) {
+            play(listOf(track), 0)
+            return@launch
+        }
+        val index = at(media).coerceIn(0, media.mediaItemCount)
+        media.addMediaItem(index, item)
+        queue = queue.toMutableList().apply { add(index.coerceAtMost(size), track) }
+        publish(media)
+    }
+
     fun moveQueueItem(from: Int, to: Int) {
         val media = controller ?: return
         if (from !in queue.indices || to !in queue.indices || from == to) return

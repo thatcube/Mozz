@@ -157,6 +157,10 @@ class MozzServer(
         core.call<Map<String, String>>(
             CoreRequest(
                 cmd = "attach",
+                // The account's own id, not one derived from the address it is
+                // reachable at today. The catalogue is keyed on this, and a
+                // server's address can change without the server changing.
+                serverId = account.serverId,
                 kind = account.kind.wire,
                 baseURL = account.baseUrl,
                 token = secret,

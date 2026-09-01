@@ -16,7 +16,12 @@ import com.thatcube.mozz.ui.theme.MozzSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.MainScope
+import okhttp3.Dispatcher
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Response
 import java.io.File
+import java.io.IOException
 
 /**
  * The core session, opened once for the life of the process.
@@ -42,9 +47,31 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
      */
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
-            .components { add(OkHttpNetworkFetcherFactory()) }
+            .components { add(OkHttpNetworkFetcherFactory(callFactory = { artworkHttpClient })) }
             .apply { if (BuildConfig.DEBUG) logger(DebugLogger()) }
             .build()
+
+    /**
+     * The client every cover is fetched through.
+     *
+     * Two departures from the defaults, both for the same reason: a Plex server
+     * reached over Plex's relay drops connections under load. Scrolling a list of
+     * songs asks for a dozen covers at once and the relay closes the TLS
+     * handshake on several of them — `SSLHandshakeException: connection closed` —
+     * leaving a page of grey squares while the same covers load fine one at a
+     * time elsewhere in the app.
+     *
+     * So: fewer at once, and a second chance. Neither is a fix for the relay —
+     * the fix is not being on it — but a dropped handshake is exactly the kind of
+     * failure a retry is for, and four in flight is still more than a scrolling
+     * list can consume.
+     */
+    private val artworkHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .dispatcher(Dispatcher().apply { maxRequestsPerHost = ARTWORK_PARALLELISM })
+            .addInterceptor(RetryOnDroppedConnection(attempts = 3))
+            .build()
+    }
 
     /**
      * How the app is meant to look. Application-scoped so a theme change survives
@@ -88,5 +115,35 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             secrets = SecretStore(this),
             accountsFile = File(filesDir, "accounts.json"),
         )
+    }
+}
+
+/** OkHttp's default is five per host, which the relay cannot keep up with. */
+private const val ARTWORK_PARALLELISM = 4
+
+/**
+ * Try again when the connection dies before an answer.
+ *
+ * OkHttp retries some connection failures on its own, but not a TLS handshake the
+ * peer closes mid-way, which is the shape the relay's failures take. The backoff
+ * is short and the ceiling low: this is for a flaky hop, not for a server that is
+ * genuinely down, and three attempts that all fail should fail quickly.
+ */
+private class RetryOnDroppedConnection(private val attempts: Int) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        var failure: IOException? = null
+        repeat(attempts) { attempt ->
+            if (attempt > 0) Thread.sleep(BACKOFF_MS * attempt)
+            try {
+                return chain.proceed(chain.request())
+            } catch (error: IOException) {
+                failure = error
+            }
+        }
+        throw failure ?: IOException("request failed")
+    }
+
+    private companion object {
+        const val BACKOFF_MS = 180L
     }
 }

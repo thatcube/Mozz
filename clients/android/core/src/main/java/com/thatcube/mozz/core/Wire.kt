@@ -139,6 +139,8 @@ data class Track(
     val artistName: String,
     val albumTitle: String? = null,
     val albumRemoteId: String? = null,
+    /** Who made it, as a reference — so a row can offer "go to artist". */
+    val artistRemoteId: String? = null,
     val trackNumber: Int? = null,
     val discNumber: Int? = null,
     val durationSeconds: Double = 0.0,
