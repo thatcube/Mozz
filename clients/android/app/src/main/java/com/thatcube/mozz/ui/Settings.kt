@@ -25,6 +25,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -37,7 +43,13 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.thatcube.mozz.BuildConfig
 import com.thatcube.mozz.R
+import androidx.compose.foundation.lazy.items
+import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.core.MusicLibrary
 import com.thatcube.mozz.core.ServerAccount
+import com.thatcube.mozz.core.Suppression
+import kotlinx.coroutines.launch
 import com.thatcube.mozz.ui.theme.LocalMozzSettings
 import com.thatcube.mozz.ui.theme.MozzAppearance
 import com.thatcube.mozz.ui.theme.MozzDarkStyle
@@ -93,15 +105,8 @@ fun SettingsPage(
                         },
                     )
                     SettingsRow(
-                        R.drawable.ic_library, "Music Library", inset, soon = true,
-                        onClick = {
-                            nav.open(
-                                Route.SettingsSoon(
-                                    "Music Library",
-                                    "Which of this server's libraries to mirror, when it has more than one.",
-                                )
-                            )
-                        },
+                        R.drawable.ic_library, "Music Library", inset,
+                        onClick = { nav.open(Route.SettingsLibraries) },
                     )
                 }
             }
@@ -143,15 +148,8 @@ fun SettingsPage(
                         inset,
                     )
                     SettingsRow(
-                        R.drawable.ic_more, "Not Recommended", inset, soon = true,
-                        onClick = {
-                            nav.open(
-                                Route.SettingsSoon(
-                                    "Not Recommended",
-                                    "Everything you have told the app to stop suggesting, and a way to change your mind.",
-                                )
-                            )
-                        },
+                        R.drawable.ic_more, "Not Recommended", inset,
+                        onClick = { nav.open(Route.SettingsSuppressions) },
                     )
                 }
             }
@@ -292,6 +290,190 @@ fun SettingsSoonPage(title: String, promise: String, nav: Navigator) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Which of a server's music libraries to mirror.
+ *
+ * Only ever a question when a server has more than one, which is why the page
+ * says so rather than showing a list of one and asking someone to choose it. The
+ * chosen library is saved and the account re-attached on it before the resync
+ * runs — the core builds its backend at attach time, so a sync started before
+ * that would still be pointed at the old one.
+ */
+@Composable
+fun MusicLibrariesPage(
+    account: ServerAccount,
+    server: MozzServer,
+    nav: Navigator,
+    bottomReserve: Dp,
+    onResync: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var libraries by remember { mutableStateOf<List<MusicLibrary>?>(null) }
+    var selected by remember { mutableStateOf(account.musicSectionId) }
+    var failure by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(account.serverId) {
+        runCatching { server.libraries(account.serverId) }
+            .onSuccess { libraries = it }
+            .onFailure { failure = it.message ?: "Couldn't reach ${account.serverName}." }
+    }
+
+    ListPage("Music Library", onBack = nav::back) { inset, _ ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+        ) {
+            val rows = libraries
+            when {
+                failure != null -> item { SettingsNote(failure!!, inset) }
+                rows == null -> Unit          // still asking; an empty page beats a spinner that flashes
+                rows.isEmpty() -> item {
+                    SettingsNote("${account.serverName} has no music library.", inset)
+                }
+                else -> {
+                    item {
+                        SettingsSection(account.serverName, inset) {
+                            rows.forEachIndexed { index, option ->
+                                if (index > 0) RowDivider(start = inset, end = inset)
+                                ChoiceRow(
+                                    label = option.name,
+                                    selected = option.id == selected,
+                                    inset = inset,
+                                    onClick = {
+                                        if (option.id == selected) return@ChoiceRow
+                                        selected = option.id
+                                        scope.launch {
+                                            runCatching { server.selectMusicLibrary(account, option.id) }
+                                                .onSuccess { onResync() }
+                                                .onFailure {
+                                                    selected = account.musicSectionId
+                                                    failure = it.message
+                                                }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                        if (rows.size > 1) {
+                            SettingsNote(
+                                "Switching libraries re-mirrors the catalogue. Your likes and listening history stay.",
+                                inset,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Everything the user has told the app to stop recommending, and a way to change
+ * their mind.
+ *
+ * The reason this page exists at all is that the undo on the toast expires. A
+ * decision you can only reverse in the five seconds after making it is not a
+ * decision anyone can make comfortably.
+ */
+@Composable
+fun SuppressionsPage(
+    account: ServerAccount,
+    library: MozzLibrary,
+    server: MozzServer,
+    nav: Navigator,
+    bottomReserve: Dp,
+) {
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<Suppression>?>(null) }
+
+    suspend fun reload() {
+        items = runCatching { library.suppressions(account.serverId) }.getOrDefault(emptyList())
+    }
+    LaunchedEffect(account.serverId) { reload() }
+
+    ListPage("Not Recommended", onBack = nav::back) { inset, _ ->
+        val rows = items
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+        ) {
+            if (rows != null && rows.isEmpty()) {
+                item {
+                    SettingsNote(
+                        "Nothing here. Anything you tell Mozz not to recommend — from a song's menu, or an artist's — shows up here so you can take it back.",
+                        inset,
+                    )
+                }
+            }
+            items(rows ?: emptyList(), key = { "${'$'}{it.scope}:${'$'}{it.ref}" }) { item ->
+                SuppressionRow(
+                    item = item,
+                    account = account,
+                    server = server,
+                    inset = inset,
+                    onRestore = {
+                        scope.launch {
+                            runCatching {
+                                if (item.isArtist) library.unsuppressArtist(account.serverId, item.ref)
+                                else library.unsuppressTrack(account.serverId, item.ref)
+                            }
+                            reload()
+                        }
+                    },
+                )
+                RowDivider(start = inset, end = inset)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SuppressionRow(
+    item: Suppression,
+    account: ServerAccount,
+    server: MozzServer,
+    inset: Dp,
+    onRestore: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = inset, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Artwork(
+            server = server,
+            serverId = account.serverId,
+            artworkKey = item.artworkKey,
+            pixels = artworkPixels(44.dp),
+            // An artist is a round portrait everywhere else in the app; it would
+            // be strange for this one list to disagree.
+            modifier = Modifier
+                .size(44.dp)
+                .clip(if (item.isArtist) CircleShape else RoundedCornerShape(6.dp)),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.label, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(
+                item.subtitle?.takeIf { it.isNotEmpty() } ?: if (item.isArtist) "Artist" else "Song",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "Restore",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable(onClick = onRestore)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
 }
 

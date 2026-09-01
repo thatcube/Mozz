@@ -238,6 +238,18 @@ class MozzLibrary(private val core: MozzCore) {
     }
 
     /**
+     * Everything this server has been told not to recommend, newest first.
+     *
+     * The core resolves each one against the catalogue, so these carry names
+     * rather than remote ids. A row whose title is a remote id is one that was
+     * suppressed and later removed from the library — the honest thing to show
+     * for it, since there is nothing else left to say about it.
+     */
+    suspend fun suppressions(serverId: String): List<Suppression> =
+        core.call<List<Suppression>>(CoreRequest(cmd = "suppressions", serverId = serverId))
+            ?: emptyList()
+
+    /**
      * Search across artists, albums and tracks. [limit] is per type, not total.
      *
      * Fast enough to run on every keystroke: 16 ms at the 95th percentile over

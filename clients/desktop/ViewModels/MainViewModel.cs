@@ -463,7 +463,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             var suppressions = await _core.CallAsync<List<SuppressedRef>>(
                 new CoreRequest("suppressions") { ServerId = account.ServerId }) ?? [];
-            foreach (var item in suppressions.Select(s => new SuppressedSettingsItem(s.Scope, s.Ref, s.CreatedAt)))
+            foreach (var item in suppressions.Select(
+                s => new SuppressedSettingsItem(s.Scope, s.Ref, s.CreatedAt, s.Title, s.Subtitle)))
             {
                 if (item.Scope == "artist") SuppressedArtists.Add(item);
                 else SuppressedTracks.Add(item);

@@ -661,6 +661,22 @@ private fun TabContent(
 
         Route.SettingsAppearance -> AppearancePage(nav = nav, bottomReserve = bottomReserve)
 
+        Route.SettingsLibraries -> MusicLibrariesPage(
+            account = account,
+            server = server,
+            nav = nav,
+            bottomReserve = bottomReserve,
+            onResync = onResync,
+        )
+
+        Route.SettingsSuppressions -> SuppressionsPage(
+            account = account,
+            library = library,
+            server = server,
+            nav = nav,
+            bottomReserve = bottomReserve,
+        )
+
         is Route.SettingsSoon -> SettingsSoonPage(
             title = route.title,
             promise = route.promise,

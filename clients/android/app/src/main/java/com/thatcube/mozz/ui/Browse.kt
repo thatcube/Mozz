@@ -75,6 +75,12 @@ sealed interface Route {
     data object Settings : Route
     data object SettingsAppearance : Route
 
+    /** Which of a server's music libraries to mirror. */
+    data object SettingsLibraries : Route
+
+    /** Everything the user has told the app to stop recommending. */
+    data object SettingsSuppressions : Route
+
     /**
      * A settings page that exists in the map before it exists in code. Carries
      * its own text so one destination covers every one of them.

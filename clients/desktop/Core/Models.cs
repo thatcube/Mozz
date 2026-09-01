@@ -108,7 +108,12 @@ public sealed record LibraryCounts(
 public sealed record SuppressedRef(
     [property: JsonPropertyName("scope")] string Scope,
     [property: JsonPropertyName("ref")] string Ref,
-    [property: JsonPropertyName("createdAt")] double CreatedAt);
+    [property: JsonPropertyName("createdAt")] double CreatedAt,
+    /// <summary>The track title or artist name, resolved by the core.</summary>
+    [property: JsonPropertyName("title")] string? Title = null,
+    /// <summary>The artist name, for a track. Null for an artist.</summary>
+    [property: JsonPropertyName("subtitle")] string? Subtitle = null,
+    [property: JsonPropertyName("artworkKey")] string? ArtworkKey = null);
 
 public sealed record SearchResults(
     IReadOnlyList<Artist> Artists,

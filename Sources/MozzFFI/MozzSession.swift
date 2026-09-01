@@ -349,6 +349,13 @@ private struct WireSuppression: Encodable {
     var scope: String
     var ref: String
     var createdAt: Double
+    /// The track title or artist name. Falls back to the ref for something
+    /// suppressed and then removed from the library — but only then. A list that
+    /// shows remote ids where names belong is not a list anyone can act on.
+    var title: String
+    /// The artist name, for a track. Nil for an artist.
+    var subtitle: String?
+    var artworkKey: String?
 }
 
 private struct WireAction: Encodable {
@@ -927,8 +934,11 @@ private func dispatch(
         guard let serverId else {
             return sessionFailure(request.id, request.cmd, "suppressions needs serverId")
         }
-        let rows = try await session.recommendations.suppressions(serverId: serverId)
-            .map { WireSuppression(scope: $0.scope, ref: $0.ref, createdAt: $0.createdAt) }
+        let rows = try await session.recommendations.suppressedItems(serverId: serverId)
+            .map {
+                WireSuppression(scope: $0.scope, ref: $0.ref, createdAt: $0.createdAt,
+                                title: $0.title, subtitle: $0.subtitle, artworkKey: $0.artworkKey)
+            }
         return sessionSuccess(request, rows)
 
     default:

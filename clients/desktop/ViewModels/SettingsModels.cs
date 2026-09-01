@@ -10,10 +10,17 @@ public sealed record SettingsLibraryOption(string Id, string Name, bool IsSelect
     public string Status => IsSelected ? "Syncing" : "Not syncing";
 }
 
-public sealed record SuppressedSettingsItem(string Scope, string Ref, double CreatedAt)
+public sealed record SuppressedSettingsItem(
+    string Scope, string Ref, double CreatedAt, string? Name = null, string? Detail = null)
 {
-    public string Title => Ref;
-    public string Subtitle => Scope == "artist" ? "Artist" : "Track";
+    /// The name the core resolved. The ref is the fallback for something
+    /// suppressed and then removed from the library — a list that shows remote
+    /// ids where names belong is not a list anyone can act on.
+    public string Title => string.IsNullOrEmpty(Name) ? Ref : Name;
+
+    public string Subtitle => string.IsNullOrEmpty(Detail)
+        ? (Scope == "artist" ? "Artist" : "Track")
+        : Detail;
 }
 
 public sealed partial class EqualizerBandSetting(

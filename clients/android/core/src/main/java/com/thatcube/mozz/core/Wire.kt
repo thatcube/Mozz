@@ -437,6 +437,27 @@ data class ServerAccount(
     val machineIdentifier: String? = null,
 )
 
+/**
+ * One thing the user has told the app to stop recommending.
+ *
+ * [scope] is `"track"` or `"artist"`; [ref] is that thing's remote id, which is
+ * what reverses the suppression.
+ */
+@Serializable
+data class Suppression(
+    val scope: String,
+    val ref: String,
+    val createdAt: Double = 0.0,
+    /** The name, resolved by the core. Falls back to [ref] when the catalogue no longer has the row. */
+    val title: String = "",
+    /** The artist name, for a track. Null for an artist. */
+    val subtitle: String? = null,
+    val artworkKey: String? = null,
+) {
+    val isArtist: Boolean get() = scope == "artist"
+    val label: String get() = title.ifEmpty { ref }
+}
+
 /** An in-progress Plex link: show [linkUrl] to the user, then poll. */
 data class PlexLink(
     val pinId: Int,
