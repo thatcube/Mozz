@@ -172,7 +172,7 @@ final class MozzSessionDetailTests: XCTestCase {
         XCTAssertEqual(topResponse["ok"] as? Bool, true, "\(topResponse)")
         let tracks = try XCTUnwrap(topResponse["payload"] as? [[String: Any]])
         XCTAssertEqual(tracks.map { $0["remoteId"] as? String }, ["own2", "own1"])
-        XCTAssertTrue(Set(["id", "remoteId", "serverId", "title", "artistName", "albumTitle", "albumRemoteId", "trackNumber", "discNumber", "durationSeconds", "artworkKey", "isFavorite", "normalizationGainDB"]).isSuperset(of: tracks[0].keys))
+        XCTAssertTrue(Set(["id", "remoteId", "serverId", "title", "artistName", "artistRemoteId", "albumTitle", "albumRemoteId", "trackNumber", "discNumber", "durationSeconds", "artworkKey", "isFavorite", "normalizationGainDB"]).isSuperset(of: tracks[0].keys))
 
         let appearsResponse = try call(handle, [
             "cmd": "artistAppearsOn", "serverId": server.id, "artistRemoteId": "ar1", "limit": 20, "after": NSNull(),

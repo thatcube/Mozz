@@ -363,11 +363,33 @@ enum AppTab: CaseIterable, Hashable {
         }
     }
 
+    /// The tab's glyph, named as a bundled Tabler asset rather than routed
+    /// through `Image(mozz:)`'s SF-Symbol map.
+    ///
+    /// Two reasons. There is no SF Symbol name for the filled variants, so a map
+    /// keyed on SF names cannot reach them. And the map was quietly sending
+    /// Library to `books` — a row of hardbacks — while the icon actually drawn
+    /// for this app, and shipped on Android, is a record crate. The assets have
+    /// been in `Icons.xcassets` under these exact names since they were drawn;
+    /// only the tab bar was still pointing elsewhere.
     var icon: String {
         switch self {
-        case .home: "house.fill"
-        case .library: "square.stack.fill"
-        case .search: "magnifyingglass"
+        case .home: "home"
+        case .library: "library"
+        case .search: "search"
+        }
+    }
+
+    /// The same glyph, filled, for the tab you are on.
+    ///
+    /// Android has carried this since its bar was built; iOS coloured the
+    /// outline and stopped there, which reads as less selected at a glance —
+    /// weight is doing the work colour cannot do on its own.
+    var selectedIcon: String {
+        switch self {
+        case .home: "home-filled"
+        case .library: "library-filled"
+        case .search: "search-filled"
         }
     }
 }
@@ -619,7 +641,7 @@ struct MainTabBar: View {
             onPressTab(tab)         // switch + pop to root (also expands the bar)
         } label: {
             ZStack {
-                Image(mozz: tab.icon)
+                Image(accent ? tab.selectedIcon : tab.icon, bundle: .module)
                     .resizable().scaledToFit()
                     .frame(width: 30, height: 30)
                     .offset(y: -8 * labelShown)
