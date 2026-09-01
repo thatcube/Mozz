@@ -608,6 +608,18 @@ private func dispatch(
         }
         return sessionSuccess(request, wireHeader(album))
 
+    case "track":
+        // One track, by remote id. Exists so a client can re-resolve a durable
+        // reference it stored — a "recently searched" row, a deep link — without
+        // having kept a snapshot of the row itself.
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "track needs remoteId and serverId")
+        }
+        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "track not found: \(remoteId)")
+        }
+        return sessionSuccess(request, wire(record))
+
     case "artistAlbums":
         guard let remoteId = request.remoteId, let serverId else {
             return sessionFailure(request.id, request.cmd, "artistAlbums needs remoteId and serverId")
@@ -923,7 +935,7 @@ private func dispatch(
 /// hand-maintained and make the failure it protects against loud.
 let mozzSessionCommands = [
     "ping", "servers", "counts", "artists", "albums", "tracks",
-    "artist", "album", "artistAlbums", "artistTopTracks", "artistAppearsOn",
+    "artist", "album", "track", "artistAlbums", "artistTopTracks", "artistAppearsOn",
     "albumTracks", "albumReleaseKind", "playlists", "playlistTracks",
     "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
     "recordPlayEvent", "playHistory", "historyExportBatch",

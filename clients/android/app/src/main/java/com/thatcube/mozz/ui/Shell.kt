@@ -530,7 +530,14 @@ private fun TabContent(
                 nav = nav,
                 bottomReserve = bottomReserve,
             )
-            AppTab.SEARCH -> ComingSoon("Search", "Everything on this server, by name.")
+            AppTab.SEARCH -> SearchRoot(
+                account = account,
+                library = library,
+                server = server,
+                playback = playback,
+                nav = nav,
+                bottomReserve = bottomReserve,
+            )
         }
 
         is Route.AlbumPage -> AlbumDetailPage(

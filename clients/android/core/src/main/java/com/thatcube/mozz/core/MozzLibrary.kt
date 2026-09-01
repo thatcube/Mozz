@@ -89,6 +89,20 @@ class MozzLibrary(private val core: MozzCore) {
             CoreRequest(cmd = "artist", serverId = serverId, remoteId = remoteId)
         )
 
+    /** One album, by remote id. Arrives as a header, so [Album.id] is 0. */
+    suspend fun album(serverId: String, remoteId: String): Album? =
+        core.call<Album>(CoreRequest(cmd = "album", serverId = serverId, remoteId = remoteId))
+
+    /**
+     * One track, by remote id.
+     *
+     * For re-resolving a durable reference — a "recently searched" row, a deep
+     * link — rather than keeping a snapshot of the row, so titles and artwork
+     * stay fresh and anything pruned from the catalogue simply drops out.
+     */
+    suspend fun track(serverId: String, remoteId: String): Track? =
+        core.call<Track>(CoreRequest(cmd = "track", serverId = serverId, remoteId = remoteId))
+
     /**
      * The songs the core ranks highest for one artist — the artist page's "Top
      * Songs", and the list its Play button plays through.
