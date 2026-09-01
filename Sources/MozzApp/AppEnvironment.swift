@@ -330,7 +330,22 @@ public final class AppEnvironment: ObservableObject {
             try await activate(saved)
             restoreLastPlaybackSession()
         } catch {
-            SessionPersistence.clear(credentials)
+            // Only a server that REJECTS the credential is grounds for throwing
+            // it away. Anything else — no network yet at cold launch, a server
+            // that is down, an address that has stopped answering — is temporary,
+            // and clearing the session for it signs the user out of Plex and
+            // makes them link the account again to fix a problem that would have
+            // fixed itself. That is what "it keeps signing me out" was.
+            //
+            // Plex is the one that got hit: `buildBackend` asks the server for
+            // its music sections when the stored id is missing, so an unreachable
+            // server threw from inside activation rather than merely failing to
+            // detect capabilities.
+            if case MozzError.unauthorized = error {
+                SessionPersistence.clear(credentials)
+                return
+            }
+            lastSyncSummary = "Couldn't reach \(saved.serverName). Your library is still here."
         }
     }
 
@@ -1748,7 +1763,14 @@ public final class AppEnvironment: ObservableObject {
             )
             var backend = PlexBackend(connection: connection, token: stored.token, clientInfo: clientInfo)
             if connection.musicSectionID == nil {
-                if let section = try await backend.musicSections().first {
+                // `try?`, not `try`: this is a request to the server, and letting
+                // it throw aborted the whole activation — which, at launch, threw
+                // away the saved session and put the user back on the sign-in
+                // screen because their server happened to be unreachable for a
+                // moment. The section is not needed to browse what is already
+                // mirrored, and `ensurePlexMusicSection` resolves it before the
+                // next sync, so a failure here costs nothing.
+                if let section = try? await backend.musicSections().first {
                     connection.musicSectionID = section.id
                     backend = PlexBackend(connection: connection, token: stored.token, clientInfo: clientInfo)
                     var updated = SessionPersistence.load(credentials)

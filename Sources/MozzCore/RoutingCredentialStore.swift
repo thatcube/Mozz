@@ -25,14 +25,30 @@ public final class RoutingCredentialStore: CredentialStore, @unchecked Sendable 
 
     public func string(forKey key: String) throws -> String? {
         guard syncedKeys.contains(key) else { return try local.string(forKey: key) }
-        if let value = try synced.string(forKey: key) { return value }
-        // Nothing in iCloud yet. A pre-upgrade session is still sitting in the
-        // device-local item, so move it across — after which this device's
-        // session is what seeds the user's other devices.
-        guard let legacy = try local.string(forKey: key) else { return nil }
-        try? synced.setString(legacy, forKey: key)
-        try? local.setString(nil, forKey: key)
-        return legacy
+        if let value = try synced.string(forKey: key) {
+            // Keep the mirror current, so the device can answer this question by
+            // itself next time.
+            if (try? local.string(forKey: key)) != value {
+                try? local.setString(value, forKey: key)
+            }
+            return value
+        }
+        // iCloud has nothing to say. That is NOT the same as the user being
+        // signed out, and treating it that way is what "it keeps signing me out
+        // of Plex" was: the synchronizable item is not always readable — it has
+        // not propagated to this device yet, the account is between syncs, the
+        // keychain is briefly unavailable — and with the session living ONLY
+        // there, every one of those looked like a sign-out and sent the user
+        // back to link their account again. It would then reappear on its own
+        // once the item synced, which is exactly how an intermittent fault of
+        // this kind presents.
+        //
+        // The device-local item is the answer to both that and to the original
+        // case this branch was written for (a session saved before syncing
+        // existed). Either way, hand it back and push it up.
+        guard let mirrored = try local.string(forKey: key) else { return nil }
+        try? synced.setString(mirrored, forKey: key)
+        return mirrored
     }
 
     public func setString(_ value: String?, forKey key: String) throws {
@@ -41,8 +57,8 @@ public final class RoutingCredentialStore: CredentialStore, @unchecked Sendable 
             return
         }
         try synced.setString(value, forKey: key)
-        // Drop any stale device-local copy, so a sign-out can't be undone by the
-        // promotion path above resurrecting the pre-upgrade item on next launch.
-        try? local.setString(nil, forKey: key)
+        // Mirrored, including the nil of a sign-out — which is what keeps the
+        // fallback above from resurrecting a session the user has ended.
+        try? local.setString(value, forKey: key)
     }
 }
