@@ -455,6 +455,11 @@ internal fun PlayerBody(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 4.dp),
+                    // One column, and these three sit under previous, play and
+                    // next — same gap, same column widths. Two columns, and the
+                    // weighted spacers below split them left and right instead.
+                    horizontalArrangement = if (wide) Arrangement.Start
+                    else Arrangement.spacedBy(TRANSPORT_GAP, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // Keyed on the WIDTH, not on whether a panel happens to be
@@ -474,26 +479,32 @@ internal fun PlayerBody(
                         Spacer(Modifier.weight(1f))
                         PanelToggles(panel, onPanel)
                     } else {
-                        // One column, so the three share it — iOS's order.
-                        PanelButton(
-                            icon = R.drawable.ic_lyrics,
-                            label = "Lyrics",
-                            selected = panel == PlayerPanel.LYRICS,
-                            onClick = {
-                                onPanel(if (panel == PlayerPanel.LYRICS) null else PlayerPanel.LYRICS)
-                            },
-                        )
-                        Spacer(Modifier.weight(1f))
-                        RouteButton()
-                        Spacer(Modifier.weight(1f))
-                        PanelButton(
-                            icon = R.drawable.ic_queue,
-                            label = "Queue",
-                            selected = panel == PlayerPanel.QUEUE,
-                            onClick = {
-                                onPanel(if (panel == PlayerPanel.QUEUE) null else PlayerPanel.QUEUE)
-                            },
-                        )
+                        // One column, so the three share it — iOS's order, in
+                        // the play controls' own columns so they line up with
+                        // previous, play and next rather than near them.
+                        Box(Modifier.width(SKIP_HIT), contentAlignment = Alignment.Center) {
+                            PanelButton(
+                                icon = R.drawable.ic_lyrics,
+                                label = "Lyrics",
+                                selected = panel == PlayerPanel.LYRICS,
+                                onClick = {
+                                    onPanel(if (panel == PlayerPanel.LYRICS) null else PlayerPanel.LYRICS)
+                                },
+                            )
+                        }
+                        Box(Modifier.width(PLAY_HIT), contentAlignment = Alignment.Center) {
+                            RouteButton()
+                        }
+                        Box(Modifier.width(SKIP_HIT), contentAlignment = Alignment.Center) {
+                            PanelButton(
+                                icon = R.drawable.ic_queue,
+                                label = "Queue",
+                                selected = panel == PlayerPanel.QUEUE,
+                                onClick = {
+                                    onPanel(if (panel == PlayerPanel.QUEUE) null else PlayerPanel.QUEUE)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1012,7 +1023,7 @@ private fun QueueControls(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 14.dp),
+        modifier = modifier.fillMaxWidth().padding(top = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         QueuePill(
@@ -1115,7 +1126,7 @@ private fun NowPlayingCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+            .padding(end = 8.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -1274,7 +1285,7 @@ private fun QueueRow(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+            .padding(end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Artwork(
@@ -1691,7 +1702,7 @@ private fun Transport(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        horizontalArrangement = Arrangement.spacedBy(TRANSPORT_GAP, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (showsModes) {
@@ -1824,6 +1835,16 @@ private fun PlayButton(isPlaying: Boolean, onClick: () -> Unit) {
 // iOS's control metrics, so a thumb that has learned one app has learned both.
 // Glyph sizes and hit targets are kept separate: the icon is sized to read, the
 // square around it is sized to be hit.
+/**
+ * Gap between the play controls, and between the utility buttons under them.
+ *
+ * One number for both rows: that is what puts lyrics, cast and queue under
+ * previous, play and next. `SpaceEvenly` on one row and weighted spacers on the
+ * other put them on two different rhythms, so they only ever agreed by accident.
+ * iOS's 52.
+ */
+private val TRANSPORT_GAP = 52.dp
+
 private val UTILITY_GLYPH = 26.dp
 private val SKIP_GLYPH = 40.dp
 private val PLAY_GLYPH = 60.dp
