@@ -1883,16 +1883,22 @@ struct NowPlayingMorphContainer: View {
         let playing = snapshot.status == .playing
         let mode = snapshot.repeatMode
         let modes = showsPlayModes(m)
-        return HStack(spacing: Self.transportGap) {
+        // Three controls: the fixed gap the utility row copies, which is what
+        // keeps the two aligned. Five: let them spread instead — 272pt of controls
+        // plus four 52pt gaps is 480, and a portrait iPad's column with the queue
+        // open is 353, so a fixed gap pushes repeat off the end. (It did exactly
+        // that on Android's half-column before the same fix.)
+        return HStack(spacing: modes ? 0 : Self.transportGap) {
             if modes {
                 PlayerIconButton(glyph: .shuffle,
-                             glyphSize: 22,
-                             tint: snapshot.isShuffled ? .primary : .secondary,
-                             haptics: false,
+                                 glyphSize: 22,
+                                 tint: snapshot.isShuffled ? .primary : .secondary,
+                                 haptics: false,
                                  label: snapshot.isShuffled ? "Shuffle on" : "Shuffle off") {
                     playback.toggleShuffle()
                 }
                 .frame(width: Self.transportColumns[0])
+                Spacer(minLength: 12)
             }
             TransportSkipButton(travel: .backward,
                                 direction: snapshot.transportDirection,
@@ -1900,8 +1906,10 @@ struct NowPlayingMorphContainer: View {
                                 isEnabled: snapshot.hasPrevious,
                                 label: "Previous") { playback.previous() }
                 .frame(width: Self.transportColumns[1])
+            if modes { Spacer(minLength: 12) }
             PlayPauseButton(playing: playing) { playback.togglePlayPause() }
                 .frame(width: Self.transportColumns[2])
+            if modes { Spacer(minLength: 12) }
             TransportSkipButton(travel: .forward,
                                 direction: snapshot.transportDirection,
                                 generation: snapshot.transportGeneration,
@@ -1912,6 +1920,7 @@ struct NowPlayingMorphContainer: View {
             // there is no repeat-one icon in this set, and the state is carried
             // by the accent and read out by the label.
             if modes {
+                Spacer(minLength: 12)
                 PlayerIconButton(glyph: .repeatTracks,
                                  glyphSize: 22,
                                  tint: mode != .off ? .primary : .secondary,

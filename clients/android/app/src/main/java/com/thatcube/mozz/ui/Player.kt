@@ -1702,7 +1702,12 @@ private fun Transport(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(TRANSPORT_GAP, Alignment.CenterHorizontally),
+        // Three controls: a fixed gap, because the utility row below copies it
+        // and that is what keeps the two aligned. Five: spread them instead —
+        // 292dp of controls plus four 52dp gaps is 500, and the beside layout's
+        // half-column is about 400, which clipped repeat clean off the end.
+        horizontalArrangement = if (showsModes) Arrangement.SpaceEvenly
+        else Arrangement.spacedBy(TRANSPORT_GAP, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (showsModes) {
