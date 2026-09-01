@@ -165,6 +165,16 @@ class MozzLibrary(private val core: MozzCore) {
             CoreRequest(cmd = "recentlyPlayedTracks", serverId = serverId, limit = limit)
         ) ?: emptyList()
 
+    /** Every distinct genre in the mirrored catalogue, as the core orders them. */
+    suspend fun genres(serverId: String): List<String> =
+        core.call<List<String>>(CoreRequest(cmd = "genres", serverId = serverId)) ?: emptyList()
+
+    /** The albums tagged with one genre. */
+    suspend fun genreAlbums(serverId: String, genre: String, limit: Int = 200): List<Album> =
+        core.call<List<Album>>(
+            CoreRequest(cmd = "genreAlbums", serverId = serverId, genre = genre, limit = limit)
+        ) ?: emptyList()
+
     // MARK: Recommendations
 
     /**

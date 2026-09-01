@@ -102,6 +102,8 @@ fun LibraryRoot(
                     CategoryRow("Artists", R.drawable.ic_microphone, inset) { nav.open(Route.AllArtists) }
                     RowDivider(start = inset + 40.dp, end = inset)
                     CategoryRow("Albums", R.drawable.ic_disc, inset) { nav.open(Route.AllAlbums) }
+                    RowDivider(start = inset + 40.dp, end = inset)
+                    CategoryRow("Genres", R.drawable.ic_tag, inset) { nav.open(Route.AllGenres) }
                 }
             }
             if (recentlyAdded.isNotEmpty()) {
@@ -332,6 +334,120 @@ fun PlaylistsPage(
                 items(playlists, key = { "playlist-${it.remoteId}" }) { playlist ->
                     PlaylistCell(playlist, server, cell) { nav.open(Route.PlaylistPage(playlist)) }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun GenresPage(
+    account: ServerAccount,
+    library: MozzLibrary,
+    nav: Navigator,
+    onBack: () -> Unit,
+    bottomReserve: Dp,
+) {
+    var genres by remember(account.serverId) { mutableStateOf<List<String>>(emptyList()) }
+    var loaded by remember(account.serverId) { mutableStateOf(false) }
+    LaunchedEffect(account.serverId) {
+        genres = runCatching { library.genres(account.serverId) }.getOrDefault(emptyList())
+        loaded = true
+    }
+
+    ListPage("Genres", onBack) { inset, _ ->
+        if (loaded && genres.isEmpty()) {
+            EmptyState(
+                title = "No Genres",
+                detail = "Nothing on this server is tagged with one.",
+                icon = R.drawable.ic_tag,
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+            ) {
+                items(genres, key = { it }) { genre ->
+                    Column {
+                        Text(
+                            genre,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { nav.open(Route.GenrePage(genre)) }
+                                .padding(horizontal = inset, vertical = 16.dp),
+                        )
+                        RowDivider(start = inset, end = inset)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GenreAlbumsPage(
+    genre: String,
+    account: ServerAccount,
+    library: MozzLibrary,
+    server: MozzServer,
+    nav: Navigator,
+    onBack: () -> Unit,
+    bottomReserve: Dp,
+) {
+    var albums by remember(genre) { mutableStateOf<List<Album>>(emptyList()) }
+    LaunchedEffect(genre, account.serverId) {
+        albums = runCatching { library.genreAlbums(account.serverId, genre) }.getOrDefault(emptyList())
+    }
+
+    ListPage(genre, onBack) { inset, width ->
+        val cell = cellWidth(width, ideal = 168.dp, gap = 16.dp, inset = inset)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(cellColumns(width, ideal = 168.dp, gap = 16.dp, inset = inset)),
+            contentPadding = PaddingValues(start = inset, end = inset, bottom = bottomReserve + 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(albums, key = { "g-${it.serverId}-${it.remoteId}" }) { album ->
+                AlbumCell(album, server, cell) { nav.open(Route.AlbumPage(album)) }
+            }
+        }
+    }
+}
+
+/**
+ * Everything by one artist, ranked the way the artist page ranks it.
+ *
+ * Loads its own songs rather than being handed them, so the route carries an
+ * artist and not a list — the same reason `ArtistAllSongsView` does on iOS.
+ */
+@Composable
+fun ArtistSongsPage(
+    artist: Artist,
+    library: MozzLibrary,
+    server: MozzServer,
+    playback: PlayerController,
+    onBack: () -> Unit,
+    bottomReserve: Dp,
+) {
+    var songs by remember(artist.remoteId) { mutableStateOf<List<Track>>(emptyList()) }
+    LaunchedEffect(artist.remoteId) {
+        songs = runCatching { library.artistTopTracks(artist.serverId, artist.remoteId) }
+            .getOrDefault(emptyList())
+    }
+
+    ListPage(artist.name, onBack) { _, _ ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+        ) {
+            itemsIndexed(songs, key = { _, t -> "as-${t.id}" }) { index, track ->
+                SongRow(
+                    track,
+                    server = server,
+                    subtitle = track.albumTitle,
+                    onClick = { playback.play(songs, index) },
+                )
             }
         }
     }

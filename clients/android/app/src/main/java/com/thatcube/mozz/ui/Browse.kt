@@ -66,6 +66,11 @@ sealed interface Route {
     data object AllArtists : Route
     data object AllAlbums : Route
     data object AllPlaylists : Route
+    data object AllGenres : Route
+    data class GenrePage(val genre: String) : Route
+
+    /** An artist's full ranked song list, behind "See All". */
+    data class ArtistSongs(val artist: Artist) : Route
 
     data object Settings : Route
     data object SettingsAppearance : Route

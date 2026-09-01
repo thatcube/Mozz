@@ -624,6 +624,33 @@ private fun TabContent(
             bottomReserve = bottomReserve,
         )
 
+        is Route.ArtistSongs -> ArtistSongsPage(
+            artist = route.artist,
+            library = library,
+            server = server,
+            playback = playback,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+
+        Route.AllGenres -> GenresPage(
+            account = account,
+            library = library,
+            nav = nav,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+
+        is Route.GenrePage -> GenreAlbumsPage(
+            genre = route.genre,
+            account = account,
+            library = library,
+            server = server,
+            nav = nav,
+            onBack = nav::back,
+            bottomReserve = bottomReserve,
+        )
+
         Route.Settings -> SettingsPage(
             account = account,
             nav = nav,

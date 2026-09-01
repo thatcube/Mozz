@@ -1,5 +1,6 @@
 package com.thatcube.mozz.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -169,7 +170,18 @@ fun ArtistDetailPage(
         }
         if (topSongs.isNotEmpty()) {
             item(key = "top-songs-header") {
-                DetailSectionHeader("Top Songs")
+                DetailSectionHeader("Top Songs") {
+                    if (songs.size > topSongs.size) {
+                        Text(
+                            "See All",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = LocalContentColor.current.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .clickable { nav.open(Route.ArtistSongs(artist)) }
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                        )
+                    }
+                }
             }
             itemsIndexed(topSongs, key = { _, t -> "top-${t.id}" }) { index, track ->
                 SongRow(
