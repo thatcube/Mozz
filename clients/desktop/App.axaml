@@ -46,6 +46,14 @@
             <SolidColorBrush x:Key="SurfaceSelected" Color="#2A2A30" />
             <SolidColorBrush x:Key="Divider" Color="#232327" />
 
+            <!-- The wash under an artist banner's name. Declared here so the
+                 template can bind it at load; DesktopPalette replaces it with
+                 one that fades into whichever background is in effect. -->
+            <LinearGradientBrush x:Key="HeroScrim" StartPoint="0%,0%" EndPoint="0%,100%">
+                <GradientStop Color="#000B0B0D" Offset="0" />
+                <GradientStop Color="#CC0B0B0D" Offset="1" />
+            </LinearGradientBrush>
+
             <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
             <SolidColorBrush x:Key="TextSecondary" Color="#9A9AA2" />
             <SolidColorBrush x:Key="TextTertiary" Color="#6A6A72" />

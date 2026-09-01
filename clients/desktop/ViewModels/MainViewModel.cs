@@ -355,20 +355,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _ => ThemeVariant.Default,
         };
 
-        var oled = DarkStyle == "black";
-        SetBrush(app, "AppBackground", oled ? "#000000" : "#0B0B0D");
-        SetBrush(app, "SidebarBackground", oled ? "#070708" : "#121214");
-        SetBrush(app, "BarBackground", oled ? "#08080A" : "#141416");
-        SetBrush(app, "SurfaceRaised", oled ? "#121216" : "#1C1C20");
-        SetBrush(app, "SurfaceHover", oled ? "#1A1A1F" : "#232328");
-        SetBrush(app, "SurfaceSelected", oled ? "#202027" : "#2A2A30");
-        SetBrush(app, "Divider", oled ? "#17171B" : "#232327");
+        // Not `Appearance` — `ActualThemeVariant`. On "System" the request is
+        // Default, and only Avalonia knows what the desktop resolved that to.
+        // Reading the request instead is how System silently meant Dark.
+        if (!_watchingSystemTheme)
+        {
+            _watchingSystemTheme = true;
+            app.ActualThemeVariantChanged += (_, _) => ApplyPalette(app);
+        }
+        ApplyPalette(app);
     }
 
-    private static void SetBrush(Avalonia.Application app, string key, string color)
-    {
-        app.Resources[key] = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(color));
-    }
+    private bool _watchingSystemTheme;
+
+    private void ApplyPalette(Avalonia.Application app) =>
+        DesktopPalette.Apply(
+            app,
+            dark: app.ActualThemeVariant != ThemeVariant.Light,
+            blackout: DarkStyle == "black");
 
     /// Called when a sync finishes: the counts and whatever page is showing are
     /// both stale, and the empty-library message may no longer be true.

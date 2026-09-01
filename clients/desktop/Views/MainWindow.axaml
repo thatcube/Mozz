@@ -769,14 +769,12 @@
                                                 FallbackText="{Binding Artist.Name}" FallbackFontSize="72"
                                                 FallbackForeground="#44FFFFFF" />
                                     </Border>
-                                    <Border VerticalAlignment="Bottom" Height="130">
-                                        <Border.Background>
-                                            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                                <GradientStop Color="#00000000" Offset="0" />
-                                                <GradientStop Color="#CC0B0B0D" Offset="1" />
-                                            </LinearGradientBrush>
-                                        </Border.Background>
-                                    </Border>
+                                    <!-- Fades into whatever the page's own background
+                                         is, rather than into a baked near-black: in
+                                         Black that has to be black, and in Light it
+                                         must not be dark at all. -->
+                                    <Border VerticalAlignment="Bottom" Height="130"
+                                            Background="{DynamicResource HeroScrim}" />
                                     <StackPanel Orientation="Horizontal" Spacing="12" Margin="24" VerticalAlignment="Bottom">
                                         <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
                                             <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
