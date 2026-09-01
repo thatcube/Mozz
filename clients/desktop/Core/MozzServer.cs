@@ -99,6 +99,11 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         await core.CallAsync<AttachPayload>(new
         {
             cmd = "attach",
+            // The account's own id, not one derived from the address it happens
+            // to be reachable at today. The catalogue, the likes and the play
+            // history are keyed on this, and a server's address can change
+            // without the server changing. See ADR-0017.
+            serverId = account.ServerId,
             kind = account.Kind.Wire(),
             baseURL = account.BaseUrl,
             token = secret,
@@ -145,6 +150,71 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         SaveAccount(resolved);
         await AttachAsync(resolved, token).ConfigureAwait(false);
         return resolved;
+    }
+
+    /// <summary>
+    /// Ask the Plex account for an address that answers, and re-attach the
+    /// account on it.
+    ///
+    /// Plex hands out several addresses for one server — LAN, remote, relay —
+    /// and any of them can stop working while the others are fine. Signing in
+    /// picks one and, left alone, keeps it forever: when it dies, every cover
+    /// goes grey and playback fails, which reads as a broken app rather than a
+    /// bad address. (One did die, for twenty minutes, on 2026-09-01. See
+    /// ADR-0017.)
+    ///
+    /// The account's id is passed through unchanged, so the catalogue, the likes
+    /// and the play history stay attached to it. Returns null when there was
+    /// nothing to change — no account token, no candidate that answered, or the
+    /// stored address already being the right one. That is not a failure worth
+    /// surfacing: it means "still the best we know of".
+    /// </summary>
+    public async Task<ServerAccount?> RepointAccountAsync(
+        ServerAccount account, CancellationToken token = default)
+    {
+        if (account.Kind != BackendKind.Plex) return null;
+        var accountToken = secrets.Get($"plex.account.{account.ServerId}");
+        if (accountToken is not { Length: > 0 }) return null;
+
+        SessionPayload? session;
+        try
+        {
+            session = await core.CallAsync<SessionPayload>(new
+            {
+                cmd = "plexResolve",
+                serverId = account.ServerId,
+                accountToken,
+                machineIdentifier = account.MachineIdentifier,
+                serverName = account.ServerName,
+                clientIdentifier = account.ClientIdentifier,
+            }, token).ConfigureAwait(false);
+        }
+        catch (MozzCoreException)
+        {
+            return null;
+        }
+
+        if (session is null
+            || string.IsNullOrEmpty(session.BaseUrl)
+            || string.IsNullOrEmpty(session.Token))
+        {
+            return null;
+        }
+        if (session.BaseUrl == account.BaseUrl
+            && session.Token == secrets.Get(SecretKey(account.ServerId)))
+        {
+            return null;
+        }
+
+        var updated = account with
+        {
+            BaseUrl = session.BaseUrl,
+            MachineIdentifier = session.MachineIdentifier ?? account.MachineIdentifier,
+        };
+        secrets.Set(SecretKey(updated.ServerId), session.Token);
+        SaveAccount(updated);
+        await AttachAsync(updated, token).ConfigureAwait(false);
+        return updated;
     }
 
     public Task<IReadOnlyList<MusicLibrary>?> LibrariesAsync(
@@ -279,6 +349,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 ? identifier
                 : session.ClientIdentifier,
             MusicSectionId = null,
+            MachineIdentifier = session.MachineIdentifier,
         };
 
         secrets.Set(SecretKey(account.ServerId), session.Token);
@@ -378,6 +449,17 @@ public sealed record ServerAccount
     public string? Username { get; init; }
     public required string ClientIdentifier { get; init; }
     public string? MusicSectionId { get; init; }
+
+    /// <summary>
+    /// The Plex <em>server's</em> machine identifier — not this app's, which is
+    /// <see cref="ClientIdentifier"/>.
+    ///
+    /// A Plex server has several addresses and none of them is the server; this
+    /// is what stays the same when the address changes, so it is what
+    /// re-resolution matches on. Null for accounts signed in before it was
+    /// recorded.
+    /// </summary>
+    public string? MachineIdentifier { get; init; }
 }
 
 public sealed record PlexLink(int PinId, string Code, string ClientIdentifier, string? LinkUrl);
@@ -436,7 +518,8 @@ internal sealed record SessionPayload(
     [property: JsonPropertyName("userID")] string? UserId,
     [property: JsonPropertyName("serverName")] string ServerName,
     [property: JsonPropertyName("clientIdentifier")] string ClientIdentifier,
-    [property: JsonPropertyName("accountToken")] string? AccountToken);
+    [property: JsonPropertyName("accountToken")] string? AccountToken,
+    [property: JsonPropertyName("machineIdentifier")] string? MachineIdentifier = null);
 
 internal sealed record PlexPinPayload(
     [property: JsonPropertyName("pinId")] int PinId,

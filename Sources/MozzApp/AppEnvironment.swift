@@ -396,7 +396,8 @@ public final class AppEnvironment: ObservableObject {
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
             clientIdentifier: session.clientIdentifier, musicSectionID: nil,
-            accountToken: session.accountToken, selectedMusicSectionIDs: nil
+            accountToken: session.accountToken, selectedMusicSectionIDs: nil,
+            machineIdentifier: session.machineIdentifier
         )
         // Persist before activation so buildBackend's Plex section resolution can
         // load + update it. On failure/cancel we CLEAR it, so a half-saved session
@@ -518,8 +519,8 @@ public final class AppEnvironment: ObservableObject {
             try await activateDemo()
             return
         }
-        let (connection, backend) = try await buildBackend(from: stored)
-        try await CatalogWriter(database).saveServer(connection)
+        var stored = stored
+        var (connection, backend) = try await buildBackend(from: stored)
 
         // Prefer live detection; if the server is unreachable (offline launch),
         // keep the last-known capabilities rather than clobbering them with
@@ -527,9 +528,22 @@ public final class AppEnvironment: ObservableObject {
         // the cached row). See CapabilityResolver. Wrapped in the local-network
         // retry so a launch reconnect to a LAN server isn't defeated by the iOS
         // permission prompt racing the first request.
-        let detected = try? await LocalNetworkPermission.retrying(for: connection.baseURL) {
+        var detected = try? await LocalNetworkPermission.retrying(for: connection.baseURL) {
             try await backend.detectCapabilities()
         }
+        // Silence from the stored address is not the same as the server being
+        // gone. Plex gives one machine several addresses — LAN, remote, relay —
+        // and any of them can stop working on its own while the others are fine;
+        // a relay endpoint did exactly that for twenty minutes on 2026-09-01,
+        // during which the library looked broken rather than unreachable. Ask
+        // the account which address works now. ADR-0017.
+        if detected == nil, let repointed = await repointedPlexSession(stored, keeping: connection.id) {
+            stored = repointed
+            SessionPersistence.save(stored, to: credentials)
+            (connection, backend) = try await buildBackend(from: stored)
+            detected = try? await backend.detectCapabilities()
+        }
+        try await CatalogWriter(database).saveServer(connection)
         let cached = try? await repository.capabilities(serverId: connection.id)
         let resolved = CapabilityResolver.resolve(detected: detected, cached: cached, backend: stored.kind)
         if resolved.shouldPersist {
@@ -922,6 +936,12 @@ public final class AppEnvironment: ObservableObject {
                 } catch {
                     lastSyncSummary = "Sync failed: \(error.localizedDescription)"
                     guard attempt < maxAttempts, Self.isTransient(error) else { break }
+                    // A transient failure and a dead pinned address look
+                    // identical from here, and the second one never clears on
+                    // its own: every retry goes to the same address that just
+                    // refused. Ask the account for a working one before backing
+                    // off — a no-op when the address is fine. ADR-0017.
+                    await repointActiveConnection()
                     // Backoff 2s, 4s, 6s — enough to ride out cold-launch network
                     // warmup or a brief server blip. isSyncing stays true across
                     // retries, so the setup screen keeps waiting rather than
@@ -1502,10 +1522,14 @@ public final class AppEnvironment: ObservableObject {
         guard let connections = try? await auth.discoverConnections(accountToken: accountToken) else { return }
         let serverConnections = connections.filter { $0.clientIdentifier == serverMachineID }
         guard let chosen = await auth.firstMusicConnection(serverConnections) else { return }
+        // No `serverId`: this is a different machine, and it is right for it to
+        // have its own catalogue. Repointing an address keeps the id; changing
+        // servers does not.
         let stored = StoredSession(
             kind: .plex, baseURL: chosen.uri, token: chosen.accessToken,
             userID: nil, serverName: chosen.serverName, clientIdentifier: clientIdentifier,
-            musicSectionID: nil, accountToken: accountToken, selectedMusicSectionIDs: nil)
+            musicSectionID: nil, accountToken: accountToken, selectedMusicSectionIDs: nil,
+            machineIdentifier: chosen.clientIdentifier.isEmpty ? nil : chosen.clientIdentifier)
         SessionPersistence.save(stored, to: credentials)
         do {
             try await activate(stored)
@@ -1634,6 +1658,70 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Backend construction
 
+    /// Ask the Plex account for an address that answers, when the stored one
+    /// does not.
+    ///
+    /// Returns nil — leaving the stored session exactly as it was — whenever
+    /// there is nothing better to say: a non-Plex backend, no account token, no
+    /// candidate that answered (which is what a device with no network at all
+    /// looks like), or a resolution that lands back on the address already
+    /// stored. Overwriting a good address with a guess made offline is the one
+    /// way this could make things worse.
+    ///
+    /// The server id is carried across unchanged. It is the account's identity,
+    /// not the address's; re-deriving it here would present the same library as
+    /// a new empty server. See ADR-0017.
+    private func repointedPlexSession(_ stored: StoredSession, keeping serverId: String) async -> StoredSession? {
+        guard stored.kind == .plex, let accountToken = stored.accountToken, !accountToken.isEmpty else { return nil }
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: clientIdentifier)
+        guard let resolved = try? await auth.resolveConnection(
+            accountToken: accountToken,
+            machineIdentifier: stored.machineIdentifier,
+            serverName: stored.serverName
+        ) else { return nil }
+        guard resolved.baseURL != stored.baseURL || resolved.token != stored.token else { return nil }
+        var updated = stored
+        updated.serverId = serverId
+        updated.baseURL = resolved.baseURL
+        updated.token = resolved.token
+        updated.machineIdentifier = resolved.machineIdentifier ?? stored.machineIdentifier
+        return updated
+    }
+
+    /// Re-resolve the active server's address and rebuild the backend on it,
+    /// without disturbing the catalogue.
+    ///
+    /// Called between sync attempts: activation repairs a bad address at launch,
+    /// but the address can die while the app is open — which is how it was first
+    /// noticed — and a user should not have to relaunch to recover. Reports
+    /// whether anything changed.
+    @discardableResult
+    public func repointActiveConnection() async -> Bool {
+        guard let current = active, let stored = SessionPersistence.load(credentials) else { return false }
+        guard let repointed = await repointedPlexSession(stored, keeping: current.connection.id) else { return false }
+        SessionPersistence.save(repointed, to: credentials)
+        guard let (connection, backend) = try? await buildBackend(from: repointed) else { return false }
+        try? await CatalogWriter(database).saveServer(connection)
+        finishActivation(connection: connection, backend: backend, capabilities: current.capabilities)
+        return true
+    }
+
+    /// The session's server id: the one it was first activated under, or — for a
+    /// session saved before ids were frozen — the derived one, written back so
+    /// that from now on it is the frozen one.
+    ///
+    /// The derived id hashes the base URL, so leaving it derived means an account
+    /// that changes address becomes, to the catalogue, a different server. See
+    /// ADR-0017. Existing installs are unaffected: the value written back on
+    /// first run is exactly the one they have been using.
+    private func frozenServerId(_ stored: StoredSession, derived: String) -> String {
+        if let id = stored.serverId, !id.isEmpty { return id }
+        var updated = stored
+        updated.serverId = derived
+        SessionPersistence.save(updated, to: credentials)
+        return derived
+    }
+
     private func buildBackend(from stored: StoredSession) async throws -> (ServerConnection, any MusicBackend) {
         // Always present THIS device's client identifier, never the one baked
         // into the stored session: that session may have arrived from another
@@ -1645,7 +1733,7 @@ public final class AppEnvironment: ObservableObject {
         switch stored.kind {
         case .jellyfin:
             let connection = ServerConnection(
-                id: Self.serverId(kind: .jellyfin, baseURL: stored.baseURL),
+                id: frozenServerId(stored, derived: Self.serverId(kind: .jellyfin, baseURL: stored.baseURL)),
                 kind: .jellyfin, name: stored.serverName, baseURL: stored.baseURL,
                 userID: stored.userID, clientIdentifier: clientIdentifier
             )
@@ -1653,7 +1741,7 @@ public final class AppEnvironment: ObservableObject {
             return (connection, backend)
         case .plex:
             var connection = ServerConnection(
-                id: Self.serverId(kind: .plex, baseURL: stored.baseURL),
+                id: frozenServerId(stored, derived: Self.serverId(kind: .plex, baseURL: stored.baseURL)),
                 kind: .plex, name: stored.serverName, baseURL: stored.baseURL,
                 userID: stored.userID, clientIdentifier: clientIdentifier,
                 musicSectionID: stored.musicSectionID
@@ -1676,7 +1764,7 @@ public final class AppEnvironment: ObservableObject {
                 throw MozzError.unauthorized
             }
             let connection = ServerConnection(
-                id: Self.serverId(kind: .subsonic, baseURL: stored.baseURL, username: stored.userID),
+                id: frozenServerId(stored, derived: Self.serverId(kind: .subsonic, baseURL: stored.baseURL, username: stored.userID)),
                 kind: .subsonic, name: stored.serverName, baseURL: stored.baseURL,
                 userID: stored.userID, clientIdentifier: clientIdentifier,
                 musicSectionID: stored.musicSectionID

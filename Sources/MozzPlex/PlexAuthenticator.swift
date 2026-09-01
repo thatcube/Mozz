@@ -141,18 +141,35 @@ public struct PlexAuthenticator: Sendable {
     public func firstReachableConnection(
         _ connections: [PlexResourceConnection]
     ) async -> PlexResourceConnection? {
+        await firstAnswering(connections) ?? connections.first
+    }
+
+    /// The first candidate that actually answers, or nil when none of them does.
+    ///
+    /// The difference from ``firstReachableConnection`` is the whole point:
+    /// there is no consolation prize. Sign-in wants a best guess when nothing
+    /// answers, because a guess is better than refusing to sign in; repair wants
+    /// the truth, because a guess would overwrite a stored address with a worse
+    /// one.
+    private func firstAnswering(
+        _ connections: [PlexResourceConnection]
+    ) async -> PlexResourceConnection? {
         for connection in connections {
-            let probe = HTTPClient(
-                baseURL: connection.uri,
-                transport: probeTransport,
-                defaultHeaders: PlexHeaders.common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: connection.accessToken),
-                retryPolicy: .none
-            )
-            if (try? await probe.send(Endpoint(path: "identity"))) != nil {
-                return connection
-            }
+            if await answers(connection) { return connection }
         }
-        return connections.first
+        return nil
+    }
+
+    /// One tight-timeout `identity` request — the cheapest thing a Plex server
+    /// will answer, and it needs no library to exist.
+    private func answers(_ connection: PlexResourceConnection) async -> Bool {
+        let probe = HTTPClient(
+            baseURL: connection.uri,
+            transport: probeTransport,
+            defaultHeaders: PlexHeaders.common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: connection.accessToken),
+            retryPolicy: .none
+        )
+        return (try? await probe.send(Endpoint(path: "identity"))) != nil
     }
 
     /// Probe candidates in preference order and return the first whose SERVER has
@@ -206,14 +223,71 @@ public struct PlexAuthenticator: Sendable {
         guard let chosen = await firstMusicConnection(connections) else {
             throw MozzError.notFound
         }
-        return AuthenticatedSession(
+        return session(from: chosen, accountToken: accountToken)
+    }
+
+    /// Re-resolve the working address of a server the app is ALREADY signed in
+    /// to, and return it as a session to persist.
+    ///
+    /// This is the repair for a pinned address that has stopped answering.
+    /// Plex hands out several addresses for one machine — LAN, remote, relay —
+    /// and which of them works depends on the network the device is on and on
+    /// whether Plex's own relay infrastructure is up. Sign-in picks one and, on
+    /// its own, would keep it forever: when that one dies the library looks
+    /// broken rather than unreachable.
+    ///
+    /// The point of `machineIdentifier` is that it, not the address, is the
+    /// server. Given one, this stays on the same machine and only changes how
+    /// the app gets there. Without one — an account linked before it was
+    /// recorded — it falls back to matching the stored name, and only if that
+    /// finds nothing does it widen to "any server of this account with music on
+    /// it", which is the same choice sign-in makes.
+    ///
+    /// The caller keeps its existing server id: identity belongs to the account,
+    /// and re-deriving it from the new address would orphan the catalogue, the
+    /// likes and the play history. See ADR-0017.
+    public func resolveConnection(
+        accountToken: String,
+        machineIdentifier: String? = nil,
+        serverName: String? = nil
+    ) async throws -> AuthenticatedSession {
+        let all = try await discoverConnections(accountToken: accountToken)
+        guard !all.isEmpty else { throw MozzError.notFound }
+
+        var candidates: [PlexResourceConnection] = []
+        if let machineIdentifier, !machineIdentifier.isEmpty {
+            candidates = all.filter { $0.clientIdentifier == machineIdentifier }
+        }
+        if candidates.isEmpty, let serverName, !serverName.isEmpty {
+            candidates = all.filter { $0.serverName == serverName }
+        }
+
+        // Re-resolution never hands back an address that did not answer. The
+        // caller is about to persist this over a known-good-until-recently one,
+        // and the reason the old address failed might be that the device has no
+        // network at all — in which case every candidate is equally silent and
+        // the right move is to keep what we have and try again later, not to
+        // repoint at a guess.
+        if !candidates.isEmpty {
+            guard let chosen = await firstAnswering(candidates) else { throw MozzError.serverUnreachable }
+            return session(from: chosen, accountToken: accountToken)
+        }
+        guard let chosen = await firstMusicConnection(all), await answers(chosen) else {
+            throw MozzError.serverUnreachable
+        }
+        return session(from: chosen, accountToken: accountToken)
+    }
+
+    private func session(from chosen: PlexResourceConnection, accountToken: String) -> AuthenticatedSession {
+        AuthenticatedSession(
             kind: .plex,
             baseURL: chosen.uri,
             token: chosen.accessToken,
             userID: nil,
             serverName: chosen.serverName,
             clientIdentifier: clientIdentifier,
-            accountToken: accountToken
+            accountToken: accountToken,
+            machineIdentifier: chosen.clientIdentifier.isEmpty ? nil : chosen.clientIdentifier
         )
     }
 

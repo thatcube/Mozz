@@ -89,7 +89,10 @@ class AppViewModel(
                 // partway leaves exactly this state, and showing an empty Home
                 // makes it look like the server has no music.
                 library.counts(account.serverId).tracks == 0 -> sync(account)
-                else -> _state.value = AppState.Ready(account)
+                else -> {
+                    _state.value = AppState.Ready(account)
+                    verifyReachable(account)
+                }
             }
         }.onFailure { error ->
             // A stored account that will not attach is not fatal — the token may
@@ -143,13 +146,42 @@ class AppViewModel(
             .onFailure { fail("Selecting a library", it) }
     }
 
+    /**
+     * Check that the address this account is pinned to still answers, and quietly
+     * move to one that does if it does not.
+     *
+     * Runs after the library is already on screen, not before, because it costs a
+     * round trip and the catalogue is local — making launch wait on the network
+     * to show music that is already on the device would be a bad trade. The
+     * symptom this catches is otherwise silent and total: every cover grey, every
+     * track refusing to play, with a library that looks intact. See ADR-0017.
+     */
+    private fun verifyReachable(account: ServerAccount) = viewModelScope.launch {
+        // `libraries` is a real request to the server (Plex answers it from
+        // library/sections), so it fails exactly when the address is dead.
+        if (runCatching { server.libraries(account.serverId) }.isSuccess) return@launch
+        val repointed = runCatching { server.repointAccount(account) }.getOrNull() ?: return@launch
+        if (_state.value is AppState.Ready) _state.value = AppState.Ready(repointed)
+    }
+
     private fun sync(account: ServerAccount) = viewModelScope.launch {
         _state.value = AppState.Syncing(account.serverName, null)
+        var target = account
         runCatching {
-            server.sync(account.serverId).collect { status ->
-                _state.value = AppState.Syncing(account.serverName, status)
+            server.sync(target.serverId).collect { status ->
+                _state.value = AppState.Syncing(target.serverName, status)
             }
-        }.onSuccess { _state.value = AppState.Ready(account) }
+        }.recoverCatching { error ->
+            // A sync that fails against a dead address fails the same way every
+            // time it is retried, because every retry goes to the same address.
+            // Ask the account for a working one and run it again — once. A null
+            // means there was nothing better to move to, and the original error
+            // is the honest one to report.
+            target = server.repointAccount(target) ?: throw error
+            server.sync(target.serverId).collect { status ->
+                _state.value = AppState.Syncing(target.serverName, status)
+            }
+        }.onSuccess { _state.value = AppState.Ready(target) }
             .onFailure { fail("Sync", it) }
     }
 

@@ -19,6 +19,19 @@ struct StoredSession: Codable, Sendable {
     /// The music library section ids the user chose to sync (Plex). Nil = all
     /// (the default). Decodes to nil for sessions saved before this field.
     var selectedMusicSectionIDs: [String]? = nil
+    /// The **server's** machine identifier (Plex). What re-resolution matches on
+    /// when the stored address stops answering — the address changes, this does
+    /// not. Nil for sessions saved before it was recorded.
+    var machineIdentifier: String? = nil
+    /// The catalogue's server id, frozen the first time this session is
+    /// activated.
+    ///
+    /// It is otherwise derived by hashing `baseURL`, which quietly makes the
+    /// address the identity: repointing a Plex account at a working address
+    /// would present as a different server, with an empty catalogue and no
+    /// likes or play history. Freezing it lets the address change without
+    /// orphaning any of that. See ADR-0017.
+    var serverId: String? = nil
 }
 
 /// Reads/writes the single active ``StoredSession`` as a JSON blob under one

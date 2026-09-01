@@ -204,6 +204,54 @@ class MozzServer(
         return resolved
     }
 
+    /**
+     * Ask the Plex account for an address that answers, and re-attach the
+     * account on it.
+     *
+     * Plex hands out several addresses for one server — LAN, remote, relay —
+     * and any of them can stop working while the others are fine. Linking picks
+     * one and, left alone, keeps it forever: when it dies, every cover goes grey
+     * and playback fails, which reads as a broken app rather than a bad address.
+     * (One did die, for twenty minutes, on 2026-09-01. See ADR-0017.)
+     *
+     * The account's id is passed through unchanged, so the catalogue, the likes
+     * and the play history stay attached to it. Returns the updated account, or
+     * null when there was nothing to change — no account token, no candidate
+     * that answered, or the address already being the right one. A null is not a
+     * failure worth surfacing: it means "still the best we know of".
+     */
+    suspend fun repointAccount(account: ServerAccount): ServerAccount? {
+        if (account.kind != BackendKind.PLEX) return null
+        val accountToken = secrets.get(plexAccountKey(account.serverId))
+            ?.takeIf { it.isNotEmpty() } ?: return null
+
+        val session: SessionPayload = runCatching {
+            core.call<SessionPayload>(
+                CoreRequest(
+                    cmd = "plexResolve",
+                    serverId = account.serverId,
+                    accountToken = accountToken,
+                    machineIdentifier = account.machineIdentifier,
+                    serverName = account.serverName,
+                    clientIdentifier = account.clientIdentifier,
+                )
+            )
+        }.getOrNull() ?: return null
+        if (session.baseURL.isEmpty() || session.token.isEmpty()) return null
+        if (session.baseURL == account.baseUrl && session.token == secrets.get(secretKey(account.serverId))) {
+            return null
+        }
+
+        val updated = account.copy(
+            baseUrl = session.baseURL,
+            machineIdentifier = session.machineIdentifier ?: account.machineIdentifier,
+        )
+        secrets.set(secretKey(updated.serverId), session.token)
+        saveAccount(updated)
+        attach(updated)
+        return updated
+    }
+
     suspend fun libraries(serverId: String): List<MusicLibrary> =
         core.call<List<MusicLibrary>>(CoreRequest(cmd = "libraries", serverId = serverId))
             ?: emptyList()
@@ -381,6 +429,7 @@ class MozzServer(
             username = username,
             clientIdentifier = session.clientIdentifier.ifEmpty { identifier },
             musicSectionId = null,
+            machineIdentifier = session.machineIdentifier,
         )
 
         secrets.set(secretKey(account.serverId), session.token)

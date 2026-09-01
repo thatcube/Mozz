@@ -44,6 +44,10 @@ data class CoreRequest(
     val musicSectionID: String? = null,
     val pinId: Int? = null,
     val code: String? = null,
+    /** Plex's account token — for `plexResolve` only. */
+    val accountToken: String? = null,
+    /** The Plex **server's** machine identifier, so re-resolution stays on it. */
+    val machineIdentifier: String? = null,
     val artworkKey: String? = null,
     val size: Int? = null,
     val maxBitrateKbps: Int? = null,
@@ -352,6 +356,8 @@ internal data class SessionPayload(
     val serverName: String = "",
     val clientIdentifier: String = "",
     val accountToken: String? = null,
+    /** The server's own machine identifier — see [ServerAccount.machineIdentifier]. */
+    val machineIdentifier: String? = null,
 )
 
 @Serializable
@@ -420,6 +426,15 @@ data class ServerAccount(
     val userId: String? = null,
     val username: String? = null,
     val musicSectionId: String? = null,
+    /**
+     * The Plex **server's** machine identifier — not this app's, which is
+     * [clientIdentifier].
+     *
+     * A Plex server has several addresses and none of them is the server; this
+     * is what stays the same when the address changes, so it is what
+     * re-resolution matches on. Null for accounts linked before it was recorded.
+     */
+    val machineIdentifier: String? = null,
 )
 
 /** An in-progress Plex link: show [linkUrl] to the user, then poll. */

@@ -38,6 +38,14 @@ public struct AuthenticatedSession: Sendable, Hashable {
     /// retained so the app can re-discover the account's servers later for the
     /// server picker. Nil for Jellyfin.
     public var accountToken: String?
+    /// The **server's** machine identifier (Plex's `clientIdentifier` for the
+    /// resource — not this app's, which is `clientIdentifier` above).
+    ///
+    /// A Plex server has several addresses and no single one of them is the
+    /// server; this is the thing that stays the same when the address changes,
+    /// so it is what re-resolution matches on. Nil for accounts signed in before
+    /// it was recorded, and for backends that have one address by definition.
+    public var machineIdentifier: String?
 
     public init(
         kind: BackendKind,
@@ -46,7 +54,8 @@ public struct AuthenticatedSession: Sendable, Hashable {
         userID: String? = nil,
         serverName: String,
         clientIdentifier: String,
-        accountToken: String? = nil
+        accountToken: String? = nil,
+        machineIdentifier: String? = nil
     ) {
         self.kind = kind
         self.baseURL = baseURL
@@ -55,6 +64,7 @@ public struct AuthenticatedSession: Sendable, Hashable {
         self.serverName = serverName
         self.clientIdentifier = clientIdentifier
         self.accountToken = accountToken
+        self.machineIdentifier = machineIdentifier
     }
 }
 

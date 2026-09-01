@@ -181,6 +181,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
             try
             {
                 await _server.AttachAsync(account);
+                _ = VerifyReachableAsync(account);
             }
             catch (Exception ex)
             {
@@ -189,6 +190,68 @@ public sealed partial class ConnectViewModel : ViewModelBase
                 // must not stop the app from opening.
                 Message = Explain(ex);
             }
+        }
+    }
+
+    /// <summary>
+    /// Check that the address this account is pinned to still answers, and
+    /// quietly move to one that does if it does not.
+    ///
+    /// Deliberately not awaited by the caller: the library is on disk and should
+    /// be on screen immediately, so this costs the user nothing when the address
+    /// is fine. The symptom it catches is otherwise silent and total — every
+    /// cover grey, nothing playable, with a library that looks intact. See
+    /// ADR-0017.
+    /// </summary>
+    private async Task VerifyReachableAsync(ServerAccount account)
+    {
+        try
+        {
+            // A real request to the server (Plex answers it from
+            // library/sections), so it fails exactly when the address is dead.
+            await _server.LibrariesAsync(account.ServerId);
+            return;
+        }
+        catch (Exception)
+        {
+            // Fall through to the repair.
+        }
+
+        try
+        {
+            var repointed = await _server.RepointAccountAsync(account);
+            if (repointed is null) return;
+            Accounts.Clear();
+            foreach (var saved in _server.SavedAccounts()) Accounts.Add(saved);
+            OnPropertyChanged(nameof(HasAccounts));
+        }
+        catch (Exception ex)
+        {
+            Message = Explain(ex);
+        }
+    }
+
+    /// <summary>
+    /// Run a sync, and if it fails against a dead address, move to a working one
+    /// and run it again — once.
+    ///
+    /// Retrying on its own would not help: every retry goes to the same address
+    /// that just refused. When there is nothing better to move to,
+    /// <c>RepointAccountAsync</c> returns null and the original failure is the
+    /// honest one to report.
+    /// </summary>
+    private async Task<SyncStatus> SyncWithRepointAsync(
+        ServerAccount account, IProgress<SyncStatus> progress)
+    {
+        try
+        {
+            return await _server.SyncAsync(account.ServerId, progress);
+        }
+        catch (Exception)
+        {
+            var repointed = await _server.RepointAccountAsync(account);
+            if (repointed is null) throw;
+            return await _server.SyncAsync(repointed.ServerId, progress);
         }
     }
 
@@ -225,7 +288,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
                     : 0;
             });
 
-            var final = await _server.SyncAsync(account.ServerId, progress);
+            var final = await SyncWithRepointAsync(account, progress);
             SyncDetail = $"{final.Tracks:N0} songs · {final.Albums:N0} albums · {final.Artists:N0} artists";
             Message = $"{account.ServerName} is ready.";
             await _onLibraryChanged();

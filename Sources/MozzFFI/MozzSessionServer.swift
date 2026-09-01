@@ -59,6 +59,9 @@ struct WireSession: Encodable {
     var serverName: String
     var clientIdentifier: String
     var accountToken: String?
+    /// The server's own machine identifier — the thing that stays constant when
+    /// its address changes. Persist it: it is what `plexResolve` matches on.
+    var machineIdentifier: String?
 }
 
 struct WirePinSession: Encodable {
@@ -404,6 +407,30 @@ func dispatchServerCommand(
         let authenticated = try await auth.completeLogin(accountToken: accountToken)
         return session.success(request, wire(authenticated))
 
+    case "plexResolve":
+        // The repair for a pinned address that has stopped answering. See
+        // ADR-0017: Plex gives a server several addresses, sign-in picks one,
+        // and when that one dies the app looks broken rather than disconnected.
+        //
+        // The server id is NOT re-derived. The caller passes the id it already
+        // holds and gets it back unchanged, because the catalogue, the likes and
+        // the play history are keyed on it — repointing the address must not
+        // orphan them.
+        guard let accountToken = request.accountToken, !accountToken.isEmpty else {
+            return session.failure(request, "plexResolve needs the Plex accountToken")
+        }
+        let resolver = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier ?? fallbackClientIdentifier())
+        let resolved = try await resolver.resolveConnection(
+            accountToken: accountToken,
+            machineIdentifier: request.machineIdentifier,
+            serverName: request.serverName
+        )
+        var wired = wire(resolved)
+        if let existing = request.serverId, !existing.isEmpty { wired.serverId = existing }
+        return session.success(request, wired)
+
     // MARK: Attach / mirror
 
     case "attach":
@@ -605,7 +632,8 @@ func wire(_ authenticated: AuthenticatedSession) -> WireSession {
         userID: authenticated.userID,
         serverName: authenticated.serverName,
         clientIdentifier: authenticated.clientIdentifier,
-        accountToken: authenticated.accountToken
+        accountToken: authenticated.accountToken,
+        machineIdentifier: authenticated.machineIdentifier
     )
 }
 

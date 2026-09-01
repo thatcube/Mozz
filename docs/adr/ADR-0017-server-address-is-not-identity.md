@@ -1,17 +1,17 @@
 # ADR-0017 — A server's address is not its identity
 
-Status: **Proposed** (the enabler is in; the resolution path is not)
+Status: **Accepted** — implemented on iOS, Android and desktop.
 
 ## Context
 
 Plex does not have *an* address for a server. `api/v2/resources` returns several
 candidate connections for the same machine — a LAN address, a remote address, and
 a relay address that tunnels through Plex's own infrastructure — and which of
-them works depends on the network the phone happens to be on.
+them works depends on the network the device happens to be on.
 
-Mozz picks one at sign-in and never asks again. `mozzServerId(kind:baseURL:)`
-then derives the account's identity by hashing that address, and the catalogue,
-the likes and the entire play history are keyed on the result.
+Mozz picked one at sign-in and never asked again. `mozzServerId(kind:baseURL:)`
+then derived the account's identity by hashing that address, and the catalogue,
+the likes and the entire play history were keyed on the result.
 
 Two consequences, both observed:
 
@@ -25,55 +25,80 @@ javax.net.ssl.SSLHandshakeException: connection closed
 curl: (35) … exit 35, tls=0.000000s
 ```
 
-Every cover in the app went grey and playback failed, while the same library was
-fine on the iPhone and the TV — because those had re-resolved to a working
-address. The failure is intermittent: it recovered on its own twenty minutes
-later, which is exactly what makes it hard to recognise as an address problem
-rather than a flaky app.
+Every cover in the app went grey and playback failed. The failure is
+intermittent: it recovered on its own twenty minutes later, which is exactly what
+makes it hard to recognise as an address problem rather than a flaky app.
 
-**Re-resolving would orphan the library.** Because identity is derived from the
-address, pointing the account at a working address makes it, as far as the
-database is concerned, a different server: a new empty catalogue, no likes, no
-history.
+**Re-resolving would orphan the library.** Because identity was derived from the
+address, pointing the account at a working address made it, as far as the
+database was concerned, a different server: a new empty catalogue, no likes, no
+history. That is why the app could not simply re-resolve, and it is the deeper
+half of the bug.
+
+### A correction
+
+An earlier revision of this ADR said Mozz never stores the Plex **account**
+token, and treated storing it as the price of re-resolution. That was wrong, and
+the error mattered: it made the safe fix look expensive.
+
+Every client already stores it, and has for as long as the server picker has
+existed — iOS in the Keychain (`StoredSession.accountToken`, routed through
+iCloud Keychain), Android under `plex.account.<serverId>` in the Keystore-backed
+store, the desktop under the same key in its secret store. `discoverConnections`
+is what the "switch server" picker is built on.
+
+So re-resolution asks for **no new privilege**. It reads a credential the app is
+already holding, for a purpose it is already used for.
 
 ## Decision
 
 Identity belongs to the *account*, established once, and travels with it. The
 address is a property that may change.
 
-`attach` now accepts a `serverId` and uses it when given, deriving one only for
-an account being met for the first time. Both clients pass the id they already
-hold. This is the enabler and it is landed; nothing re-resolves yet.
+**1. Freeze the id.** `attach` accepts a `serverId` and uses it when given,
+deriving one only for an account being met for the first time. All three clients
+pass the id they already hold. On iOS the id is frozen into `StoredSession` on
+first activation — for existing installs the value written back is exactly the
+one they were already using, so nothing moves.
 
-## What is not decided
+**2. Record the machine.** `AuthenticatedSession`, `WireSession` and each
+client's saved account gained `machineIdentifier` — Plex's identifier for the
+*server*, which is the thing that does not change when the address does.
 
-How to re-resolve, and it turns on a credential question rather than a technical
-one.
+**3. Re-resolve on failure.** `PlexAuthenticator.resolveConnection` discovers the
+account's connections, narrows them to that machine (by identifier, or by name
+for accounts linked before identifiers were recorded), and returns the first that
+answers. Exposed over the FFI as `plexResolve`, which echoes the caller's
+`serverId` back unchanged.
 
-`api/v2/resources` is account-scoped: it needs the Plex **account** token. Mozz
-never stores that. `plexPinCheck` receives it, hands it straight to
-`completeLogin`, and keeps only the per-server access token that comes back —
-which is the narrower credential, and deliberately so.
+Re-resolution **never returns an address that did not answer**. A device with no
+network at all looks identical to a dead address — every candidate is silent —
+and repointing to a guess made offline would take a working configuration and
+break it. `firstReachableConnection` keeps its "best guess" fallback for sign-in,
+where a guess beats refusing to sign in; repair uses a strict probe that can
+return nothing.
 
-Three ways forward, in order of how much they ask for:
+Each client repairs in two places, one for each way the symptom appears:
 
-1. **Store the candidate list at sign-in.** `discoverConnections` already returns
-   every candidate with its own server access token. Persisting the addresses
-   costs no new privilege — the token stored is the same class already held — and
-   lets the app re-probe them in preference order whenever the pinned one fails.
-   Takes effect only after a re-link, since existing accounts saved no list.
-2. **Store the account token.** Simplest, works for existing accounts on next
-   launch, and widens what a compromised device gives up from one server to the
-   whole Plex account. That is a real trade and should be a deliberate one.
-3. **Local discovery (GDM).** Plex servers answer a UDP broadcast on 32410–32414
-   with no token at all. Credential-free and fixes the common case — being at
-   home while pinned to a relay — but only the common case.
+| | at launch | during a sync |
+|---|---|---|
+| iOS | `activate` — capability detection came back nil | between the existing retry attempts |
+| Android | `verifyReachable`, after the library is on screen | one retry through `repointAccount` |
+| Desktop | `VerifyReachableAsync`, not awaited | `SyncWithRepointAsync` |
 
-(1) is the honest default; (2) should not be adopted silently.
+The launch check is deliberately off the critical path on Android and desktop:
+the catalogue is local and should be on screen immediately, so a healthy address
+costs the user nothing.
 
 ## Consequences
 
-Until a resolution path exists, an account pinned to a bad address stays there,
-and the symptom is a library that looks broken rather than a connection that is.
-The retry and per-host cap on Android's artwork loader soften a *flaky* hop; they
-do nothing for a dead one.
+An account whose address dies now moves to a working one on its own, keeping its
+catalogue, its likes and its history. A user who has never noticed any of this is
+the intended outcome.
+
+What is still true: this is Plex-only. Jellyfin and Subsonic have one address by
+definition, and if that address changes the user has to say so. Local discovery
+(GDM — Plex servers answer a UDP broadcast on 32410–32414 with no token at all)
+remains unbuilt; it would fix the common case of being at home while pinned to a
+relay without any credential, and is worth having if the account path ever proves
+unreliable.

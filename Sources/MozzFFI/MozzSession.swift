@@ -63,6 +63,12 @@ struct SessionRequest: Decodable {
     var musicSectionID: String?
     var pinId: Int?
     var code: String?
+    /// The Plex *account* token, for `plexResolve` only. Every other command
+    /// works from the per-server access token in `token`.
+    var accountToken: String?
+    /// The Plex **server's** machine identifier, so re-resolution stays on the
+    /// same machine rather than wandering to another server on the account.
+    var machineIdentifier: String?
     var artworkKey: String?
     var size: Int?
     var maxBitrateKbps: Int?
@@ -949,7 +955,7 @@ let mozzSessionCommands = [
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
-    "connect", "plexPin", "plexPinCheck", "attach", "libraries",
+    "connect", "plexPin", "plexPinCheck", "plexResolve", "attach", "libraries",
     "sync", "syncStatus", "streamURL", "artworkURL",
     "capabilities", "setLiked", "setRating",
 ].sorted()
