@@ -45,6 +45,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
 
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.displayScale) private var displayScale
     @State private var bg: Color = Color(white: 0.12)
     @State private var deepBg: Color = .mozzDetailBackground
 
@@ -160,7 +161,7 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
             ZStack(alignment: .bottom) {
                 Color.clear
                     .frame(width: geo.size.width, height: Self.fullBleedHeight + stretch)
-                    .overlay { heroArtwork }
+                    .overlay { heroArtwork(width: geo.size.width) }
                     .clipped()
                     .overlay {
                         // Keep text legible + fade the image into the page color.
@@ -189,8 +190,13 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
     /// The hero artwork content (real image or the deterministic fallback). Filled
     /// via aspect-fill inside a fixed-width box, so as the box grows taller during
     /// an overscroll pull the image scales up (zooms) to keep covering it.
-    @ViewBuilder private var heroArtwork: some View {
-        if let url = heroURL(pixels: 1200) {
+    @ViewBuilder private func heroArtwork(width: CGFloat) -> some View {
+        // Sized from the box it fills, not a constant: 1200px was chosen for a
+        // phone, and on an iPad the same hero is over 2000 physical pixels wide —
+        // which turned every artist and playlist header into a visible upscale.
+        // The box is aspect-filled, so the larger of its two sides is what has to
+        // be covered.
+        if let url = heroURL(points: max(width, Self.fullBleedHeight)) {
             CachedArtworkImage(url: url) { heroFallback }
         } else {
             heroFallback
@@ -285,9 +291,12 @@ struct MediaDetailScaffold<Actions: View, Content: View>: View {
         LinearGradient(colors: [bg.opacity(0.85), bg], startPoint: .top, endPoint: .bottom)
     }
 
-    private func heroURL(pixels: CGFloat) -> URL? {
+    private func heroURL(points: CGFloat) -> URL? {
         guard let artwork = hero.artwork, let backend = env.active?.backend else { return nil }
-        return backend.artworkURL(for: artwork, size: Int(pixels))
+        return backend.artworkURL(
+            for: artwork,
+            size: ArtworkResolution.rung(forPoints: points, scale: displayScale)
+        )
     }
 }
 

@@ -49,6 +49,10 @@ struct NowPlayingMorphContainer: View {
         _lyrics = State(initialValue: LyricsController(playback: playback))
     }
 
+    /// The display's pixels-per-point, so prefetches ask for the pixels this
+    /// screen will actually draw rather than a @2x assumption.
+    @Environment(\.displayScale) private var displayScale
+
     /// 0 = docked island, 1 = full drawer. Animated by the open/collapse springs.
     @State private var p: CGFloat = 0
     /// Live drag translation (points) while the open drawer is being pulled down.
@@ -410,7 +414,7 @@ struct NowPlayingMorphContainer: View {
                 // Warm the current + upcoming covers at the player's pixel size so
                 // skipping finds the artwork already cached — no placeholder flash.
                 .onChange(of: prefetchToken, initial: true) { _, _ in
-                    prefetchNearbyArtwork()
+                    prefetchNearbyArtwork(side: m.expArtSide)
                 }
                 // Live finger translation for drag-to-dismiss, applied as ONE
                 // container offset here — isolated behind a binding so reading
@@ -425,14 +429,18 @@ struct NowPlayingMorphContainer: View {
         }
     }
 
-    /// Prefetch the current + next few covers at the player's pixel size (matching
-    /// `MorphArtwork`: base 340 × 2 = 680) so a skip finds the art already cached
-    /// and renders it on the first frame instead of flashing a placeholder.
-    private func prefetchNearbyArtwork() {
+    /// Prefetch the current + next few covers so a skip finds the artwork already
+    /// cached and renders it on the first frame instead of flashing a placeholder.
+    ///
+    /// `side` is the expanded player's artwork size, and it has to be: a prefetch
+    /// at any other size warms a URL nothing asks for, which costs a download and
+    /// buys nothing.
+    private func prefetchNearbyArtwork(side: CGFloat) {
         guard let backend = env.active?.backend else { return }
+        let pixels = ArtworkResolution.rung(forPoints: side, scale: displayScale)
         let tracks = [playback.currentTrack].compactMap { $0 } + playback.upNext.prefix(3)
         for track in tracks {
-            if let artwork = track.artwork, let url = backend.artworkURL(for: artwork, size: 680) {
+            if let artwork = track.artwork, let url = backend.artworkURL(for: artwork, size: pixels) {
                 ArtworkImageLoader.shared.prefetch(url)
             }
         }
@@ -570,7 +578,8 @@ struct NowPlayingMorphContainer: View {
         // nothing during the transition and rasterizes once at rest. Dropped while
         // the queue is open — the compact thumbnail carries no drop shadow.
         let showShadow = settled && openPanel == nil
-        return MorphArtwork(track: playback.currentTrack, side: m.artSide, cornerRadius: m.artRadius)
+        return MorphArtwork(track: playback.currentTrack, side: m.artSide,
+                            cornerRadius: m.artRadius, resolveSide: m.expArtSide)
             .scaleEffect(pausedScale)
             .shadow(color: .black.opacity(showShadow ? 0.35 : 0), radius: 16, y: 8)
             .position(x: m.artCenterX, y: m.artCenterY)
@@ -2773,9 +2782,14 @@ private struct MorphArtwork: View {
     let track: Track?
     let side: CGFloat
     var cornerRadius: CGFloat = 10
+    /// The largest side this artwork will ever be drawn at. The URL is resolved
+    /// from THIS, not from `side`, so the animated size never changes the request
+    /// — and so the cover is fetched at the size the expanded player will show it
+    /// rather than the size the dock started it at.
+    var resolveSide: CGFloat?
 
     @EnvironmentObject private var env: AppEnvironment
-    private let base: CGFloat = 340
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Group {
@@ -2791,7 +2805,8 @@ private struct MorphArtwork: View {
 
     private var resolvedURL: URL? {
         guard let artwork = track?.artwork, let backend = env.active?.backend else { return nil }
-        return backend.artworkURL(for: artwork, size: Int(base * 2))
+        let pixels = ArtworkResolution.rung(forPoints: resolveSide ?? side, scale: displayScale)
+        return backend.artworkURL(for: artwork, size: pixels)
     }
 
     private var placeholder: some View { ArtworkPlaceholder() }

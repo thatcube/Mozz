@@ -247,7 +247,7 @@ private fun TrackRow(track: Track, server: MozzServer? = null, onClick: (() -> U
                 server = server,
                 serverId = track.serverId,
                 artworkKey = track.artworkKey,
-                size = 160,
+                pixels = artworkPixels(44.dp),
                 modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
             )
             Spacer(Modifier.width(14.dp))
@@ -288,7 +288,7 @@ private fun AlbumRow(album: Album, server: MozzServer, onClick: () -> Unit) {
             server = server,
             serverId = album.serverId,
             artworkKey = album.artworkKey,
-            size = 160,
+            pixels = artworkPixels(52.dp),
             modifier = Modifier.size(52.dp).clip(RoundedCornerShape(6.dp)),
         )
         Spacer(Modifier.width(14.dp))

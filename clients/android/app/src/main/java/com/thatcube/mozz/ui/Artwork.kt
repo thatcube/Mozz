@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -40,17 +42,18 @@ fun Artwork(
     server: MozzServer,
     serverId: String,
     artworkKey: String?,
-    size: Int,
+    /** Pixels to ask for — see [artworkPixels], which is how callers get one. */
+    pixels: Int,
     modifier: Modifier = Modifier,
 ) {
     var url by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(serverId, artworkKey) {
+    LaunchedEffect(serverId, artworkKey, pixels) {
         if (artworkKey == null) {
             url = null
             return@LaunchedEffect
         }
-        val resolved = runCatching { server.artworkUrl(serverId, artworkKey, size) }.getOrNull()
+        val resolved = runCatching { server.artworkUrl(serverId, artworkKey, pixels) }.getOrNull()
         // Only ever replaced by something real. A server that fails to answer for
         // one track should not blank the cover that is already showing.
         if (resolved != null) url = resolved
@@ -68,6 +71,13 @@ fun Artwork(
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(current)
+                    // Decode at the size we asked the server for, rather than at
+                    // whatever this box measures. The player's cover is laid out
+                    // by the morph, so its measured size sweeps from a 48dp
+                    // thumbnail to the full screen while it opens — letting Coil
+                    // size the decode off that would sample the cover down to the
+                    // dock and then scale that back up.
+                    .size(pixels)
                     .crossfade(ARTWORK_FADE_MS)
                     .build(),
                 contentDescription = null,
@@ -85,10 +95,10 @@ fun Artwork(
  * entirely whether the fetch started before the track changed, which is why iOS
  * prefetches too. Failures are ignored on purpose: this is opportunistic.
  */
-suspend fun prefetchArtwork(server: MozzServer, context: android.content.Context, track: Track?, size: Int) {
+suspend fun prefetchArtwork(server: MozzServer, context: android.content.Context, track: Track?, pixels: Int) {
     val key = track?.artworkKey ?: return
     runCatching {
-        val url = server.artworkUrl(track.serverId, key, size) ?: return
+        val url = server.artworkUrl(track.serverId, key, pixels) ?: return
         SingletonImageLoader.get(context).execute(
             ImageRequest.Builder(context).data(url).build()
         )
@@ -97,3 +107,43 @@ suspend fun prefetchArtwork(server: MozzServer, context: android.content.Context
 
 /** Long enough to read as a dissolve, short enough not to feel slow. */
 private const val ARTWORK_FADE_MS = 220
+
+/**
+ * How many pixels to ask a server for, given how many pixels a slot will draw.
+ *
+ * Mirrors `ArtworkResolution` in the Swift core, rung for rung, because a cover
+ * fetched on the phone and the same cover fetched on the desktop should be the
+ * same bytes — a shared ladder is what makes that true.
+ *
+ * Every artwork request used to carry a hand-picked constant, which is a guess
+ * about a screen. The expanded player asked for 1024 pixels and drew them across
+ * 1921 on a fold's inner display: a 1.9x upscale, and the reason big covers
+ * looked soft there while the same covers looked fine in a list. The number a
+ * slot needs is not a constant; it is the slot's own size times this display's
+ * density.
+ *
+ * Asking for exactly that would be worse, though. Each distinct size is a
+ * separate transcode on the server and a separate cache entry, so requests are
+ * snapped UP to a rung: a whole device class shares one value, and no cover is
+ * ever smaller than the box it fills.
+ */
+object ArtworkResolution {
+    /** Roughly √2 apart. */
+    private val RUNGS = intArrayOf(128, 192, 256, 384, 512, 768, 1024, 1536, 2048)
+
+    /**
+     * The smallest rung that covers [pixels], capped at the largest.
+     *
+     * The cap matters: a full-bleed hero on an unfolded display can measure past
+     * 2700 physical pixels, and no music server holds cover art that big — asking
+     * only makes the server upscale, which costs time and buys nothing.
+     */
+    fun rung(pixels: Int): Int = RUNGS.firstOrNull { it >= pixels } ?: RUNGS.last()
+}
+
+/** The rung for a slot drawn at [side] on this display. */
+@Composable
+fun artworkPixels(side: Dp): Int {
+    val density = LocalDensity.current
+    return ArtworkResolution.rung(with(density) { side.roundToPx() })
+}

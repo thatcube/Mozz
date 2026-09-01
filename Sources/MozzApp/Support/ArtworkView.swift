@@ -41,6 +41,10 @@ struct ArtworkView: View {
     var circular: Bool = false
 
     @EnvironmentObject private var env: AppEnvironment
+    /// The display's pixels-per-point. Read from the environment rather than
+    /// assumed: a @3x iPhone needs half again as many pixels as a @2x one for the
+    /// same box, and hardcoding 2 made every cover on those devices a soft upscale.
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Group {
@@ -62,7 +66,8 @@ struct ArtworkView: View {
 
     private var resolvedURL: URL? {
         guard let artwork, let backend = env.active?.backend else { return nil }
-        return backend.artworkURL(for: artwork, size: Int(size * 2))
+        let pixels = ArtworkResolution.rung(forPoints: size, scale: displayScale)
+        return backend.artworkURL(for: artwork, size: pixels)
     }
 
     private var placeholder: some View { ArtworkPlaceholder() }

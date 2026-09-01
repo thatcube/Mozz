@@ -101,6 +101,18 @@ internal fun MorphHost(
     // Read once per frame in the layout/draw lambdas below, never in composition.
     val frame = { morphAt(progress(), artSlot, cardSlot) }
 
+    // How many pixels the cover is fetched at: the size of the slot it flies
+    // INTO, not the size it happens to be mid-flight. A request keyed to the
+    // animated size would refetch the whole way up, and would leave the open
+    // player showing a cover fetched for a 48dp dock thumbnail.
+    //
+    // Progress is passed as a literal zero rather than read: `expandedArtSide`
+    // does not depend on it, and reading `progress()` here would subscribe
+    // composition to a value that changes every frame.
+    val coverPixels = ArtworkResolution.rung(
+        morphAt(0f, artSlot, cardSlot).expandedArtSide.roundToInt()
+    )
+
     /**
      * True once the cover has arrived in the card's slot, at which point the
      * card's own artwork takes over so it can scroll and clip with the list. The
@@ -202,6 +214,7 @@ internal fun MorphHost(
                 onPanel = onPanel,
                 wide = wide,
                 capabilities = capabilities,
+                coverPixels = coverPixels,
                 onCollapse = onCollapse,
                 // Only the resting slot is the cover's destination.
                 //
@@ -282,7 +295,7 @@ internal fun MorphHost(
                 server = server,
                 serverId = track.serverId,
                 artworkKey = track.artworkKey,
-                size = 1024,
+                pixels = coverPixels,
                 modifier = Modifier.fillMaxSize(),
             )
         }

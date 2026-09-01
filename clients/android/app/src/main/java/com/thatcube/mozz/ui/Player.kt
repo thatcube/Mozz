@@ -135,6 +135,8 @@ internal fun PlayerBody(
     wide: Boolean,
     /** What this server means by "liked", and how to change it. */
     capabilities: ServerCapabilities?,
+    /** The pixel size the cover is fetched at — the morph owns that number. */
+    coverPixels: Int,
     onCollapse: () -> Unit,
     onArtSlot: (Rect) -> Unit,
     /** Where the queue card's thumbnail landed — the cover's second destination. */
@@ -217,7 +219,8 @@ internal fun PlayerBody(
     // previous artwork stops the black square; this is what stops the wait.
     val context = LocalContext.current
     LaunchedEffect(state.indexInQueue, state.queue.size) {
-        prefetchArtwork(server, context, state.queue.getOrNull(state.indexInQueue + 1), 1024)
+        // At the cover's own size, or it warms a URL nothing asks for.
+        prefetchArtwork(server, context, state.queue.getOrNull(state.indexInQueue + 1), coverPixels)
     }
 
     CompositionLocalProvider(LocalContentColor provides PlayerForeground) {
@@ -1131,7 +1134,7 @@ private fun NowPlayingCard(
                     server = server,
                     serverId = track.serverId,
                     artworkKey = track.artworkKey,
-                    size = 256,
+                    pixels = artworkPixels(CARD_ART_SIDE),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1268,7 +1271,7 @@ private fun QueueRow(
             server = server,
             serverId = track.serverId,
             artworkKey = track.artworkKey,
-            size = 160,
+            pixels = artworkPixels(44.dp),
             modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
         )
         Spacer(Modifier.width(12.dp))
