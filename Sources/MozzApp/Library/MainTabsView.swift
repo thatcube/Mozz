@@ -232,7 +232,8 @@ struct MainTabsView: View {
                                          wide: isWide)
                     .zIndex(100)
             }
-            ToastOverlayView(hasTrack: hasTrack, hasBottomBar: !isWide)
+            ToastOverlayView(hasTrack: hasTrack, hasBottomBar: !isWide,
+                             contentLeft: isWide ? SideNav.columnWidth : 0)
                 .zIndex(110)
             // Cross-device resume offer (ADR-0010). Sits BELOW the now-playing
             // morph on purpose: dismissing the full player animates it back down

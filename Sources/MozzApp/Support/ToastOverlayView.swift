@@ -13,13 +13,23 @@ struct ToastOverlayView: View {
     /// Whether there is a bottom bar to clear at all. Beside a rail there is
     /// not — only the dock, which floats at the same height at every width.
     var hasBottomBar: Bool = true
+    /// Left edge of the content area — the sidebar's column when there is one.
+    /// The toast sits over the content it is about, like the dock.
+    var contentLeft: CGFloat = 0
 
     var body: some View {
         VStack {
             Spacer(minLength: 0)
             if let toast = toasts.current {
                 card(toast)
-                    .padding(.horizontal, 14)
+                    // The dock's own width and centre, not a width of its own.
+                    // Two floating cards a few points apart in width, stacked
+                    // one above the other, read as a mistake rather than as two
+                    // things; sharing the geometry makes them a set.
+                    .frame(maxWidth: BottomBar.dockMaxWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, BottomBar.hMargin)
+                    .padding(.leading, contentLeft)
                     .padding(.bottom, bottomInset)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }

@@ -79,6 +79,7 @@ enum MozzIconMap {
         "shuffle": "arrows-shuffle",
         "play.fill": "player-play",
         "forward.fill": "player-skip-forward",
+        "backward.fill": "player-skip-back",
         "magnifyingglass": "search",
         "heart": "heart",
         "heart.fill": "heart-filled",

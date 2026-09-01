@@ -413,6 +413,21 @@ private fun DockContent(
             }
         }
 
+        // Only here. On a phone-width pill the row is artwork, a title and two
+        // controls; a third would make all of them harder to hit than any of
+        // them is worth.
+        if (wide) {
+            IconButton(onClick = { playback.previous() }, enabled = state.hasPrevious) {
+                Icon(
+                    painterResource(R.drawable.ic_skip_back),
+                    contentDescription = "Previous",
+                    tint = if (state.hasPrevious) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
         IconButton(onClick = playback::togglePlayPause) {
             Icon(
                 painterResource(if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),

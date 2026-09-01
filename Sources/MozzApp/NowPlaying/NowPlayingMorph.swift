@@ -2170,10 +2170,10 @@ private struct IslandContent: View {
     /// trailing inset). Deterministic — no measurement, no feedback loop.
     private func zoneWidth(pill: CGFloat, collapse: CGFloat) -> CGFloat {
         let skip = (30 + 10) * (1 - collapse)     // skip button + its HStack gap
-        // Shuffle and repeat, when the pill is wide enough to carry them. They
-        // collapse away with the skip, since a pill dropped into the tab bar is
-        // never wide.
-        let extras = wide ? 2 * (30 + 10) * (1 - collapse) : 0
+        // Previous, shuffle and repeat, when the pill is wide enough to carry
+        // them. They collapse away with the skip, since a pill dropped into the
+        // tab bar is never wide.
+        let extras = wide ? 3 * (30 + 10) * (1 - collapse) : 0
         let fixed = Morph.islandArtLeading        // 20 leading inset
                   + Morph.islandArtSide           // 34 artwork
                   + 10                            // artwork → text gap
@@ -2294,6 +2294,25 @@ private struct IslandContent: View {
                             label: playback.snapshot.isShuffled ? "Shuffle on" : "Shuffle off") {
                     playback.toggleShuffle()
                 }
+            }
+
+            if wide {
+                // Only here. On a phone-width pill the row is artwork, a title
+                // and two controls; a third would make all of them harder to
+                // hit than any of them is worth.
+                Button {
+                    commitTick &+= 1
+                    changeTrack(goNext: false, from: 0)
+                } label: {
+                    Image(mozz: "backward.fill")
+                        .font(.title3).frame(width: 30, height: 30).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!playback.snapshot.hasPrevious)
+                .accessibilityLabel("Previous")
+                .opacity((playback.snapshot.hasPrevious ? 1 : 0.4) * Double(1 - collapse))
+                .frame(width: 30 * (1 - collapse))
+                .allowsHitTesting(collapse < 0.5)
             }
 
             Button { playback.togglePlayPause() } label: {
