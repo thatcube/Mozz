@@ -553,6 +553,13 @@ struct FluidRatingControl: View {
             if let r = rating, r > 0 {
                 Text(LikeControl.format(r))
                     .font(.title3).monospacedDigit()
+                    // "4.5" is three characters and must stay three characters.
+                    // Without this the row can compress it under width pressure —
+                    // which a `Text` answers by WRAPPING, so the queue card's
+                    // rating came out as "4." over "5" on a narrow phone. Fixed
+                    // size makes the cluster claim the width it needs instead.
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
         // Unrated shows a white outline star (rated fills it + shows the number);
