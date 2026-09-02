@@ -314,6 +314,36 @@
         <Style Selector="Button.link:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
+        <!-- A cover that opens something, where the artwork fills the control
+             and a plate around it would have nowhere to go. The affordance is a
+             scrim with a chevron over the art itself, which also says WHAT the
+             click does — this opens upward into the player — in a way a
+             highlight cannot. -->
+        <Style Selector="Button.cover">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.cover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.cover:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.cover:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.cover:pointerover Border#DockArtworkHover">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Border#DockArtworkHover">
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+
         <Style Selector="Button.tile">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CornerRadius" Value="12" />
@@ -322,7 +352,7 @@
                  has room to be seen around the art and the footprint is
                  unchanged — which matters because the walls' column counts come
                  from fixed pitch constants in DesktopLayout. -->
-            <Setter Property="Padding" Value="10" />
+            <Setter Property="Padding" Value="8" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />

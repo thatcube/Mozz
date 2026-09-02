@@ -36,13 +36,11 @@
         <Style Selector="Window.compact TextBlock.pageTitle">
             <Setter Property="FontSize" Value="24" />
         </Style>
-        <!-- The Home mix tile is wider than a phone-width content pane. It keeps
-             its two-cell rhythm but yields width before the row can clip. -->
-        <Style Selector="Button.homeMixTile">
-            <Setter Property="Width" Value="410" />
-        </Style>
+        <!-- The mix tile takes its width from the pane now, like every other
+             wall, so a wide window fits three or four rather than two and a gap.
+             Compact keeps a floor so the cover and two lines of text still fit. -->
         <Style Selector="Window.compact Button.homeMixTile">
-            <Setter Property="Width" Value="330" />
+            <Setter Property="MinWidth" Value="300" />
         </Style>
         <Style Selector="TextBlock.compactOnly">
             <Setter Property="IsVisible" Value="False" />
@@ -322,41 +320,48 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile homeMixTile" Margin="0,0,20,16"
+                                           <!-- A mix is a cover with a name under it, exactly like an album.
+                                                It used to be a wide card with the art squashed into a strip down
+                                                one side, which made Home read as two unrelated systems: skinny
+                                                landscape cards at the top and square covers everywhere below.
+                                                One shape for everything is both calmer and easier to scan. -->
+                                           <Button Classes="tile" Margin="0,0,0,4"
+                                                   Width="{Binding $parent[Window].DataContext.AlbumTileWidth}"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}"
-                                                       CornerRadius="12" ClipToBounds="True">
-                                                   <Grid ColumnDefinitions="88,*" Height="88">
-                                                       <Border Grid.Column="0" Width="88" Height="88"
-                                                               Background="{DynamicResource Accent}"
-                                                               IsVisible="{Binding IsLiked}">
-                                                           <controls:TablerIcon Size="30" Filled="True"
-                                                                                Data="{StaticResource IconHeart}"
-                                                                                Brush="{DynamicResource BrandForeground}"
-                                                                                HorizontalAlignment="Center"
-                                                                                VerticalAlignment="Center" />
-                                                       </Border>
-                                                       <controls:ArtworkImage Grid.Column="0"
-                                                               Width="88" Height="88" DisplaySize="88"
-                                                               CornerRadius="0"
+                                               <StackPanel Spacing="9">
+                                                   <Panel>
+                                                       <controls:ArtworkImage
+                                                               Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                               Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                               DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                               CornerRadius="8"
                                                                ServerId="{Binding ServerId}"
                                                                ArtworkKey="{Binding ArtworkKey}"
                                                                FallbackText="{Binding FallbackText}"
-                                                               FallbackFontSize="24"
+                                                               FallbackFontSize="52"
                                                                FallbackFontWeight="SemiBold"
-                                                               FallbackForeground="{DynamicResource ArtworkFallbackPrimary}"
+                                                               FallbackForeground="{DynamicResource ArtworkFallbackTertiary}"
                                                                IsVisible="{Binding !IsLiked}" />
-                                                       <StackPanel Grid.Column="1" Spacing="4"
-                                                                   VerticalAlignment="Center" Margin="18,0,16,0">
-                                                           <TextBlock Text="{Binding Title}" Classes="primary"
-                                                                      FontSize="22" FontWeight="SemiBold" />
-                                                           <TextBlock Text="{Binding Subtitle}" Classes="secondary"
-                                                                      FontSize="15"
-                                                                      IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                                       </StackPanel>
-                                                   </Grid>
-                                               </Border>
+                                                       <!-- Liked Songs has no cover of its own, so it gets the one
+                                                            mark that means "liked" everywhere else in the app. -->
+                                                       <Border Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                               Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                               CornerRadius="8"
+                                                               Background="{DynamicResource Accent}"
+                                                               IsVisible="{Binding IsLiked}">
+                                                           <controls:TablerIcon Size="46" Filled="True"
+                                                                                Data="{StaticResource IconHeart}"
+                                                                                Brush="White"
+                                                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                       </Border>
+                                                   </Panel>
+                                                   <StackPanel Spacing="2">
+                                                       <TextBlock Text="{Binding Title}" Classes="primary" />
+                                                       <TextBlock Text="{Binding Subtitle}" Classes="secondary"
+                                                                  IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                   </StackPanel>
+                                               </StackPanel>
                                            </Button>
                                        </DataTemplate>
                                    </ItemsControl.ItemTemplate>
@@ -421,11 +426,11 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="196" Margin="0,0,0,2"
+                                           <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,2"
                                                    Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                    CommandParameter="{Binding}">
                                                <StackPanel Spacing="9">
-                                                   <controls:ArtworkImage Width="176" Height="176" DisplaySize="176" CornerRadius="8"
+                                                   <controls:ArtworkImage Width="{Binding $parent[Window].DataContext.AlbumArtSize}" Height="{Binding $parent[Window].DataContext.AlbumArtSize}" DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}" CornerRadius="8"
                                                            ServerId="{Binding ServerId}" ArtworkKey="{Binding ArtworkKey}"
                                                            FallbackText="{Binding Title}" FallbackFontSize="52" FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                    <StackPanel Spacing="2">
@@ -446,18 +451,31 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile card" Width="216" Margin="0,0,20,22"
+                                           <!-- A playlist is a cover with a name under it, like an album and
+                                                a mix. It was a tall card with a glyph in the middle,
+                                                which made three different shapes on one screen for
+                                                three things that are all "a collection you open". -->
+                                           <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
                                                    Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="148">
-                                                   <StackPanel Spacing="8" VerticalAlignment="Center">
-                                                       <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
-                                                                            Brush="{DynamicResource TextSecondary}" />
-                                                       <TextBlock Text="{Binding Title}" Classes="primary" FontSize="16" />
+                                               <StackPanel Spacing="9">
+                                                   <controls:ArtworkImage
+                                                           Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                           Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                           DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                           CornerRadius="8"
+                                                           ServerId="{Binding ServerId}"
+                                                           ArtworkKey="{Binding ArtworkKey}"
+                                                           FallbackText="{Binding Title}"
+                                                           FallbackFontSize="52"
+                                                           FallbackFontWeight="SemiBold"
+                                                           FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
+                                                   <StackPanel Spacing="2">
+                                                       <TextBlock Text="{Binding Title}" Classes="primary" />
                                                        <TextBlock Text="{Binding TrackCount, StringFormat='{}{0} songs'}"
                                                                   Classes="secondary" />
                                                    </StackPanel>
-                                               </Border>
+                                               </StackPanel>
                                            </Button>
                                        </DataTemplate>
                                    </ItemsControl.ItemTemplate>
@@ -574,12 +592,12 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="196" Margin="0,0,0,4"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="9">
                                                 <controls:ArtworkImage
-                                                        Width="176" Height="176" DisplaySize="176"
+                                                        Width="{Binding $parent[Window].DataContext.AlbumArtSize}" Height="{Binding $parent[Window].DataContext.AlbumArtSize}" DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}"
                                                         CornerRadius="8"
                                                         ServerId="{Binding ServerId}"
                                                         ArtworkKey="{Binding ArtworkKey}"
@@ -637,7 +655,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="178" Margin="0,0,0,4"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.ArtistTileWidth}" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="10">
@@ -692,10 +710,14 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile card" Width="216" Margin="0,0,20,24"
+                                            <!-- A genre has no cover to show, so it keeps a label card — but on
+                                                 the same square footprint as everything else, so the wall
+                                                 stays one rhythm instead of two. -->
+                                            <Button Classes="tile card" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenGenreCommand}"
                                                     CommandParameter="{Binding}">
-                                                <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="128">
+                                                <Border Classes="tileSurface" CornerRadius="8" Padding="18"
+                                                        Height="{Binding $parent[Window].DataContext.AlbumArtSize}">
                                                     <StackPanel Spacing="8" VerticalAlignment="Center">
                                                         <controls:TablerIcon Size="32" Data="{StaticResource IconStack}"
                                                                              Brush="{DynamicResource TextSecondary}" />
@@ -903,19 +925,28 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile card" Width="216" Margin="0,0,20,24"
-                                                    Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
-                                                    CommandParameter="{Binding}">
-                                                <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="148">
-                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
-                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
-                                                                             Brush="{DynamicResource TextSecondary}" />
-                                                        <TextBlock Text="{Binding Title}" Classes="primary" FontSize="16" />
-                                                        <TextBlock Text="{Binding TrackCount, StringFormat='{}{0} songs'}"
-                                                                   Classes="secondary" />
-                                                    </StackPanel>
-                                                </Border>
-                                            </Button>
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
+        Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
+        CommandParameter="{Binding}">
+    <StackPanel Spacing="9">
+        <controls:ArtworkImage
+                Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                CornerRadius="8"
+                ServerId="{Binding ServerId}"
+                ArtworkKey="{Binding ArtworkKey}"
+                FallbackText="{Binding Title}"
+                FallbackFontSize="52"
+                FallbackFontWeight="SemiBold"
+                FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
+        <StackPanel Spacing="2">
+            <TextBlock Text="{Binding Title}" Classes="primary" />
+            <TextBlock Text="{Binding TrackCount, StringFormat='{}{0} songs'}"
+                       Classes="secondary" />
+        </StackPanel>
+    </StackPanel>
+</Button>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -1118,11 +1149,11 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="196" Margin="0,0,0,2"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,2"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                                 <StackPanel Spacing="9">
-                                                    <controls:ArtworkImage Width="176" Height="176" DisplaySize="176" CornerRadius="8"
+                                                    <controls:ArtworkImage Width="{Binding $parent[Window].DataContext.AlbumArtSize}" Height="{Binding $parent[Window].DataContext.AlbumArtSize}" DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}" CornerRadius="8"
                                                             ServerId="{Binding ServerId}" ArtworkKey="{Binding ArtworkKey}"
                                                             FallbackText="{Binding Title}" FallbackFontSize="52" FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
                                                     <StackPanel Spacing="2">
@@ -1280,32 +1311,46 @@
             BorderThickness="1"
             CornerRadius="22"
             BoxShadow="0 18 44 -14 #8C000000">
-            <Grid RowDefinitions="Auto,Auto" RowSpacing="6" Margin="20,10,20,8">
+            <Grid ColumnDefinitions="Auto,*" Margin="10">
 
-                <Grid x:Name="BottomTransportGrid" Grid.Row="0" ColumnDefinitions="*,Auto,*">
+                <!-- The cover is the dock's full height, inset by the same amount
+                     on every side, and its radius is the pill's less that inset
+                     so the two curves are concentric rather than merely both
+                     round. Hovering it shows a chevron: the affordance is "this
+                     opens upward into the player", which a plate behind the art
+                     cannot say. -->
+                <Button Grid.Column="0" Classes="cover" VerticalAlignment="Stretch"
+                        Command="{Binding OpenNowPlayingCommand}"
+                        ToolTip.Tip="Open player">
+                    <Panel>
+                        <controls:ArtworkImage x:Name="DockArtwork"
+                                Width="76" Height="76" DisplaySize="76"
+                                CornerRadius="12"
+                                ServerId="{Binding NowPlaying.ServerId}"
+                                ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+                                FallbackText="{Binding NowPlaying.AlbumTitle}"
+                                FallbackFontSize="26"
+                                FallbackFontWeight="SemiBold"
+                                FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
+                        <Border x:Name="DockArtworkHover" CornerRadius="12"
+                                Background="#8C000000" Opacity="0" IsHitTestVisible="False">
+                            <controls:TablerIcon Size="22" Data="{StaticResource IconChevronUp}"
+                                                 Brush="White"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Panel>
+                </Button>
 
-                    <Button Grid.Column="0" Classes="tile" Padding="0"
-                            HorizontalAlignment="Left" VerticalAlignment="Center"
-                            Command="{Binding OpenNowPlayingCommand}"
-                            ToolTip.Tip="Open player">
-                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                            <controls:ArtworkImage Width="46" Height="46" DisplaySize="46"
-                                    CornerRadius="7"
-                                    ServerId="{Binding NowPlaying.ServerId}"
-                                    ArtworkKey="{Binding NowPlaying.ArtworkKey}"
-                                    FallbackText="{Binding NowPlaying.AlbumTitle}"
-                                    FallbackFontSize="18"
-                                    FallbackFontWeight="SemiBold"
-                                    FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
-                            <StackPanel x:Name="NowPlayingSummaryText" VerticalAlignment="Center"
-                                        Spacing="1" MaxWidth="260">
-                                <TextBlock Classes="primary" FontWeight="Medium"
-                                           Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
-                                <TextBlock Classes="secondary" FontSize="12"
-                                           Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Button>
+                <Grid x:Name="BottomTransportGrid" Grid.Column="1" ColumnDefinitions="*,Auto,*"
+                      Margin="14,0,4,0">
+
+                    <StackPanel x:Name="NowPlayingSummaryText" Grid.Column="0"
+                                VerticalAlignment="Center" Spacing="1" MaxWidth="260">
+                        <TextBlock Classes="primary" FontWeight="Medium"
+                                   Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
+                        <TextBlock Classes="secondary" FontSize="12"
+                                   Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+                    </StackPanel>
 
                     <!-- One shape, one weight. The dock's play control is a glyph
                          like the rest of them rather than a crimson disc: the
@@ -1313,8 +1358,9 @@
                          a transport every control is equally reachable. The full
                          player still fills its play button, because there it is
                          the thing you look at. -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10"
-                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="10"
+                                HorizontalAlignment="Center">
                         <Button x:Name="BottomShuffleButton" Classes="transport"
                                 Command="{Binding ToggleShuffleCommand}"
                                 ToolTip.Tip="{Binding ShuffleStateText}">
@@ -1350,6 +1396,21 @@
                         </Button>
                     </StackPanel>
 
+                    <!-- Under the transport and no wider than it needs to be. Run
+                         across the whole pill it stopped reading as this song's
+                         progress and started reading as a rule dividing the dock
+                         in two. -->
+                    <controls:SeekBar x:Name="BottomScrubber"
+                                      LabelPlacement="Inline"
+                                      LabelFontSize="11" LabelSpacing="9"
+                                      RestHeight="5" ActiveHeight="10"
+                                      Position="{Binding PositionSeconds}"
+                                      Duration="{Binding DurationSeconds}"
+                                      TrackKey="{Binding NowPlayingKey}"
+                                      SeekCommand="{Binding SeekToCommand}"
+                                      Tint="{DynamicResource TextPrimary}" />
+                    </StackPanel>
+
                     <StackPanel x:Name="BottomVolumeControls" Grid.Column="2" Orientation="Horizontal"
                                 Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Button Classes="transport" Command="{Binding OpenNowPlayingCommand}"
@@ -1373,19 +1434,6 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- The scrubber spans the whole dock rather than sitting inside
-                     the centre column: squeezed between the title and the volume
-                     it was both too short to aim with and visually unrelated to
-                     the pill it lives in, and its time labels overflowed the
-                     bottom edge. -->
-                <controls:SeekBar x:Name="BottomScrubber" Grid.Row="1"
-                                  LabelFontSize="11" LabelSpacing="5"
-                                  RestHeight="5" ActiveHeight="10"
-                                  Position="{Binding PositionSeconds}"
-                                  Duration="{Binding DurationSeconds}"
-                                  TrackKey="{Binding NowPlayingKey}"
-                                  SeekCommand="{Binding SeekToCommand}"
-                                  Tint="{DynamicResource TextPrimary}" />
             </Grid>
             </Border>
         </Grid>

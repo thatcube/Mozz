@@ -214,6 +214,36 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     /// Width available to the content pane, set by the view on layout. Drives
     /// how many tiles fit across.
+    /// <summary>
+    /// How wide one tile is, so a wall fills the pane instead of stopping short
+    /// of it.
+    ///
+    /// The pitch constants decide how many tiles fit; dividing the pane by that
+    /// count decides how wide each one is. Sizing tiles to a fixed pitch instead
+    /// left whatever did not divide evenly as dead space down the right-hand
+    /// edge — up to a whole tile of it — which reads as the grid giving up
+    /// partway across rather than as a margin.
+    /// </summary>
+    public double AlbumTileWidth => TileWidth(DesktopLayout.AlbumTilePitch);
+    public double ArtistTileWidth => TileWidth(DesktopLayout.ArtistTilePitch);
+    public double PlaylistTileWidth => TileWidth(DesktopLayout.PlaylistTilePitch);
+    public double GenreTileWidth => TileWidth(DesktopLayout.GenreTilePitch);
+    public double HomeMixTileWidth => TileWidth(DesktopLayout.HomeMixTilePitch);
+
+    /// <summary>The cover inside a tile: the tile less its hover padding.</summary>
+    public double AlbumArtSize => Math.Max(AlbumTileWidth - TilePadding * 2, 1);
+    public double ArtistArtSize => Math.Max(ArtistTileWidth - TilePadding * 2, 1);
+
+    /// <summary>Matches the Button.tile padding in App.axaml.</summary>
+    private const double TilePadding = 8;
+
+    private double TileWidth(double pitch)
+    {
+        var columns = Math.Max(ColumnsFor(pitch), 1);
+        var available = _contentWidth > 0 ? _contentWidth : pitch * columns;
+        return Math.Max(Math.Floor(available / columns), pitch * 0.6);
+    }
+
     public double ContentWidth
     {
         get => _contentWidth;
@@ -221,13 +251,20 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (Math.Abs(value - _contentWidth) < 1) return;
             _contentWidth = value;
+            OnPropertyChanged(nameof(AlbumTileWidth));
+            OnPropertyChanged(nameof(AlbumArtSize));
+            OnPropertyChanged(nameof(ArtistTileWidth));
+            OnPropertyChanged(nameof(ArtistArtSize));
+            OnPropertyChanged(nameof(PlaylistTileWidth));
+            OnPropertyChanged(nameof(GenreTileWidth));
+            OnPropertyChanged(nameof(HomeMixTileWidth));
             AlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             ArtistGrid.SetColumns(ColumnsFor(DesktopLayout.ArtistTilePitch));
             GenreGrid.SetColumns(ColumnsFor(DesktopLayout.GenreTilePitch));
             GenreAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             ArtistAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             PlaylistGrid.SetColumns(ColumnsFor(DesktopLayout.PlaylistTilePitch));
-            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)));
+            HomeMixGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             RebuildHomeRows();
             RebuildDetailRows();
         }
@@ -2322,7 +2359,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _homeRecentlyPlayed,
             _homeRecentlyAddedAlbums,
             _homePlaylists,
-            Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)),
+            ColumnsFor(DesktopLayout.AlbumTilePitch),
             ColumnsFor(DesktopLayout.TrackCardPitch),
             ColumnsFor(DesktopLayout.AlbumTilePitch),
             ColumnsFor(DesktopLayout.PlaylistTilePitch),

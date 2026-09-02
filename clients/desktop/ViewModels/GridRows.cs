@@ -26,7 +26,13 @@ public static class DesktopLayout
     public const double GenreTilePitch = 236;
     public const double PlaylistTilePitch = 236;
     public const double TrackCardPitch = 320;
-    public const double HomeMixTilePitch = 430;
+    /// <summary>
+    /// A mix shortcut is a cover and two lines of text, not a hero. At 430 it
+    /// took half the pane and a wide window fitted two of them with most of a
+    /// third's worth of space left over — which reads as the grid stopping
+    /// early rather than as a margin.
+    /// </summary>
+    public const double HomeMixTilePitch = 320;
 
     public static int ColumnsFor(double width, double pitch) => Math.Max(1, (int)(width / pitch));
 
