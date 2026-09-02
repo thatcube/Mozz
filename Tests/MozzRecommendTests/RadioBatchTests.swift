@@ -31,6 +31,65 @@ final class RadioBatchTests: XCTestCase {
         return (RecommendationService(store: RecommendationStore(db), now: { fixedNow }), "rsrv")
     }
 
+    // MARK: The acoustic tier
+
+    func testSonicLeadsOverCollaborativeAndGenre() async throws {
+        let (service, serverId) = try await makeService()
+        let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")
+        // The two tiers answer different questions and the station is asking the
+        // acoustic one, so a WEAK sonic match still leads a strong crowd match.
+        // The scores are not comparable across tiers; the precedence is.
+        let sonic = [scored("son1", artist: "SonArtist", score: 0.05)]
+        let similar = [scored("sim1", artist: "SimArtist", score: 0.99)]
+        let ids = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 5, excluding: [],
+            sonic: sonic, similar: similar)
+        XCTAssertEqual(ids.first, "son1", "the server's own acoustic analysis leads")
+        XCTAssertEqual(ids.dropFirst().first, "sim1", "then the crowd signal")
+        XCTAssertTrue(ids.dropFirst(2).allSatisfy { $0.hasPrefix("rock") }, "then genre")
+    }
+
+    func testSonicCapsOneArtistTighterThanTheOtherTiers() async throws {
+        let (service, serverId) = try await makeService()
+        let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")
+        // An analyzer's nearest neighbours to a track are very often the rest of
+        // its album. True, and not what anyone means by radio — so the acoustic
+        // tier takes at most two per artist and the rest of the batch fills from
+        // the tiers below.
+        let sonic = (1...6).map { scored("same\($0)", artist: "OneBand", score: 1.0 - Double($0) / 10) }
+        let ids = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 6, excluding: [], sonic: sonic)
+        XCTAssertEqual(ids.filter { $0.hasPrefix("same") }.count, 2)
+        XCTAssertEqual(ids.count, 6, "the genre engine topped the batch back up")
+    }
+
+    func testSonicRespectsExcludingAndNeedsAPositiveScore() async throws {
+        let (service, serverId) = try await makeService()
+        let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")
+        let sonic = [
+            scored("dropped", artist: "A", score: 0.9),
+            scored("zero", artist: "B", score: 0),
+            scored("kept", artist: "C", score: 0.4),
+        ]
+        let ids = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 5, excluding: ["dropped"], sonic: sonic)
+        XCTAssertFalse(ids.contains("dropped"))
+        XCTAssertFalse(ids.contains("zero"))
+        XCTAssertEqual(ids.first, "kept")
+    }
+
+    func testNoSonicIsExactlyTodaysBatch() async throws {
+        let (service, serverId) = try await makeService()
+        let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")
+        let similar = [scored("sim1", artist: "A", score: 0.9)]
+        let withEmptySonic = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 5, excluding: [], sonic: [], similar: similar)
+        let withoutTheArgument = try await service.radioBatch(
+            seed: seed, serverId: serverId, limit: 5, excluding: [], similar: similar)
+        XCTAssertEqual(withEmptySonic, withoutTheArgument)
+        XCTAssertEqual(withEmptySonic.first, "sim1")
+    }
+
     func testSimilarityLeadsOverGenreEvenAtLowScore() async throws {
         let (service, serverId) = try await makeService()
         let seed = RadioSeed(title: "Seed", genres: ["Rock"], artistIds: [], seedTrackRef: "rsrv:seed")

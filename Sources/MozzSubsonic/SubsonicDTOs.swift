@@ -86,6 +86,28 @@ struct SubsonicExtensionDTO: Decodable {
     let versions: [Int]?
 }
 
+// MARK: - Sonic similarity (OpenSubsonic `sonicSimilarity` extension)
+
+/// `getSonicSimilarTracks` / `findSonicPath` both answer with a flat
+/// `sonicMatch` array: an `entry` (a full Child) and a normalized `similarity`.
+///
+/// Only the id is decoded. The entry carries the server's whole song payload,
+/// but this app already has that track mirrored locally with its likes, its
+/// play history and its artwork — re-deriving it from the match would be a
+/// second, thinner source of truth for the same row.
+struct SubsonicSonicMatchPayload: Decodable {
+    let sonicMatch: [SubsonicSonicMatchDTO]?
+}
+
+struct SubsonicSonicMatchDTO: Decodable {
+    let entry: SubsonicSonicEntryDTO?
+    let similarity: Double?
+}
+
+struct SubsonicSonicEntryDTO: Decodable {
+    let id: String?
+}
+
 // MARK: - Music folders
 
 struct SubsonicMusicFoldersPayload: Decodable {

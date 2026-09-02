@@ -32,6 +32,13 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
     public var supportsNormalizationGain: Bool
     /// Server accepts playback progress / scrobble reports.
     public var supportsProgressReporting: Bool
+    /// Server can answer "what sounds like this track" from its own analysis of
+    /// the audio — OpenSubsonic's `sonicSimilarity` extension today.
+    ///
+    /// Acoustic, not collaborative: unlike a genre tag or a listen count this
+    /// comes from the waveform, which is the whole reason a station built on it
+    /// separates tracks that share a coarse label.
+    public var supportsSonicSimilarity: Bool
 
     /// The server's own stable identity, where the protocol exposes one
     /// (Jellyfin `System/Info/Public.Id`, Plex `machineIdentifier`).
@@ -81,6 +88,7 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         supportsSyncedLyrics: Bool = false,
         supportsNormalizationGain: Bool = false,
         supportsProgressReporting: Bool = true,
+        supportsSonicSimilarity: Bool = false,
         hasPlexPass: Bool? = nil,
         serverIdentity: String? = nil,
         supportsIndexBasedQueue: Bool? = nil,
@@ -98,6 +106,7 @@ public struct ServerCapabilities: Codable, Sendable, Hashable {
         self.supportsSyncedLyrics = supportsSyncedLyrics
         self.supportsNormalizationGain = supportsNormalizationGain
         self.supportsProgressReporting = supportsProgressReporting
+        self.supportsSonicSimilarity = supportsSonicSimilarity
         self.hasPlexPass = hasPlexPass
         self.serverIdentity = serverIdentity
         self.supportsIndexBasedQueue = supportsIndexBasedQueue

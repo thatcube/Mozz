@@ -322,6 +322,33 @@ public struct RecommendationStore: Sendable {
     /// filters are given (caller should use the cold-start pool instead).
     ///
     /// `excludingRemoteIds` (e.g. tracks a radio station has already surfaced) is
+    /// The candidates for a specific set of `remoteId`s on one server.
+    ///
+    /// For signals that arrive as a list of the server's OWN ids — acoustic
+    /// similarity from `sonicSimilarity`, say — rather than as a query over the
+    /// catalogue. Anything the server names that this device has not mirrored is
+    /// simply absent, which is correct: a station can only play what is here.
+    ///
+    /// Unordered. The caller holds the scores and re-attaches them by `remoteId`,
+    /// because the ranking belongs to whatever produced the ids.
+    public func candidateTracks(serverId: ServerID, remoteIds: [String]) async throws -> [TrackCandidate] {
+        let ids = Array(remoteIds.prefix(Self.maxSQLExclusions))
+        guard !ids.isEmpty else { return [] }
+        return try await database.read { db in
+            let sql = """
+                SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
+                       track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
+                       track.albumRemoteId AS albumRemoteId, track.genres AS genres, track.addedAt AS addedAt
+                FROM track
+                WHERE track.serverId = ? AND track.remoteId IN (\(databasePlaceholders(ids.count)))
+                """
+            var args: [DatabaseValueConvertible?] = [serverId]
+            args.append(contentsOf: ids)
+            return try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+                .map { Self.candidate($0, enrich: false) }
+        }
+    }
+
     /// applied in SQL *before* the random sample + limit, so the sample is drawn
     /// from unseen tracks — otherwise a random slice near the tail of a large
     /// catalog can miss the remaining unseen tracks and the station stalls early.

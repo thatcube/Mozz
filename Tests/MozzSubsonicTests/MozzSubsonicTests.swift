@@ -379,6 +379,61 @@ final class SubsonicBackendTests: XCTestCase {
         XCTAssertTrue(caps.supportsLyrics)                // songLyrics extension present
     }
 
+    // MARK: Sonic similarity (OpenSubsonic `sonicSimilarity`)
+
+    func testSonicSimilarityCapabilityFollowsTheAdvertisedExtension() async throws {
+        // The extension is advertised only while a server-side analyzer is
+        // installed, so its presence IS the capability. A server with lyrics but
+        // no analyzer must not claim it.
+        let withSonic = FixtureTransport([
+            .init(contains: "getOpenSubsonicExtensions", fixture: "sub_extensions_sonic"),
+            .init(contains: "ping", fixture: "sub_ping_opensubsonic"),
+        ])
+        let sonicCaps = try await backend(withSonic).detectCapabilities()
+        XCTAssertTrue(sonicCaps.supportsSonicSimilarity)
+
+        let withoutSonic = FixtureTransport([
+            .init(contains: "getOpenSubsonicExtensions", fixture: "sub_extensions"),
+            .init(contains: "ping", fixture: "sub_ping_opensubsonic"),
+        ])
+        let plainCaps = try await backend(withoutSonic).detectCapabilities()
+        XCTAssertFalse(plainCaps.supportsSonicSimilarity)
+    }
+
+    func testSonicSimilarTracksMapsMatchesAndDropsUnusableOnes() async throws {
+        let transport = FixtureTransport([
+            .init(contains: "getSonicSimilarTracks", fixture: "sub_sonic_similar"),
+        ])
+        let matches = try await backend(transport).sonicallySimilarTracks(to: "tr-1001", limit: 10)
+
+        // The seed itself, a zero score, an empty id and an entry-less match are
+        // all dropped; a match with NO similarity survives, because a server that
+        // omitted the number still ranked the list and treating that as zero
+        // would throw the whole answer away at the caller's `> 0` guard.
+        XCTAssertEqual(matches.map(\.trackID), ["tr-2001", "tr-3001"])
+        XCTAssertEqual(matches[0].similarity, 0.91, accuracy: 0.0001)
+        XCTAssertEqual(matches[1].similarity, 1.0, accuracy: 0.0001)
+
+        let q = queryItems(transport.lastRequest?.url)
+        XCTAssertEqual(q["id"], "tr-1001")
+        XCTAssertEqual(q["count"], "10")
+        XCTAssertTrue(transport.lastRequest?.url?.absoluteString.contains("getSonicSimilarTracks.view") == true)
+    }
+
+    func testSonicSimilarTracksIsBestEffortAndNeverThrows() async throws {
+        // A server that advertised the extension and then refuses the call is a
+        // station that falls back a tier, not an error anyone should see.
+        let transport = FixtureTransport([.init(contains: "ping", fixture: "sub_ping_opensubsonic")])
+        let matches = try await backend(transport).sonicallySimilarTracks(to: "tr-1001", limit: 10)
+        XCTAssertTrue(matches.isEmpty)
+
+        // A zero budget asks the server nothing at all.
+        let unused = FixtureTransport([.init(contains: "getSonicSimilarTracks", fixture: "sub_sonic_similar")])
+        let none = try await backend(unused).sonicallySimilarTracks(to: "tr-1001", limit: 0)
+        XCTAssertTrue(none.isEmpty)
+        XCTAssertNil(unused.lastRequest)
+    }
+
     func testMusicFolderScopingIsAppliedToRequests() async throws {
         let transport = FixtureTransport([.init(contains: "search3", fixture: "sub_search3")])
         _ = try await backend(transport, musicFolderId: "7").fetchTracks(offset: 0, limit: 10)

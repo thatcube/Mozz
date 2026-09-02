@@ -171,50 +171,100 @@ public actor RecommendationService {
         }
     }
 
-    /// Generate the next batch of station tracks. When ListenBrainz similarity for
-    /// the seed is available (`similar`, resolved by the caller from
-    /// `EnrichmentStore.similarOwnedTracks`), those tracks LEAD the batch — the
-    /// crowd-similarity signal that separates tracks a coarse genre tag lumps
-    /// together — with the genre engine filling any remaining slots. With no
-    /// similarity the result is exactly the genre engine's (never worse than
-    /// today). `excluding` drops the seed and anything already queued.
+    /// Resolve a server's acoustic matches against what this device has mirrored.
+    ///
+    /// The scores come back untouched. They are the SERVER's normalized
+    /// similarity and they are only ever compared with each other inside one
+    /// tier — never against a ListenBrainz score, never against a genre score,
+    /// and never against another analyzer's, because two analyzers do not share
+    /// a space. The blender min-max normalizes per source, which is what keeps
+    /// that true.
+    public func ownedSonicTracks(_ matches: [SonicMatch], serverId: ServerID) async throws -> [ScoredOwnedTrack] {
+        guard !matches.isEmpty else { return [] }
+        let byRemoteId = Dictionary(matches.map { ($0.trackID, $0.similarity) },
+                                    uniquingKeysWith: Swift.max)
+        let owned = try await store.candidateTracks(serverId: serverId,
+                                                    remoteIds: Array(byRemoteId.keys))
+        return owned.compactMap { candidate in
+            guard let score = byRemoteId[candidate.remoteId] else { return nil }
+            return ScoredOwnedTrack(candidate: candidate, score: score)
+        }
+        .sorted { $0.score > $1.score }
+    }
+
+    /// Generate the next batch of station tracks, from the strongest signal the
+    /// device actually has.
+    ///
+    /// Three tiers, in descending order of how much they know about the sound:
+    /// `sonic` (the server analyzed the audio — see `ownedSonicTracks`),
+    /// `similar` (ListenBrainz crowd similarity, resolved by the caller from
+    /// `EnrichmentStore.similarOwnedTracks`), then the genre engine for whatever
+    /// slots are left. Each tier is optional; with none of them the result is
+    /// exactly the genre engine's, which is what every station was before any of
+    /// this. `excluding` drops the seed and anything already queued.
     public func radioBatch(seed: RadioSeed, serverId: ServerID,
                            limit: Int = 20, excluding: Set<String> = [],
+                           sonic: [ScoredOwnedTrack] = [],
                            similar: [ScoredOwnedTrack] = []) async throws -> [String] {
-        // Tier 1 — ListenBrainz similarity (explicit precedence). Trusted OVER the
-        // genre floor on purpose (that's the point: separate within a genre bucket);
-        // guarded only by dropping non-positive scores + ranking by score.
         let suppressedArtists = (try? await store.suppressedArtistIds(serverId: serverId)) ?? []
         let suppressedTrackIds = (try? await store.suppressedTrackRemoteIds(serverId: serverId)) ?? []
         var picked: [String] = []
         var pickedSet = excluding.union(suppressedTrackIds)
-        let usableSimilar = similar.filter {
-            $0.score > 0 && !pickedSet.contains($0.candidate.remoteId)
-                && !($0.candidate.artistRemoteId.map(suppressedArtists.contains) ?? false)
-        }
-        if !usableSimilar.isEmpty {
-            let scored = usableSimilar.map {
-                ScoredCandidate(candidate: $0.candidate, score: $0.score, source: "collaborative")
-            }
-            // Rank tier 1 by the ListenBrainz score (near-zero jitter so the crowd
-            // signal — not exploration noise — orders the lead; batch-to-batch
-            // variety comes from the growing `excluding` set). Tighter per-artist
-            // cap: ListenBrainz "similar" skews same-artist, and the seed's own
-            // artist isn't discovery.
-            let config = Blender.Config(limit: limit, explorationJitter: 0.02,
-                                        maxPerArtist: 4, maxPerAlbum: max(2, limit / 4))
-            var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
-            let ranked = blender.blend(sources: [scored], config: config,
-                                       excludingArtists: suppressedArtists, using: &rng)
-            picked = ranked.map { $0.candidate.remoteId }
-            pickedSet.formUnion(picked)
-            if picked.count >= limit { return picked }
-        }
+
+        // Tier 0 — the server's own acoustic analysis, when it has one. Above
+        // ListenBrainz because the two answer different questions: the crowd
+        // signal is "who else played these together", this one is "what does
+        // this actually sound like", and a station is asking the second.
+        //
+        // The tightest artist cap of the three tiers, because an analyzer's
+        // nearest neighbours to a track are very often the rest of its album —
+        // true, and not what anyone means by radio.
+        lead(sonic, source: "sonic", maxPerArtist: 2, limit: limit,
+             picked: &picked, pickedSet: &pickedSet, suppressedArtists: suppressedArtists)
+        if picked.count >= limit { return picked }
+
+        // Tier 1 — ListenBrainz similarity. Trusted OVER the genre floor on
+        // purpose (that's the point: separate within a genre bucket); guarded
+        // only by dropping non-positive scores + ranking by score.
+        //
+        // Per-artist cap of 4: ListenBrainz "similar" skews same-artist, and the
+        // seed's own artist isn't discovery.
+        lead(similar, source: "collaborative", maxPerArtist: 4, limit: limit - picked.count,
+             picked: &picked, pickedSet: &pickedSet, suppressedArtists: suppressedArtists)
+        if picked.count >= limit { return picked }
+
         // Tier 3 — genre engine fills the remaining slots (unchanged behavior).
         let genre = try await genreRadioBatch(
             seed: seed, serverId: serverId, limit: limit - picked.count,
             excluding: pickedSet, excludingArtists: suppressedArtists)
         return picked + genre
+    }
+
+    /// Rank one pre-scored tier and append what it yields.
+    ///
+    /// Near-zero jitter on purpose: the tier's own score — not exploration noise
+    /// — orders the lead, and batch-to-batch variety comes from the growing
+    /// `excluding` set instead.
+    private func lead(_ tracks: [ScoredOwnedTrack], source: String, maxPerArtist: Int,
+                      limit: Int, picked: inout [String], pickedSet: inout Set<String>,
+                      suppressedArtists: Set<String>) {
+        guard limit > 0 else { return }
+        let usable = tracks.filter {
+            $0.score > 0 && !pickedSet.contains($0.candidate.remoteId)
+                && !($0.candidate.artistRemoteId.map(suppressedArtists.contains) ?? false)
+        }
+        guard !usable.isEmpty else { return }
+        let scored = usable.map {
+            ScoredCandidate(candidate: $0.candidate, score: $0.score, source: source)
+        }
+        let config = Blender.Config(limit: limit, explorationJitter: 0.02,
+                                    maxPerArtist: maxPerArtist, maxPerAlbum: max(2, limit / 4))
+        var rng = SeededGenerator(seed: UInt64(truncatingIfNeeded: now().timeIntervalSince1970.bitPattern))
+        let ranked = blender.blend(sources: [scored], config: config,
+                                   excludingArtists: suppressedArtists, using: &rng)
+        let ids = ranked.map { $0.candidate.remoteId }
+        picked += ids
+        pickedSet.formUnion(ids)
     }
 
     /// The genre-similarity station batch (the pre-B3 `radioBatch` body, verbatim):

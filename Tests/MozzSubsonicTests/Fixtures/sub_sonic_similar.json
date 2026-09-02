@@ -1,0 +1,16 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "navidrome",
+    "openSubsonic": true,
+    "sonicMatch": [
+      { "entry": { "id": "tr-1001", "title": "The seed itself" }, "similarity": 1.0 },
+      { "entry": { "id": "tr-2001", "title": "Very close" }, "similarity": 0.91 },
+      { "entry": { "id": "tr-3001", "title": "No score reported" } },
+      { "entry": { "id": "tr-4001", "title": "Not similar at all" }, "similarity": 0.0 },
+      { "entry": { "id": "", "title": "No id" }, "similarity": 0.5 },
+      { "similarity": 0.4 }
+    ]
+  }
+}

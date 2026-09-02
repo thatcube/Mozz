@@ -891,8 +891,27 @@ private func dispatch(
                              genres: request.seedGenres ?? [],
                              artistIds: request.seedArtistIds ?? [],
                              seedTrackRef: request.seedTrackRef)
+        // The acoustic tier is resolved HERE, not in each client. iOS resolves
+        // its ListenBrainz tier in its own app layer, which is precisely why
+        // Android and the desktop have never had one — a signal wired into one
+        // shell is a signal four platforms do not get. This one is shared.
+        var sonic: [ScoredOwnedTrack] = []
+        if let backend = session.backends.backend(serverId), let seedRef = request.seedTrackRef {
+            let prefix = "\(serverId):"
+            let seedTrackId = seedRef.hasPrefix(prefix)
+                ? String(seedRef.dropFirst(prefix.count))
+                : seedRef
+            // Ask for more than the batch needs: the blender's artist and album
+            // caps throw a lot of an analyzer's nearest neighbours away, and a
+            // list trimmed to `limit` before capping arrives short.
+            let matches = (try? await backend.sonicallySimilarTracks(
+                to: seedTrackId, limit: limit * 3)) ?? []
+            sonic = (try? await session.recommendations.ownedSonicTracks(
+                matches, serverId: serverId)) ?? []
+        }
         let remoteIds = try await session.recommendations.radioBatch(
-            seed: seed, serverId: serverId, limit: limit, excluding: Set(request.excluding ?? []))
+            seed: seed, serverId: serverId, limit: limit,
+            excluding: Set(request.excluding ?? []), sonic: sonic)
         var tracks: [WireTrack] = []
         tracks.reserveCapacity(remoteIds.count)
         for remoteId in remoteIds {

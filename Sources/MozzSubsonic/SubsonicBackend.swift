@@ -89,6 +89,11 @@ public struct SubsonicBackend: MusicBackend {
             supportsSyncedLyrics: extensions.contains("songLyrics"),
             supportsNormalizationGain: openSubsonic, // replayGain is OpenSubsonic
             supportsProgressReporting: true,  // scrobble
+            // Advertised only while a server-side analyzer is installed and
+            // enabled — Navidrome carries the endpoints but delegates the actual
+            // similarity to a plugin, so the extension appearing IS the signal
+            // that something has analyzed the audio.
+            supportsSonicSimilarity: extensions.contains("sonicSimilarity"),
             supportsIndexBasedQueue: extensions.contains("indexBasedQueue"),
             serverProduct: product,
             isOpenSubsonic: openSubsonic
@@ -401,6 +406,38 @@ public struct SubsonicBackend: MusicBackend {
             URLQueryItem(name: "id", value: report.track.id),
             URLQueryItem(name: "submission", value: submission ? "true" : "false"),
         ], as: SubsonicEmpty.self)
+    }
+
+    // MARK: Sonic similarity
+
+    /// OpenSubsonic's `getSonicSimilarTracks`, when the server advertises the
+    /// `sonicSimilarity` extension.
+    ///
+    /// The extension is an interface, not an analyzer: Navidrome carries these
+    /// endpoints and delegates the work to a plugin, so what this really asks is
+    /// "whatever analyzed your library, what does it say sounds like this?".
+    /// That is exactly the right shape to consume — it means one implementation
+    /// here works against every analyzer anyone writes for the standard.
+    ///
+    /// Best-effort like lyrics: a server that advertised the extension and then
+    /// refuses the call is a station that falls back a tier, not an error worth
+    /// showing anyone.
+    public func sonicallySimilarTracks(to trackID: String, limit: Int) async throws -> [SonicMatch] {
+        guard limit > 0 else { return [] }
+        let response = try? await client.send("getSonicSimilarTracks", query: [
+            URLQueryItem(name: "id", value: trackID),
+            URLQueryItem(name: "count", value: String(limit)),
+        ], as: SubsonicSonicMatchPayload.self)
+        guard let matches = response?.payload.sonicMatch else { return [] }
+        return matches.compactMap { match in
+            guard let id = match.entry?.id, !id.isEmpty, id != trackID else { return nil }
+            // A server that omits the score still ranked its list, so an absent
+            // similarity is treated as "present but unquantified" rather than
+            // zero — which would drop the whole answer at the caller's `> 0`.
+            let similarity = match.similarity ?? 1
+            guard similarity > 0 else { return nil }
+            return SonicMatch(trackID: id, similarity: min(similarity, 1))
+        }
     }
 
     // MARK: Lyrics

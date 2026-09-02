@@ -116,6 +116,27 @@ public struct MusicLibrary: Sendable, Hashable, Identifiable {
 /// - **Sendable & stateless-ish.** Implementations hold only immutable
 ///   configuration (base URL, token, client info) so they are safe to share
 ///   across the concurrency domains that sync, playback and downloads run in.
+/// One track a server considers acoustically close to another, with the
+/// server's own normalized closeness.
+///
+/// The vocabulary is OpenSubsonic's `sonicSimilarity` extension, deliberately:
+/// it is the only open, multi-implementation standard for this, and shaping the
+/// port around it means a server that speaks it needs no adapter beyond
+/// decoding. `similarity` runs 0...1, where 1 is the same recording.
+public struct SonicMatch: Sendable, Hashable {
+    /// The matched track's id in the server's own namespace (a `Track.id`).
+    public let trackID: String
+    /// 0...1, higher is closer. Servers normalize this themselves; it is only
+    /// ever compared against other matches from the SAME server, never across
+    /// providers, because two analyzers do not share a space.
+    public let similarity: Double
+
+    public init(trackID: String, similarity: Double) {
+        self.trackID = trackID
+        self.similarity = similarity
+    }
+}
+
 public protocol MusicBackend: Sendable {
     /// Which backend this is (used only where a real protocol difference
     /// forces a branch; prefer capabilities elsewhere).
@@ -149,6 +170,13 @@ public protocol MusicBackend: Sendable {
     /// sync for speed. Default: `[]` — a backend whose bulk `fetchTracks` already
     /// carries full format needs no backfill.
     func fetchTrackDetails(ids: [String]) async throws -> [Track]
+
+    /// Tracks the SERVER considers acoustically similar to `trackID`, best first.
+    ///
+    /// Gated by ``ServerCapabilities/supportsSonicSimilarity``. Only a server
+    /// that has actually analyzed the audio can answer this; everything else
+    /// takes the default and returns nothing.
+    func sonicallySimilarTracks(to trackID: String, limit: Int) async throws -> [SonicMatch]
 
     /// Authoritative, prune-safe enumeration of *every* track in the catalog.
     ///
@@ -262,6 +290,13 @@ public extension MusicBackend {
 
     /// Default: no backfill needed (the bulk sync already carries full details).
     func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }
+
+    /// Default: the server has analyzed nothing, so it can vouch for nothing.
+    ///
+    /// Empty rather than an error on purpose — every caller treats "no acoustic
+    /// signal" as a reason to fall back to a weaker one, never as a failure, and
+    /// most servers will never have this.
+    func sonicallySimilarTracks(to trackID: String, limit: Int) async throws -> [SonicMatch] { [] }
 
     /// Default: no specialized bulk enumeration; the sync engine uses the flat
     /// ``fetchTracks(offset:limit:)`` pager instead.

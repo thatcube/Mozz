@@ -2280,11 +2280,12 @@ public final class AppEnvironment: ObservableObject {
         let epoch = playback.transportEpoch
         Task { [weak self] in
             guard let self else { return }
+            let sonic = await self.sonicCandidates(for: seed, serverId: serverId, limit: 30)
             let similar = await self.similarCandidates(for: seed, serverId: serverId,
                                                        excluding: initialExcluding, limit: 30)
             let ids = (try? await self.recommendations.radioBatch(
                 seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding,
-                similar: similar)) ?? []
+                sonic: sonic, similar: similar)) ?? []
             let batch = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
             // The seed track leads; the batch (which excluded it) follows — so the
             // station starts with the song the user chose. Drop it from the batch
@@ -2351,15 +2352,37 @@ public final class AppEnvironment: ObservableObject {
     private func nextRadioBatch(station: Int) async -> [Track] {
         guard station == activeStationID, let seed = activeRadioSeed,
               let serverId = active?.connection.id else { return [] }
+        let sonic = await sonicCandidates(for: seed, serverId: serverId, limit: 20)
         let similar = await similarCandidates(for: seed, serverId: serverId,
                                               excluding: radioSeenIDs, limit: 20)
         let ids = (try? await recommendations.radioBatch(
             seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs,
-            similar: similar)) ?? []
+            sonic: sonic, similar: similar)) ?? []
         let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
         guard station == activeStationID else { return [] }
         radioSeenIDs.formUnion(tracks.map(\.id))
         return tracks
+    }
+
+    /// The seed's acoustically-similar owned tracks, when the server has analyzed
+    /// its own library and will say so.
+    ///
+    /// A network call, unlike the ListenBrainz tier below it — the analysis lives
+    /// on the server, not in this database. Failure is silent and empty: a
+    /// station falls to the next tier rather than not starting.
+    private func sonicCandidates(for seed: RadioSeed, serverId: ServerID,
+                                 limit: Int) async -> [ScoredOwnedTrack] {
+        guard let backend = active, backend.capabilities.supportsSonicSimilarity,
+              let ref = seed.seedTrackRef else { return [] }
+        let prefix = "\(serverId):"
+        let seedTrackId = ref.hasPrefix(prefix) ? String(ref.dropFirst(prefix.count)) : ref
+        // Overfetch for the same reason the ListenBrainz tier does: the per-artist
+        // cap throws away an analyzer's album-mates, and a pool trimmed to `limit`
+        // first arrives short.
+        let matches = (try? await backend.backend.sonicallySimilarTracks(
+            to: seedTrackId, limit: limit * 3)) ?? []
+        guard !matches.isEmpty else { return [] }
+        return (try? await recommendations.ownedSonicTracks(matches, serverId: serverId)) ?? []
     }
 
     /// The seed's ListenBrainz-similar owned tracks for the radio precedence tier,
