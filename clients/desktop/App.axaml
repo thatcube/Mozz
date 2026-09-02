@@ -156,6 +156,62 @@
             <Setter Property="Foreground" Value="{DynamicResource Accent}" />
         </Style>
 
+        <!-- =================================================================
+             Hover.
+
+             One rule for everything clickable: it says so under the pointer,
+             with a rounded plate that has room around the content, on the frame
+             the pointer arrives. No fades — a hover that animates in feels like
+             the app is thinking about it, and at the speed a pointer crosses a
+             list of songs the fades pile up into a smear.
+
+             The plate lives in the row TEMPLATE, on a Border we own, rather than
+             on the ListBoxItem's ContentPresenter — because a list whose rows
+             are of mixed kinds cannot style hover at the item level. The detail
+             pages put a hero banner, section titles and track rows in ONE
+             ListBox, so they switch item hover off wholesale to stop the banner
+             lighting up, and that takes the track rows down with it. A plate on
+             the track template lights the rows that are rows and nothing else.
+             `:pointerover` on the Border needs no selector reaching into a
+             theme's template internals, so nothing outside this file can turn it
+             off; the transparent resting background is what keeps it
+             hit-testable.
+             ================================================================= -->
+        <Style Selector="Border.rowPlate">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="10" />
+            <!-- Even on all four sides, so the gap left of a cover is the gap
+                 above it. -->
+            <Setter Property="Padding" Value="8" />
+            <!-- And a gap, so two rows read as two rows. Without it consecutive
+                 plates share an edge, the rounded corners cancel out against
+                 each other, and hovering one row looks like a band of colour
+                 across the list rather than a card under the pointer. -->
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Border.rowPlate:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+
+        <!-- A tile that is already a raised card lifts its own surface: a plate
+             behind a card is a halo at the same colour. -->
+        <Style Selector="Border.tileSurface">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Border.tileSurface:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="ListBoxItem /template/ ContentPresenter">
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+
         <!-- The default button.
              Everything below is a variation on this one, and it is written this
              way round because the failure it fixes is a button with NO class on
@@ -242,24 +298,50 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
+        <!-- The artist and album names in a row stay clickable, but they sit
+             inside a plate that already lights up, so a second surface under
+             them would read as two overlapping targets. -->
         <Style Selector="Button.link:pointerover TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="TextDecorations" Value="Underline" />
         </Style>
         <Style Selector="Button.link:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Button.tile">
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="CornerRadius" Value="12" />
+            <!-- The padding is not new space: it is the margin each wall used to
+                 put BETWEEN its tiles, moved inside the tile, so the hover plate
+                 has room to be seen around the art and the footprint is
+                 unchanged — which matters because the walls' column counts come
+                 from fixed pitch constants in DesktopLayout. -->
+            <Setter Property="Padding" Value="10" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
+        <!-- At rest the artwork is the whole affordance, so the button paints
+             nothing; under the pointer a rounded plate appears behind it, and
+             the padding is what gives the plate room to be seen around the art
+             rather than hiding exactly beneath it. -->
         <Style Selector="Button.tile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Button.tile:focus-visible /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <!-- A tile that is already a raised card lifts that card instead. -->
+        <Style Selector="Button.tile.card">
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="Button.tile.card:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile.card:focus-visible /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
         <!-- The base button now paints a pressed state, and a cover must not get

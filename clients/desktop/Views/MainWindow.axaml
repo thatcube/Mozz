@@ -386,7 +386,7 @@
                                                <Border Width="300" Margin="0,0,20,12" Padding="8" CornerRadius="8"
                                                        Background="{DynamicResource SurfaceRaised}">
                                                    <Grid ColumnDefinitions="44,*,38,64" Height="44">
-                                                       <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
+                                                       <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
                                                                FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                                        <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" Spacing="1">
@@ -421,7 +421,7 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="176" Margin="0,0,20,22"
+                                           <Button Classes="tile" Width="196" Margin="0,0,0,2"
                                                    Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                    CommandParameter="{Binding}">
                                                <StackPanel Spacing="9">
@@ -446,11 +446,10 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="216" Margin="0,0,20,22"
+                                           <Button Classes="tile card" Width="216" Margin="0,0,20,22"
                                                    Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}"
-                                                       CornerRadius="12" Padding="18" Height="148">
+                                               <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="148">
                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
                                                                             Brush="{DynamicResource TextSecondary}" />
@@ -485,48 +484,50 @@
                         </ListBox.ItemsPanel>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid ColumnDefinitions="44,*,Auto,Auto,Auto" Height="50" Classes="libraryTrackRow">
-                                    <controls:ArtworkImage Grid.Column="0"
-                                            Width="38" Height="38" DisplaySize="38"
-                                            CornerRadius="6"
-                                            ServerId="{Binding ServerId}"
-                                            ArtworkKey="{Binding ArtworkKey}"
-                                            FallbackText="{Binding AlbumTitle}"
-                                            FallbackFontSize="15"
-                                            FallbackFontWeight="SemiBold"
-                                            FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center"
-                                                Margin="13,0" Spacing="1">
-                                        <TextBlock Text="{Binding Title}" Classes="primary" />
-                                        <Button Classes="link"
+                                <Border Classes="rowPlate">
+                                    <Grid ColumnDefinitions="40,*,Auto,Auto,Auto" Height="40" Classes="libraryTrackRow">
+                                        <controls:ArtworkImage Grid.Column="0"
+                                                Width="40" Height="40" DisplaySize="40"
+                                                CornerRadius="6"
+                                                ServerId="{Binding ServerId}"
+                                                ArtworkKey="{Binding ArtworkKey}"
+                                                FallbackText="{Binding AlbumTitle}"
+                                                FallbackFontSize="15"
+                                                FallbackFontWeight="SemiBold"
+                                                FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center"
+                                                    Margin="13,0" Spacing="1">
+                                            <TextBlock Text="{Binding Title}" Classes="primary" />
+                                            <Button Classes="link"
+                                                    HorizontalAlignment="Left"
+                                                    Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
+                                            </Button>
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Classes="link trackAlbumColumn" Width="200"
                                                 HorizontalAlignment="Left"
-                                                Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                                VerticalAlignment="Center"
+                                                Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
                                                 CommandParameter="{Binding}">
-                                            <TextBlock Text="{Binding ArtistName}" Classes="secondary" />
+                                            <TextBlock Text="{Binding AlbumTitle}" Classes="secondary" />
                                         </Button>
-                                    </StackPanel>
-                                    <Button Grid.Column="2" Classes="link trackAlbumColumn" Width="200"
-                                            HorizontalAlignment="Left"
-                                            VerticalAlignment="Center"
-                                            Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                            CommandParameter="{Binding}">
-                                        <TextBlock Text="{Binding AlbumTitle}" Classes="secondary" />
-                                    </Button>
-                                    <Button Grid.Column="3" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                            Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                            CommandParameter="{Binding}"
-                                            ToolTip.Tip="{Binding FavoriteLabel}">
-                                        <Panel Opacity="{Binding FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                            <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                 Brush="{DynamicResource BrandForeground}" IsVisible="{Binding IsFavorite}" />
-                                            <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsFavorite}" />
-                                        </Panel>
-                                    </Button>
-                                    <TextBlock Grid.Column="4" Classes="secondary trackDurationColumn" Text="{Binding Duration}"
-                                               VerticalAlignment="Center"
-                                               HorizontalAlignment="Right" Margin="0,0,10,0" />
-                                </Grid>
+                                        <Button Grid.Column="3" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
+                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="{Binding FavoriteLabel}">
+                                            <Panel Opacity="{Binding FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding IsFavorite}" />
+                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsFavorite}" />
+                                            </Panel>
+                                        </Button>
+                                        <TextBlock Grid.Column="4" Classes="secondary trackDurationColumn" Text="{Binding Duration}"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -573,7 +574,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="176" Margin="0,0,20,24"
+                                            <Button Classes="tile" Width="196" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="9">
@@ -636,7 +637,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="158" Margin="0,0,20,24"
+                                            <Button Classes="tile" Width="178" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="10">
@@ -691,11 +692,10 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="216" Margin="0,0,20,24"
+                                            <Button Classes="tile card" Width="216" Margin="0,0,20,24"
                                                     Command="{Binding $parent[Window].DataContext.OpenGenreCommand}"
                                                     CommandParameter="{Binding}">
-                                                <Border Background="{DynamicResource SurfaceRaised}"
-                                                        CornerRadius="12" Padding="18" Height="128">
+                                                <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="128">
                                                     <StackPanel Spacing="8" VerticalAlignment="Center">
                                                         <controls:TablerIcon Size="32" Data="{StaticResource IconStack}"
                                                                              Brush="{DynamicResource TextSecondary}" />
@@ -730,37 +730,39 @@
                                 </Border>
                             </DataTemplate>
                             <DataTemplate DataType="vm:SearchTrackRow">
-                                <Grid ColumnDefinitions="44,*,Auto,Auto,Auto" Height="50" Classes="libraryTrackRow">
-                                    <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
-                                            ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                            FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
-                                        <TextBlock Text="{Binding Track.Title}" Classes="primary" />
-                                        <Button Classes="link" HorizontalAlignment="Left"
-                                                Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                <Border Classes="rowPlate">
+                                    <Grid ColumnDefinitions="40,*,Auto,Auto,Auto" Height="40" Classes="libraryTrackRow">
+                                        <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
+                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
+                                                FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
+                                            <TextBlock Text="{Binding Track.Title}" Classes="primary" />
+                                            <Button Classes="link" HorizontalAlignment="Left"
+                                                    Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                                    CommandParameter="{Binding Track}">
+                                                <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary compactOnly" />
+                                            </Button>
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Classes="link trackAlbumColumn" Width="200" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
                                                 CommandParameter="{Binding Track}">
-                                            <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary compactOnly" />
+                                            <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
                                         </Button>
-                                    </StackPanel>
-                                    <Button Grid.Column="2" Classes="link trackAlbumColumn" Width="200" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                            Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                            CommandParameter="{Binding Track}">
-                                        <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
-                                    </Button>
-                                    <Button Grid.Column="3" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                            Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                            CommandParameter="{Binding Track}"
-                                            ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                        <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                            <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                 Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                            <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                        </Panel>
-                                    </Button>
-                                    <TextBlock Grid.Column="4" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
-                                               VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
-                                </Grid>
+                                        <Button Grid.Column="3" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
+                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                CommandParameter="{Binding Track}"
+                                                ToolTip.Tip="{Binding Track.FavoriteLabel}">
+                                            <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
+                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
+                                            </Panel>
+                                        </Button>
+                                        <TextBlock Grid.Column="4" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
+                                                   VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                             <DataTemplate DataType="vm:SearchAlbumRow">
                                 <Button Classes="tile" HorizontalAlignment="Stretch"
@@ -833,33 +835,35 @@
                             </ListBox.ItemsPanel>
                             <ListBox.ItemTemplate>
                                 <DataTemplate DataType="vm:DownloadRow">
-                                    <Grid ColumnDefinitions="*,Auto,Auto" Height="58" Classes="libraryTrackRow">
-                                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="4,0,13,0" Spacing="3">
-                                            <TextBlock Text="{Binding Title}" Classes="primary" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding Detail}" Classes="secondary" FontSize="12" />
-                                            <ProgressBar Minimum="0" Maximum="1" Value="{Binding ProgressFraction}"
-                                                         Height="3" IsVisible="{Binding ShowProgress}" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding StateLabel}" Classes="secondary"
-                                                   VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" />
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                            <Button Classes="ghost" Width="34" Height="34"
-                                                    IsVisible="{Binding !IsDownloaded}"
-                                                    Command="{Binding $parent[Window].DataContext.CancelDownloadCommand}"
-                                                    CommandParameter="{Binding}"
-                                                    ToolTip.Tip="Cancel">
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconX}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" />
-                                            </Button>
-                                            <Button Classes="ghost" Width="34" Height="34"
-                                                    Command="{Binding $parent[Window].DataContext.DeleteDownloadCommand}"
-                                                    CommandParameter="{Binding}"
-                                                    ToolTip.Tip="Remove">
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconTrash}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" />
-                                            </Button>
-                                        </StackPanel>
-                                    </Grid>
+                                    <Border Classes="rowPlate">
+                                        <Grid ColumnDefinitions="*,Auto,Auto" Height="46" Classes="libraryTrackRow">
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="4,0,13,0" Spacing="3">
+                                                <TextBlock Text="{Binding Title}" Classes="primary" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Detail}" Classes="secondary" FontSize="12" />
+                                                <ProgressBar Minimum="0" Maximum="1" Value="{Binding ProgressFraction}"
+                                                             Height="3" IsVisible="{Binding ShowProgress}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Text="{Binding StateLabel}" Classes="secondary"
+                                                       VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" />
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <Button Classes="ghost" Width="34" Height="34"
+                                                        IsVisible="{Binding !IsDownloaded}"
+                                                        Command="{Binding $parent[Window].DataContext.CancelDownloadCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip.Tip="Cancel">
+                                                    <controls:TablerIcon Size="17" Data="{StaticResource IconX}"
+                                                                         Brush="{Binding $parent[Button].Foreground}" />
+                                                </Button>
+                                                <Button Classes="ghost" Width="34" Height="34"
+                                                        Command="{Binding $parent[Window].DataContext.DeleteDownloadCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip.Tip="Remove">
+                                                    <controls:TablerIcon Size="17" Data="{StaticResource IconTrash}"
+                                                                         Brush="{Binding $parent[Button].Foreground}" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
@@ -899,11 +903,10 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="216" Margin="0,0,20,24"
+                                            <Button Classes="tile card" Width="216" Margin="0,0,20,24"
                                                     Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                     CommandParameter="{Binding}">
-                                                <Border Background="{DynamicResource SurfaceRaised}"
-                                                        CornerRadius="12" Padding="18" Height="148">
+                                                <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="148">
                                                     <StackPanel Spacing="8" VerticalAlignment="Center">
                                                         <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
                                                                              Brush="{DynamicResource TextSecondary}" />
@@ -1115,7 +1118,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="176" Margin="0,0,20,22"
+                                            <Button Classes="tile" Width="196" Margin="0,0,0,2"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                                 <StackPanel Spacing="9">
@@ -1145,7 +1148,7 @@
                                                 <Border Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
                                                         Background="{DynamicResource SurfaceRaised}">
                                                     <Grid ColumnDefinitions="44,*,38,64" Height="44">
-                                                        <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
+                                                        <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
                                                                 FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                                         <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" Spacing="1">
@@ -1174,34 +1177,36 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:AlbumTrackItemRow">
-                                <Grid ColumnDefinitions="36,*,46,46,70" Height="44">
-                                    <TextBlock Grid.Column="0" Text="{Binding Row.TrackNumberText}" Classes="secondary"
-                                               VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Text="{Binding Row.Track.Title}" Classes="primary" />
-                                        <TextBlock Text="{Binding Row.Track.ArtistName}" Classes="secondary" />
-                                    </StackPanel>
-                                    <Button Grid.Column="2" Classes="ghost" Width="34" Height="34"
-                                            Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                            CommandParameter="{Binding Row.Track}"
-                                            ToolTip.Tip="{Binding Row.Track.FavoriteLabel}">
-                                        <Panel Opacity="{Binding Row.Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                            <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                 Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Row.Track.IsFavorite}" />
-                                            <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Row.Track.IsFavorite}" />
-                                        </Panel>
-                                    </Button>
-                                    <Button Grid.Column="3" Classes="ghost" Width="34" Height="34"
-                                            Command="{Binding $parent[Window].DataContext.DownloadTrackCommand}"
-                                            CommandParameter="{Binding Row.Track}"
-                                            ToolTip.Tip="Download">
-                                        <controls:TablerIcon Size="17" Data="{StaticResource IconDownload}"
-                                                             Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <TextBlock Grid.Column="4" Text="{Binding Row.Track.Duration}" Classes="secondary"
-                                               VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
-                                </Grid>
+                                <Border Classes="rowPlate">
+                                    <Grid ColumnDefinitions="36,*,46,46,70" Height="36">
+                                        <TextBlock Grid.Column="0" Text="{Binding Row.TrackNumberText}" Classes="secondary"
+                                                   VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="{Binding Row.Track.Title}" Classes="primary" />
+                                            <TextBlock Text="{Binding Row.Track.ArtistName}" Classes="secondary" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Classes="ghost" Width="34" Height="34"
+                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                CommandParameter="{Binding Row.Track}"
+                                                ToolTip.Tip="{Binding Row.Track.FavoriteLabel}">
+                                            <Panel Opacity="{Binding Row.Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Row.Track.IsFavorite}" />
+                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Row.Track.IsFavorite}" />
+                                            </Panel>
+                                        </Button>
+                                        <Button Grid.Column="3" Classes="ghost" Width="34" Height="34"
+                                                Command="{Binding $parent[Window].DataContext.DownloadTrackCommand}"
+                                                CommandParameter="{Binding Row.Track}"
+                                                ToolTip.Tip="Download">
+                                            <controls:TablerIcon Size="17" Data="{StaticResource IconDownload}"
+                                                                 Brush="{Binding $parent[Button].Foreground}" />
+                                        </Button>
+                                        <TextBlock Grid.Column="4" Text="{Binding Row.Track.Duration}" Classes="secondary"
+                                                   VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistTrackHeaderRow">
@@ -1214,38 +1219,40 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistTrackItemRow">
-                                <Grid ColumnDefinitions="44,*,Auto,Auto,Auto,Auto" Height="50" Classes="playlistTrackRow">
-                                    <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
-                                            ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                            FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
-                                        <TextBlock Text="{Binding Track.Title}" Classes="primary" />
-                                        <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
-                                    </StackPanel>
-                                    <Button Grid.Column="2" Classes="link playlistArtistColumn" Width="180" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                            Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
-                                            CommandParameter="{Binding Track}">
-                                        <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
-                                    </Button>
-                                    <Button Grid.Column="3" Classes="link playlistAlbumColumn" Width="220" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                            Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                            CommandParameter="{Binding Track}">
-                                        <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
-                                    </Button>
-                                    <Button Grid.Column="4" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                            Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                            CommandParameter="{Binding Track}"
-                                            ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                        <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                            <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                 Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                            <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                        </Panel>
-                                    </Button>
-                                    <TextBlock Grid.Column="5" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
-                                               VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
-                                </Grid>
+                                <Border Classes="rowPlate">
+                                    <Grid ColumnDefinitions="40,*,Auto,Auto,Auto,Auto" Height="40" Classes="playlistTrackRow">
+                                        <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
+                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
+                                                FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="13,0" Spacing="1">
+                                            <TextBlock Text="{Binding Track.Title}" Classes="primary" />
+                                            <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Classes="link playlistArtistColumn" Width="180" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                                CommandParameter="{Binding Track}">
+                                            <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
+                                        </Button>
+                                        <Button Grid.Column="3" Classes="link playlistAlbumColumn" Width="220" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
+                                                CommandParameter="{Binding Track}">
+                                            <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
+                                        </Button>
+                                        <Button Grid.Column="4" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
+                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                CommandParameter="{Binding Track}"
+                                                ToolTip.Tip="{Binding Track.FavoriteLabel}">
+                                            <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
+                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
+                                            </Panel>
+                                        </Button>
+                                        <TextBlock Grid.Column="5" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
+                                                   VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListBox.DataTemplates>
                     </ListBox>
@@ -1420,7 +1427,7 @@
                                     <DataTemplate>
                                         <Grid ColumnDefinitions="Auto,44,*,Auto,Auto,Auto,Auto" Height="54" Classes="queueTrackRow">
                                             <TextBlock Grid.Column="0" Width="78" Text="{Binding NumberText}" Classes="secondary compactHidden" VerticalAlignment="Center" />
-                                            <controls:ArtworkImage Grid.Column="1" Classes="queueArtworkColumn" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
+                                            <controls:ArtworkImage Grid.Column="1" Classes="queueArtworkColumn" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                     ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
                                                     FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
                                             <TextBlock Grid.Column="2" Text="{Binding Track.Title}" Classes="primary queueTitleColumn" VerticalAlignment="Center" Margin="13,0" />
