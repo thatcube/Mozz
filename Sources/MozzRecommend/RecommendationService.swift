@@ -53,7 +53,7 @@ public actor RecommendationService {
 
     /// Per-server analyzed vectors, so a station does not re-read the whole
     /// corpus for every batch. See `sonicCorpus(serverId:engine:)`.
-    private var sonicCorpusCache: [ServerID: (entries: [(remoteId: String, vector: [Float])], engine: String, loadedAt: Date)] = [:]
+    private var sonicCorpusCache: [ServerID: (corpus: SonicCorpus, engine: String, loadedAt: Date)] = [:]
     private static let sonicCorpusTTL: TimeInterval = 120
 
     /// Stable id of the weekly rediscovery set.
@@ -193,16 +193,17 @@ public actor RecommendationService {
               !seed.isEmpty else { return [] }
 
         let corpus = try await sonicCorpus(serverId: serverId, engine: engine)
-        guard !corpus.isEmpty else { return [] }
+        guard !corpus.entries.isEmpty else { return [] }
+        let probe = corpus.normalize(seed)
 
         var scored: [SonicMatch] = []
-        scored.reserveCapacity(corpus.count)
-        for entry in corpus where entry.remoteId != seedRemoteId {
-            guard entry.vector.count == seed.count else { continue }
+        scored.reserveCapacity(corpus.entries.count)
+        for entry in corpus.entries where entry.remoteId != seedRemoteId {
+            guard entry.vector.count == probe.count else { continue }
             var dot = 0.0
-            for i in 0..<seed.count { dot += Double(seed[i]) * Double(entry.vector[i]) }
-            // Both vectors are unit length and centred, so the dot product is a
-            // signed cosine; mapped to 0...1 to match what a server reports.
+            for i in 0..<probe.count { dot += Double(probe[i]) * Double(entry.vector[i]) }
+            // Both vectors are unit length, so the dot product is a signed
+            // cosine; mapped to 0...1 to match what a server reports.
             scored.append(SonicMatch(trackID: entry.remoteId,
                                      similarity: Swift.min(Swift.max((dot + 1) / 2, 0), 1)))
         }
@@ -216,14 +217,15 @@ public actor RecommendationService {
     /// re-read and re-unpack every vector in the library. The TTL is short
     /// because analysis runs in the background and a station started mid-scan
     /// should start seeing the new tracks.
-    private func sonicCorpus(serverId: ServerID, engine: String) async throws -> [(remoteId: String, vector: [Float])] {
+    private func sonicCorpus(serverId: ServerID, engine: String) async throws -> SonicCorpus {
         if let cached = sonicCorpusCache[serverId], cached.engine == engine,
            now().timeIntervalSince(cached.loadedAt) < Self.sonicCorpusTTL {
-            return cached.entries
+            return cached.corpus
         }
         let entries = try await store.sonicEmbeddings(serverId: serverId, engine: engine)
-        sonicCorpusCache[serverId] = (entries, engine, now())
-        return entries
+        let corpus = SonicCorpus(entries)
+        sonicCorpusCache[serverId] = (corpus, engine, now())
+        return corpus
     }
 
     /// Resolve a server's acoustic matches against what this device has mirrored.
