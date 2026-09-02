@@ -236,7 +236,7 @@
             </Border>
 
             <!-- Content -->
-            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="32,26,24,116" Classes="contentShell">
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="32,26,24,0" Classes="contentShell">
 
                 <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="0,0,0,20">
                     <Button x:Name="CompactNavigationButton" Grid.Column="0" Classes="transport"
@@ -291,7 +291,7 @@
                     <ListBox IsVisible="{Binding ShowHomeRows}"
                              ItemsSource="{Binding HomeRows}"
                              Background="Transparent" BorderThickness="0"
-                             SelectionMode="Single" Padding="0,0,8,0">
+                             SelectionMode="Single" Padding="0,0,8,112">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -522,7 +522,7 @@
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent"
                              BorderThickness="0"
-                             Padding="0,0,8,0">
+                             Padding="0,0,8,112">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -587,7 +587,7 @@
                              ItemsSource="{Binding AlbumGrid.Rows}"
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
-                             SelectionMode="Single" Padding="0,0,8,0">
+                             SelectionMode="Single" Padding="0,0,8,112">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -650,7 +650,7 @@
                              ItemsSource="{Binding ArtistGrid.Rows}"
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
-                             SelectionMode="Single" Padding="0,0,8,0">
+                             SelectionMode="Single" Padding="0,0,8,112">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -711,7 +711,7 @@
                     <ListBox IsVisible="{Binding ShowGenres}"
                              ItemsSource="{Binding GenreGrid.Rows}"
                              Background="Transparent" BorderThickness="0"
-                             SelectionMode="Single" Padding="0,0,8,0">
+                             SelectionMode="Single" Padding="0,0,8,112">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -766,7 +766,7 @@
                              ItemsSource="{Binding SearchRows}"
                              DoubleTapped="OnSearchRowActivated"
                              Background="Transparent" BorderThickness="0"
-                             Padding="0,0,8,24">
+                             Padding="0,0,8,124">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
@@ -924,7 +924,7 @@
                              ItemsSource="{Binding PlaylistGrid.Rows}"
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
-                             SelectionMode="Single" Padding="0,0,8,0">
+                             SelectionMode="Single" Padding="0,0,8,112">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -989,7 +989,7 @@
                              DoubleTapped="OnDetailRowActivated"
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
-                             Padding="0,0,8,28">
+                             Padding="0,0,8,128">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -2030,7 +2030,7 @@
                             </StackPanel>
                         </Grid>
 
-                        <ScrollViewer Grid.Row="1" Padding="0,0,8,0">
+                        <ScrollViewer Grid.Row="1" Padding="0,0,8,112">
                             <Panel>
                                 <StackPanel Spacing="16" IsVisible="{Binding IsSettingsAccountSelected}">
                                     <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
