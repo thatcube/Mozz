@@ -52,6 +52,17 @@
             <!-- The dock's own surface. Lifted off the page rather than equal
                  to it, so the pill reads as laid on top; DesktopPalette swaps
                  both for the light and blackout ladders. -->
+            <!-- Under a title laid on artwork. Nothing at the top, where the
+                 cover should be seen, deepening to near-opaque at the bottom
+                 where the words are — so the text is legible over a pale record
+                 and a dark one alike without flattening either. -->
+            <LinearGradientBrush x:Key="TileTitleScrim" StartPoint="0%,0%" EndPoint="0%,100%">
+                <GradientStop Color="#00000000" Offset="0.32" />
+                <GradientStop Color="#40000000" Offset="0.6" />
+                <GradientStop Color="#A6000000" Offset="0.84" />
+                <GradientStop Color="#D9000000" Offset="1" />
+            </LinearGradientBrush>
+
             <SolidColorBrush x:Key="DockBackground" Color="#F21C1C20" />
             <SolidColorBrush x:Key="DockBorder" Color="#26FFFFFF" />
 
@@ -337,11 +348,16 @@
         <Style Selector="Button.cover:pressed /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Button.cover:pointerover Border#DockArtworkHover">
-            <Setter Property="Opacity" Value="1" />
-        </Style>
-        <Style Selector="Border#DockArtworkHover">
+        <!-- The resting opacity has to live here rather than on the element: a
+             value set inline in XAML is a local value, and a local value beats
+             every style setter, so `Opacity="0"` on the Border made the hover
+             rule below unable to raise it. -->
+        <Style Selector="Border.coverHover">
+            <Setter Property="Opacity" Value="0" />
             <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.cover:pointerover Border.coverHover">
+            <Setter Property="Opacity" Value="1" />
         </Style>
 
         <Style Selector="Button.tile">

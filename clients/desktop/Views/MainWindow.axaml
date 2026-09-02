@@ -320,17 +320,19 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <!-- A mix is a cover with a name under it, exactly like an album.
-                                                It used to be a wide card with the art squashed into a strip down
-                                                one side, which made Home read as two unrelated systems: skinny
-                                                landscape cards at the top and square covers everywhere below.
-                                                One shape for everything is both calmer and easier to scan. -->
+                                           <!-- A mix wears its own name. The generated covers are borrowed
+                                                album art, so without the title on them a wall of mixes is a
+                                                wall of records you already own with captions underneath; with
+                                                it, each one is the thing it actually is. The wash beneath the
+                                                words is what keeps them readable over a cover of any
+                                                brightness — see TileTitleScrim. -->
                                            <Button Classes="tile" Margin="0,0,0,4"
                                                    Width="{Binding $parent[Window].DataContext.AlbumTileWidth}"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <StackPanel Spacing="9">
-                                                   <Panel>
+                                               <StackPanel Spacing="8">
+                                                   <Panel Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                          Height="{Binding $parent[Window].DataContext.AlbumArtSize}">
                                                        <controls:ArtworkImage
                                                                Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
                                                                Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
@@ -345,22 +347,26 @@
                                                                IsVisible="{Binding !IsLiked}" />
                                                        <!-- Liked Songs has no cover of its own, so it gets the one
                                                             mark that means "liked" everywhere else in the app. -->
-                                                       <Border Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
-                                                               Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
-                                                               CornerRadius="8"
+                                                       <Border CornerRadius="8"
                                                                Background="{DynamicResource Accent}"
                                                                IsVisible="{Binding IsLiked}">
-                                                           <controls:TablerIcon Size="46" Filled="True"
+                                                           <controls:TablerIcon Size="44" Filled="True"
                                                                                 Data="{StaticResource IconHeart}"
                                                                                 Brush="White"
-                                                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                                HorizontalAlignment="Center"
+                                                                                VerticalAlignment="Top" Margin="0,22,0,0" />
                                                        </Border>
+                                                       <Border CornerRadius="8" Background="{DynamicResource TileTitleScrim}" />
+                                                       <TextBlock Text="{Binding Title}"
+                                                                  Foreground="White"
+                                                                  FontSize="19" FontWeight="Bold"
+                                                                  TextWrapping="Wrap" MaxLines="2"
+                                                                  TextTrimming="CharacterEllipsis"
+                                                                  VerticalAlignment="Bottom"
+                                                                  Margin="12,0,12,11" />
                                                    </Panel>
-                                                   <StackPanel Spacing="2">
-                                                       <TextBlock Text="{Binding Title}" Classes="primary" />
-                                                       <TextBlock Text="{Binding Subtitle}" Classes="secondary"
-                                                                  IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                                   </StackPanel>
+                                                   <TextBlock Text="{Binding Subtitle}" Classes="secondary"
+                                                              IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                                </StackPanel>
                                            </Button>
                                        </DataTemplate>
@@ -1332,8 +1338,8 @@
                                 FallbackFontSize="26"
                                 FallbackFontWeight="SemiBold"
                                 FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
-                        <Border x:Name="DockArtworkHover" CornerRadius="12"
-                                Background="#8C000000" Opacity="0" IsHitTestVisible="False">
+                        <Border x:Name="DockArtworkHover" Classes="coverHover" CornerRadius="12"
+                                Background="#8C000000" IsHitTestVisible="False">
                             <controls:TablerIcon Size="22" Data="{StaticResource IconChevronUp}"
                                                  Brush="White"
                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
