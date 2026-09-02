@@ -176,7 +176,7 @@
                                    Text="Connect a Plex, Jellyfin or Subsonic server and Mozz will sync your library." />
                         <Button Content="Connect a server"
                                 HorizontalAlignment="Center"
-                                Classes="accent"
+                                Classes="accent large"
                                 Command="{Binding SelectSectionCommand}"
                                 CommandParameter="{x:Static vm:LibrarySection.Connect}" />
                     </StackPanel>
@@ -745,13 +745,13 @@
                                         </Button>
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                                            <Button Classes="accent detailAction" Command="{Binding $parent[Window].DataContext.PlaySelectedAlbumCommand}">
+                                            <Button Classes="accent large" Command="{Binding $parent[Window].DataContext.PlaySelectedAlbumCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                                     <TextBlock Text="Play" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="detailAction secondaryAction" Command="{Binding $parent[Window].DataContext.ShuffleSelectedAlbumCommand}">
+                                            <Button Classes="large" Command="{Binding $parent[Window].DataContext.ShuffleSelectedAlbumCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
@@ -810,13 +810,13 @@
                                                    Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                                            <Button Classes="accent detailAction" Command="{Binding $parent[Window].DataContext.PlaySelectedPlaylistCommand}">
+                                            <Button Classes="accent large" Command="{Binding $parent[Window].DataContext.PlaySelectedPlaylistCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                                     <TextBlock Text="Play" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="detailAction secondaryAction" Command="{Binding $parent[Window].DataContext.ShuffleSelectedPlaylistCommand}">
+                                            <Button Classes="large" Command="{Binding $parent[Window].DataContext.ShuffleSelectedPlaylistCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
@@ -847,13 +847,13 @@
                                                    IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
-                                            <Button Classes="accent detailAction" Command="{Binding $parent[Window].DataContext.PlaySelectedMixCommand}">
+                                            <Button Classes="accent large" Command="{Binding $parent[Window].DataContext.PlaySelectedMixCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Filled="True" Data="{StaticResource IconPlay}" Brush="White" />
                                                     <TextBlock Text="Play" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Classes="detailAction secondaryAction" Command="{Binding $parent[Window].DataContext.ShuffleSelectedMixCommand}">
+                                            <Button Classes="large" Command="{Binding $parent[Window].DataContext.ShuffleSelectedMixCommand}">
                                                 <StackPanel Orientation="Horizontal" Spacing="7">
                                                     <controls:TablerIcon Size="15" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
                                                     <TextBlock Text="Shuffle" />
@@ -1058,7 +1058,7 @@
                              </ItemsControl.ItemsPanel>
                              <ItemsControl.ItemTemplate>
                                <DataTemplate>
-                                 <Button Content="{Binding Label}" Margin="0,0,8,8"
+                                 <Button Content="{Binding Label}" Classes="small" Margin="0,0,8,8"
                                          Command="{Binding $parent[ScrollViewer].DataContext.ApplyEqualizerPresetCommand}"
                                          CommandParameter="{Binding}" />
                                </DataTemplate>
@@ -1120,7 +1120,7 @@
                                      <TextBlock Text="{Binding Title}" Classes="primary" />
                                      <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
                                    </StackPanel>
-                                   <Button Grid.Column="1" Content="Restore"
+                                   <Button Grid.Column="1" Content="Restore" Classes="small"
                                            Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
                                            CommandParameter="{Binding}" />
                                  </Grid>
@@ -1135,7 +1135,7 @@
                                      <TextBlock Text="{Binding Title}" Classes="primary" />
                                      <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
                                    </StackPanel>
-                                   <Button Grid.Column="1" Content="Restore"
+                                   <Button Grid.Column="1" Content="Restore" Classes="small"
                                            Command="{Binding $parent[ScrollViewer].DataContext.RestoreSuppressionCommand}"
                                            CommandParameter="{Binding}" />
                                  </Grid>
@@ -1196,8 +1196,7 @@
                          </StackPanel>
                        </Border>
 
-                       <Button Content="Sign Out" HorizontalAlignment="Left"
-                               Foreground="{DynamicResource Accent}"
+                       <Button Content="Sign Out" Classes="danger" HorizontalAlignment="Left"
                                IsVisible="{Binding HasActiveAccount}"
                                Command="{Binding SignOutCommand}" />
                        <TextBlock Text="{Binding SettingsMessage}" Classes="secondary" TextWrapping="Wrap"
@@ -1222,10 +1221,10 @@
                                       <TextBlock Text="{Binding ServerName}" Classes="primary" />
                                       <TextBlock Text="{Binding BaseUrl}" Classes="secondary" FontSize="11.5" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Sync" Margin="0,0,8,0"
+                                    <Button Grid.Column="1" Content="Sync" Classes="small" Margin="0,0,8,0"
                                             Command="{Binding $parent[ScrollViewer].DataContext.Connect.SyncAccountCommand}"
                                             CommandParameter="{Binding}" />
-                                    <Button Grid.Column="2" Content="Sign out"
+                                    <Button Grid.Column="2" Content="Sign out" Classes="small ghost"
                                             Command="{Binding $parent[ScrollViewer].DataContext.Connect.ForgetAccountCommand}"
                                             CommandParameter="{Binding}" />
                                   </Grid>
@@ -1294,7 +1293,7 @@
                                         Command="{Binding Connect.OpenPlexLinkCommand}" />
                                 <Button Content="Copy link"
                                         Command="{Binding Connect.CopyPlexLinkCommand}" />
-                                <Button Content="Cancel"
+                                <Button Content="Cancel" Classes="ghost"
                                         Command="{Binding Connect.CancelPlexCommand}" />
                               </StackPanel>
                             </StackPanel>

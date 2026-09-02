@@ -160,6 +160,83 @@
             <Setter Property="Foreground" Value="{DynamicResource Accent}" />
         </Style>
 
+        <!-- =================================================================
+             Buttons.
+
+             Every button in the app is one of these. The base style below is a
+             complete, finished button on its own — the standard pill, in the
+             secondary colour — and the classes after it only say how a button
+             differs from that: bigger, smaller, louder, quieter, or not
+             pill-shaped at all.
+
+             It is written this way round because the failure it fixes was a
+             button with NO class on it. "Sync Now" carried `accent` and came out
+             a crimson pill; "Refresh Settings" beside it carried nothing and
+             came out a grey Fluent rectangle with a different height, a
+             different radius and a different font. Half a dozen buttons across
+             Settings and Connect were in the same state. Styling only the
+             classes leaves the default as a trap, and someone falls into it
+             every time a button is added; styling the DEFAULT means forgetting
+             a class produces the right button instead of the theme's.
+
+             The scale is three sizes — small / standard / large — and the radius
+             is always half the height, so everything is a true pill and nothing
+             is a rounded rectangle. Sizes are set with MinHeight plus horizontal
+             padding rather than a fixed Height, so a button still grows for a
+             long label or a large system font instead of clipping it.
+             ================================================================= -->
+        <Style Selector="Button">
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="17,0" />
+            <Setter Property="CornerRadius" Value="17" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
+            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+            <!-- Fluent's DefaultFocusAdorner draws a rounded rect around whatever
+                 last took focus, and clicking focuses — so it appeared behind
+                 buttons after an ordinary click. Opt out, then put a ring back
+                 for keyboard focus only, below. -->
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
+        <Style Selector="Button:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="BorderThickness" Value="1.5" />
+        </Style>
+
+        <!-- The other two rungs of the scale. Large is for the one action a page
+             is about — Play on an album; small is for an action that belongs to
+             a row rather than to the page. -->
+        <Style Selector="Button.large">
+            <Setter Property="MinHeight" Value="38" />
+            <Setter Property="Padding" Value="21,0" />
+            <Setter Property="CornerRadius" Value="19" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+        <Style Selector="Button.small">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="13,0" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="FontSize" Value="12.5" />
+        </Style>
+
         <Style Selector="Button.nav">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
@@ -181,12 +258,23 @@
             <Setter Property="TextElement.Foreground" Value="{DynamicResource Accent}" />
         </Style>
 
+        <!-- Not a button in the visual sense: a run of text you can click, in a
+             row that is already dense. It resets every part of the base pill —
+             the height most of all, because a 34px minimum inside a 50px track
+             row would push the title off its baseline. -->
         <Style Selector="Button.link">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.link:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Button.link:pointerover TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
@@ -194,16 +282,27 @@
         <Style Selector="Button.link:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
+        <!-- A cover or a card that happens to be clickable. The artwork is the
+             affordance, so the button itself paints nothing at all — including
+             on press, which used to flash the theme's grey behind the art. -->
         <Style Selector="Button.tile">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
         <Style Selector="Button.tile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
 
@@ -291,36 +390,54 @@
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
+        <!-- The three voices, all on the same scale as the base pill. Only
+             colour changes: `accent` is the one action a group is about,
+             `ghost` is the dismissal beside it, and `danger` is the one you
+             should have to mean. There is no `secondary` class because the
+             base style IS secondary. -->
         <Style Selector="Button.accent">
             <Setter Property="Background" Value="{DynamicResource Accent}" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="18,9" />
-            <Setter Property="CornerRadius" Value="18" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
         <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+            <Setter Property="TextElement.Foreground" Value="White" />
         </Style>
-        <Style Selector="Button.detailAction">
-            <Setter Property="Padding" Value="18,9" />
-            <Setter Property="CornerRadius" Value="18" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        <Style Selector="Button.accent:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
+            <Setter Property="TextElement.Foreground" Value="White" />
         </Style>
-        <Style Selector="Button.secondaryAction">
-            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
-            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
-        </Style>
-        <Style Selector="Button.secondaryAction:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
-        </Style>
-        <Style Selector="Button.secondaryAction:pressed /template/ ContentPresenter">
+        <Style Selector="Button.accent:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
+        <Style Selector="Button.accent:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="White" />
+            <Setter Property="BorderThickness" Value="1.5" />
+        </Style>
+
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.ghost:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style Selector="Button.danger">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.danger:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.danger:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentHover}" />
         </Style>
 
         <Style Selector="TextBlock.pageTitle">
