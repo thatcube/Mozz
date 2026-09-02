@@ -19,6 +19,7 @@ import com.thatcube.mozz.ui.ToastCenter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import android.util.Log
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,7 +119,14 @@ class PlayerController(
                 { continuation.resume(runCatching { future.get() }.getOrNull()) },
                 MoreExecutors.directExecutor(),
             )
-        } ?: return
+        } ?: run {
+            // Every control routes through here, so a controller that never
+            // arrives is a transport that silently does nothing — which is
+            // exactly what it looks like from the outside, and exactly the
+            // report that has no evidence behind it.
+            Log.w(TAG, "no MediaController: the playback service did not answer")
+            return
+        }
 
         controller = media
         media.addListener(object : Player.Listener {
@@ -192,7 +200,10 @@ class PlayerController(
      */
     fun play(tracks: List<Track>, startIndex: Int) = scope.launch {
         connect()
-        val media = controller ?: return@launch
+        val media = controller ?: run {
+            noteFailure(NO_SESSION)
+            return@launch
+        }
         val window = tracks.take(MAX_QUEUE)
         if (window.isEmpty()) return@launch
         val start = startIndex.coerceIn(0, window.size - 1)
@@ -261,6 +272,13 @@ class PlayerController(
                     .build()
             )
             .build()
+    }.onFailure {
+        // The caller turns this into "Can't reach the server", which is a guess:
+        // Plex builds its stream URL without touching the network, so this fails
+        // for reasons that have nothing to do with reachability — an unattached
+        // server, a track the catalogue does not have, a part with no media key.
+        // The guess is what the person sees; this is what it actually was.
+        Log.w(TAG, "no stream URL for ${track.title} (${track.remoteId})", it)
     }.getOrNull()
 
     // MARK: Failure and recovery
@@ -557,6 +575,15 @@ class PlayerController(
          * it. One phrase, because it is one situation however we found out.
          */
         const val UNREACHABLE = "Can't reach the server"
+
+        /**
+         * The media session itself never answered, so there is nothing to play
+         * through. Distinct from the server being unreachable: nothing was
+         * asked of the server at all.
+         */
+        const val NO_SESSION = "Playback isn't ready yet"
+
+        const val TAG = "MozzPlayback"
 
         /**
          * How long to wait before each automatic retry.
