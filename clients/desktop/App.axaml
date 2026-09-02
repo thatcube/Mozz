@@ -145,6 +145,47 @@
             <Setter Property="Foreground" Value="{DynamicResource Accent}" />
         </Style>
 
+        <!-- The default button.
+             Everything below is a variation on this one, and it is written this
+             way round because the failure it fixes is a button with NO class on
+             it: those fall through to Fluent and arrive with a different height,
+             a different corner radius and a different font from every styled
+             button beside them. Styling only the classes leaves the default as a
+             trap that someone falls into each time a button is added; styling
+             the default means forgetting a class produces the right button
+             instead of the theme's.
+
+             The metrics are the same ones the role classes use, and the colours
+             are `secondary`, because a button with nothing said about it is a
+             secondary button. It is declared first so every class after it —
+             nav, link, tile, and the roles — still wins. -->
+        <Style Selector="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
+
         <Style Selector="Button.nav">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
@@ -179,6 +220,10 @@
         </Style>
 
         <Style Selector="Button.link">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
@@ -192,6 +237,8 @@
             <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Button.tile">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
@@ -201,6 +248,20 @@
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
         <Style Selector="Button.tile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <!-- The base button now paints a pressed state, and a cover must not get
+             one behind it: the artwork is the whole affordance. -->
+        <Style Selector="Button.tile:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.link:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.link:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
 
