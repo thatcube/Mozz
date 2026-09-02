@@ -120,7 +120,7 @@ public partial class MainWindow : Window
         BottomTransportGrid.ColumnDefinitions = expanded
             ? new ColumnDefinitions("*,Auto,*")
             : new ColumnDefinitions("*,Auto,0");
-        BottomTransportBar.Height = compact ? 76 : 88;
+        BottomTransportBar.Height = compact ? 70 : 80;
         BottomVolumeControls.IsVisible = expanded;
 
         // Shuffle, repeat and volume are useful, but they are secondary. When the

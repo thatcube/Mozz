@@ -49,6 +49,12 @@
             <SolidColorBrush x:Key="DetailBackground" Color="#121212" />
             <SolidColorBrush x:Key="Divider" Color="#99545458" />
 
+            <!-- The dock's own surface. Lifted off the page rather than equal
+                 to it, so the pill reads as laid on top; DesktopPalette swaps
+                 both for the light and blackout ladders. -->
+            <SolidColorBrush x:Key="DockBackground" Color="#F21C1C20" />
+            <SolidColorBrush x:Key="DockBorder" Color="#26FFFFFF" />
+
             <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFF" />
             <SolidColorBrush x:Key="TextSecondary" Color="#99EBEBF5" />
             <SolidColorBrush x:Key="TextTertiary" Color="#4DEBEBF5" />

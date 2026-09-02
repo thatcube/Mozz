@@ -71,6 +71,22 @@ public static class MozzThemeApplicator
         SetBrush(app, "SliderThumbBackgroundPointerOver", palette.SliderThumbBackground);
         SetBrush(app, "SliderThumbBackgroundPressed", palette.SliderThumbBackground);
         SetBrush(app, "SliderThumbBackgroundDisabled", palette.SliderThumbBackgroundDisabled);
+
+        // The transport dock floats over the content rather than sitting in a
+        // band of its own, so it needs a surface of its own: the bar's colour,
+        // nearly opaque so a title stays legible over whatever artwork is
+        // scrolling underneath, with the divider as a hairline to lift its edge
+        // off the page.
+        SetBrush(app, "DockBackground", Translucent(palette.BarBackground, 0.95));
+        SetBrush(app, "DockBorder", palette.Divider);
+    }
+
+    /// <summary>The same colour at a given opacity, as a hex string the setters take.</summary>
+    private static string Translucent(string color, double opacity)
+    {
+        var parsed = Color.Parse(color);
+        var alpha = (byte)Math.Clamp(Math.Round(255 * opacity), 0, 255);
+        return $"#{alpha:X2}{parsed.R:X2}{parsed.G:X2}{parsed.B:X2}";
     }
 
     private static void SetBrush(Application app, string key, string color) =>
