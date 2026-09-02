@@ -414,12 +414,15 @@ public struct SubsonicBackend: MusicBackend {
     /// window is taken from the start of the stream and the lead-in is trimmed
     /// from the decoded samples instead. Same analyzer input either way — the
     /// only cost is transcoding a few seconds nobody looks at.
-    public func analysisAudioURL(for track: Track) throws -> URL? {
-        client.mediaURL("stream", query: [
-            URLQueryItem(name: "id", value: track.id),
+    public func analysisAudioSource(forTrackID trackID: String) throws -> AnalysisAudioSource? {
+        guard let url = client.mediaURL("stream", query: [
+            URLQueryItem(name: "id", value: trackID),
             URLQueryItem(name: "format", value: "mp3"),
             URLQueryItem(name: "maxBitRate", value: "\(AnalysisAudio.bitrateKbps)"),
-        ])
+        ]) else { return nil }
+        // `stream` has no start offset in any Subsonic revision, so this begins
+        // at zero and the client throws the lead-in away after decoding.
+        return AnalysisAudioSource(url: url, startsAtLeadIn: false)
     }
 
     // MARK: Sonic similarity

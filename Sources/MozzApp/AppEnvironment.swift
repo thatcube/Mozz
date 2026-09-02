@@ -101,6 +101,13 @@ public final class AppEnvironment: ObservableObject {
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
     public let recommendations: RecommendationService
+    /// On-device sonic analysis: listens to the library itself so acoustic radio
+    /// works on a server that has never analyzed anything. Gated by
+    /// ``SonicAnalysisConditions`` — charger, unmetered network, Settings switch.
+    public let sonicAnalysis: SonicAnalysisService
+    /// The gate above, kept so the app can react to a charger being pulled.
+    private let sonicConditions: SonicAnalysisConditions
+
     /// Open metadata enrichment (MusicBrainz IDs → later ListenBrainz similarity).
     /// On by default with a Settings off-switch; resolves MBIDs off-main and
     /// rate-limited, never blocking sync or the UI (ADR-0007).
@@ -267,12 +274,23 @@ public final class AppEnvironment: ObservableObject {
             isEnabled: {
                 UserDefaults.standard.object(forKey: AppEnvironment.enrichmentEnabledKey) as? Bool ?? true
             })
+        let sonicConditions = SonicAnalysisConditions()
+        self.sonicConditions = sonicConditions
+        self.sonicAnalysis = SonicAnalysisService(
+            store: RecommendationStore(database),
+            isEnabled: { sonicConditions.isSatisfied() })
         self.favorites = FavoritesStore(database)
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
         self.clientInfo = ClientInfo(
             product: "Mozz", version: "0.1.0",
             deviceName: "iPhone", platform: "iOS", platformVersion: "17.0"
         )
+        // Now that `self` is whole: react to the charger and the network rather
+        // than waiting for the next foreground. Analysis is the one job where
+        // "stop now" has to mean now.
+        sonicConditions.onConditionsChanged { [weak self] in
+            Task { @MainActor in self?.sonicConditionsChanged() }
+        }
         wirePlaybackReporting()
         wirePlayEventLogging()
         wireBackgroundDownloads()
@@ -599,6 +617,9 @@ public final class AppEnvironment: ObservableObject {
         // pass and starts fresh — so even a raced concurrent resume can't leave the
         // previous library crawling. Toggle-gated inside the service.
         resumeEnrichmentIfNeeded()
+        // Same shape, different cost: this one only starts when the device is
+        // charging on an unmetered network.
+        resumeSonicAnalysisIfNeeded()
     }
 
     /// Look up the signed-in user's profile photo on the active server and
@@ -645,6 +666,45 @@ public final class AppEnvironment: ObservableObject {
         guard let serverId = active?.connection.id else { return }
         let enrichment = self.enrichment
         Task { await enrichment.enrich(serverId: serverId) }
+    }
+
+    /// Kick a sonic analysis pass for the active server when the conditions
+    /// allow one. Safe to call on every launch, foreground and sync: the service
+    /// is single-flight per server, and a pass that is already walking this
+    /// library ignores it.
+    public func resumeSonicAnalysisIfNeeded() {
+        guard let serverId = active?.connection.id, let backend = active?.backend else { return }
+        guard sonicConditions.isSatisfied() else { return }
+        let sonicAnalysis = self.sonicAnalysis
+        Task { await sonicAnalysis.analyze(serverId: serverId, backend: backend) }
+    }
+
+    /// Charger plugged or pulled, network changed, Low Data Mode toggled.
+    private func sonicConditionsChanged() {
+        if sonicConditions.isSatisfied() {
+            resumeSonicAnalysisIfNeeded()
+        } else {
+            let sonicAnalysis = self.sonicAnalysis
+            Task { await sonicAnalysis.cancel() }
+        }
+    }
+
+    /// React to the sonic-analysis switch in Settings. Off cancels the pass in
+    /// flight; already-analyzed tracks keep their vectors, so turning it back on
+    /// resumes rather than restarts.
+    public func setSonicAnalysisEnabled(_ enabled: Bool) {
+        if enabled {
+            resumeSonicAnalysisIfNeeded()
+        } else {
+            let sonicAnalysis = self.sonicAnalysis
+            Task { await sonicAnalysis.cancel() }
+        }
+    }
+
+    /// How much of the active server's library has been analyzed, for Settings.
+    public func sonicAnalysisProgress() async -> SonicAnalysisProgress? {
+        guard let serverId = active?.connection.id else { return nil }
+        return await sonicAnalysis.progress(serverId: serverId)
     }
 
     /// React to the enrichment on/off switch. Turning it ON resumes the crawl;

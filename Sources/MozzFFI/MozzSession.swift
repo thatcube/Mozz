@@ -363,6 +363,13 @@ private struct WireAction: Encodable {
     var ok: Bool
 }
 
+/// How much of a library the on-device analyzer has described.
+private struct WireSonicProgress: Encodable {
+    var analyzed: Int
+    var total: Int
+    var running: Bool
+}
+
 private struct WireHistoryImport: Encodable {
     var imported: Int
 }
@@ -446,6 +453,10 @@ final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
     let recommendations: RecommendationService
+    /// On-device sonic analysis (ADR-0011). Idle until the host asks for a pass,
+    /// because only the host can see whether this is a good moment to spend
+    /// somebody's battery and bandwidth on it.
+    let sonicAnalysis: SonicAnalysisService
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
@@ -454,6 +465,7 @@ final class MozzSession: @unchecked Sendable {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
+        self.sonicAnalysis = SonicAnalysisService(store: RecommendationStore(database))
     }
 }
 
@@ -463,6 +475,7 @@ protocol SessionContext: AnyObject {
     var database: MusicDatabase { get }
     var repository: LibraryRepository { get }
     var recommendations: RecommendationService { get }
+    var sonicAnalysis: SonicAnalysisService { get }
     var backends: BackendTable { get }
 }
 
@@ -970,6 +983,37 @@ private func dispatch(
             }
         return sessionSuccess(request, rows)
 
+    case "analyzeSonics":
+        // Fire-and-forget: the pass runs for as long as the host lets the
+        // process live, and the reply is the progress as it stands right now so
+        // a caller polling this command needs no second round trip.
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "analyzeSonics needs serverId")
+        }
+        guard let backend = session.backends.backend(serverId) else {
+            return sessionFailure(request.id, request.cmd, "analyzeSonics needs an attached server")
+        }
+        await session.sonicAnalysis.analyze(serverId: serverId, backend: backend)
+        let started = await session.sonicAnalysis.progress(serverId: serverId)
+        return sessionSuccess(request, WireSonicProgress(analyzed: started.analyzed, total: started.total,
+                                                         running: started.running))
+
+    case "sonicProgress":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "sonicProgress needs serverId")
+        }
+        let progress = await session.sonicAnalysis.progress(serverId: serverId)
+        return sessionSuccess(request, WireSonicProgress(analyzed: progress.analyzed, total: progress.total,
+                                                         running: progress.running))
+
+    case "cancelSonics":
+        // What a host calls when its conditions lapse — the charger is pulled,
+        // the network turns metered, the user turns the feature off. Vectors
+        // already written stay written, so the next pass resumes rather than
+        // restarts.
+        await session.sonicAnalysis.cancel()
+        return sessionSuccess(request, WireAction(ok: true))
+
     default:
         // Not a catalog command — try the server/sync/streaming table before
         // declaring it unknown, so both halves share one envelope and one error.
@@ -994,6 +1038,7 @@ let mozzSessionCommands = [
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
+    "analyzeSonics", "sonicProgress", "cancelSonics",
     "connect", "plexPin", "plexPinCheck", "plexResolve", "attach", "libraries",
     "sync", "syncStatus", "streamURL", "artworkURL",
     "capabilities", "setLiked", "setRating",

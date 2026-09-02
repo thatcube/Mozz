@@ -162,13 +162,22 @@ public struct RecommendationStore: Sendable {
         }
     }
 
-    /// Tracks on this server with no vector from `engine` yet, most recently
-    /// added first.
+    /// Tracks on this server with no vector from `engine` yet, in the order they
+    /// are worth analyzing.
     ///
-    /// Newest first because a library grows at the end and the tracks someone
-    /// just added are the ones they are most likely to go looking for. A row
-    /// carrying an OLDER engine counts as unanalyzed: the two are not
-    /// comparable, so it needs redoing rather than keeping.
+    /// The order is the whole point. Analyzing a library is hours of somebody's
+    /// battery and bandwidth, and the value arrives only when enough neighbours
+    /// of a *seed* are done — so the queue is sorted by how likely a track is to
+    /// be one:
+    ///   1. tracks they have actually played, most recent first — every radio
+    ///      station starts from something played, so these pay off first;
+    ///   2. tracks sitting in a generated mix, which are the next thing likely
+    ///      to be played;
+    ///   3. the rest, newest first, because a library grows at the end.
+    ///
+    /// A row carrying an OLDER engine counts as unanalyzed: two engines' vectors
+    /// are coordinates in unrelated spaces, so it needs redoing rather than
+    /// keeping.
     public func tracksNeedingSonicAnalysis(serverId: ServerID, engine: String,
                                            limit: Int) async throws -> [TrackCandidate] {
         guard limit > 0 else { return [] }
@@ -176,12 +185,20 @@ public struct RecommendationStore: Sendable {
             let sql = """
                 SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
                        track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
-                       track.albumRemoteId AS albumRemoteId, track.genres AS genres, track.addedAt AS addedAt
+                       track.albumRemoteId AS albumRemoteId, track.genres AS genres, track.addedAt AS addedAt,
+                       (SELECT MAX(pe.created_at) FROM play_event pe
+                         WHERE pe.track_ref = \(Self.refExpr)
+                           AND pe.kind IN ('started','completed')) AS last_played,
+                       EXISTS (SELECT 1 FROM recommendation_item ri
+                                WHERE ri.track_ref = \(Self.refExpr)) AS in_mix
                 FROM track
                 LEFT JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
                 WHERE track.serverId = ?
                   AND (tf.embedding IS NULL OR tf.feature_source IS NOT ?)
-                ORDER BY track.addedAt DESC NULLS LAST, track.remoteId ASC
+                ORDER BY last_played DESC NULLS LAST,
+                         in_mix DESC,
+                         track.addedAt DESC NULLS LAST,
+                         track.remoteId ASC
                 LIMIT ?
                 """
             return try Row.fetchAll(db, sql: sql, arguments: [serverId, engine, limit])

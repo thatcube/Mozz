@@ -23,11 +23,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -47,6 +49,9 @@ import androidx.compose.foundation.lazy.items
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.MusicLibrary
+import com.thatcube.mozz.core.SonicProgress
+import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.Suppression
 import com.thatcube.mozz.ui.theme.mozzSurface
@@ -71,12 +76,21 @@ import com.thatcube.mozz.ui.theme.MozzDarkStyle
 @Composable
 fun SettingsPage(
     account: ServerAccount,
+    server: MozzServer,
     nav: Navigator,
     bottomReserve: Dp,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
+    // Polled rather than pushed: the pass lives in the core, and a count that
+    // ticks while this screen is open is the only visible sign it is working.
+    val sonic by produceState<SonicProgress?>(null, account.serverId) {
+        while (true) {
+            value = runCatching { server.sonicProgress(account.serverId) }.getOrNull()
+            delay(SONIC_POLL_MS)
+        }
+    }
     fun open(url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
@@ -148,6 +162,10 @@ fun SettingsPage(
                         "Sharpens radio and mixes using MusicBrainz. Only song and artist names are sent — off means fully offline.",
                         inset,
                     )
+                    val progress = sonic
+                    if (progress != null && progress.total > 0) {
+                        SonicAnalysisNote(progress, inset)
+                    }
                     SettingsRow(
                         R.drawable.ic_more, "Not Recommended", inset,
                         onClick = { nav.open(Route.SettingsSuppressions) },
@@ -488,6 +506,51 @@ private fun SuppressionRow(
  * is what makes a long settings page scannable — the same job iOS's grouped
  * `Form` does.
  */
+/**
+ * How much of the library the analyzer has listened to.
+ *
+ * Worth a row of its own because this is the one background job whose terms a
+ * person can act on: "waiting for a charger" explains a number that would
+ * otherwise look stuck.
+ */
+@Composable
+private fun SonicAnalysisNote(progress: SonicProgress, inset: Dp) {
+    val done = progress.remaining == 0
+    Column(modifier = Modifier.padding(horizontal = inset, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    done -> "Library analysed"
+                    progress.running -> "Listening to your library"
+                    else -> "Analysis paused"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${(progress.fraction * 100).roundToInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        LinearProgressIndicator(
+            progress = { progress.fraction },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            when {
+                done -> "Every song analysed — radio can follow the sound, not just the tags."
+                progress.running -> "${progress.analyzed} of ${progress.total} songs analysed."
+                else -> "Waiting for a charger and Wi-Fi — ${progress.remaining} songs to go."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun SettingsSection(
     title: String?,
@@ -669,3 +732,6 @@ fun SettingsButton(onClick: () -> Unit) {
         )
     }
 }
+
+/** Slow enough to be free, quick enough that the count visibly moves. */
+private const val SONIC_POLL_MS = 5_000L

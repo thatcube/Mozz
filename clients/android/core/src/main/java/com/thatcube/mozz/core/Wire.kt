@@ -298,6 +298,22 @@ data class MusicLibrary(val id: String, val name: String)
 @Serializable
 data class SyncStart(val started: Boolean, val reason: String? = null)
 
+/**
+ * How much of a library the on-device analyzer has listened to.
+ *
+ * `running` is what a caller polls: the pass keeps walking inside the core after
+ * `analyzeSonics` returns, so this is the only way to know it is still going.
+ */
+@Serializable
+data class SonicProgress(
+    val analyzed: Int = 0,
+    val total: Int = 0,
+    val running: Boolean = false,
+) {
+    val remaining: Int get() = (total - analyzed).coerceAtLeast(0)
+    val fraction: Float get() = if (total > 0) analyzed.toFloat() / total else 0f
+}
+
 @Serializable
 data class SyncStatus(
     val running: Boolean = false,

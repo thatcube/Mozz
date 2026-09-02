@@ -1,4 +1,5 @@
 import SwiftUI
+import MozzAnalysis
 import MozzCore
 import MozzSync
 
@@ -18,6 +19,9 @@ struct SettingsView: View {
     /// a `.task` on a view whose only content is conditional never fires until the
     /// content exists, a chicken-and-egg that leaves it permanently hidden).
     @State private var recCoverage: (total: Int, matched: Int, genreTagged: Int)?
+    /// On-device sonic analysis on/off (default on), and how far it has got.
+    @AppStorage(SonicAnalysisConditions.enabledKey) private var sonicAnalysisEnabled = true
+    @State private var sonicProgress: SonicAnalysisProgress?
     /// Whether the active server exposes more than one music library, so the
     /// picker is worth offering. Probed once when the screen appears.
     @State private var hasSeveralLibraries = false
@@ -101,6 +105,17 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         if enrichmentEnabled, let c = recCoverage, c.total > 0 {
                             EnrichmentCoverageRow(coverage: c)
+                        }
+                        Toggle(isOn: $sonicAnalysisEnabled) {
+                            Label("Listen to My Library", mozz: "waveform")
+                        }
+                        .onChange(of: sonicAnalysisEnabled) { _, enabled in
+                            env.setSonicAnalysisEnabled(enabled)
+                        }
+                        Text("Analyses how your songs actually sound, so radio can follow the music rather than the tags. Runs on Wi-Fi while charging, and never leaves this device.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if sonicAnalysisEnabled, let p = sonicProgress, p.total > 0 {
+                            SonicAnalysisRow(progress: p)
                         }
                         NavigationLink {
                             SuppressedItemsView()
@@ -192,6 +207,7 @@ struct SettingsView: View {
                 // row) so it reliably fires. Cancelled automatically on dismiss.
                 while !Task.isCancelled {
                     recCoverage = await env.enrichmentCoverage()
+                    sonicProgress = await env.sonicAnalysisProgress()
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                 }
             }
@@ -228,6 +244,45 @@ struct SettingsView: View {
 /// polling `.task` (hosted on the always-present Form) and only renders this row
 /// once there's coverage to show, so the count ticks up live as the rate-limited
 /// background pass runs.
+/// How much of the library the analyzer has listened to.
+///
+/// Worth showing because this is the one background job whose conditions a
+/// person can act on: a row that says "waiting for a charger" explains a number
+/// that would otherwise look stuck.
+private struct SonicAnalysisRow: View {
+    let progress: SonicAnalysisProgress
+
+    var body: some View {
+        let done = progress.remaining == 0
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(mozz: done ? "checkmark.seal.fill" : "waveform")
+                    .font(.footnote)
+                    .foregroundStyle(done ? Color.green : Color.accentColor)
+                Text(done ? "Library analysed" : (progress.running ? "Listening to your library" : "Paused"))
+                    .font(.footnote.weight(.medium))
+                Spacer(minLength: 0)
+                Text("\(Int((progress.fraction * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+            ProgressView(value: Double(progress.analyzed), total: Double(max(progress.total, 1)))
+                .progressViewStyle(.linear)
+                .tint(done ? .green : .accentColor)
+            Text(done
+                 ? "Every song analysed"
+                 : (progress.running
+                    ? "\(progress.analyzed.formatted()) of \(progress.total.formatted()) songs analysed"
+                    : "Waiting for a charger and Wi-Fi — \(progress.remaining.formatted()) songs to go"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .animation(.default, value: progress.analyzed)
+    }
+}
+
 private struct EnrichmentCoverageRow: View {
     let coverage: (total: Int, matched: Int, genreTagged: Int)
 

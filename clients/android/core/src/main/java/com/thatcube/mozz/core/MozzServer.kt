@@ -292,6 +292,32 @@ class MozzServer(
         }
     }
 
+    // MARK: Sonic analysis
+
+    /**
+     * Start analyzing this server's library, and report where it has got to.
+     *
+     * Returns as soon as the pass has started, not when it finishes — the work
+     * is hours long. Poll [sonicProgress] to follow it.
+     *
+     * The caller decides *when*: the core cannot see a charger or a metered
+     * network, so it analyzes whenever it is asked to. See
+     * `SonicAnalysisController`, which is what actually asks.
+     */
+    suspend fun analyzeSonics(serverId: String): SonicProgress? =
+        core.call(CoreRequest(cmd = "analyzeSonics", serverId = serverId))
+
+    suspend fun sonicProgress(serverId: String): SonicProgress? =
+        core.call(CoreRequest(cmd = "sonicProgress", serverId = serverId))
+
+    /**
+     * Stop the pass. Vectors already written stay written, so the next call to
+     * [analyzeSonics] resumes rather than restarting.
+     */
+    suspend fun cancelSonics() {
+        core.call<Map<String, Boolean>>(CoreRequest(cmd = "cancelSonics"))
+    }
+
     // MARK: Playback
 
     suspend fun stream(

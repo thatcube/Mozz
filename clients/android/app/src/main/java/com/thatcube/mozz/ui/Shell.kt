@@ -653,6 +653,7 @@ private fun TabContent(
 
         Route.Settings -> SettingsPage(
             account = account,
+            server = server,
             nav = nav,
             bottomReserve = bottomReserve,
             onResync = onResync,

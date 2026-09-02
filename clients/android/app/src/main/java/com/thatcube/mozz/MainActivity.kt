@@ -15,7 +15,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import com.thatcube.mozz.ui.FailedScreen
 import com.thatcube.mozz.ui.MozzShell
 import com.thatcube.mozz.ui.LibraryPickerScreen
@@ -50,6 +54,22 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         val settings = (application as MozzApplication).settings
+        // Analysis runs only while the app is on screen (and only on a charger,
+        // on an unmetered network — the controller decides). Tied to STARTED so
+        // it stops the moment the app is backgrounded rather than running on
+        // somebody's battery behind their back.
+        val sonicAnalysis = (application as MozzApplication).sonicAnalysis
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                try {
+                    viewModel.state.collect { state ->
+                        if (state is AppState.Ready) sonicAnalysis.start(state.account.serverId)
+                    }
+                } finally {
+                    sonicAnalysis.stop()
+                }
+            }
+        }
         setContent {
             MozzTheme(settings) {
                 // Provided rather than passed down: the only thing that reads it

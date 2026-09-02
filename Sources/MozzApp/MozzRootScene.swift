@@ -32,6 +32,10 @@ public struct MozzRootScene: Scene {
                     // No-op when disabled or already running.
                     if phase == .active {
                         env.resumeEnrichmentIfNeeded()
+                        // Analysis only runs on a charger and an unmetered
+                        // network, so most foregrounds are a no-op; the ones
+                        // that aren't are exactly the moments it should start.
+                        env.resumeSonicAnalysisIfNeeded()
                         // An idle device has to re-read the shared checkpoint:
                         // another device may have taken over while this one was
                         // asleep, and stale state here would be published over

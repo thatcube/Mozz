@@ -54,6 +54,33 @@ final class SonicEmbeddingStoreTests: XCTestCase {
         XCTAssertNil(wrongEngine)
     }
 
+    func testTheAnalysisQueueLeadsWithWhatIsWorthAnalyzingFirst() async throws {
+        // Analyzing a library takes hours, and the vectors only pay off around
+        // tracks someone actually plays — so the order matters more than the
+        // throughput. Played first, then whatever a mix has already picked out,
+        // then the tail.
+        let (store, _, serverId, db) = try await makeStore()
+        let events = PlayEventStore(db)
+        try await events.append(PlayEvent(trackID: "t4", kind: .completed,
+                                          createdAt: Date(timeIntervalSince1970: 1_000)),
+                                serverId: serverId)
+        try await events.append(PlayEvent(trackID: "t2", kind: .started,
+                                          createdAt: Date(timeIntervalSince1970: 2_000)),
+                                serverId: serverId)
+        // t5 sits in a generated mix but has never been played.
+        let mixRef = "\(serverId):t5"
+        try await db.write { database in
+            try database.execute(sql: "INSERT INTO recommendation_set (id, title, kind, generated_at) VALUES ('mix', 'Mix', 'daily_mix', 0)")
+            try database.execute(
+                sql: "INSERT INTO recommendation_item (set_id, track_ref, rank, score, in_library) VALUES ('mix', ?, 0, 1.0, 1)",
+                arguments: [mixRef])
+        }
+
+        let queue = try await store.tracksNeedingSonicAnalysis(
+            serverId: serverId, engine: engineV1, limit: 5)
+        XCTAssertEqual(queue.prefix(3).map(\.remoteId), ["t2", "t4", "t5"])
+    }
+
     func testSavingAnEmbeddingDoesNotBlankEnrichment() async throws {
         // `track_features` is shared with the MusicBrainz path. A whole-record
         // write here would destroy resolved MBIDs, which are expensive and

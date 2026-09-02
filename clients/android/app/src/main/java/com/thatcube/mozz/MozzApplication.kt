@@ -6,6 +6,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.util.DebugLogger
+import com.thatcube.mozz.analysis.SonicAnalysisController
 import com.thatcube.mozz.core.MozzCore
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
@@ -107,6 +108,15 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             toasts = toasts,
             scope = MainScope(),
         )
+    }
+
+    /**
+     * Analyzes the library's audio when the device can afford it — see
+     * [SonicAnalysisController]. Application-scoped because the pass outlives
+     * any one screen, and driven by the activity's lifecycle.
+     */
+    val sonicAnalysis: SonicAnalysisController by lazy {
+        SonicAnalysisController(context = this, server = server, scope = MainScope())
     }
 
     val server: MozzServer by lazy {

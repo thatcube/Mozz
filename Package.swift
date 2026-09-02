@@ -169,13 +169,17 @@ let package = Package(
         // Turns decoded mono PCM into a fixed-width, L2-normalized feature
         // vector: the `embedding` BLOB `track_features` has reserved since v6.
         //
-        // Deliberately free of Accelerate/Core ML/AVFoundation, and of any
-        // vendored native code. A vector computed on an iPhone and the same
-        // track's vector computed on a Pixel land in the SAME nearest-neighbour
-        // index and sync between the two devices, so "the analyzer" has to be
+        // Deliberately free of every platform framework — no Accelerate, no
+        // Core ML, no AVFoundation — and of any model weights. The one piece of
+        // native code it does use, the vendored MP3 decoder below, is here for
+        // the same reason: it is OURS on every platform rather than the host's.
+        // A vector computed on an iPhone and the same track's vector computed on
+        // a Pixel land in the SAME nearest-neighbour
+        // index, so "the analyzer" has to be
         // one implementation, not five that agree to within rounding. That also
         // makes it testable off-device against golden fixtures in `spec/`.
-        .target(name: "MozzAnalysis", dependencies: ["MozzCore", "CMozzMP3"]),
+        .target(name: "MozzAnalysis",
+                dependencies: ["MozzCore", "CMozzMP3", "MozzNetworking", "MozzDatabase"]),
 
         // MARK: Vendored MP3 decoder (minimp3, CC0 — see LICENSE-minimp3.txt)
         //
@@ -272,7 +276,8 @@ let package = Package(
         .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
-        .testTarget(name: "MozzAnalysisTests", dependencies: ["MozzAnalysis", "MozzCore"],
+        .testTarget(name: "MozzAnalysisTests",
+                    dependencies: ["MozzAnalysis", "MozzCore", "MozzDatabase"],
                     resources: [.copy("Fixtures")]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzAppTests", dependencies: ["MozzApp"]),

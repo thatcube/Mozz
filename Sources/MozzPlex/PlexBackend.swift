@@ -204,20 +204,23 @@ public struct PlexBackend: MusicBackend {
     /// cannot stream. None of that matters here: this is an HTTP read into
     /// memory that stops when it has enough, and chunked is exactly the shape
     /// that lets the server give up transcoding when we disconnect.
-    public func analysisAudioURL(for track: Track) throws -> URL? {
+    public func analysisAudioSource(forTrackID trackID: String) throws -> AnalysisAudioSource? {
         let query: [URLQueryItem] = [
-            URLQueryItem(name: "path", value: "/library/metadata/\(track.id)"),
+            URLQueryItem(name: "path", value: "/library/metadata/\(trackID)"),
             URLQueryItem(name: "protocol", value: "http"),
             URLQueryItem(name: "mediaIndex", value: "0"),
             URLQueryItem(name: "partIndex", value: "0"),
             URLQueryItem(name: "hasMDE", value: "1"),
             URLQueryItem(name: "offset", value: "\(AnalysisAudio.leadInSeconds)"),
             URLQueryItem(name: "maxAudioBitrate", value: "\(AnalysisAudio.bitrateKbps)"),
-            URLQueryItem(name: "session", value: "mozz-analysis-\(track.id)"),
+            URLQueryItem(name: "session", value: "mozz-analysis-\(trackID)"),
             URLQueryItem(name: "X-Plex-Client-Identifier", value: connection.clientIdentifier),
             URLQueryItem(name: "X-Plex-Token", value: token),
         ]
-        return mediaURL(path: "music/:/transcode/universal/start.mp3", query: query)
+        guard let url = mediaURL(path: "music/:/transcode/universal/start.mp3", query: query) else { return nil }
+        // `offset` is server-side: the transcode starts at the lead-in, so the
+        // bytes we pull are the window itself.
+        return AnalysisAudioSource(url: url, startsAtLeadIn: true)
     }
 
     public func originalFileURL(for track: Track) throws -> URL {

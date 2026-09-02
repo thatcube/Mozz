@@ -134,6 +134,27 @@ public enum AnalysisAudio {
     public static let leadInSeconds = 20
 }
 
+/// Where to fetch one track's analysis audio, and whether the server is doing
+/// the skipping.
+///
+/// The lead-in has to be honoured somewhere. Plex and Jellyfin both take a
+/// start offset, so they transcode from ``AnalysisAudio/leadInSeconds`` and we
+/// download only the window we asked for; Subsonic's `stream` has no such
+/// parameter, so it sends the track from zero and the client trims. The flag
+/// exists so the analyzer's input is the same 90 seconds of music either way —
+/// without it the two paths quietly disagree about which part of the song they
+/// are describing.
+public struct AnalysisAudioSource: Sendable, Hashable {
+    public let url: URL
+    /// True when the stream already begins at the lead-in.
+    public let startsAtLeadIn: Bool
+
+    public init(url: URL, startsAtLeadIn: Bool) {
+        self.url = url
+        self.startsAtLeadIn = startsAtLeadIn
+    }
+}
+
 /// One track a server considers acoustically close to another, with the
 /// server's own normalized closeness.
 ///
@@ -199,7 +220,7 @@ public protocol MusicBackend: Sendable {
     ///
     /// The caller stops reading once it has enough; the server stops transcoding
     /// when it does. Nil means this backend has no analyzable form of the track.
-    func analysisAudioURL(for track: Track) throws -> URL?
+    func analysisAudioSource(forTrackID trackID: String) throws -> AnalysisAudioSource?
 
     /// Tracks the SERVER considers acoustically similar to `trackID`, best first.
     ///
@@ -324,7 +345,7 @@ public extension MusicBackend {
     /// Default: no analyzable audio. A backend that cannot transcode to the
     /// analysis format opts out rather than returning something in a format the
     /// analyzer would silently mis-read.
-    func analysisAudioURL(for track: Track) throws -> URL? { nil }
+    func analysisAudioSource(forTrackID trackID: String) throws -> AnalysisAudioSource? { nil }
 
     /// Default: the server has analyzed nothing, so it can vouch for nothing.
     ///
