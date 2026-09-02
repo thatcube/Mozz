@@ -10,6 +10,10 @@ private struct StubResolver: TrackURLResolver {
     }
 }
 
+// The engine's `…ForTesting` helpers are `#if DEBUG`, so the tests calling
+// them have to be too — otherwise `swift test -c release` cannot build this
+// target, and a release build is what running the sonic benchmark needs.
+#if DEBUG
 @MainActor
 final class PlaybackEngineTests: XCTestCase {
     func testInitialStateIsIdle() {
@@ -251,6 +255,7 @@ private actor ExtendGate {
         continuation = nil
     }
 }
+#endif
 
 /// Verifies the listening-history emission (B1): every track start is paired
 /// with exactly one terminal event — `completed` on natural end vs `skipped`
@@ -337,6 +342,10 @@ private final class RecordingResolver: TrackURLResolver, @unchecked Sendable {
     }
 }
 
+// The engine's `…ForTesting` helpers are `#if DEBUG`, so the tests calling
+// them have to be too — otherwise `swift test -c release` cannot build this
+// target, and a release build is what running the sonic benchmark needs.
+#if DEBUG
 /// Seeking a non-range-seekable transcode must re-request the stream at the
 /// offset (server-side seek), whereas a range-seekable stream seeks natively
 /// without re-resolving.
@@ -404,7 +413,12 @@ private final class SelectiveResolver: TrackURLResolver, @unchecked Sendable {
         return ResolvedTrackURL(url: URL(fileURLWithPath: "/dev/null/\(track.id).m4a"), isLocal: true)
     }
 }
+#endif
 
+// The engine's `…ForTesting` helpers are `#if DEBUG`, so the tests calling
+// them have to be too — otherwise `swift test -c release` cannot build this
+// target, and a release build is what running the sonic benchmark needs.
+#if DEBUG
 /// A track that won't load used to leave the engine paused and silent, which in
 /// the car is indistinguishable from the tap not registering at all.
 @MainActor
@@ -462,3 +476,4 @@ final class PlaybackLoadFailureTests: XCTestCase {
         XCTAssertNil(working.lastFailure)
     }
 }
+#endif
