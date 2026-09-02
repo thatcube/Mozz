@@ -164,6 +164,19 @@ let package = Package(
         // docs RECOMMENDATIONS.md + ADR-0004/0005.
         .target(name: "MozzRecommend", dependencies: ["MozzCore", "MozzDatabase"]),
 
+        // MARK: On-device sonic analysis (pure Swift, no platform frameworks)
+        //
+        // Turns decoded mono PCM into a fixed-width, L2-normalized feature
+        // vector: the `embedding` BLOB `track_features` has reserved since v6.
+        //
+        // Deliberately free of Accelerate/Core ML/AVFoundation, and of any
+        // vendored native code. A vector computed on an iPhone and the same
+        // track's vector computed on a Pixel land in the SAME nearest-neighbour
+        // index and sync between the two devices, so "the analyzer" has to be
+        // one implementation, not five that agree to within rounding. That also
+        // makes it testable off-device against golden fixtures in `spec/`.
+        .target(name: "MozzAnalysis", dependencies: ["MozzCore"]),
+
         // MARK: Open metadata enrichment (network + orchestration; ADR-0007)
         //
         // Resolves MusicBrainz IDs (from embedded provider metadata, then
@@ -244,6 +257,7 @@ let package = Package(
         .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
+        .testTarget(name: "MozzAnalysisTests", dependencies: ["MozzAnalysis", "MozzCore"]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzAppTests", dependencies: ["MozzApp"]),
     ],
