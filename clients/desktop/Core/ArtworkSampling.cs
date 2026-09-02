@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Media.Immutable;
+using System.Runtime.InteropServices;
 using Avalonia.Platform;
 
 namespace Mozz.Desktop.Core;
@@ -35,37 +36,37 @@ public static class ArtworkSampling
     /// Scale a cover to the sample grid and hand back tightly packed RGBA, which
     /// is the layout the core reads.
     ///
-    /// Avalonia renders to BGRA, so the two colour channels are swapped on the
-    /// way out. Getting that backwards does not fail — it produces a plausible
-    /// backdrop in the wrong colour — so it is worth being explicit about.
+    /// The channel order is ASKED FOR rather than assumed or detected. Avalonia's
+    /// buffers use whichever layout the platform's Skia backend prefers — BGRA on
+    /// some, RGBA on others — and guessing wrong does not fail, it produces a
+    /// perfectly plausible backdrop with red and blue exchanged. A red album came
+    /// out deep blue, which is the kind of wrong that looks deliberate. Locking a
+    /// <see cref="WriteableBitmap"/> declared as <c>Rgba8888</c> and copying into
+    /// it makes Avalonia do the conversion, whatever it was holding.
     /// </summary>
     public static byte[]? Rgba(Bitmap bitmap)
     {
         try
         {
-            using var target = new RenderTargetBitmap(new PixelSize(SampleDim, SampleDim));
-            using (var context = target.CreateDrawingContext())
-            {
-                context.DrawImage(
-                    bitmap,
-                    new Rect(bitmap.Size),
-                    new Rect(0, 0, SampleDim, SampleDim));
-            }
+            var size = new PixelSize(SampleDim, SampleDim);
+            using var scaled = bitmap.CreateScaledBitmap(size, BitmapInterpolationMode.MediumQuality);
+            using var buffer = new WriteableBitmap(
+                size, new Vector(96, 96), PixelFormats.Rgba8888, AlphaFormat.Unpremul);
 
             var stride = SampleDim * 4;
             var bytes = new byte[stride * SampleDim];
-            unsafe
+            using (var frame = buffer.Lock())
             {
-                fixed (byte* buffer = bytes)
+                scaled.CopyPixels(frame);
+                // RowBytes may exceed the packed stride, so copy a row at a time
+                // rather than assuming the buffer is tight.
+                for (var row = 0; row < SampleDim; row++)
                 {
-                    target.CopyPixels(
-                        new PixelRect(0, 0, SampleDim, SampleDim),
-                        (nint)buffer, bytes.Length, stride);
+                    Marshal.Copy(
+                        frame.Address + row * frame.RowBytes,
+                        bytes, row * stride, stride);
                 }
             }
-
-            for (var i = 0; i < bytes.Length; i += 4)
-                (bytes[i], bytes[i + 2]) = (bytes[i + 2], bytes[i]);
 
             return bytes;
         }

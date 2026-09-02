@@ -369,9 +369,10 @@
                         </ListBox.ItemsPanel>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid ColumnDefinitions="44,*,200,64" Height="50">
+                                <Border Classes="rowPlate">
+                                <Grid ColumnDefinitions="40,*,200,64" Height="40">
                                     <controls:ArtworkImage Grid.Column="0"
-                                            Width="38" Height="38" DisplaySize="38"
+                                            Width="40" Height="40" DisplaySize="40"
                                             CornerRadius="6"
                                             ServerId="{Binding ServerId}"
                                             ArtworkKey="{Binding ArtworkKey}"
@@ -400,6 +401,7 @@
                                                Classes="secondary" VerticalAlignment="Center"
                                                HorizontalAlignment="Right" Margin="0,0,10,0" />
                                 </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -618,8 +620,9 @@
                                          Background="Transparent" BorderThickness="0">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid ColumnDefinitions="44,*,200,64" Height="50">
-                                                <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38"
+                                            <Border Classes="rowPlate">
+                                <Grid ColumnDefinitions="40,*,200,64" Height="40">
+                                                <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40"
                                                         CornerRadius="6"
                                                         ServerId="{Binding ServerId}"
                                                         ArtworkKey="{Binding ArtworkKey}"
@@ -643,6 +646,7 @@
                                                 <TextBlock Grid.Column="3" Text="{Binding Duration}" Classes="secondary"
                                                            VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                             </Grid>
+                                            </Border>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
@@ -920,7 +924,8 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:AlbumTrackItemRow">
-                                <Grid ColumnDefinitions="36,*,70" Height="44">
+                                <Border Classes="rowPlate">
+                                <Grid ColumnDefinitions="36,*,70" Height="40">
                                     <TextBlock Grid.Column="0" Text="{Binding Row.TrackNumberText}" Classes="secondary"
                                                VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -930,20 +935,24 @@
                                     <TextBlock Grid.Column="2" Text="{Binding Row.Track.Duration}" Classes="secondary"
                                                VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                 </Grid>
+                                </Border>
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistTrackHeaderRow">
-                                <Grid ColumnDefinitions="44,*,180,220,64" Height="34" Margin="0,8,0,4">
+                                <Border Padding="8,0" Margin="0,8,0,4">
+                                <Grid ColumnDefinitions="40,*,180,220,64" Height="34">
                                     <TextBlock Grid.Column="1" Text="Song" Classes="secondary" />
                                     <TextBlock Grid.Column="2" Text="Artist" Classes="secondary" />
                                     <TextBlock Grid.Column="3" Text="Album" Classes="secondary" />
                                     <TextBlock Grid.Column="4" Text="Time" Classes="secondary" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                 </Grid>
+                                </Border>
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistTrackItemRow">
-                                <Grid ColumnDefinitions="44,*,180,220,64" Height="50">
-                                    <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
+                                <Border Classes="rowPlate">
+                                <Grid ColumnDefinitions="40,*,180,220,64" Height="40">
+                                    <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                             ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
                                             FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="#88FFFFFF" />
                                     <TextBlock Grid.Column="1" Text="{Binding Track.Title}" Classes="primary"
@@ -961,6 +970,7 @@
                                     <TextBlock Grid.Column="4" Text="{Binding Track.Duration}" Classes="secondary"
                                                VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                 </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListBox.DataTemplates>
                     </ListBox>
@@ -1477,6 +1487,9 @@
                 <SolidColorBrush x:Key="SurfaceHover" Color="#26FFFFFF" />
                 <SolidColorBrush x:Key="SurfaceSelected" Color="#3AFFFFFF" />
                 <SolidColorBrush x:Key="SurfaceRaised" Color="#1AFFFFFF" />
+                <SolidColorBrush x:Key="Accent" Color="#FFFFFF" />
+                <SolidColorBrush x:Key="AccentHover" Color="#FFFFFF" />
+                <SolidColorBrush x:Key="AccentDeep" Color="#D5D5DC" />
             </Border.Resources>
             <Panel>
                 <!-- A wash over the tones, densest at the bottom where the
@@ -1563,7 +1576,7 @@
                                 <controls:TablerIcon Size="24" Filled="True" Data="{StaticResource IconSkipBack}"
                                                      Brush="{Binding $parent[Button].Foreground}" />
                             </Button>
-                            <Button Classes="play big" Command="{Binding TogglePlayPauseCommand}">
+                            <Button Classes="play big onArtwork" Command="{Binding TogglePlayPauseCommand}">
                                 <Panel>
                                     <controls:TablerIcon Size="30" Filled="True" Data="{StaticResource IconPlay}"
                                                          Brush="{Binding $parent[Button].Foreground}"
@@ -1661,12 +1674,13 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid ColumnDefinitions="26,40,*,Auto" Height="46">
+                            <Border Classes="rowPlate" Padding="6,0">
+                                <Grid ColumnDefinitions="24,40,*,Auto" Height="40">
                                 <TextBlock Grid.Column="0" Text="{Binding Ordinal}"
                                            Classes="secondary" FontSize="11.5"
                                            VerticalAlignment="Center" />
                                 <controls:ArtworkImage Grid.Column="1"
-                                        Width="34" Height="34" DisplaySize="34"
+                                        Width="40" Height="40" DisplaySize="40"
                                         CornerRadius="5"
                                         ServerId="{Binding Track.ServerId}"
                                         ArtworkKey="{Binding Track.ArtworkKey}"
@@ -1683,6 +1697,7 @@
                                            Classes="secondary" FontSize="11.5"
                                            VerticalAlignment="Center" Margin="0,0,4,0" />
                             </Grid>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>

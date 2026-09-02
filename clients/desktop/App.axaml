@@ -165,10 +165,39 @@
              The plate is `SurfaceHover`, which is one step off the page in every
              theme, so it reads as a light lift rather than as a selection.
              ================================================================= -->
+        <!-- The row plate.
+             It lives in the row TEMPLATE, on a Border we own, rather than on the
+             ListBoxItem's ContentPresenter — for two reasons, both learned the
+             hard way.
+
+             First, a ListBox whose rows are of mixed kinds cannot style hover at
+             the item level: the album and artist detail pages put a hero banner,
+             section titles and track rows in ONE ListBox, so they had to switch
+             item hover off wholesale to stop the banner lighting up, and that
+             took the track rows down with it. A plate on the track template
+             lights up the rows that are rows and nothing else.
+
+             Second, `:pointerover` on the Border itself needs no descendant
+             selector reaching into a theme's template internals, so it cannot be
+             broken by a template we do not own. The Border must be hit-testable
+             for that, which is what the transparent rest background is for.
+
+             The padding is the plate's, not the row's, so the artwork inside sits
+             the same distance from the left edge as from the top — the columns
+             used to centre a 38px cover in a 44px column, giving 3px at the side
+             against 6px above, which read as a lopsided row. -->
+        <Style Selector="Border.rowPlate">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Border.rowPlate:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+
         <Style Selector="ListBoxItem">
-            <!-- The inset that makes the plate look placed rather than painted
-                 edge to edge. Rows lay out inside it. -->
-            <Setter Property="Padding" Value="9,0" />
+            <Setter Property="Padding" Value="0" />
             <Setter Property="CornerRadius" Value="9" />
             <Setter Property="Transitions" Value="{x:Null}" />
         </Style>
@@ -381,11 +410,8 @@
             <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
             <Setter Property="Transitions" Value="{x:Null}" />
         </Style>
-        <Style Selector="Button.tile.card:pointerover Border.tileSurface">
+        <Style Selector="Border.tileSurface:pointerover">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
-        </Style>
-        <Style Selector="Button.tile.card:pressed Border.tileSurface">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
         </Style>
 
         <Style Selector="Button.transport">
@@ -473,6 +499,26 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
+        <!-- The player's play button.
+             Crimson is the app's accent, and it is right in the transport bar,
+             which sits on the app's own chrome. It is wrong in the player, whose
+             field is the RECORD's colour: over a red album the crimson button
+             disappeared into the backdrop. White reads on every tone the core
+             can produce, and the same reasoning makes the player's other
+             controls monochrome — see the resource overrides on the player. -->
+        <Style Selector="Button.play.onArtwork">
+            <Setter Property="Background" Value="#F2F2F4" />
+            <Setter Property="Foreground" Value="#101014" />
+        </Style>
+        <Style Selector="Button.play.onArtwork:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="TextElement.Foreground" Value="#101014" />
+        </Style>
+        <Style Selector="Button.play.onArtwork:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#D5D5DC" />
+            <Setter Property="TextElement.Foreground" Value="#101014" />
+        </Style>
+
         <Style Selector="Button.play:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AccentHover}" />
         </Style>
