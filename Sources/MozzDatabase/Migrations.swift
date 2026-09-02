@@ -29,6 +29,7 @@ enum Schema {
         registerV20(&migrator)
         registerV21(&migrator)
         registerV22(&migrator)
+        registerV23(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -748,6 +749,28 @@ enum Schema {
         }
     }
 
+    /// v23 — collapse Plex duplicates that appeared *after* v18 repaired them.
+    ///
+    /// v18 is a one-shot, and one-shot is not enough. A catalogue can gain a
+    /// second identity for one server again at any time — an older build, or a
+    /// branch that predates the machine-identifier work, signing in and deriving
+    /// an id from the address it happened to answer on. Once that has happened
+    /// v18 is already recorded as applied and will never look again, so the
+    /// library stays doubled: every count twice its real size, every album
+    /// listed twice, and anything reached through the losing id refusing to play
+    /// because streaming rightly declines a server that is not attached.
+    ///
+    /// The repair itself is unchanged and is deliberately the same routine v18
+    /// runs, rather than a second implementation of the same idea. It is
+    /// idempotent — a catalogue whose servers are already canonical is left
+    /// untouched — so running it again costs one query on an install that does
+    /// not need it.
+    private static func registerV23(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v23.repairPlexServerIdentitiesAgain") { db in
+            try repairPlexServerIdentities(db)
+        }
+    }
+
     static func repairPlexServerIdentities(_ db: Database) throws {
         let rows = try Row.fetchAll(db, sql: """
             SELECT id, kind, name, baseURL, userID, clientIdentifier, musicSectionID
@@ -797,7 +820,7 @@ enum Schema {
                 try mergeUniqueServerTable(db, table: "artist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
                 try mergeUniqueServerTable(db, table: "album", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
                 try mergeUniqueServerTable(db, table: "track", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
-                try mergeUniqueServerTable(db, table: "playlist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergePlaylists(db, oldId: oldId, canonicalId: canonicalId)
                 try mergeUniqueServerTable(db, table: "favorite_outbox", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
                 try mergeUniqueServerTable(db, table: "suppressed_ref", columns: ["scope", "ref"], oldId: oldId, canonicalId: canonicalId)
                 try mergeSingleServerRow(db, table: "serverCapabilities", oldId: oldId, canonicalId: canonicalId)
@@ -822,6 +845,40 @@ enum Schema {
                 )
             }
         }
+    }
+
+    /// Merge one server's playlists into another's, taking their items with them.
+    ///
+    /// `playlistItem` references `playlist(id)` with ON DELETE CASCADE, which
+    /// would normally make this a non-problem — but a migration runs with
+    /// foreign keys DISABLED, so the cascade does not fire. Dropping a duplicate
+    /// playlist therefore leaves its items behind pointing at a row that no
+    /// longer exists, and GRDB's end-of-migration `foreign_key_check` fails the
+    /// whole migration. The library then cannot be opened at all, which presents
+    /// as the app quitting on launch rather than as anything to do with
+    /// playlists.
+    ///
+    /// So the items are removed explicitly, for exactly the playlists the merge
+    /// is about to delete. The surviving server's copy of each playlist brings
+    /// its own items with it.
+    private static func mergePlaylists(
+        _ db: Database,
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        try db.execute(sql: """
+            DELETE FROM playlistItem
+            WHERE playlistId IN (
+              SELECT canonical.id FROM playlist canonical
+              WHERE canonical.serverId = ?
+                AND EXISTS (
+                  SELECT 1 FROM playlist old
+                  WHERE old.serverId = ? AND old.remoteId = canonical.remoteId
+                )
+            )
+            """, arguments: [canonicalId, oldId])
+        try mergeUniqueServerTable(
+            db, table: "playlist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
     }
 
     private static func mergeUniqueServerTable(
