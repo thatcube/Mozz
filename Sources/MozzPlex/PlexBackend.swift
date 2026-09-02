@@ -205,12 +205,19 @@ public struct PlexBackend: MusicBackend {
     /// memory that stops when it has enough, and chunked is exactly the shape
     /// that lets the server give up transcoding when we disconnect.
     public func analysisAudioSource(forTrackID trackID: String) throws -> AnalysisAudioSource? {
-        let query: [URLQueryItem] = [
+        // The identity goes in the URL, not in headers: this is read by the
+        // analyzer's own fetcher, which shares none of the API client's default
+        // headers. Plex's universal transcoder decides what to send from that
+        // identity, and 400s when it has none.
+        var query = PlexHeaders.commonQuery(
+            clientInfo: clientInfo, clientIdentifier: connection.clientIdentifier, token: nil)
+        query += [
             URLQueryItem(name: "path", value: "/library/metadata/\(trackID)"),
             URLQueryItem(name: "protocol", value: "http"),
             URLQueryItem(name: "mediaIndex", value: "0"),
             URLQueryItem(name: "partIndex", value: "0"),
-            URLQueryItem(name: "hasMDE", value: "1"),
+            // No `hasMDE`: that announces a client which calls
+            // `/transcode/universal/decision` first, and this one does not.
             URLQueryItem(name: "offset", value: "\(AnalysisAudio.leadInSeconds)"),
             // Force the transcode. Left to itself the universal endpoint may
             // decide the original part is fine and hand back whatever the file
@@ -220,7 +227,6 @@ public struct PlexBackend: MusicBackend {
             URLQueryItem(name: "directStream", value: "0"),
             URLQueryItem(name: "maxAudioBitrate", value: "\(AnalysisAudio.bitrateKbps)"),
             URLQueryItem(name: "session", value: "mozz-analysis-\(trackID)"),
-            URLQueryItem(name: "X-Plex-Client-Identifier", value: connection.clientIdentifier),
             URLQueryItem(name: "X-Plex-Token", value: token),
         ]
         guard let url = mediaURL(path: "music/:/transcode/universal/start.mp3", query: query) else { return nil }

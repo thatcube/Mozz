@@ -401,3 +401,44 @@ final class PlexAuthTests: XCTestCase {
         XCTAssertEqual(chosen?.accessToken, "t-full")
     }
 }
+
+final class PlexAnalysisURLTests: XCTestCase {
+    private func analysisQuery() throws -> [String: String] {
+        let source = try XCTUnwrap(makeBackend().analysisAudioSource(forTrackID: "4242"))
+        let components = try XCTUnwrap(URLComponents(url: source.url, resolvingAgainstBaseURL: false))
+        return Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    }
+
+    func testTheAnalysisURLCarriesTheClientIdentity() throws {
+        // The analyzer fetches this with its own session, which shares none of
+        // the API client's default headers. Plex's universal transcoder builds
+        // its decision from this identity and answers 400 without it — which is
+        // exactly what a real server did.
+        let query = try analysisQuery()
+        XCTAssertEqual(query["X-Plex-Product"], clientInfo.product)
+        XCTAssertEqual(query["X-Plex-Version"], clientInfo.version)
+        XCTAssertEqual(query["X-Plex-Platform"], clientInfo.platform)
+        XCTAssertEqual(query["X-Plex-Device"], clientInfo.deviceName)
+        XCTAssertEqual(query["X-Plex-Client-Identifier"], makeConnection().clientIdentifier)
+        XCTAssertEqual(query["X-Plex-Token"], "plex-token")
+    }
+
+    func testTheAnalysisURLForcesAnMP3TranscodeFromTheLeadIn() throws {
+        let query = try analysisQuery()
+        XCTAssertEqual(query["path"], "/library/metadata/4242")
+        XCTAssertEqual(query["protocol"], "http")
+        // Without these Plex may hand back the original FLAC under a .mp3 path.
+        XCTAssertEqual(query["directPlay"], "0")
+        XCTAssertEqual(query["directStream"], "0")
+        XCTAssertEqual(query["maxAudioBitrate"], "\(AnalysisAudio.bitrateKbps)")
+        XCTAssertEqual(query["offset"], "\(AnalysisAudio.leadInSeconds)")
+        // `hasMDE` announces a client that calls /decision first. This one does
+        // not, and claiming otherwise is how the request gets refused.
+        XCTAssertNil(query["hasMDE"])
+    }
+
+    func testTheServerIsTrustedToSkipTheLeadIn() throws {
+        let source = try XCTUnwrap(makeBackend().analysisAudioSource(forTrackID: "1"))
+        XCTAssertTrue(source.startsAtLeadIn)
+    }
+}

@@ -53,6 +53,10 @@ private final class BoundedFetch: NSObject, URLSessionDataDelegate, @unchecked S
     /// Set when WE cancelled because the cap was reached, so the cancellation
     /// error that follows is recognised as success rather than reported.
     private var satisfied = false
+    /// The status of a response we are reading only to quote back. A server
+    /// that refuses says why in the body, and on a phone that sentence is the
+    /// entire diagnosis — nobody is watching a console.
+    private var errorStatus: Int?
 
     init(maxBytes: Int, timeout: TimeInterval) {
         self.maxBytes = max(maxBytes, 1)
@@ -101,8 +105,11 @@ private final class BoundedFetch: NSObject, URLSessionDataDelegate, @unchecked S
             return
         }
         guard (200..<300).contains(http.statusCode) else {
-            completionHandler(.cancel)
-            settle(.failure(MozzError.badStatus(http.statusCode)))
+            // Read a little of the refusal rather than discarding it.
+            lock.lock()
+            errorStatus = http.statusCode
+            lock.unlock()
+            completionHandler(.allow)
             return
         }
         completionHandler(.allow)
@@ -111,20 +118,30 @@ private final class BoundedFetch: NSObject, URLSessionDataDelegate, @unchecked S
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()
         buffer.append(data)
-        let full = buffer.count >= maxBytes
+        let status = errorStatus
+        let cap = status == nil ? maxBytes : Self.errorBodyBytes
+        let full = buffer.count >= cap
         if full { satisfied = true }
         let payload = full ? buffer : Data()
         lock.unlock()
 
         guard full else { return }
         dataTask.cancel()   // stops the server transcoding, not just our reading
-        settle(.success(payload))
+        if let status {
+            settle(.failure(Self.refusal(status: status, body: payload)))
+        } else {
+            settle(.success(payload))
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         guard let error else {
-            lock.lock(); let payload = buffer; lock.unlock()
-            settle(.success(payload))
+            lock.lock(); let payload = buffer; let status = errorStatus; lock.unlock()
+            if let status {
+                settle(.failure(Self.refusal(status: status, body: payload)))
+            } else {
+                settle(.success(payload))
+            }
             return
         }
         lock.lock(); let ours = satisfied; lock.unlock()
@@ -151,6 +168,39 @@ private final class BoundedFetch: NSObject, URLSessionDataDelegate, @unchecked S
         // every analyzed track leaks one session.
         session?.invalidateAndCancel()
         resume?(result)
+    }
+
+    /// How much of a refusal is worth quoting. Enough for Plex's one-line
+    /// reason, not enough to paste an error page into a Settings row.
+    private static let errorBodyBytes = 512
+
+    /// The status, plus whatever the server said about it.
+    ///
+    /// `MozzError.transport` rather than `badStatus`, which carries only a
+    /// number — the number is the part we already knew.
+    private static func refusal(status: Int, body: Data) -> any Error {
+        let text = String(decoding: body.prefix(errorBodyBytes), as: UTF8.self)
+        let reason = scrubbed(text)
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(200)
+        guard !reason.isEmpty else { return MozzError.badStatus(status) }
+        return MozzError.transport("the server answered \(status): \(reason)")
+    }
+
+    /// Servers echo the request back in error pages, and the request carries a
+    /// token. This ends up on screen, so the token does not.
+    private static func scrubbed(_ text: String) -> String {
+        var out = text
+        for key in ["X-Plex-Token", "api_key", "token", "t", "p", "s"] {
+            guard let regex = try? NSRegularExpression(
+                pattern: "\(NSRegularExpression.escapedPattern(for: key))=[^&\\s\"'<>]+",
+                options: [.caseInsensitive]) else { continue }
+            out = regex.stringByReplacingMatches(
+                in: out, range: NSRange(out.startIndex..., in: out),
+                withTemplate: "\(key)=REDACTED")
+        }
+        return out
     }
 
     private static func map(_ error: any Error) -> any Error {

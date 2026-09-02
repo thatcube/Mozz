@@ -20,4 +20,17 @@ enum PlexHeaders {
         if let token { headers["X-Plex-Token"] = token }
         return headers
     }
+
+    /// The same identity, as query items.
+    ///
+    /// For a media URL fetched outside the API client — a transcode read by the
+    /// analyzer, say — there are no default headers, and Plex's universal
+    /// transcoder builds its decision from this identity. Without it the
+    /// endpoint has no client to decide *for* and answers 400.
+    static func commonQuery(clientInfo: ClientInfo, clientIdentifier: String, token: String?) -> [URLQueryItem] {
+        common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: token)
+            .filter { $0.key.hasPrefix("X-Plex-") }
+            .sorted { $0.key < $1.key }
+            .map { URLQueryItem(name: $0.key, value: $0.value) }
+    }
 }
