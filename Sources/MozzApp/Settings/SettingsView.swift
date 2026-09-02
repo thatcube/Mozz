@@ -115,7 +115,7 @@ struct SettingsView: View {
                         Text("Analyses how your songs actually sound, so radio can follow the music rather than the tags. Runs on Wi-Fi while charging, and never leaves this device.")
                             .font(.caption).foregroundStyle(.secondary)
                         if sonicAnalysisEnabled, let p = sonicProgress, p.total > 0 {
-                            SonicAnalysisRow(progress: p)
+                            SonicAnalysisRow(progress: p, conditions: env.sonicAnalysisConditions)
                         }
                         NavigationLink {
                             SuppressedItemsView()
@@ -208,6 +208,10 @@ struct SettingsView: View {
                 while !Task.isCancelled {
                     recCoverage = await env.enrichmentCoverage()
                     sonicProgress = await env.sonicAnalysisProgress()
+                    // This is the screen someone watches while waiting for
+                    // analysis to start, so it is also the right place to keep
+                    // asking. Single-flight: a pass already walking ignores it.
+                    env.resumeSonicAnalysisIfNeeded()
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                 }
             }
@@ -251,6 +255,10 @@ struct SettingsView: View {
 /// that would otherwise look stuck.
 private struct SonicAnalysisRow: View {
     let progress: SonicAnalysisProgress
+    /// What the device is actually reporting, so a stalled bar names the one
+    /// condition that is missing instead of listing all of them and being wrong
+    /// about most.
+    let conditions: (powered: Bool, unmetered: Bool)
 
     var body: some View {
         let done = progress.remaining == 0
@@ -288,7 +296,13 @@ private struct SonicAnalysisRow: View {
         if progress.running {
             return "\(progress.analyzed.formatted()) of \(progress.total.formatted()) songs analysed"
         }
-        return "Waiting for a charger and Wi-Fi — \(progress.remaining.formatted()) songs to go"
+        let togo = "\(progress.remaining.formatted()) songs to go"
+        switch (conditions.powered, conditions.unmetered) {
+        case (false, false): return "Waiting for a charger and Wi-Fi — \(togo)"
+        case (false, true): return "Waiting for a charger — \(togo)"
+        case (true, false): return "Waiting for Wi-Fi — \(togo)"
+        case (true, true): return "Starting — \(togo)"
+        }
     }
 }
 

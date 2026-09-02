@@ -673,6 +673,9 @@ public final class AppEnvironment: ObservableObject {
     /// is single-flight per server, and a pass that is already walking this
     /// library ignores it.
     public func resumeSonicAnalysisIfNeeded() {
+        // Ask the device again first: a charger plugged in before launch sends
+        // no notification, so a stale "no" would never correct itself.
+        sonicConditions.refresh()
         guard let serverId = active?.connection.id, let backend = active?.backend else { return }
         guard sonicConditions.isSatisfied() else { return }
         let sonicAnalysis = self.sonicAnalysis
@@ -705,6 +708,11 @@ public final class AppEnvironment: ObservableObject {
     public func sonicAnalysisProgress() async -> SonicAnalysisProgress? {
         guard let serverId = active?.connection.id else { return nil }
         return await sonicAnalysis.progress(serverId: serverId)
+    }
+
+    /// Why analysis is or isn't running, for Settings to say out loud.
+    public var sonicAnalysisConditions: (powered: Bool, unmetered: Bool) {
+        (sonicConditions.isPowered, sonicConditions.isUnmetered)
     }
 
     /// React to the enrichment on/off switch. Turning it ON resumes the crawl;

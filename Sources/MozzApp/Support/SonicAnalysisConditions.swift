@@ -56,10 +56,38 @@ public final class SonicAnalysisConditions: @unchecked Sendable {
 
     /// The gate the analysis service polls.
     public func isSatisfied() -> Bool {
-        guard UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true else { return false }
-        lock.lock()
-        defer { lock.unlock() }
-        return unmetered && powered
+        isEnabled && isPowered && isUnmetered
+    }
+
+    /// The Settings switch. Separate from the rest so a screen can say which of
+    /// the three is the one saying no.
+    public var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true
+    }
+
+    public var isPowered: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return powered
+    }
+
+    public var isUnmetered: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return unmetered
+    }
+
+    /// Re-read the power state now.
+    ///
+    /// Necessary because the battery notification only fires on a *change*: a
+    /// phone that was already on a charger before the app launched never sends
+    /// one, so an initial read that missed is an initial read that never gets
+    /// corrected. Called on every foreground and before every pass.
+    public func refresh() {
+        #if canImport(UIKit)
+        Task { @MainActor in
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            self.notePowerState(UIDevice.current.batteryState)
+        }
+        #endif
     }
 
     private func set(_ mutate: (SonicAnalysisConditions) -> Void) {
@@ -78,12 +106,27 @@ public final class SonicAnalysisConditions: @unchecked Sendable {
     private func startPowerObservation() {
         Task { @MainActor in
             UIDevice.current.isBatteryMonitoringEnabled = true
-            self.notePowerState(UIDevice.current.batteryState)
             NotificationCenter.default.addObserver(
                 forName: UIDevice.batteryStateDidChangeNotification, object: nil, queue: .main
             ) { [weak self] _ in
                 self?.notePowerState(UIDevice.current.batteryState)
             }
+            // A charger already plugged in when the app launches produces no
+            // notification at all, so the first read has to be right — and it
+            // is not, read in the same turn that enables monitoring: UIKit
+            // answers `.unknown` until the next turn. Hence a second look.
+            // This cost an iPhone that sat at "waiting for a charger" while
+            // plugged in.
+            self.notePowerState(UIDevice.current.batteryState)
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.notePowerState(UIDevice.current.batteryState)
+            }
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            self.notePowerState(UIDevice.current.batteryState)
         }
     }
 
@@ -91,7 +134,8 @@ public final class SonicAnalysisConditions: @unchecked Sendable {
         // `.full` counts: a device sitting at 100% on a charger is still on the
         // charger. `.unknown` does not — that is the simulator, and guessing
         // "yes" there would be guessing "yes" on a real device that failed to
-        // report.
+        // report. It is also what UIKit says before battery monitoring has
+        // settled, which is why this is called more than once.
         let plugged = state == .charging || state == .full
         set { $0.powered = plugged }
     }
