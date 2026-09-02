@@ -44,6 +44,25 @@ public sealed record Album(
     [property: JsonPropertyName("isSingleOrEP")]
     bool? IsSingleOrEp = null);
 
+/// <summary>
+/// One channel of the player's backdrop, 0…1 sRGB, exactly as
+/// <c>MozzCore.ArtworkPalette.Tone</c> emits it.
+/// </summary>
+public sealed record ArtworkTone(
+    [property: JsonPropertyName("red")] double Red,
+    [property: JsonPropertyName("green")] double Green,
+    [property: JsonPropertyName("blue")] double Blue);
+
+/// <summary>
+/// The backdrop, top to bottom: the middle band is the artwork's dominant
+/// colour and covers most of the view, the two accents are gentle bands at the
+/// edges.
+/// </summary>
+public sealed record ArtworkTones(
+    [property: JsonPropertyName("top")] ArtworkTone Top,
+    [property: JsonPropertyName("middle")] ArtworkTone Middle,
+    [property: JsonPropertyName("bottom")] ArtworkTone Bottom);
+
 public sealed record Track(
     long Id,
     string RemoteId,
@@ -224,6 +243,10 @@ public sealed record CoreRequest(
     [JsonPropertyName("sinceMS")] public long? SinceMS { get; init; }
     [JsonPropertyName("maxBytes")] public int? MaxBytes { get; init; }
     [JsonPropertyName("year")] public int? Year { get; init; }
+    /// <summary>Base64 of tightly packed RGBA, for <c>artworkTones</c>.</summary>
+    [JsonPropertyName("pixels")] public string? Pixels { get; init; }
+    [JsonPropertyName("width")] public int? Width { get; init; }
+    [JsonPropertyName("height")] public int? Height { get; init; }
     [JsonPropertyName("liked")] public bool? Liked { get; init; }
     [JsonPropertyName("flush")] public bool? Flush { get; init; }
     [JsonPropertyName("rating")] public double? Rating { get; init; }

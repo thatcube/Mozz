@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using Avalonia.Styling;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -121,6 +123,27 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _trackCount;
 
     [ObservableProperty] private Track? _nowPlaying;
+
+    /// <summary>
+    /// The field behind Now Playing, sampled from the cover by the shared core.
+    ///
+    /// Never reset to null between tracks: the previous record's field stays up
+    /// until the next has been computed, because blanking it while the next
+    /// cover loads is a flash of black in the middle of a song.
+    /// </summary>
+    [ObservableProperty] private IBrush _playerBackground = PlayerFallbackBrush;
+
+    /// <summary>
+    /// What Now Playing paints when the artwork yields nothing usable.
+    ///
+    /// A fixed dark tone rather than the theme's background, matching Android:
+    /// this view is always dark, because its foreground is white over whatever
+    /// colour the record turned out to be. Taking the page's floor here would
+    /// put white text on near-white in the Light theme for any track without
+    /// artwork.
+    /// </summary>
+    private static readonly IBrush PlayerFallbackBrush =
+        new ImmutableSolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
 
     /// <summary>Identity of what is playing, so the scrubber resets when it changes.</summary>
     public string? NowPlayingKey => NowPlaying is null ? null : $"{NowPlaying.ServerId}:{NowPlaying.RemoteId}";
@@ -2746,7 +2769,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await PlayIndexAsync(index, initialPositionSeconds);
     }
 
-    private async Task PlayIndexAsync(int index, double initialPositionSeconds = 0)
+    /// <summary>
+    /// A track the server will not stream — moved, deleted, or on a server that
+    /// is no longer attached — steps to the next one rather than stopping.
+    /// Pressing play on a hundred songs and getting silence because the first is
+    /// gone is not a queue, and ResolveSource has already said why on screen.
+    /// The budget bounds it so an entirely unplayable queue stops instead of
+    /// racing to the end.
+    /// </summary>
+    private async Task PlayIndexAsync(int index, double initialPositionSeconds = 0, int skipBudget = 4)
     {
         if (_engine is null || index < 0 || index >= _queue.Tracks.Count) return;
         var track = _queue.Tracks[index];
@@ -2756,7 +2787,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // Resolving a source can spawn ffprobe or call the core, so keep it off
         // the UI thread.
         var source = await Task.Run(() => ResolveSource(track));
-        if (source is null) return; // ResolveSource reported why.
+        if (source is null)
+        {
+            if (skipBudget > 0 && _queue.NextIndex() is { } next && next != index)
+                await PlayIndexAsync(next, skipBudget: skipBudget - 1);
+            return;
+        }
 
         // Ask the engine BEFORE committing the UI to this track. Setting
         // NowPlaying first meant a load that failed left the title, the artwork
@@ -2876,7 +2912,54 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nowPlaying_os?.UpdatePosition(_engine.Position, _engine.Duration);
     }
 
-    partial void OnNowPlayingChanged(Track? value) => OnPropertyChanged(nameof(NowPlayingKey));
+    partial void OnNowPlayingChanged(Track? value)
+    {
+        OnPropertyChanged(nameof(NowPlayingKey));
+        _ = RefreshPlayerBackgroundAsync(value);
+    }
+
+    /// <summary>
+    /// Re-derive Now Playing's backdrop from the current cover.
+    ///
+    /// The colours come from the shared core (<c>artworkTones</c>) rather than
+    /// from anything decided here: iOS samples them, Android's PlayerBackground
+    /// is a direct port of the iOS one "tuning constants included", and a third
+    /// client guessing separately at "colours from the artwork" would drift from
+    /// both immediately. Everything below is only fetching the cover and getting
+    /// its pixels into the shape the core reads — see ArtworkSampling.
+    /// </summary>
+    private async Task RefreshPlayerBackgroundAsync(Track? track)
+    {
+        // Black takes no colour from the artwork anywhere in the app, and
+        // returning before the fetch means the cover is never decoded for its
+        // histogram either.
+        if (DarkStyle == "black" && Appearance != "light")
+        {
+            PlayerBackground = Brushes.Black;
+            return;
+        }
+
+        if (_artwork is null || track?.ArtworkKey is not { Length: > 0 } key) return;
+
+        var request = new ArtworkRef(track.ServerId, key, ArtworkSampling.RequestSize);
+        var bitmap = await _artwork.LoadAsync(request, CancellationToken.None);
+        if (bitmap is null) return;
+
+        var pixels = ArtworkSampling.Rgba(bitmap);
+        if (pixels is null) return;
+
+        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+        {
+            Pixels = Convert.ToBase64String(pixels),
+            Width = ArtworkSampling.SampleDim,
+            Height = ArtworkSampling.SampleDim,
+        }));
+
+        // Same rule as the cover: only ever replaced by something real, so one
+        // track without usable artwork does not wash the field out.
+        if (tones is not null && NowPlaying == track)
+            PlayerBackground = ArtworkSampling.Brush(tones);
+    }
 
     partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
 
@@ -2977,6 +3060,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             }
         }
 
+        // The core answers this one, and when it refuses it says why — "streamURL
+        // needs an attached serverId", "no track <id>". Reporting that verbatim is
+        // the difference between a fault you can act on and one you can only guess
+        // at: every failure used to collapse into a note telling the user to set a
+        // developer environment variable, which was neither the reason nor
+        // something they could do anything about.
+        string reason;
         try
         {
             var stream = _core.Call<StreamSource>(new CoreRequest("streamURL")
@@ -2996,14 +3086,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     ReplayGainTrackDb: track.NormalizationGainDB,
                     KnownDuration: track.DurationSeconds > 0 ? TimeSpan.FromSeconds(track.DurationSeconds) : null);
             }
+            reason = "the server returned no stream URL";
         }
-        catch
+        catch (Exception ex)
         {
-            // The core doesn't expose a stream URL yet; fall through to the hint.
+            reason = ex.Message;
         }
 
-        Dispatcher.UIThread.Post(() => StatusMessage =
-            "No audio source for this track yet — set MOZZ_DEMO_AUDIO to a file or folder to hear playback.");
+        var detail = $"Can't play \u201C{track.Title}\u201D — {reason}.";
+        Dispatcher.UIThread.Post(() => StatusMessage = detail);
         return null;
     }
 

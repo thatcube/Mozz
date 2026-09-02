@@ -1250,8 +1250,43 @@
                         </ListBox.DataTemplates>
                     </ListBox>
 
-                    <!-- Full Now Playing -->
-                    <Grid IsVisible="{Binding ShowNowPlaying}" RowDefinitions="Auto,*" Margin="0,0,8,24">
+                    <!-- Full Now Playing.
+                         The backdrop is the record's own colour, sampled by the
+                         shared core so this cannot drift from the phone: iOS
+                         paints these tones as a mesh gradient and Android as a
+                         drifting canvas, and neither has an equivalent here —
+                         but the iOS grid is row-uniform, each row one tone, so a
+                         vertical gradient reproduces the same field. The drift
+                         is not reproduced: the iOS source calls the motion the
+                         genuinely per-platform half, it costs a full repaint
+                         every frame, and the tones are what carry the record's
+                         identity.
+
+                         The view is always dark, in every theme, matching
+                         Android's note that its foreground is white over
+                         whatever colour the record turned out to be. Overriding
+                         the text tiers for this subtree is what makes that true
+                         for everything inside it at once rather than each
+                         control hard-coding white and Light quietly breaking
+                         one of them. -->
+                    <Border IsVisible="{Binding ShowNowPlaying}"
+                            Background="{Binding PlayerBackground}"
+                            CornerRadius="18" Margin="0,0,8,24" ClipToBounds="True">
+                        <Border.Resources>
+                            <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
+                            <SolidColorBrush x:Key="TextSecondary" Color="#B9B9C1" />
+                            <SolidColorBrush x:Key="TextTertiary" Color="#8E8E97" />
+                            <SolidColorBrush x:Key="SurfaceRaised" Color="#1AFFFFFF" />
+                            <SolidColorBrush x:Key="SurfaceHover" Color="#26FFFFFF" />
+                            <SolidColorBrush x:Key="SurfaceSelected" Color="#3AFFFFFF" />
+                        </Border.Resources>
+                        <Panel>
+                            <!-- Light at the top, where there is only colour to
+                                 look at, and heavy at the bottom, where the seek
+                                 bar and the times have to stay readable over a
+                                 record that turned out pale. -->
+                            <Border Background="{DynamicResource PlayerScrim}" />
+                    <Grid RowDefinitions="Auto,*" Margin="26,24,26,24">
                         <Grid x:Name="NowPlayingHeroGrid" Grid.Row="0" ColumnDefinitions="320,*" ColumnSpacing="30" Margin="0,0,0,26" Classes="nowPlayingHero">
                             <controls:ArtworkImage Grid.Column="0" Width="300" Height="300" DisplaySize="300"
                                     CornerRadius="18"
@@ -1428,6 +1463,8 @@
                             </Grid>
                         </Grid>
                     </Grid>
+                        </Panel>
+                    </Border>
 
                 </Panel>
             </Grid>
