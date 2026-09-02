@@ -8,6 +8,7 @@ import MozzDatabase
 import MozzDownloads
 import MozzPlayback
 import MozzNetworking
+import MozzAnalysis
 import MozzRecommend
 import MozzEnrichment
 import MozzSync
@@ -2372,15 +2373,24 @@ public final class AppEnvironment: ObservableObject {
     /// station falls to the next tier rather than not starting.
     private func sonicCandidates(for seed: RadioSeed, serverId: ServerID,
                                  limit: Int) async -> [ScoredOwnedTrack] {
-        guard let backend = active, backend.capabilities.supportsSonicSimilarity,
-              let ref = seed.seedTrackRef else { return [] }
+        guard let backend = active, let ref = seed.seedTrackRef else { return [] }
         let prefix = "\(serverId):"
         let seedTrackId = ref.hasPrefix(prefix) ? String(ref.dropFirst(prefix.count)) : ref
         // Overfetch for the same reason the ListenBrainz tier does: the per-artist
         // cap throws away an analyzer's album-mates, and a pool trimmed to `limit`
         // first arrives short.
-        let matches = (try? await backend.backend.sonicallySimilarTracks(
-            to: seedTrackId, limit: limit * 3)) ?? []
+        var matches: [SonicMatch] = []
+        if backend.capabilities.supportsSonicSimilarity {
+            matches = (try? await backend.backend.sonicallySimilarTracks(
+                to: seedTrackId, limit: limit * 3)) ?? []
+        }
+        if matches.isEmpty {
+            // Nothing analyzed it for us, which is the ordinary case. Fall
+            // through to what this device heard for itself.
+            matches = (try? await recommendations.localSonicMatches(
+                seedRemoteId: seedTrackId, serverId: serverId,
+                engine: SonicAnalyzer.engine, limit: limit * 3)) ?? []
+        }
         guard !matches.isEmpty else { return [] }
         return (try? await recommendations.ownedSonicTracks(matches, serverId: serverId)) ?? []
     }

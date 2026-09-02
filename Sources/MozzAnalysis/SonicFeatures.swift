@@ -48,10 +48,12 @@ public struct SonicFeatures: Sendable, Equatable {
         guard engine == other.engine, values.count == other.values.count else { return nil }
         var dot = 0.0
         for i in 0..<values.count { dot += Double(values[i]) * Double(other.values[i]) }
-        // Both are unit vectors and every component is non-negative by
-        // construction, so the dot product is already the cosine and already in
-        // 0...1; the clamp is only against accumulated rounding.
-        return min(max(dot, 0), 1)
+        // Both are unit vectors, so the dot product IS the cosine — and because
+        // the components are centred it is signed, running -1...1. Mapped to
+        // 0...1 rather than clamped: clamping would collapse every dissimilar
+        // pair to exactly zero and throw away the ordering among them, which is
+        // the half of the ranking that decides what does NOT join a station.
+        return min(max((dot + 1) / 2, 0), 1)
     }
 }
 

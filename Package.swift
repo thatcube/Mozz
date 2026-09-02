@@ -208,6 +208,7 @@ let package = Package(
                 "MozzCore", "MozzNetworking", "MozzDatabase",
                 "MozzPlex", "MozzJellyfin", "MozzSubsonic", "MozzSync",
                 "MozzPlayback", "MozzDownloads", "MozzRecommend", "MozzEnrichment",
+                "MozzAnalysis",
             ],
             resources: [.process("Resources")]
         ),
@@ -240,7 +241,7 @@ let package = Package(
                 // counterpart elsewhere, and it publishes progress with Combine.
                 // A desktop client wants a plain download queue, not a port of
                 // this. See ARCHITECTURE.md §0.
-                "MozzRecommend", "MozzEnrichment",
+                "MozzRecommend", "MozzEnrichment", "MozzAnalysis",
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),

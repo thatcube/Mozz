@@ -1,6 +1,7 @@
 import Foundation
 import MozzCore
 import MozzDatabase
+import MozzAnalysis
 import MozzRecommend
 
 // MARK: - The session facade
@@ -904,8 +905,17 @@ private func dispatch(
             // Ask for more than the batch needs: the blender's artist and album
             // caps throw a lot of an analyzer's nearest neighbours away, and a
             // list trimmed to `limit` before capping arrives short.
-            let matches = (try? await backend.sonicallySimilarTracks(
+            var matches = (try? await backend.sonicallySimilarTracks(
                 to: seedTrackId, limit: limit * 3)) ?? []
+            if matches.isEmpty {
+                // Nothing analyzed it for us, which is the ordinary case: a
+                // server answers this only with a subscription or a second
+                // service installed beside it. Fall through to what this device
+                // heard for itself.
+                matches = (try? await session.recommendations.localSonicMatches(
+                    seedRemoteId: seedTrackId, serverId: serverId,
+                    engine: SonicAnalyzer.engine, limit: limit * 3)) ?? []
+            }
             sonic = (try? await session.recommendations.ownedSonicTracks(
                 matches, serverId: serverId)) ?? []
         }

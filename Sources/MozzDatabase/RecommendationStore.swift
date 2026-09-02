@@ -97,6 +97,112 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    // MARK: - Sonic embeddings
+
+    /// Store one analyzed vector, leaving every other column alone.
+    ///
+    /// `engine` is the analyzer's `name@version` and goes in `feature_source`.
+    /// It is not decoration: vectors from two engines are coordinates in two
+    /// unrelated spaces, so every read filters on it and a bumped version is
+    /// what makes a library re-analyze rather than silently mix.
+    public func saveSonicEmbedding(_ vector: [Float], engine: String, bpm: Double?,
+                                   trackRef: String, at now: Double) async throws {
+        let packed = SonicEmbeddingCodec.pack(vector)
+        try await database.write { db in
+            try db.execute(sql: """
+                INSERT INTO track_features
+                    (track_ref, embedding, embedding_dim, feature_source, bpm, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(track_ref) DO UPDATE SET
+                    embedding = excluded.embedding,
+                    embedding_dim = excluded.embedding_dim,
+                    feature_source = excluded.feature_source,
+                    bpm = COALESCE(excluded.bpm, track_features.bpm),
+                    updated_at = excluded.updated_at
+                """, arguments: [trackRef, packed, vector.count, engine, bpm, now])
+        }
+    }
+
+    /// Every analyzed vector for one server, as (remoteId, vector).
+    ///
+    /// Loaded whole rather than searched in SQL: SQLite has no vector index, the
+    /// distance is a dot product over ~50 floats, and a 20,000-track library is
+    /// about four megabytes. An approximate index is a thing to add when a
+    /// library is large enough to need one, not before.
+    public func sonicEmbeddings(serverId: ServerID, engine: String) async throws -> [(remoteId: String, vector: [Float])] {
+        try await database.read { db in
+            let sql = """
+                SELECT track.remoteId AS remoteId, tf.embedding AS embedding
+                FROM track_features tf
+                JOIN track ON \(Self.refExpr) = tf.track_ref
+                WHERE track.serverId = ?
+                  AND tf.feature_source = ?
+                  AND tf.embedding IS NOT NULL
+                """
+            return try Row.fetchAll(db, sql: sql, arguments: [serverId, engine])
+                .compactMap { row -> (String, [Float])? in
+                    guard let remoteId: String = row["remoteId"],
+                          let data: Data = row["embedding"],
+                          let vector = SonicEmbeddingCodec.unpack(data), !vector.isEmpty
+                    else { return nil }
+                    return (remoteId, vector)
+                }
+        }
+    }
+
+    /// One track's vector, or nil when it has not been analyzed by this engine.
+    public func sonicEmbedding(trackRef: String, engine: String) async throws -> [Float]? {
+        try await database.read { db in
+            let row = try Row.fetchOne(db, sql: """
+                SELECT embedding FROM track_features
+                WHERE track_ref = ? AND feature_source = ? AND embedding IS NOT NULL
+                """, arguments: [trackRef, engine])
+            guard let data: Data = row?["embedding"] else { return nil }
+            return SonicEmbeddingCodec.unpack(data)
+        }
+    }
+
+    /// Tracks on this server with no vector from `engine` yet, most recently
+    /// added first.
+    ///
+    /// Newest first because a library grows at the end and the tracks someone
+    /// just added are the ones they are most likely to go looking for. A row
+    /// carrying an OLDER engine counts as unanalyzed: the two are not
+    /// comparable, so it needs redoing rather than keeping.
+    public func tracksNeedingSonicAnalysis(serverId: ServerID, engine: String,
+                                           limit: Int) async throws -> [TrackCandidate] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
+            let sql = """
+                SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
+                       track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
+                       track.albumRemoteId AS albumRemoteId, track.genres AS genres, track.addedAt AS addedAt
+                FROM track
+                LEFT JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                WHERE track.serverId = ?
+                  AND (tf.embedding IS NULL OR tf.feature_source IS NOT ?)
+                ORDER BY track.addedAt DESC NULLS LAST, track.remoteId ASC
+                LIMIT ?
+                """
+            return try Row.fetchAll(db, sql: sql, arguments: [serverId, engine, limit])
+                .map { Self.candidate($0, enrich: false) }
+        }
+    }
+
+    /// How much of a server's catalogue this engine has analyzed.
+    public func sonicAnalysisProgress(serverId: ServerID, engine: String) async throws -> (analyzed: Int, total: Int) {
+        try await database.read { db in
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?",
+                                         arguments: [serverId]) ?? 0
+            let analyzed = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM track_features tf
+                JOIN track ON \(Self.refExpr) = tf.track_ref
+                WHERE track.serverId = ? AND tf.feature_source = ? AND tf.embedding IS NOT NULL
+                """, arguments: [serverId, engine]) ?? 0
+            return (analyzed, total)
+        }
+    }
+
     public func trackFeatures(forTrackRef ref: String) async throws -> TrackFeaturesRecord? {
         try await database.read { db in
             try TrackFeaturesRecord.fetchOne(db, key: ref)

@@ -51,6 +51,11 @@ public actor RecommendationService {
     private var genreSpaceCache: [ServerID: (space: GenreSimilarity, computedAt: Date, enrich: Bool)] = [:]
     private static let genreSpaceTTL: TimeInterval = 3600
 
+    /// Per-server analyzed vectors, so a station does not re-read the whole
+    /// corpus for every batch. See `sonicCorpus(serverId:engine:)`.
+    private var sonicCorpusCache: [ServerID: (entries: [(remoteId: String, vector: [Float])], engine: String, loadedAt: Date)] = [:]
+    private static let sonicCorpusTTL: TimeInterval = 120
+
     /// Stable id of the weekly rediscovery set.
     public static let mozzWeeklyId = "mozz-weekly"
 
@@ -169,6 +174,56 @@ public actor RecommendationService {
             let age = max(0, nowSec - playedAt)
             return exp(-lambda * age)
         }
+    }
+
+    /// Nearest neighbours from THIS DEVICE's own analysis of the audio.
+    ///
+    /// The fallback for the overwhelmingly common case: a server that has
+    /// analyzed nothing, because doing so costs either a subscription or a
+    /// second thing to install. Same output shape as a server's answer, so the
+    /// station machinery cannot tell them apart.
+    ///
+    /// `engine` filters the search. Two analyzers' vectors are coordinates in
+    /// unrelated spaces, so a search that spanned them would be ranking noise.
+    public func localSonicMatches(seedRemoteId: String, serverId: ServerID,
+                                  engine: String, limit: Int) async throws -> [SonicMatch] {
+        guard limit > 0 else { return [] }
+        let seedRef = "\(serverId):\(seedRemoteId)"
+        guard let seed = try await store.sonicEmbedding(trackRef: seedRef, engine: engine),
+              !seed.isEmpty else { return [] }
+
+        let corpus = try await sonicCorpus(serverId: serverId, engine: engine)
+        guard !corpus.isEmpty else { return [] }
+
+        var scored: [SonicMatch] = []
+        scored.reserveCapacity(corpus.count)
+        for entry in corpus where entry.remoteId != seedRemoteId {
+            guard entry.vector.count == seed.count else { continue }
+            var dot = 0.0
+            for i in 0..<seed.count { dot += Double(seed[i]) * Double(entry.vector[i]) }
+            // Both vectors are unit length and centred, so the dot product is a
+            // signed cosine; mapped to 0...1 to match what a server reports.
+            scored.append(SonicMatch(trackID: entry.remoteId,
+                                     similarity: Swift.min(Swift.max((dot + 1) / 2, 0), 1)))
+        }
+        scored.sort { $0.similarity > $1.similarity }
+        return Array(scored.prefix(limit))
+    }
+
+    /// The analyzed corpus for one server, cached briefly.
+    ///
+    /// A station asks for a batch every few tracks and each ask would otherwise
+    /// re-read and re-unpack every vector in the library. The TTL is short
+    /// because analysis runs in the background and a station started mid-scan
+    /// should start seeing the new tracks.
+    private func sonicCorpus(serverId: ServerID, engine: String) async throws -> [(remoteId: String, vector: [Float])] {
+        if let cached = sonicCorpusCache[serverId], cached.engine == engine,
+           now().timeIntervalSince(cached.loadedAt) < Self.sonicCorpusTTL {
+            return cached.entries
+        }
+        let entries = try await store.sonicEmbeddings(serverId: serverId, engine: engine)
+        sonicCorpusCache[serverId] = (entries, engine, now())
+        return entries
     }
 
     /// Resolve a server's acoustic matches against what this device has mirrored.
