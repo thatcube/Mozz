@@ -145,6 +145,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private static readonly IBrush PlayerFallbackBrush =
         new ImmutableSolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
 
+    /// <summary>"Playing from Reasonable Doubt" — where this track came from.</summary>
+    public string? NowPlayingContext =>
+        string.IsNullOrWhiteSpace(NowPlaying?.AlbumTitle) ? null : $"Playing from {NowPlaying!.AlbumTitle}";
+
     /// <summary>Identity of what is playing, so the scrubber resets when it changes.</summary>
     public string? NowPlayingKey => NowPlaying is null ? null : $"{NowPlaying.ServerId}:{NowPlaying.RemoteId}";
 
@@ -2915,6 +2919,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     partial void OnNowPlayingChanged(Track? value)
     {
         OnPropertyChanged(nameof(NowPlayingKey));
+        OnPropertyChanged(nameof(NowPlayingContext));
         _ = RefreshPlayerBackgroundAsync(value);
     }
 

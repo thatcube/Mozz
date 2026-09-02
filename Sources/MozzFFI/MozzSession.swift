@@ -52,6 +52,10 @@ struct SessionRequest: Decodable {
     var offset: Int?
     var limit: Int?
     var query: String?
+    /// Base64 of tightly packed RGBA, for `artworkTones`.
+    var pixels: String?
+    var width: Int?
+    var height: Int?
     var remoteId: String?
     var artistRemoteId: String?
     var groupKey: String?
@@ -1727,6 +1731,21 @@ private func dispatch(
         }
         let rows = try await repo.albums(forGenre: genre, serverId: serverId)
         return sessionSuccess(request, rows.map(wire))
+
+    case "artworkTones":
+        guard let encoded = request.pixels,
+              let width = request.width,
+              let height = request.height,
+              let data = Data(base64Encoded: encoded) else {
+            return sessionFailure(request.id, request.cmd, "artworkTones needs pixels, width and height")
+        }
+        // Null rather than an error when the artwork yields nothing usable: an
+        // all-transparent image is a fact about the cover, not a failed call, and
+        // the client simply paints a plain background.
+        return sessionSuccess(
+            request,
+            ArtworkPalette.tones(rgba: [UInt8](data), width: width, height: height)
+        )
 
     case "search":
         guard let query = request.query else {

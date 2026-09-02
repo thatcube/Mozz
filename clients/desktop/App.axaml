@@ -454,6 +454,30 @@
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
+        <!-- A star is one fifth of a single control, so it carries none of a
+             button's chrome: no minimum height, no padding, no plate. Five ghost
+             buttons at 36px tall with 16px of side padding read as five separate
+             widgets scattered across a line. -->
+        <Style Selector="Button.star">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.star:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.star:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.star:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
         <Style Selector="Button.play">
             <Setter Property="Background" Value="{DynamicResource Accent}" />
             <Setter Property="Foreground" Value="White" />
@@ -478,6 +502,35 @@
             <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
+
+        <!-- The transport, one rung up, for the full player. -->
+        <Style Selector="Button.transport.big">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="46" />
+            <Setter Property="CornerRadius" Value="23" />
+        </Style>
+        <Style Selector="Button.play.big">
+            <Setter Property="Width" Value="62" />
+            <Setter Property="Height" Value="62" />
+            <Setter Property="CornerRadius" Value="31" />
+        </Style>
+        <!-- The player's play button. Crimson is right on the app's own chrome
+             and wrong on the record's colour: over a red album it disappears
+             into its own backdrop. White reads on every tone the core can
+             produce. -->
+        <Style Selector="Button.play.onArtwork">
+            <Setter Property="Background" Value="#F2F2F4" />
+            <Setter Property="Foreground" Value="#101014" />
+        </Style>
+        <Style Selector="Button.play.onArtwork:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="TextElement.Foreground" Value="#101014" />
+        </Style>
+        <Style Selector="Button.play.onArtwork:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#D5D5DC" />
+            <Setter Property="TextElement.Foreground" Value="#101014" />
+        </Style>
+
 
         <Style Selector="TextBlock.pageTitle">
             <Setter Property="FontSize" Value="30" />

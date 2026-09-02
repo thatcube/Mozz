@@ -97,19 +97,10 @@ public partial class MainWindow : Window
     {
         var compact = tier == DesktopLayoutTier.Compact;
 
-        // Full now-playing can afford two columns. At compact width the artwork
-        // and metadata stack so the scrubber and queue do not become horizontal
-        // scroll traps inside the page.
-        NowPlayingHeroGrid.ColumnDefinitions = compact
-            ? new ColumnDefinitions("*")
-            : new ColumnDefinitions("320,*");
-        NowPlayingHeroGrid.RowDefinitions = compact
-            ? new RowDefinitions("Auto,Auto")
-            : new RowDefinitions("Auto");
-        Grid.SetColumn(NowPlayingText, compact ? 0 : 1);
-        Grid.SetRow(NowPlayingText, compact ? 1 : 0);
-        NowPlayingText.Margin = compact ? new Thickness(0, 16, 0, 0) : new Thickness(0);
-
+        // The hero is one centred column at every width now, so there is no
+        // reflow left to do for it: the cover, the title and the transport are
+        // already stacked, and the Viewbox shrinks the cover rather than letting
+        // the row overflow. Only the lower half still has two columns to fold.
         NowPlayingLowerGrid.ColumnDefinitions = compact
             ? new ColumnDefinitions("*")
             : new ColumnDefinitions("*,*");

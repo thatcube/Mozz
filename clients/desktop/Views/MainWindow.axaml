@@ -1257,221 +1257,6 @@
                         </ListBox.DataTemplates>
                     </ListBox>
 
-                    <!-- Full Now Playing.
-                         The backdrop is the record's own colour, sampled by the
-                         shared core so this cannot drift from the phone: iOS
-                         paints these tones as a mesh gradient and Android as a
-                         drifting canvas, and neither has an equivalent here —
-                         but the iOS grid is row-uniform, each row one tone, so a
-                         vertical gradient reproduces the same field. The drift
-                         is not reproduced: the iOS source calls the motion the
-                         genuinely per-platform half, it costs a full repaint
-                         every frame, and the tones are what carry the record's
-                         identity.
-
-                         The view is always dark, in every theme, matching
-                         Android's note that its foreground is white over
-                         whatever colour the record turned out to be. Overriding
-                         the text tiers for this subtree is what makes that true
-                         for everything inside it at once rather than each
-                         control hard-coding white and Light quietly breaking
-                         one of them. -->
-                    <Border IsVisible="{Binding ShowNowPlaying}"
-                            Background="{Binding PlayerBackground}"
-                            CornerRadius="18" Margin="0,0,8,24" ClipToBounds="True">
-                        <Border.Resources>
-                            <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
-                            <SolidColorBrush x:Key="TextSecondary" Color="#B9B9C1" />
-                            <SolidColorBrush x:Key="TextTertiary" Color="#8E8E97" />
-                            <SolidColorBrush x:Key="SurfaceRaised" Color="#1AFFFFFF" />
-                            <SolidColorBrush x:Key="SurfaceHover" Color="#26FFFFFF" />
-                            <SolidColorBrush x:Key="SurfaceSelected" Color="#3AFFFFFF" />
-                        </Border.Resources>
-                        <Panel>
-                            <!-- Light at the top, where there is only colour to
-                                 look at, and heavy at the bottom, where the seek
-                                 bar and the times have to stay readable over a
-                                 record that turned out pale. -->
-                            <Border Background="{DynamicResource PlayerScrim}" />
-                    <Grid RowDefinitions="Auto,*" Margin="26,24,26,24">
-                        <Grid x:Name="NowPlayingHeroGrid" Grid.Row="0" ColumnDefinitions="320,*" ColumnSpacing="30" Margin="0,0,0,26" Classes="nowPlayingHero">
-                            <controls:ArtworkImage Grid.Column="0" Width="300" Height="300" DisplaySize="300"
-                                    CornerRadius="18"
-                                    ServerId="{Binding NowPlaying.ServerId}"
-                                    ArtworkKey="{Binding NowPlaying.ArtworkKey}"
-                                    FallbackText="{Binding NowPlaying.AlbumTitle}"
-                                    FallbackFontSize="82"
-                                    FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
-                            <StackPanel x:Name="NowPlayingText" Grid.Column="1" Spacing="14" VerticalAlignment="Center" Classes="nowPlayingText">
-                                <TextBlock Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}"
-                                           FontSize="40" FontWeight="Bold"
-                                           Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Classes="link" Command="{Binding OpenTrackArtistCommand}" CommandParameter="{Binding NowPlaying}">
-                                        <TextBlock Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" FontSize="17"
-                                                   Foreground="{DynamicResource TextSecondary}" />
-                                    </Button>
-                                    <TextBlock Text="·" Classes="secondary" FontSize="17" />
-                                    <Button Classes="link" Command="{Binding OpenTrackAlbumCommand}" CommandParameter="{Binding NowPlaying}">
-                                        <TextBlock Text="{Binding NowPlaying.AlbumTitle, FallbackValue=''}" FontSize="17"
-                                                   Foreground="{DynamicResource TextSecondary}" />
-                                    </Button>
-                                </StackPanel>
-                                <controls:SeekBar LabelFontSize="12"
-                                                  RestHeight="7" ActiveHeight="14"
-                                                  Position="{Binding PositionSeconds}"
-                                                  Duration="{Binding DurationSeconds}"
-                                                  TrackKey="{Binding NowPlayingKey}"
-                                                  SeekCommand="{Binding SeekToCommand}"
-                                                  Tint="{DynamicResource TextPrimary}" />
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <Button Classes="ghost" Command="{Binding ToggleFavoriteCommand}"
-                                            CommandParameter="{Binding NowPlaying}"
-                                            ToolTip.Tip="{Binding NowPlaying.FavoriteLabel}">
-                                        <StackPanel Orientation="Horizontal" Spacing="7">
-                                            <Panel Opacity="{Binding NowPlaying.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding NowPlaying.IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !NowPlaying.IsFavorite}" />
-                                            </Panel>
-                                            <TextBlock Text="{Binding NowPlaying.FavoriteLabel, FallbackValue='Like'}" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Classes="ghost" Command="{Binding ToggleShuffleCommand}">
-                                        <StackPanel Orientation="Horizontal" Spacing="7">
-                                            <controls:TablerIcon Size="17" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
-                                            <TextBlock Text="{Binding ShuffleStateText}" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Classes="secondary" Command="{Binding PreviousCommand}">
-                                        <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipBack}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <Button Classes="play" Command="{Binding TogglePlayPauseCommand}">
-                                        <Panel>
-                                            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsPlaying}" />
-                                            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPause}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding IsPlaying}" />
-                                        </Panel>
-                                    </Button>
-                                    <Button Classes="secondary" Command="{Binding NextCommand}">
-                                        <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <Button Classes="ghost" Command="{Binding CycleRepeatCommand}">
-                                        <StackPanel Orientation="Horizontal" Spacing="7">
-                                            <controls:TablerIcon Size="17" Data="{StaticResource IconRepeat}" Brush="{Binding $parent[Button].Foreground}" />
-                                            <TextBlock Text="{Binding RepeatStateText}" />
-                                        </StackPanel>
-                                    </Button>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="5">
-                                    <TextBlock Text="Rating" Classes="secondary" VerticalAlignment="Center" Margin="0,0,4,0" />
-                                    <Button Classes="ghost" Command="{Binding RateNowPlayingCommand}" CommandParameter="1">
-                                        <controls:TablerIcon Size="16" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <Button Classes="ghost" Command="{Binding RateNowPlayingCommand}" CommandParameter="2">
-                                        <controls:TablerIcon Size="16" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=2}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <Button Classes="ghost" Command="{Binding RateNowPlayingCommand}" CommandParameter="3">
-                                        <controls:TablerIcon Size="16" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=3}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <Button Classes="ghost" Command="{Binding RateNowPlayingCommand}" CommandParameter="4">
-                                        <controls:TablerIcon Size="16" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=4}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                    <Button Classes="ghost" Command="{Binding RateNowPlayingCommand}" CommandParameter="5">
-                                        <controls:TablerIcon Size="16" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=5}" Brush="{Binding $parent[Button].Foreground}" />
-                                    </Button>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <controls:TablerIcon Size="18" Data="{StaticResource IconVolume}" Brush="{DynamicResource TextSecondary}" />
-                                    <Slider Classes="scrub" Width="180" Minimum="0" Maximum="1"
-                                            Value="{Binding Volume, Mode=TwoWay}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid x:Name="NowPlayingLowerGrid" Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="26" Classes="nowPlayingLower">
-                            <Grid Grid.Column="0" RowDefinitions="Auto,*">
-                            <TextBlock Grid.Row="0" Text="Lyrics" Classes="sectionTitle" Margin="0,0,0,12" />
-                            <Border Grid.Row="1" Background="{DynamicResource SurfaceRaised}" CornerRadius="14" Padding="18"
-                                    IsVisible="{Binding ShowLyricsSilent}">
-                                <TextBlock Text="{Binding LyricsMessage}" Classes="secondary" TextWrapping="Wrap" />
-                            </Border>
-                            <TextBlock Grid.Row="1" Text="{Binding LyricsMessage}" Classes="secondary"
-                                       IsVisible="{Binding !HasLyrics}" />
-                            <ListBox Grid.Row="1" ItemsSource="{Binding LyricRows}"
-                                     IsVisible="{Binding HasLyrics}"
-                                     Background="Transparent" BorderThickness="0">
-                                <ListBox.ItemsPanel>
-                                    <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
-                                </ListBox.ItemsPanel>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding DisplayText}" Classes="secondary" FontSize="16" TextWrapping="Wrap"
-                                                   Margin="0,0,0,9" />
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                            </Grid>
-                            <Grid x:Name="NowPlayingQueuePanel" Grid.Column="1" RowDefinitions="Auto,*" Classes="nowPlayingQueuePanel">
-                            <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12" />
-                            <ListBox Grid.Row="1"
-                                     ItemsSource="{Binding QueueRows}"
-                                     DoubleTapped="OnQueueRowActivated"
-                                     Background="Transparent" BorderThickness="0">
-                                <ListBox.ItemsPanel>
-                                    <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
-                                </ListBox.ItemsPanel>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid ColumnDefinitions="Auto,44,*,Auto,Auto,Auto,Auto" Height="54" Classes="queueTrackRow">
-                                            <TextBlock Grid.Column="0" Width="78" Text="{Binding NumberText}" Classes="secondary compactHidden" VerticalAlignment="Center" />
-                                            <controls:ArtworkImage Grid.Column="1" Classes="queueArtworkColumn" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
-                                                    ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                                    FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
-                                            <TextBlock Grid.Column="2" Text="{Binding Track.Title}" Classes="primary queueTitleColumn" VerticalAlignment="Center" Margin="13,0" />
-                                            <Button Grid.Column="3" Classes="link queueArtistColumn" Width="180" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                    Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
-                                                    CommandParameter="{Binding Track}">
-                                                <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
-                                            </Button>
-                                            <Button Grid.Column="4" Classes="link queueAlbumColumn" Width="220" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                    Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                                    CommandParameter="{Binding Track}">
-                                                <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
-                                            </Button>
-                                            <Button Grid.Column="5" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                                    Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                                    CommandParameter="{Binding Track}"
-                                                    ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                                <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                    <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                         Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                    <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
-                                                                         Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                                </Panel>
-                                            </Button>
-                                            <StackPanel Grid.Column="6" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Classes="queueActionsColumn">
-                                                <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemUpCommand}" CommandParameter="{Binding}">
-                                                    <TextBlock Text="Up" />
-                                                </Button>
-                                                <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemDownCommand}" CommandParameter="{Binding}">
-                                                    <TextBlock Text="Down" />
-                                                </Button>
-                                                <Button Classes="destructive" Command="{Binding $parent[Window].DataContext.RemoveQueueItemCommand}" CommandParameter="{Binding}">
-                                                    <TextBlock Text="Remove" />
-                                                </Button>
-                                            </StackPanel>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                            </Grid>
-                        </Grid>
-                    </Grid>
-                        </Panel>
-                    </Border>
 
                 </Panel>
             </Grid>
@@ -1482,6 +1267,282 @@
              deliberate: it keeps the permanent rail and the overlay independent,
              so shrinking the window cannot strand search or section navigation
              behind a collapsed column. -->
+        <!-- Full Now Playing.
+             A screen, not a panel: it covers the sidebar and the transport
+             both, because what makes this read as THE player rather than a
+             large artwork pane is that nothing else is on screen while it is
+             up. The phone morphs its mini bar into a full sheet; the mechanism
+             differs, the result should not.
+             The backdrop is the record's own colour, sampled by the
+             shared core so this cannot drift from the phone: iOS
+             paints these tones as a mesh gradient and Android as a
+             drifting canvas, and neither has an equivalent here —
+             but the iOS grid is row-uniform, each row one tone, so a
+             vertical gradient reproduces the same field. The drift
+             is not reproduced: the iOS source calls the motion the
+             genuinely per-platform half, it costs a full repaint
+             every frame, and the tones are what carry the record's
+             identity.
+
+             The view is always dark, in every theme, matching
+             Android's note that its foreground is white over
+             whatever colour the record turned out to be. Overriding
+             the text tiers for this subtree is what makes that true
+             for everything inside it at once rather than each
+             control hard-coding white and Light quietly breaking
+             one of them. -->
+        <Border IsVisible="{Binding ShowNowPlaying}"
+                Background="{Binding PlayerBackground}"
+                Grid.Row="0" Grid.RowSpan="2" ZIndex="15">
+            <Border.Resources>
+                <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
+                <SolidColorBrush x:Key="TextSecondary" Color="#B9B9C1" />
+                <SolidColorBrush x:Key="TextTertiary" Color="#8E8E97" />
+                <SolidColorBrush x:Key="SurfaceRaised" Color="#1AFFFFFF" />
+                <SolidColorBrush x:Key="SurfaceHover" Color="#26FFFFFF" />
+                <SolidColorBrush x:Key="SurfaceSelected" Color="#3AFFFFFF" />
+            </Border.Resources>
+            <Panel>
+                <!-- Light at the top, where there is only colour to
+                     look at, and heavy at the bottom, where the seek
+                     bar and the times have to stay readable over a
+                     record that turned out pale. -->
+                <Border Background="{DynamicResource PlayerScrim}" />
+        <Grid RowDefinitions="Auto,Auto,*" Margin="26,18,26,22">
+
+            <!-- Its own header, because it no longer sits beneath the page
+                 title: somewhere to go back to, and what this is playing from. -->
+            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+                <Button Grid.Column="0" Classes="transport"
+                        Command="{Binding GoBackCommand}" ToolTip.Tip="Close player">
+                    <controls:TablerIcon Size="20" Data="{StaticResource IconChevronLeft}"
+                                         Brush="{Binding $parent[Button].Foreground}" />
+                </Button>
+                <Button Grid.Column="1" Classes="link"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Command="{Binding OpenTrackAlbumCommand}"
+                        CommandParameter="{Binding NowPlaying}">
+                    <TextBlock Text="{Binding NowPlayingContext, FallbackValue=''}"
+                               FontSize="11" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextTertiary}" />
+                </Button>
+            </Grid>
+
+            <!-- The hero is one centred column, the way the phone's
+                 player is: cover, then what is playing, then the
+                 seek bar, then the transport. A left-cover /
+                 right-column split put six controls of four
+                 different shapes on one line — text buttons, dark
+                 rectangles and a crimson circle — and nothing in it
+                 said which one was the important one.
+
+                 So the transport is a single row of one shape:
+                 round, monochrome, with the play button larger and
+                 filled. The things that are ABOUT the track rather
+                 than the playback — like, rating, volume — sit
+                 quietly on their own line below, because they are
+                 not transport and should not compete with it. -->
+            <StackPanel x:Name="NowPlayingHeroGrid" Grid.Row="1" Spacing="20"
+                        HorizontalAlignment="Center" MaxWidth="700"
+                        Margin="0,4,0,28" Classes="nowPlayingHero">
+
+                <Viewbox Stretch="Uniform" StretchDirection="DownOnly" MaxHeight="300">
+                    <Border CornerRadius="16" ClipToBounds="True"
+                            Width="300" Height="300"
+                            BoxShadow="0 22 60 -18 #A6000000">
+                        <controls:ArtworkImage Width="300" Height="300" DisplaySize="300"
+                                CornerRadius="16"
+                                ServerId="{Binding NowPlaying.ServerId}"
+                                ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+                                FallbackText="{Binding NowPlaying.AlbumTitle}"
+                                FallbackFontSize="82"
+                                FallbackForeground="{DynamicResource ArtworkFallbackTertiary}" />
+                    </Border>
+                </Viewbox>
+
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}"
+                               FontSize="30" FontWeight="Bold" TextAlignment="Center"
+                               Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                        <Button Classes="link" Command="{Binding OpenTrackArtistCommand}" CommandParameter="{Binding NowPlaying}">
+                            <TextBlock Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" FontSize="16"
+                                       Foreground="{DynamicResource TextSecondary}" />
+                        </Button>
+                        <TextBlock Text="·" Classes="secondary" FontSize="16" />
+                        <Button Classes="link" Command="{Binding OpenTrackAlbumCommand}" CommandParameter="{Binding NowPlaying}">
+                            <TextBlock Text="{Binding NowPlaying.AlbumTitle, FallbackValue=''}" FontSize="16"
+                                       Foreground="{DynamicResource TextSecondary}" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+
+                <controls:SeekBar LabelFontSize="12"
+                                  RestHeight="7" ActiveHeight="14"
+                                  Position="{Binding PositionSeconds}"
+                                  Duration="{Binding DurationSeconds}"
+                                  TrackKey="{Binding NowPlayingKey}"
+                                  SeekCommand="{Binding SeekToCommand}"
+                                  Tint="{DynamicResource TextPrimary}" />
+
+                <StackPanel Orientation="Horizontal" Spacing="14" HorizontalAlignment="Center">
+                    <Button Classes="transport big" Command="{Binding ToggleShuffleCommand}"
+                            ToolTip.Tip="{Binding ShuffleStateText}">
+                        <controls:TablerIcon Size="22" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
+                    <Button Classes="transport lead big" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous">
+                        <controls:TablerIcon Size="23" Filled="True" Data="{StaticResource IconSkipBack}" Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
+                    <!-- Crimson is the app's accent and it is right on
+                         the app's own chrome. Here it sits on the
+                         RECORD's colour, where over a red album it
+                         disappears into the backdrop. -->
+                    <Button Classes="play big onArtwork" Command="{Binding TogglePlayPauseCommand}">
+                        <Panel>
+                            <controls:TablerIcon Size="28" Filled="True" Data="{StaticResource IconPlay}"
+                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsPlaying}" />
+                            <controls:TablerIcon Size="28" Filled="True" Data="{StaticResource IconPause}"
+                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding IsPlaying}" />
+                        </Panel>
+                    </Button>
+                    <Button Classes="transport lead big" Command="{Binding NextCommand}" ToolTip.Tip="Next">
+                        <controls:TablerIcon Size="23" Filled="True" Data="{StaticResource IconSkipForward}" Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
+                    <Button Classes="transport big" Command="{Binding CycleRepeatCommand}"
+                            ToolTip.Tip="{Binding RepeatStateText}">
+                        <controls:TablerIcon Size="22" Data="{StaticResource IconRepeat}" Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="18" HorizontalAlignment="Center">
+                    <Button Classes="transport" Command="{Binding ToggleFavoriteCommand}"
+                            CommandParameter="{Binding NowPlaying}"
+                            ToolTip.Tip="{Binding NowPlaying.FavoriteLabel}">
+                        <Panel Opacity="{Binding NowPlaying.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                            <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconHeart}"
+                                                 Brush="{DynamicResource BrandForeground}" IsVisible="{Binding NowPlaying.IsFavorite}" />
+                            <controls:TablerIcon Size="18" Data="{StaticResource IconHeartOutline}"
+                                                 Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !NowPlaying.IsFavorite}" />
+                        </Panel>
+                    </Button>
+
+                    <!-- Five taps on one control, so they are sized as
+                         one control: a row of bare stars, not five
+                         buttons each carrying a button's padding. -->
+                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="1">
+                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="2">
+                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=2}" Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="3">
+                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=3}" Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="4">
+                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=4}" Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="5">
+                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=5}" Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                        <controls:TablerIcon Size="18" Data="{StaticResource IconVolume}" Brush="{DynamicResource TextSecondary}" />
+                        <controls:SeekBar Width="130"
+                                          Position="{Binding Volume, Mode=TwoWay}"
+                                          Duration="1"
+                                          IsContinuous="True"
+                                          ShowLabels="False"
+                                          RestHeight="5" ActiveHeight="9"
+                                          KeyboardStep="0.05"
+                                          Tint="{DynamicResource TextPrimary}"
+                                          VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+
+            <Grid x:Name="NowPlayingLowerGrid" Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="26" Classes="nowPlayingLower">
+                <Grid Grid.Column="0" RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0" Text="Lyrics" Classes="sectionTitle" Margin="0,0,0,12" />
+                <Border Grid.Row="1" Background="{DynamicResource SurfaceRaised}" CornerRadius="14" Padding="18"
+                        IsVisible="{Binding ShowLyricsSilent}">
+                    <TextBlock Text="{Binding LyricsMessage}" Classes="secondary" TextWrapping="Wrap" />
+                </Border>
+                <TextBlock Grid.Row="1" Text="{Binding LyricsMessage}" Classes="secondary"
+                           IsVisible="{Binding !HasLyrics}" />
+                <ListBox Grid.Row="1" ItemsSource="{Binding LyricRows}"
+                         IsVisible="{Binding HasLyrics}"
+                         Background="Transparent" BorderThickness="0">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding DisplayText}" Classes="secondary" FontSize="16" TextWrapping="Wrap"
+                                       Margin="0,0,0,9" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                </Grid>
+                <Grid x:Name="NowPlayingQueuePanel" Grid.Column="1" RowDefinitions="Auto,*" Classes="nowPlayingQueuePanel">
+                <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12" />
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding QueueRows}"
+                         DoubleTapped="OnQueueRowActivated"
+                         Background="Transparent" BorderThickness="0">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="Auto,44,*,Auto,Auto,Auto,Auto" Height="54" Classes="queueTrackRow">
+                                <TextBlock Grid.Column="0" Width="78" Text="{Binding NumberText}" Classes="secondary compactHidden" VerticalAlignment="Center" />
+                                <controls:ArtworkImage Grid.Column="1" Classes="queueArtworkColumn" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
+                                        ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
+                                        FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                <TextBlock Grid.Column="2" Text="{Binding Track.Title}" Classes="primary queueTitleColumn" VerticalAlignment="Center" Margin="13,0" />
+                                <Button Grid.Column="3" Classes="link queueArtistColumn" Width="180" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                        Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
+                                        CommandParameter="{Binding Track}">
+                                    <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
+                                </Button>
+                                <Button Grid.Column="4" Classes="link queueAlbumColumn" Width="220" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                        Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
+                                        CommandParameter="{Binding Track}">
+                                    <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
+                                </Button>
+                                <Button Grid.Column="5" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
+                                        Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                        CommandParameter="{Binding Track}"
+                                        ToolTip.Tip="{Binding Track.FavoriteLabel}">
+                                    <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                        <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                             Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
+                                        <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                             Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
+                                    </Panel>
+                                </Button>
+                                <StackPanel Grid.Column="6" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Classes="queueActionsColumn">
+                                    <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemUpCommand}" CommandParameter="{Binding}">
+                                        <TextBlock Text="Up" />
+                                    </Button>
+                                    <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemDownCommand}" CommandParameter="{Binding}">
+                                        <TextBlock Text="Down" />
+                                    </Button>
+                                    <Button Classes="destructive" Command="{Binding $parent[Window].DataContext.RemoveQueueItemCommand}" CommandParameter="{Binding}">
+                                        <TextBlock Text="Remove" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                </Grid>
+            </Grid>
+        </Grid>
+            </Panel>
+        </Border>
         <Grid x:Name="CompactNavigationLayer" Grid.RowSpan="2" Panel.ZIndex="20" IsVisible="False">
             <Border Background="{DynamicResource AppBackground}" Opacity="0.72" />
             <Border Width="248"
