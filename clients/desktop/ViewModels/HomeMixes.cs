@@ -1,3 +1,6 @@
+using Avalonia;
+using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Mozz.Desktop.Core;
 
 namespace Mozz.Desktop.ViewModels;
@@ -26,6 +29,105 @@ public sealed record HomeMixTile(
     int? TrackCount)
 {
     public string FallbackText => Title;
+
+    /// <summary>
+    /// The name as it appears on the cover, with a trailing number split off.
+    /// "Daily Mix 3" becomes "Daily Mix" plus "3", so the three of them read as
+    /// one series rather than three unrelated titles — the arrangement Spotify
+    /// uses for the same reason.
+    /// </summary>
+    public string ChipTitle => SplitOrdinal().Title;
+
+    public string? ChipOrdinal => SplitOrdinal().Ordinal;
+
+    public bool HasOrdinal => ChipOrdinal is not null;
+
+    private (string Title, string? Ordinal) SplitOrdinal()
+    {
+        var cut = Title.LastIndexOf(' ');
+        if (cut <= 0) return (Title, null);
+        var tail = Title[(cut + 1)..];
+        return tail.Length is > 0 and <= 2 && tail.All(char.IsDigit)
+            ? (Title[..cut], tail)
+            : (Title, null);
+    }
+
+    /// <summary>
+    /// The colour the cover is built from.
+    ///
+    /// Deliberately a fixed palette keyed by the mix's own id rather than
+    /// anything sampled: a Daily Mix keeps the same colour every day even as its
+    /// artwork changes, which is what makes the set recognisable at a glance,
+    /// and two mixes never collide by accident the way two sampled covers can.
+    /// Liked Songs keeps the app's own accent, because it is not a mix.
+    /// </summary>
+    public string AccentColor => IsLiked ? "#D8213F" : MixAccents[
+        (int)((uint)StableHash(Id) % (uint)MixAccents.Length)];
+
+    private static readonly string[] MixAccents =
+    [
+        "#F2C94C", // amber
+        "#EB5757", // coral
+        "#56CCF2", // sky
+        "#BB6BD9", // orchid
+        "#6FCF97", // mint
+        "#F2994A", // tangerine
+        "#7B8CFF", // periwinkle
+        "#EF5DA8", // rose
+    ];
+
+    public IBrush AccentBrush => new ImmutableSolidColorBrush(Color.Parse(AccentColor));
+
+    /// <summary>
+    /// Ink for the chip: black on a light accent, white on a dark one. Picked
+    /// from the colour's own luminance rather than fixed, because the palette
+    /// spans amber to orchid and one ink cannot read on both.
+    /// </summary>
+    public IBrush ChipForeground
+    {
+        get
+        {
+            var c = Color.Parse(AccentColor);
+            var luma = (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
+            return new ImmutableSolidColorBrush(luma > 0.55
+                ? Color.FromRgb(0x10, 0x10, 0x14)
+                : Colors.White);
+        }
+    }
+
+    /// <summary>
+    /// The wash up the cover, in the mix's own colour rather than plain black.
+    /// It is what ties the artwork to the chips below it — a black scrim would
+    /// read as a caption laid over someone else's record, which is exactly what
+    /// the borrowed cover is.
+    /// </summary>
+    public IBrush AccentWash
+    {
+        get
+        {
+            var c = Color.Parse(AccentColor);
+            return new ImmutableLinearGradientBrush(
+                [
+                    new ImmutableGradientStop(0.0, Color.FromArgb(0x00, c.R, c.G, c.B)),
+                    new ImmutableGradientStop(0.45, Color.FromArgb(0x40, c.R, c.G, c.B)),
+                    new ImmutableGradientStop(0.78, Color.FromArgb(0xB8, 0x0A, 0x0A, 0x0C)),
+                    new ImmutableGradientStop(1.0, Color.FromArgb(0xE6, 0x0A, 0x0A, 0x0C)),
+                ],
+                startPoint: new RelativePoint(0, 0, RelativeUnit.Relative),
+                endPoint: new RelativePoint(0, 1, RelativeUnit.Relative));
+        }
+    }
+
+    /// <summary>FNV-1a, so the colour is the same on every machine and every run.</summary>
+    private static int StableHash(string value)
+    {
+        unchecked
+        {
+            var hash = 2166136261;
+            foreach (var ch in value) hash = (hash ^ ch) * 16777619;
+            return (int)hash;
+        }
+    }
 }
 
 public abstract record HomeRow;

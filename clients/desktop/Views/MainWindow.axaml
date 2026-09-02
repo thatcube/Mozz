@@ -320,60 +320,72 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <!-- A mix wears its own name. The generated covers are borrowed
-                                                album art, so without the title on them a wall of mixes is a
-                                                wall of records you already own with captions underneath; with
-                                                it, each one is the thing it actually is. The wash beneath the
-                                                words is what keeps them readable over a cover of any
-                                                brightness — see TileTitleScrim. -->
+                                           <!-- A mix cover is composed, not captioned.
+                                           
+                                                The artwork under it is borrowed from a record in the mix, so on
+                                                its own it says "here is an album you own" — the caption laid on
+                                                top was the only thing distinguishing six of them. Building the
+                                                cover instead gives each mix an identity: its own colour, carried
+                                                by a wash up from the bottom and a block holding the name, with a
+                                                trailing number split into a block of its own so Daily Mix 1, 2
+                                                and 3 read as one series. It is the arrangement Spotify, Amazon
+                                                and Apple all converge on for generated playlists, and for the
+                                                same reason: the art cannot identify the mix, so the design has
+                                                to.
+                                           
+                                                The colour comes from the mix's id, not its artwork — see
+                                                HomeMixTile.AccentColor for why it is deliberately not sampled. -->
                                            <Button Classes="tile" Margin="0,0,0,4"
                                                    Width="{Binding $parent[Window].DataContext.AlbumTileWidth}"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                                   <Panel Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
-                                                          Height="{Binding $parent[Window].DataContext.AlbumArtSize}">
-                                                       <controls:ArtworkImage
-                                                               Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
-                                                               Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
-                                                               DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}"
-                                                               CornerRadius="8"
-                                                               ServerId="{Binding ServerId}"
-                                                               ArtworkKey="{Binding ArtworkKey}"
-                                                               FallbackText="{Binding FallbackText}"
-                                                               FallbackFontSize="52"
-                                                               FallbackFontWeight="SemiBold"
-                                                               FallbackForeground="{DynamicResource ArtworkFallbackTertiary}"
-                                                               IsVisible="{Binding !IsLiked}" />
-                                                       <!-- Liked Songs has no cover of its own, so it gets the one
-                                                            mark that means "liked" everywhere else in the app. -->
-                                                       <Border CornerRadius="8"
-                                                               Background="{DynamicResource Accent}"
-                                                               IsVisible="{Binding IsLiked}">
-                                                           <controls:TablerIcon Size="44" Filled="True"
-                                                                                Data="{StaticResource IconHeart}"
-                                                                                Brush="White"
-                                                                                HorizontalAlignment="Center"
-                                                                                VerticalAlignment="Top" Margin="0,22,0,0" />
+                                               <Panel Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                      Height="{Binding $parent[Window].DataContext.AlbumArtSize}">
+                                                   <Border CornerRadius="8" ClipToBounds="True">
+                                                       <Panel>
+                                                           <controls:ArtworkImage
+                                                                   Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                                   Height="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                                   DisplaySize="{Binding $parent[Window].DataContext.AlbumArtSize}"
+                                                                   CornerRadius="0"
+                                                                   ServerId="{Binding ServerId}"
+                                                                   ArtworkKey="{Binding ArtworkKey}"
+                                                                   FallbackText="{Binding FallbackText}"
+                                                                   FallbackFontSize="52"
+                                                                   FallbackFontWeight="SemiBold"
+                                                                   FallbackForeground="{DynamicResource ArtworkFallbackTertiary}"
+                                                                   IsVisible="{Binding !IsLiked}" />
+                                                           <!-- Liked Songs has no cover of its own, so its colour
+                                                                fills the frame and the heart stands in for art. -->
+                                                           <Panel Background="{Binding AccentBrush}" IsVisible="{Binding IsLiked}">
+                                                               <controls:TablerIcon Size="52" Filled="True"
+                                                                                    Data="{StaticResource IconHeart}"
+                                                                                    Brush="White"
+                                                                                    HorizontalAlignment="Center"
+                                                                                    VerticalAlignment="Center"
+                                                                                    Margin="0,0,0,26" />
+                                                           </Panel>
+                                                           <Border Background="{Binding AccentWash}" />
+                                                       </Panel>
+                                                   </Border>
+                                           
+                                                   <Grid VerticalAlignment="Bottom" ColumnDefinitions="*,Auto" Margin="10">
+                                                       <Border Grid.Column="0" Background="{Binding AccentBrush}"
+                                                               CornerRadius="3" Padding="8,3" HorizontalAlignment="Left">
+                                                           <TextBlock Text="{Binding ChipTitle}"
+                                                                      Foreground="{Binding ChipForeground}"
+                                                                      FontSize="15" FontWeight="Bold"
+                                                                      MaxLines="1" TextTrimming="CharacterEllipsis" />
                                                        </Border>
-                                                       <Border CornerRadius="8" Background="{DynamicResource TileTitleScrim}" />
-                                                       <StackPanel VerticalAlignment="Bottom"
-                                                                   Margin="12,0,12,11" Spacing="1">
-                                                           <TextBlock Text="{Binding Title}"
-                                                                      Foreground="White"
-                                                                      FontSize="19" FontWeight="Bold"
-                                                                      TextWrapping="Wrap" MaxLines="2"
-                                                                      TextTrimming="CharacterEllipsis" />
-                                                           <!-- On the cover with the title rather than
-                                                                under the tile: it is the same thought, and
-                                                                splitting it across the artwork's edge made
-                                                                every tile two blocks tall for one idea. -->
-                                                           <TextBlock Text="{Binding Subtitle}"
-                                                                      Foreground="#C7FFFFFF"
-                                                                      FontSize="12" MaxLines="1"
-                                                                      TextTrimming="CharacterEllipsis"
-                                                                      IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                                       </StackPanel>
-                                                   </Panel>
+                                                       <Border Grid.Column="1" Background="{Binding AccentBrush}"
+                                                               CornerRadius="3" Padding="9,1" Margin="6,0,0,0"
+                                                               IsVisible="{Binding HasOrdinal}">
+                                                           <TextBlock Text="{Binding ChipOrdinal}"
+                                                                      Foreground="{Binding ChipForeground}"
+                                                                      FontSize="21" FontWeight="Bold" />
+                                                       </Border>
+                                                   </Grid>
+                                               </Panel>
                                            </Button>
                                        </DataTemplate>
                                    </ItemsControl.ItemTemplate>
