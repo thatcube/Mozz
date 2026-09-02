@@ -1275,13 +1275,13 @@
                                                    Foreground="{DynamicResource TextSecondary}" />
                                     </Button>
                                 </StackPanel>
-                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="9">
-                                    <TextBlock Grid.Column="0" Text="{Binding PositionText}" Classes="secondary" VerticalAlignment="Center" />
-                                    <Slider Grid.Column="1" Classes="scrub" Minimum="0"
-                                            Maximum="{Binding DurationSeconds}"
-                                            Value="{Binding PositionSeconds, Mode=TwoWay}" />
-                                    <TextBlock Grid.Column="2" Text="{Binding DurationText}" Classes="secondary" VerticalAlignment="Center" />
-                                </Grid>
+                                <controls:SeekBar LabelFontSize="12"
+                                                  RestHeight="7" ActiveHeight="14"
+                                                  Position="{Binding PositionSeconds}"
+                                                  Duration="{Binding DurationSeconds}"
+                                                  TrackKey="{Binding NowPlayingKey}"
+                                                  SeekCommand="{Binding SeekToCommand}"
+                                                  Tint="{DynamicResource TextPrimary}" />
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <Button Classes="ghost" Command="{Binding ToggleFavoriteCommand}"
                                             CommandParameter="{Binding NowPlaying}"
@@ -1685,15 +1685,13 @@
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
                     </StackPanel>
-                    <StackPanel x:Name="BottomPositionRow" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding PositionText, FallbackValue='0:00'}" Classes="secondary" FontSize="11"
-                                   VerticalAlignment="Center" />
-                        <Slider x:Name="BottomScrubber" Classes="scrub" Width="420" Minimum="0"
-                                Maximum="{Binding DurationSeconds}"
-                                Value="{Binding PositionSeconds, Mode=TwoWay}"
-                                VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding DurationText, FallbackValue='0:00'}"
-                                   Classes="secondary" FontSize="11" VerticalAlignment="Center" />
+                    <StackPanel x:Name="BottomPositionRow" Orientation="Horizontal" HorizontalAlignment="Center">
+                        <controls:SeekBar x:Name="BottomScrubber" Width="420"
+                                          Position="{Binding PositionSeconds}"
+                                          Duration="{Binding DurationSeconds}"
+                                          TrackKey="{Binding NowPlayingKey}"
+                                          SeekCommand="{Binding SeekToCommand}"
+                                          Tint="{DynamicResource TextPrimary}" />
                     </StackPanel>
                 </StackPanel>
 

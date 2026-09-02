@@ -87,15 +87,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly IAudioEngine? _engine;
     private readonly INowPlayingIntegration? _nowPlaying_os;
     private readonly DispatcherTimer? _positionTimer;
-    private readonly DispatcherTimer? _seekDebounce;
     private readonly DispatcherTimer? _continuityReconcileTimer;
     private readonly DispatcherTimer? _relayHistoryTimer;
     private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
     private readonly PlaybackQueue _queue = new();
-    private bool _suppressSeek;
-    private double _pendingSeek;
-    private long _lastUserSeekTicks;
     private Guid _continuityRunId = Guid.NewGuid();
     private ulong _continuitySequence;
     private bool _continuityReconciled;
@@ -125,6 +121,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _trackCount;
 
     [ObservableProperty] private Track? _nowPlaying;
+
+    /// <summary>Identity of what is playing, so the scrubber resets when it changes.</summary>
+    public string? NowPlayingKey => NowPlaying is null ? null : $"{NowPlaying.ServerId}:{NowPlaying.RemoteId}";
+
     [ObservableProperty] private bool _isPlaying;
 
     // Transport surface bound by the player bar.
@@ -430,8 +430,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _positionTimer.Start();
 
         // A one-shot debounce so dragging the scrubber issues one seek, not fifty.
-        _seekDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
-        _seekDebounce.Tick += OnSeekDebounceTick;
 
         _continuityReconcileTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _continuityReconcileTimer.Tick += (_, _) =>
@@ -2771,9 +2769,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _ = LoadLyricsAsync(track, 0);
         DurationSeconds = source.KnownDuration?.TotalSeconds
             ?? (track.DurationSeconds > 0 ? track.DurationSeconds : 0);
-        _suppressSeek = true;
         PositionSeconds = Math.Max(0, initialPositionSeconds);
-        _suppressSeek = false;
 
         StartHistoryFor(track);
         if (initialPositionSeconds > 0)
@@ -2824,9 +2820,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             _engine.Seek(TimeSpan.Zero);
             SeekHistoryForCurrent(0);
-            _suppressSeek = true;
             PositionSeconds = 0;
-            _suppressSeek = false;
             CheckpointContinuity(ContinuityCheckpointReason.Seeked);
         }
         else
@@ -2871,14 +2865,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var duration = _engine.Duration.TotalSeconds;
         if (duration > 0) DurationSeconds = duration;
 
-        // Don't fight the user while they're dragging the scrubber.
-        var msSinceUserSeek = (Stopwatch.GetTimestamp() - _lastUserSeekTicks) * 1000.0 / Stopwatch.Frequency;
-        if (msSinceUserSeek < 250) return;
-
-        _suppressSeek = true;
+        // Nothing to fight over: the scrubber holds its own value while it is
+        // being dragged and hands back one seek at the end.
         var pos = _engine.Position.TotalSeconds;
         PositionSeconds = DurationSeconds > 0 ? Math.Min(pos, DurationSeconds) : pos;
-        _suppressSeek = false;
         _playHistory.ProgressCurrent(PositionSeconds);
         UpdateActiveLyric(PositionSeconds);
         CheckpointContinuity(ContinuityCheckpointReason.Periodic);
@@ -2886,23 +2876,27 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nowPlaying_os?.UpdatePosition(_engine.Position, _engine.Duration);
     }
 
-    partial void OnPositionSecondsChanged(double value)
-    {
-        OnPropertyChanged(nameof(PositionText));
-        if (_suppressSeek || _engine is null) return;
-        // The change came from the slider: remember it and debounce the seek.
-        _pendingSeek = value;
-        _lastUserSeekTicks = Stopwatch.GetTimestamp();
-        _seekDebounce?.Stop();
-        _seekDebounce?.Start();
-    }
+    partial void OnNowPlayingChanged(Track? value) => OnPropertyChanged(nameof(NowPlayingKey));
 
-    private void OnSeekDebounceTick(object? sender, EventArgs e)
+    partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
+
+    /// <summary>
+    /// Seek to the point the scrubber was released on.
+    ///
+    /// One seek at the end of a gesture rather than a debounced stream of them
+    /// during it: the scrubber paints its own value while it is being dragged
+    /// and only reports the result, so there is nothing to coalesce and nothing
+    /// to fight with the position tick.
+    /// </summary>
+    [RelayCommand]
+    private void SeekTo(double seconds)
     {
-        _seekDebounce?.Stop();
-        _engine?.Seek(TimeSpan.FromSeconds(_pendingSeek));
-        SeekHistoryForCurrent(_pendingSeek);
+        if (_engine is null || DurationSeconds <= 0) return;
+        var target = Math.Clamp(seconds, 0, DurationSeconds);
+        _engine.Seek(TimeSpan.FromSeconds(target));
+        SeekHistoryForCurrent(target);
         CheckpointContinuity(ContinuityCheckpointReason.Seeked);
+        PositionSeconds = target;
     }
 
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
@@ -2931,9 +2925,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _queue.JumpTo(track, out _);
             RefreshQueueRows();
             DurationSeconds = _engine?.Duration.TotalSeconds is > 0 and var d ? d : track.DurationSeconds;
-            _suppressSeek = true;
             PositionSeconds = 0;
-            _suppressSeek = false;
             IsPlaying = true;
             StartHistoryFor(track);
             _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
@@ -3165,7 +3157,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (_themeObserverAttached && Avalonia.Application.Current is { } app)
             app.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         _positionTimer?.Stop();
-        _seekDebounce?.Stop();
         _continuityReconcileTimer?.Stop();
         _relayHistoryTimer?.Stop();
         _downloadPollTimer?.Stop();
