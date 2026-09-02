@@ -145,6 +145,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private static readonly IBrush PlayerFallbackBrush =
         new ImmutableSolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
 
+    /// <summary>
+    /// Which of the player's two secondary panels is showing.
+    ///
+    /// They are mutually exclusive, as on the phone — PlayerPanel there is one
+    /// slot that queue and lyrics take turns in. A wide window gives that slot a
+    /// column of its own beside the hero instead of putting it in the hero's
+    /// place, but there is still only ever one of them.
+    /// </summary>
+    [ObservableProperty] private bool _showLyricsPanel;
+
+    public bool ShowQueuePanel => !ShowLyricsPanel;
+
+    partial void OnShowLyricsPanelChanged(bool value) => OnPropertyChanged(nameof(ShowQueuePanel));
+
+    [RelayCommand]
+    private void SelectLyricsPanel() => ShowLyricsPanel = true;
+
+    [RelayCommand]
+    private void SelectQueuePanel() => ShowLyricsPanel = false;
+
     /// <summary>"Playing from Reasonable Doubt" — where this track came from.</summary>
     public string? NowPlayingContext =>
         string.IsNullOrWhiteSpace(NowPlaying?.AlbumTitle) ? null : $"Playing from {NowPlaying!.AlbumTitle}";

@@ -1512,7 +1512,7 @@
                      bar and the times have to stay readable over a
                      record that turned out pale. -->
                 <Border Background="{DynamicResource PlayerScrim}" />
-        <Grid RowDefinitions="Auto,Auto,*" Margin="26,18,26,22">
+        <Grid RowDefinitions="Auto,*" Margin="26,18,26,22">
 
             <!-- Its own header, because it no longer sits beneath the page
                  title: somewhere to go back to, and what this is playing from. -->
@@ -1530,7 +1530,23 @@
                                FontSize="11" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextTertiary}" />
                 </Button>
+
+                <!-- Queue and lyrics share one slot, so the switch between them
+                     lives here rather than each panel carrying its own heading. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
+                            VerticalAlignment="Center">
+                    <Button Classes="panelTab" Classes.active="{Binding ShowQueuePanel}"
+                            Command="{Binding SelectQueuePanelCommand}">
+                        <TextBlock Text="Up Next" />
+                    </Button>
+                    <Button Classes="panelTab" Classes.active="{Binding ShowLyricsPanel}"
+                            Command="{Binding SelectLyricsPanelCommand}">
+                        <TextBlock Text="Lyrics" />
+                    </Button>
+                </StackPanel>
             </Grid>
+
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="30">
 
             <!-- The hero is one centred column, the way the phone's
                  player is: cover, then what is playing, then the
@@ -1546,9 +1562,9 @@
                  than the playback — like, rating, volume — sit
                  quietly on their own line below, because they are
                  not transport and should not compete with it. -->
-            <StackPanel x:Name="NowPlayingHeroGrid" Grid.Row="1" Spacing="20"
-                        HorizontalAlignment="Center" MaxWidth="700"
-                        Margin="0,4,0,28" Classes="nowPlayingHero">
+            <StackPanel x:Name="NowPlayingHeroGrid" Grid.Column="0" Spacing="20"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        MaxWidth="620" Classes="nowPlayingHero">
 
                 <Viewbox Stretch="Uniform" StretchDirection="DownOnly" MaxHeight="300">
                     <Border CornerRadius="16" ClipToBounds="True"
@@ -1666,9 +1682,14 @@
                 </StackPanel>
             </StackPanel>
 
-            <Grid x:Name="NowPlayingLowerGrid" Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="26" Classes="nowPlayingLower">
-                <Grid Grid.Column="0" RowDefinitions="Auto,*">
-                <TextBlock Grid.Row="0" Text="Lyrics" Classes="sectionTitle" Margin="0,0,0,12" />
+            <!-- The panel sits beside the hero rather than beneath it. Stacked,
+                 the lyrics and the queue were pushed off the bottom of the window
+                 on every screen: a player is mostly a large square, and what is
+                 left over is at its side, not under it. -->
+            <Grid x:Name="NowPlayingLowerGrid" Grid.Column="1" Width="380" Classes="nowPlayingLower">
+                <Grid RowDefinitions="Auto,*" IsVisible="{Binding ShowLyricsPanel}">
+                <TextBlock Grid.Row="0" Text="Lyrics" Classes="sectionTitle" Margin="0,0,0,12"
+                           IsVisible="False" />
                 <Border Grid.Row="1" Background="{DynamicResource SurfaceRaised}" CornerRadius="14" Padding="18"
                         IsVisible="{Binding ShowLyricsSilent}">
                     <TextBlock Text="{Binding LyricsMessage}" Classes="secondary" TextWrapping="Wrap" />
@@ -1689,8 +1710,10 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 </Grid>
-                <Grid x:Name="NowPlayingQueuePanel" Grid.Column="1" RowDefinitions="Auto,*" Classes="nowPlayingQueuePanel">
-                <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12" />
+                <Grid x:Name="NowPlayingQueuePanel" RowDefinitions="Auto,*"
+                      IsVisible="{Binding ShowQueuePanel}" Classes="nowPlayingQueuePanel">
+                <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12"
+                           IsVisible="False" />
                 <ListBox Grid.Row="1"
                          ItemsSource="{Binding QueueRows}"
                          DoubleTapped="OnQueueRowActivated"
@@ -1743,6 +1766,7 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 </Grid>
+            </Grid>
             </Grid>
         </Grid>
             </Panel>

@@ -101,15 +101,11 @@ public partial class MainWindow : Window
         // reflow left to do for it: the cover, the title and the transport are
         // already stacked, and the Viewbox shrinks the cover rather than letting
         // the row overflow. Only the lower half still has two columns to fold.
-        NowPlayingLowerGrid.ColumnDefinitions = compact
-            ? new ColumnDefinitions("*")
-            : new ColumnDefinitions("*,*");
-        NowPlayingLowerGrid.RowDefinitions = compact
-            ? new RowDefinitions("Auto,Auto")
-            : new RowDefinitions("Auto");
-        Grid.SetColumn(NowPlayingQueuePanel, compact ? 0 : 1);
-        Grid.SetRow(NowPlayingQueuePanel, compact ? 1 : 0);
-        NowPlayingQueuePanel.Margin = compact ? new Thickness(0, 16, 0, 0) : new Thickness(0);
+        // Queue and lyrics share one slot beside the hero, so there is no
+        // two-column lower half left to fold. At compact width the panel would
+        // leave the hero nothing, so it steps aside entirely.
+        NowPlayingLowerGrid.IsVisible = !compact;
+        NowPlayingLowerGrid.Width = tier == DesktopLayoutTier.Expanded ? 380 : 320;
     }
 
     private void ApplyTransportLayout(DesktopLayoutTier tier)
