@@ -207,11 +207,16 @@ public actor SonicAnalysisService {
                               backend: any MusicBackend) async throws -> Bool {
         guard let source = try backend.analysisAudioSource(forTrackID: candidate.remoteId) else { return false }
         let data = try await load(source.url, Self.byteBudget(startsAtLeadIn: source.startsAtLeadIn))
-        guard let decoded = MP3Decoder.decode(data) else { return false }
-
         let rate = analyzer.configuration.sampleRate
-        let prepared = AudioPreparation.prepare(decoded, sampleRate: rate)
-        let window = Self.window(prepared, sampleRate: rate, trimLeadIn: !source.startsAtLeadIn)
+        // Scoped so the decoded stereo PCM — tens of megabytes for a 90-second
+        // window — is gone before the DSP starts. What survives is the mono
+        // 16 kHz window, which is a few megabytes.
+        let window: [Float] = {
+            guard let decoded = MP3Decoder.decode(data) else { return [] }
+            let prepared = AudioPreparation.prepare(decoded, sampleRate: rate)
+            return Self.window(prepared, sampleRate: rate, trimLeadIn: !source.startsAtLeadIn)
+        }()
+        guard !window.isEmpty else { return false }
         guard let features = analyzer.analyze(window) else { return false }
 
         try await store.saveSonicEmbedding(features.values,
