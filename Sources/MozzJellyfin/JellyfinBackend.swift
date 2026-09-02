@@ -480,6 +480,27 @@ public struct JellyfinBackend: MusicBackend {
         try await streamSource(for: track, options: options, startSeconds: 0)
     }
 
+    /// Jellyfin is the one backend that will honour a rate and channel request,
+    /// and it is deliberately not asked to. The client downmixes and resamples
+    /// for every backend so the analyzer sees one input spec regardless of where
+    /// a track came from — a Jellyfin-only shortcut here would make a Jellyfin
+    /// library's vectors subtly incomparable with everyone else's.
+    public func analysisAudioURL(for track: Track) throws -> URL? {
+        let ticks = Int64(AnalysisAudio.leadInSeconds) * 10_000_000
+        let query: [URLQueryItem] = [
+            URLQueryItem(name: "UserId", value: userID),
+            URLQueryItem(name: "DeviceId", value: connection.clientIdentifier),
+            URLQueryItem(name: "PlaySessionId", value: "mozz-analysis-\(track.id)"),
+            URLQueryItem(name: "TranscodingContainer", value: "mp3"),
+            URLQueryItem(name: "TranscodingProtocol", value: "http"),
+            URLQueryItem(name: "AudioCodec", value: "mp3"),
+            URLQueryItem(name: "MaxStreamingBitrate", value: "\(AnalysisAudio.bitrateKbps * 1000)"),
+            URLQueryItem(name: "StartTimeTicks", value: "\(ticks)"),
+            URLQueryItem(name: "api_key", value: token),
+        ]
+        return mediaURL(path: "Audio/\(track.id)/universal", query: query)
+    }
+
     public func streamSource(for track: Track, options: StreamOptions, startSeconds: TimeInterval) async throws -> StreamSource {
         let sessionID = UUID().uuidString
         var query: [URLQueryItem] = [

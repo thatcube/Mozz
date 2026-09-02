@@ -196,6 +196,30 @@ public struct PlexBackend: MusicBackend {
         return StreamSource(url: url, isTranscoded: false, sessionID: nil)
     }
 
+    /// Plex's progressive MP3 transcode.
+    ///
+    /// `start.mp3` rather than the HLS path playback uses. ADR-0009 rejected
+    /// this endpoint for PLAYBACK because it answers with `Transfer-Encoding:
+    /// chunked`, no `Content-Length` and `Accept-Ranges: none`, which CoreMedia
+    /// cannot stream. None of that matters here: this is an HTTP read into
+    /// memory that stops when it has enough, and chunked is exactly the shape
+    /// that lets the server give up transcoding when we disconnect.
+    public func analysisAudioURL(for track: Track) throws -> URL? {
+        let query: [URLQueryItem] = [
+            URLQueryItem(name: "path", value: "/library/metadata/\(track.id)"),
+            URLQueryItem(name: "protocol", value: "http"),
+            URLQueryItem(name: "mediaIndex", value: "0"),
+            URLQueryItem(name: "partIndex", value: "0"),
+            URLQueryItem(name: "hasMDE", value: "1"),
+            URLQueryItem(name: "offset", value: "\(AnalysisAudio.leadInSeconds)"),
+            URLQueryItem(name: "maxAudioBitrate", value: "\(AnalysisAudio.bitrateKbps)"),
+            URLQueryItem(name: "session", value: "mozz-analysis-\(track.id)"),
+            URLQueryItem(name: "X-Plex-Client-Identifier", value: connection.clientIdentifier),
+            URLQueryItem(name: "X-Plex-Token", value: token),
+        ]
+        return mediaURL(path: "music/:/transcode/universal/start.mp3", query: query)
+    }
+
     public func originalFileURL(for track: Track) throws -> URL {
         guard let key = track.mediaKey else { throw MozzError.unsupported("Track has no downloadable part") }
         guard let url = mediaURL(path: key, query: [

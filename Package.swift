@@ -175,7 +175,21 @@ let package = Package(
         // index and sync between the two devices, so "the analyzer" has to be
         // one implementation, not five that agree to within rounding. That also
         // makes it testable off-device against golden fixtures in `spec/`.
-        .target(name: "MozzAnalysis", dependencies: ["MozzCore"]),
+        .target(name: "MozzAnalysis", dependencies: ["MozzCore", "CMozzMP3"]),
+
+        // MARK: Vendored MP3 decoder (minimp3, CC0 — see LICENSE-minimp3.txt)
+        //
+        // Analysis needs PCM, and Mozz's audio lives on someone else's server.
+        // All three backends will transcode to MP3 — it is the one format they
+        // agree on — so MP3 is the analysis input, and the decoder has to be
+        // OURS: a platform decoder per client would mean the same track decoding
+        // to slightly different samples on a phone and a laptop, and therefore
+        // to different vectors in a shared index.
+        //
+        // minimp3 is a single public-domain header with no dependencies, which
+        // is the entire reason it was chosen over linking FFmpeg on five
+        // platforms. The C here is a ~90-line shim over it, nothing more.
+        .target(name: "CMozzMP3"),
 
         // MARK: Open metadata enrichment (network + orchestration; ADR-0007)
         //
@@ -257,7 +271,8 @@ let package = Package(
         .testTarget(name: "MozzFFITests", dependencies: ["MozzFFI", "MozzDatabase", "MozzCore", "MozzSubsonic"]),
         .testTarget(name: "MozzDownloadsTests", dependencies: ["MozzDownloads", "MozzDatabase"]),
         .testTarget(name: "MozzRecommendTests", dependencies: ["MozzRecommend", "MozzDatabase", "MozzCore"]),
-        .testTarget(name: "MozzAnalysisTests", dependencies: ["MozzAnalysis", "MozzCore"]),
+        .testTarget(name: "MozzAnalysisTests", dependencies: ["MozzAnalysis", "MozzCore"],
+                    resources: [.copy("Fixtures")]),
         .testTarget(name: "MozzEnrichmentTests", dependencies: ["MozzEnrichment", "MozzNetworking", "MozzDatabase", "MozzCore"]),
         .testTarget(name: "MozzAppTests", dependencies: ["MozzApp"]),
     ],

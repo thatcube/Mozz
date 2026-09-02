@@ -408,6 +408,20 @@ public struct SubsonicBackend: MusicBackend {
         ], as: SubsonicEmpty.self)
     }
 
+    /// Subsonic's `stream` with an explicit MP3 target.
+    ///
+    /// No lead-in offset: the Subsonic API has no start-time parameter, so the
+    /// window is taken from the start of the stream and the lead-in is trimmed
+    /// from the decoded samples instead. Same analyzer input either way — the
+    /// only cost is transcoding a few seconds nobody looks at.
+    public func analysisAudioURL(for track: Track) throws -> URL? {
+        client.mediaURL("stream", query: [
+            URLQueryItem(name: "id", value: track.id),
+            URLQueryItem(name: "format", value: "mp3"),
+            URLQueryItem(name: "maxBitRate", value: "\(AnalysisAudio.bitrateKbps)"),
+        ])
+    }
+
     // MARK: Sonic similarity
 
     /// OpenSubsonic's `getSonicSimilarTracks`, when the server advertises the

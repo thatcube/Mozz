@@ -116,6 +116,24 @@ public struct MusicLibrary: Sendable, Hashable, Identifiable {
 /// - **Sendable & stateless-ish.** Implementations hold only immutable
 ///   configuration (base URL, token, client info) so they are safe to share
 ///   across the concurrency domains that sync, playback and downloads run in.
+/// The wire settings for analysis audio, identical across every backend.
+///
+/// Fixed rather than tuned per server so that "the analysis input" is one thing.
+/// The bitrate is low on purpose: this is never played, and the features it
+/// feeds — spectral shape, tempo, timbre — survive it comfortably, while the
+/// difference between 64 and 320 kbps across a whole library is the difference
+/// between a background job and a problem.
+public enum AnalysisAudio {
+    public static let bitrateKbps = 64
+    /// Seconds of audio to analyze. Long enough to cover a verse and a chorus,
+    /// short enough that a library is not a download.
+    public static let windowSeconds = 90
+    /// Seconds to skip first. Intros are the least representative part of a
+    /// track — silence, a fade, an a cappella line — and starting at zero would
+    /// describe them as if they were the song.
+    public static let leadInSeconds = 20
+}
+
 /// One track a server considers acoustically close to another, with the
 /// server's own normalized closeness.
 ///
@@ -170,6 +188,18 @@ public protocol MusicBackend: Sendable {
     /// sync for speed. Default: `[]` — a backend whose bulk `fetchTracks` already
     /// carries full format needs no backfill.
     func fetchTrackDetails(ids: [String]) async throws -> [Track]
+
+    /// A URL serving this track as MP3, for on-device sonic analysis.
+    ///
+    /// MP3 at ``AnalysisAudio/bitrateKbps`` because it is the one format Plex,
+    /// Jellyfin and Subsonic all transcode to on demand. Rate and channel count
+    /// are deliberately NOT requested — only Jellyfin reliably honours them —
+    /// so the client downmixes and resamples instead, and the analyzer's input
+    /// never depends on what a given server felt like emitting.
+    ///
+    /// The caller stops reading once it has enough; the server stops transcoding
+    /// when it does. Nil means this backend has no analyzable form of the track.
+    func analysisAudioURL(for track: Track) throws -> URL?
 
     /// Tracks the SERVER considers acoustically similar to `trackID`, best first.
     ///
@@ -290,6 +320,11 @@ public extension MusicBackend {
 
     /// Default: no backfill needed (the bulk sync already carries full details).
     func fetchTrackDetails(ids: [String]) async throws -> [Track] { [] }
+
+    /// Default: no analyzable audio. A backend that cannot transcode to the
+    /// analysis format opts out rather than returning something in a format the
+    /// analyzer would silently mis-read.
+    func analysisAudioURL(for track: Track) throws -> URL? { nil }
 
     /// Default: the server has analyzed nothing, so it can vouch for nothing.
     ///
