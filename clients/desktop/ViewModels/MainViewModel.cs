@@ -1548,6 +1548,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             result.Mixes,
             serverId).ToList();
         HomeMixGrid.Reset(_homeMixTiles);
+        _ = RefreshMixTonesAsync();
         var messages = new List<string>();
         if (!string.IsNullOrWhiteSpace(result.Message)) messages.Add(result.Message);
         if (!string.IsNullOrWhiteSpace(serverId))
@@ -2970,6 +2971,64 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// both immediately. Everything below is only fetching the cover and getting
     /// its pixels into the shape the core reads — see ArtworkSampling.
     /// </summary>
+    /// <summary>
+    /// Colours for the Home mix covers, keyed by artwork so two mixes sharing a
+    /// cover sample it once.
+    /// </summary>
+    private readonly Dictionary<string, Avalonia.Media.Color> _mixTones = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Derive each mix cover's dominant colour, then rebuild the shelf with it.
+    ///
+    /// The same path the player's backdrop uses, so a mix tile and the player
+    /// agree about what a record's colour is. Sampling is per artwork rather
+    /// than per mix because several mixes legitimately share a cover, and it
+    /// happens once: the results are kept for the life of the session.
+    /// </summary>
+    private async Task RefreshMixTonesAsync()
+    {
+        if (_artwork is null || _homeMixTiles.Count == 0) return;
+
+        var wanted = _homeMixTiles
+            .Select(tile => tile.ArtworkKey)
+            .Where(key => !string.IsNullOrEmpty(key) && !_mixTones.ContainsKey(key!))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (wanted.Count == 0) return;
+
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        if (string.IsNullOrEmpty(serverId)) return;
+
+        var found = false;
+        foreach (var key in wanted)
+        {
+            var bitmap = await _artwork.LoadAsync(
+                new ArtworkRef(serverId!, key!, ArtworkSampling.RequestSize), CancellationToken.None);
+            if (bitmap is null) continue;
+            var pixels = ArtworkSampling.Rgba(bitmap);
+            if (pixels is null) continue;
+
+            var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+            {
+                Pixels = Convert.ToBase64String(pixels),
+                Width = ArtworkSampling.SampleDim,
+                Height = ArtworkSampling.SampleDim,
+            }));
+            if (tones is null) continue;
+            _mixTones[key!] = ArtworkSampling.ToColor(tones.Middle);
+            found = true;
+        }
+
+        if (!found) return;
+        _homeMixTiles = _homeMixTiles
+            .Select(tile => tile.ArtworkKey is { Length: > 0 } k && _mixTones.TryGetValue(k, out var tone)
+                ? tile with { Tone = tone }
+                : tile)
+            .ToList();
+        HomeMixGrid.Reset(_homeMixTiles);
+        RebuildHomeRows();
+    }
+
     private async Task RefreshPlayerBackgroundAsync(Track? track)
     {
         // Black takes no colour from the artwork anywhere in the app, and

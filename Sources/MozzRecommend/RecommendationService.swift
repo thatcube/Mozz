@@ -447,20 +447,51 @@ public actor RecommendationService {
             }
         }
 
-        // Artist Mixes — a top artist plus same-genre neighbours.
+        // Artist Mixes — a top artist, with same-genre neighbours around them.
+        //
+        // The seed artist has to LEAD, and be a real share of the result. Ranking
+        // one pool of the artist plus their neighbours by taste alone does not do
+        // that: every artist competes on the same footing and is held to the same
+        // per-artist cap, so a listener's overall favourite outranks the seed in
+        // the seed's own mix. On the maintainer's library that produced an
+        // "AC/DC Mix" holding six AC/DC tracks, six AURORA, and twenty-six other
+        // artists once each — opening with AURORA, and therefore wearing AURORA's
+        // cover. A mix named after someone has to be mostly them.
+        //
+        // So the two pools are ranked apart and then interleaved, the seed first.
+        // The seed keeps a generous share, the neighbours keep the variety caps
+        // that stop one of them taking over, and the mix opens with the artist
+        // whose name is on it.
         for (i, artistId) in taste.topArtists(2).enumerated() {
             guard !suppressedArtists.contains(artistId),
                   let seedArtist = try await store.seedArtist(remoteId: artistId, serverId: serverId, enrich: enrich)
             else { continue }
-            let pool = try await store.candidateTracks(
-                serverId: serverId, genres: Array(seedArtist.genres.prefix(4)), artistIds: [artistId],
+
+            let ownPool = try await store.candidateTracks(
+                serverId: serverId, genres: [], artistIds: [artistId],
+                notPlayedSince: includeFamiliar, excludingArtistIds: suppressedArtists, limit: 200, enrich: enrich)
+            let neighbourPool = try await store.candidateTracks(
+                serverId: serverId, genres: Array(seedArtist.genres.prefix(4)), artistIds: [],
                 notPlayedSince: includeFamiliar, excludingArtistIds: suppressedArtists, limit: 1000, enrich: enrich)
-            if let ranked = ranked(pool, taste: taste, scorer: scorer,
-                                   config: .init(limit: 40, explorationJitter: 0.1, maxPerArtist: 6, maxPerAlbum: 3),
-                                   excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
-                                   rng: &rng) {
+                .filter { $0.artistRemoteId != artistId }
+
+            // Neither half has to clear the minimum alone — an artist with four
+            // tracks in the library still deserves a mix built around them.
+            let own = ranked(ownPool, taste: taste, scorer: scorer,
+                             config: .init(limit: 16, explorationJitter: 0.05,
+                                           maxPerArtist: 16, maxPerAlbum: 3),
+                             excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
+                             minimum: 1, rng: &rng) ?? []
+            let neighbours = ranked(neighbourPool, taste: taste, scorer: scorer,
+                                    config: .init(limit: 24, explorationJitter: 0.1,
+                                                  maxPerArtist: 2, maxPerAlbum: 2),
+                                    excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
+                                    minimum: 1, rng: &rng) ?? []
+
+            let merged = Self.interleaveSeedFirst(own: own, neighbours: neighbours)
+            if merged.count >= Self.minTracks {
                 let title = seedArtist.name.isEmpty ? "Artist Mix" : "\(seedArtist.name) Mix"
-                try await save(id: "artist-mix-\(i + 1)", title: title, kind: Self.kindArtist, items: ranked)
+                try await save(id: "artist-mix-\(i + 1)", title: title, kind: Self.kindArtist, items: merged)
             }
         }
 
@@ -475,6 +506,36 @@ public actor RecommendationService {
             }
             try await save(id: "replay-mix", title: "Replay", kind: Self.kindReplay, items: items)
         }
+    }
+
+    /// Weave the seed artist through their own mix, starting with them.
+    ///
+    /// Two of theirs, then one neighbour: enough that the artist is present the
+    /// whole way down rather than front-loaded and then absent, and enough room
+    /// for the neighbours that the mix is still a mix. Whichever list runs out
+    /// first, the rest of the other is appended, so a thin catalogue for either
+    /// side degrades to "mostly the other" instead of to a short mix.
+    static func interleaveSeedFirst(
+        own: [ScoredCandidate], neighbours: [ScoredCandidate]
+    ) -> [ScoredCandidate] {
+        var merged: [ScoredCandidate] = []
+        merged.reserveCapacity(own.count + neighbours.count)
+        var o = 0, n = 0
+        while o < own.count || n < neighbours.count {
+            for _ in 0..<2 where o < own.count {
+                merged.append(own[o])
+                o += 1
+            }
+            if n < neighbours.count {
+                merged.append(neighbours[n])
+                n += 1
+            }
+            if o >= own.count && n < neighbours.count {
+                merged.append(contentsOf: neighbours[n...])
+                break
+            }
+        }
+        return merged
     }
 
     /// Every Home mix (the daily batch + Mozz Weekly), each with a representative
@@ -535,14 +596,20 @@ public actor RecommendationService {
     // MARK: - Home mix helpers
 
     /// Content-score a pool and blend it; nil if the result is too thin to ship.
+    /// - Parameter minimum: how many tracks make a usable result. Defaults to the
+    ///   size a mix has to reach to be worth showing, but a caller assembling one
+    ///   mix from several pools passes 1 and applies the floor to the whole,
+    ///   because neither half has to stand on its own.
     private func ranked(_ pool: [TrackCandidate], taste: TasteProfile, scorer: ContentRecommender,
                         config: Blender.Config, excludingRefs: Set<String> = [],
-                        excludingArtists: Set<String> = [], rng: inout SeededGenerator) -> [ScoredCandidate]? {
-        guard pool.count >= Self.minTracks else { return nil }
+                        excludingArtists: Set<String> = [], minimum: Int? = nil,
+                        rng: inout SeededGenerator) -> [ScoredCandidate]? {
+        let floor = minimum ?? Self.minTracks
+        guard pool.count >= floor else { return nil }
         let scored = scorer.score(candidates: pool, taste: taste)
         let blended = blender.blend(sources: [scored], config: config,
                                     excluding: excludingRefs, excludingArtists: excludingArtists, using: &rng)
-        return blended.count >= Self.minTracks ? blended : nil
+        return blended.count >= floor ? blended : nil
     }
 
     /// Persist a mix set + its ranked items, stashing a subtitle (top artists) in
