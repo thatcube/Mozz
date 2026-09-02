@@ -542,6 +542,10 @@ private fun SonicAnalysisNote(progress: SonicProgress, inset: Dp) {
         Text(
             when {
                 done -> "Every song analysed — radio can follow the sound, not just the tags."
+                // A stalled count with no explanation is the one thing this row
+                // must never show.
+                progress.analyzed == 0 && progress.lastError != null ->
+                    "Nothing analysed yet — ${progress.lastError}."
                 progress.running -> "${progress.analyzed} of ${progress.total} songs analysed."
                 else -> "Waiting for a charger and Wi-Fi — ${progress.remaining} songs to go."
             },

@@ -270,16 +270,25 @@ private struct SonicAnalysisRow: View {
             ProgressView(value: Double(progress.analyzed), total: Double(max(progress.total, 1)))
                 .progressViewStyle(.linear)
                 .tint(done ? .green : .accentColor)
-            Text(done
-                 ? "Every song analysed"
-                 : (progress.running
-                    ? "\(progress.analyzed.formatted()) of \(progress.total.formatted()) songs analysed"
-                    : "Waiting for a charger and Wi-Fi — \(progress.remaining.formatted()) songs to go"))
+            Text(caption)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
         .animation(.default, value: progress.analyzed)
+    }
+
+    /// The line under the bar. A stalled count with no explanation is the one
+    /// thing this row must never show, so a failure gets said out loud.
+    private var caption: String {
+        if progress.remaining == 0 { return "Every song analysed" }
+        if let error = progress.lastError, progress.analyzed == 0 {
+            return "Nothing analysed yet — \(error)"
+        }
+        if progress.running {
+            return "\(progress.analyzed.formatted()) of \(progress.total.formatted()) songs analysed"
+        }
+        return "Waiting for a charger and Wi-Fi — \(progress.remaining.formatted()) songs to go"
     }
 }
 

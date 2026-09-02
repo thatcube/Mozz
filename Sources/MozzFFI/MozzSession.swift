@@ -368,6 +368,7 @@ private struct WireSonicProgress: Encodable {
     var analyzed: Int
     var total: Int
     var running: Bool
+    var lastError: String?
 }
 
 private struct WireHistoryImport: Encodable {
@@ -996,7 +997,7 @@ private func dispatch(
         await session.sonicAnalysis.analyze(serverId: serverId, backend: backend)
         let started = await session.sonicAnalysis.progress(serverId: serverId)
         return sessionSuccess(request, WireSonicProgress(analyzed: started.analyzed, total: started.total,
-                                                         running: started.running))
+                                                         running: started.running, lastError: started.lastError))
 
     case "sonicProgress":
         guard let serverId else {
@@ -1004,7 +1005,7 @@ private func dispatch(
         }
         let progress = await session.sonicAnalysis.progress(serverId: serverId)
         return sessionSuccess(request, WireSonicProgress(analyzed: progress.analyzed, total: progress.total,
-                                                         running: progress.running))
+                                                         running: progress.running, lastError: progress.lastError))
 
     case "cancelSonics":
         // What a host calls when its conditions lapse — the charger is pulled,

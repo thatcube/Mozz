@@ -212,6 +212,12 @@ public struct PlexBackend: MusicBackend {
             URLQueryItem(name: "partIndex", value: "0"),
             URLQueryItem(name: "hasMDE", value: "1"),
             URLQueryItem(name: "offset", value: "\(AnalysisAudio.leadInSeconds)"),
+            // Force the transcode. Left to itself the universal endpoint may
+            // decide the original part is fine and hand back whatever the file
+            // is — FLAC, ALAC, Opus — under a `.mp3` path, which the analyzer's
+            // decoder would refuse and count as a skipped track.
+            URLQueryItem(name: "directPlay", value: "0"),
+            URLQueryItem(name: "directStream", value: "0"),
             URLQueryItem(name: "maxAudioBitrate", value: "\(AnalysisAudio.bitrateKbps)"),
             URLQueryItem(name: "session", value: "mozz-analysis-\(trackID)"),
             URLQueryItem(name: "X-Plex-Client-Identifier", value: connection.clientIdentifier),

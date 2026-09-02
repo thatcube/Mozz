@@ -138,10 +138,19 @@ class SonicAnalysisController(
 
     private fun isSatisfied(): Boolean = isCharging() && unmetered
 
+    /**
+     * Plugged in — not "actively charging".
+     *
+     * `BatteryManager.isCharging` is false on a phone sitting at 100% on a
+     * charger, and false again while adaptive charging holds it back overnight.
+     * Those are the best possible moments to analyze a library, so the question
+     * to ask is whether the mains are paying, which is what `EXTRA_PLUGGED`
+     * answers.
+     */
     private fun isCharging(): Boolean {
-        val battery = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val battery = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             ?: return false
-        return battery.isCharging
+        return battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
     }
 
     private fun currentNetworkIsUnmetered(): Boolean {

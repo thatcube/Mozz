@@ -309,6 +309,8 @@ data class SonicProgress(
     val analyzed: Int = 0,
     val total: Int = 0,
     val running: Boolean = false,
+    /** Why the last track that failed, failed — nil while nothing is wrong. */
+    val lastError: String? = null,
 ) {
     val remaining: Int get() = (total - analyzed).coerceAtLeast(0)
     val fraction: Float get() = if (total > 0) analyzed.toFloat() / total else 0f

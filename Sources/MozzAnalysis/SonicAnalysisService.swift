@@ -31,13 +31,21 @@ public struct SonicAnalysisProgress: Sendable, Hashable {
     /// Whether a pass is walking this library right now. A host that keeps its
     /// process alive for the job needs this to know when it may stop.
     public let running: Bool
+    /// Why the last track that failed, failed.
+    ///
+    /// Surfaced rather than only logged because the failure mode this guards
+    /// against is silent: a server that will not transcode leaves a count that
+    /// sits at zero with nothing to explain it, on a device with no console
+    /// anyone is watching.
+    public let lastError: String?
     public var remaining: Int { max(total - analyzed, 0) }
     public var fraction: Double { total > 0 ? Double(analyzed) / Double(total) : 0 }
 
-    public init(analyzed: Int, total: Int, running: Bool = false) {
+    public init(analyzed: Int, total: Int, running: Bool = false, lastError: String? = nil) {
         self.analyzed = analyzed
         self.total = total
         self.running = running
+        self.lastError = lastError
     }
 }
 
@@ -75,6 +83,10 @@ public actor SonicAnalysisService {
     /// Bumped on every start and cancel so a stale task's cleanup can't clear a
     /// newer pass's registration.
     private var generation = 0
+    /// The most recent track failure, kept for ``progress(serverId:)``. Cleared
+    /// by the next success, so it describes a problem that is still happening
+    /// rather than one that has been left behind.
+    private var lastError: String?
 
     public init(store: RecommendationStore,
                 analyzer: SonicAnalyzer = SonicAnalyzer(),
@@ -132,7 +144,8 @@ public actor SonicAnalysisService {
         let counts = (try? await store.sonicAnalysisProgress(serverId: serverId, engine: SonicAnalyzer.engine))
             ?? (analyzed: 0, total: 0)
         return SonicAnalysisProgress(analyzed: counts.analyzed, total: counts.total,
-                                     running: pass != nil && currentPassServerId == serverId)
+                                     running: pass != nil && currentPassServerId == serverId,
+                                     lastError: lastError)
     }
 
     /// Test hook: await the in-flight pass, if any.
@@ -178,8 +191,10 @@ public actor SonicAnalysisService {
                 do {
                     if try await analyzeTrack(candidate, serverId: serverId, backend: backend) {
                         analyzed += 1
+                        lastError = nil
                     } else {
                         failed += 1
+                        note("nothing analyzable for \u{201C}\(candidate.title)\u{201D}")
                     }
                 } catch is CancellationError {
                     return
@@ -187,7 +202,7 @@ public actor SonicAnalysisService {
                     return
                 } catch {
                     failed += 1
-                    log("sonic: \(candidate.title): \(error)")
+                    note("\u{201C}\(candidate.title)\u{201D}: \(message(for: error))")
                 }
                 if config.pauseBetweenTracks > 0 {
                     try? await Task.sleep(nanoseconds: UInt64(config.pauseBetweenTracks * 1_000_000_000))
@@ -225,6 +240,26 @@ public actor SonicAnalysisService {
                                            trackRef: candidate.trackRef,
                                            at: now().timeIntervalSince1970)
         return true
+    }
+
+    /// Record a failure for the progress readout, and log it.
+    private func note(_ reason: String) {
+        lastError = reason
+        log("sonic: \(reason)")
+    }
+
+    /// The short, human form of an error — this ends up on a Settings row, not
+    /// in a console.
+    private func message(for error: any Error) -> String {
+        guard let error = error as? MozzError else { return "\(error)" }
+        switch error {
+        case .unauthorized: return "the server refused the request"
+        case .notFound: return "the server has no such track"
+        case .badStatus(let code): return "the server answered \(code)"
+        case .serverUnreachable: return "could not reach the server"
+        case .unsupported(let detail): return detail
+        default: return error.localizedDescription
+        }
     }
 
     /// Returns false when the pass should stop; throws nothing so the caller
