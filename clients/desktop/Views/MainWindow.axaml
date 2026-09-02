@@ -1319,11 +1319,96 @@
                       </StackPanel>
                     </ScrollViewer>
                 </Panel>
+
+            <!-- Up Next.
+                 An overlay rather than a fourth band: the queue is something you
+                 glance at and dismiss, and giving it permanent width would cost the
+                 library the space every time you were not looking at it. It floats
+                 over the content column, clear of the sidebar, and stops at the
+                 transport so the bar it was opened from stays visible. -->
+            <Border Grid.Column="1"
+                    IsVisible="{Binding IsQueueOpen}"
+                    Width="352" Margin="0,16,16,16"
+                    HorizontalAlignment="Right"
+                    Background="{DynamicResource BarBackground}"
+                    BorderBrush="{DynamicResource Divider}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    BoxShadow="0 18 48 -12 #99000000">
+                <Grid RowDefinitions="Auto,*,Auto" Margin="16,14,10,14">
+                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,6,12">
+                        <TextBlock Text="Up Next" FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimary}"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="transport" Width="26" Height="26" CornerRadius="13"
+                                Command="{Binding ToggleQueueCommand}" ToolTip.Tip="Close">
+                            <controls:TablerIcon Size="15" Data="{StaticResource IconX}"
+                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        </Button>
+                    </Grid>
+
+                    <ListBox Grid.Row="1"
+                             ItemsSource="{Binding UpNext}"
+                             DoubleTapped="OnQueueRowActivated"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Padding="0,0,6,0">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="26,40,*,Auto" Height="46">
+                                    <TextBlock Grid.Column="0" Text="{Binding Ordinal}"
+                                               Classes="secondary" FontSize="11.5"
+                                               VerticalAlignment="Center" />
+                                    <controls:ArtworkImage Grid.Column="1"
+                                            Width="34" Height="34" DisplaySize="34"
+                                            CornerRadius="5"
+                                            ServerId="{Binding Track.ServerId}"
+                                            ArtworkKey="{Binding Track.ArtworkKey}"
+                                            FallbackText="{Binding Track.AlbumTitle}"
+                                            FallbackFontSize="13"
+                                            FallbackFontWeight="SemiBold"
+                                            FallbackForeground="#88FFFFFF" />
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center"
+                                                Margin="11,0,8,0" Spacing="1">
+                                        <TextBlock Text="{Binding Track.Title}" Classes="primary" FontSize="13" />
+                                        <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" FontSize="11.5" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="3" Text="{Binding Track.Duration}"
+                                               Classes="secondary" FontSize="11.5"
+                                               VerticalAlignment="Center" Margin="0,0,4,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <TextBlock Grid.Row="1" Text="Nothing queued after this track."
+                               Classes="secondary" FontSize="12.5"
+                               TextWrapping="Wrap" MaxWidth="240"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               TextAlignment="Center"
+                               IsVisible="{Binding !HasUpNext}" />
+
+                    <TextBlock Grid.Row="2" Text="Double-click a track to jump to it."
+                               Classes="secondary" FontSize="11" Margin="0,12,6,0"
+                               IsVisible="{Binding HasUpNext}" />
+                </Grid>
+            </Border>
             </Grid>
         </Grid>
 
-        <!-- Now playing -->
-        <Border Grid.Row="1" Height="88"
+        <!-- Now playing.
+             Three columns that each own one job: what is playing, the transport
+             that drives it, and the controls that sit beside it. The middle one
+             is centred on the window rather than on the space left over, which is
+             why this is a Grid with two starred flanks rather than a DockPanel —
+             the play button lands on the window's centre line no matter how long
+             the track title is. -->
+        <Border Grid.Row="1" Height="96"
                 Background="{DynamicResource BarBackground}"
                 BorderBrush="{DynamicResource Divider}"
                 BorderThickness="0,1,0,0">
@@ -1331,33 +1416,48 @@
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="13"
                             VerticalAlignment="Center">
-                    <controls:ArtworkImage Width="56" Height="56" DisplaySize="56"
-                            CornerRadius="7"
-                            ServerId="{Binding NowPlaying.ServerId}"
-                            ArtworkKey="{Binding NowPlaying.ArtworkKey}"
-                            FallbackText="{Binding NowPlaying.AlbumTitle}"
-                            FallbackFontSize="20"
-                            FallbackFontWeight="SemiBold"
-                            FallbackForeground="#66FFFFFF" />
-                    <StackPanel VerticalAlignment="Center" Spacing="3" MaxWidth="270">
+                    <Button Classes="tile"
+                            Command="{Binding OpenNowPlayingAlbumCommand}"
+                            IsEnabled="{Binding HasNowPlaying}"
+                            ToolTip.Tip="Go to album">
+                        <controls:ArtworkImage Width="58" Height="58" DisplaySize="58"
+                                CornerRadius="7"
+                                ServerId="{Binding NowPlaying.ServerId}"
+                                ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+                                FallbackText="{Binding NowPlaying.AlbumTitle}"
+                                FallbackFontSize="20"
+                                FallbackFontWeight="SemiBold"
+                                FallbackForeground="#66FFFFFF" />
+                    </Button>
+                    <StackPanel VerticalAlignment="Center" Spacing="2" MaxWidth="260">
                         <TextBlock Classes="primary" FontWeight="Medium"
                                    Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
-                        <TextBlock Classes="secondary"
-                                   Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+                        <Button Classes="link" HorizontalAlignment="Left"
+                                Command="{Binding OpenTrackArtistCommand}"
+                                CommandParameter="{Binding NowPlaying}"
+                                IsEnabled="{Binding HasNowPlaying}">
+                            <TextBlock Classes="secondary"
+                                       Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+                        </Button>
                     </StackPanel>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
-                        <Button Classes="transport">
+                        <Button Classes="transport" Classes.active="{Binding IsShuffled}"
+                                Command="{Binding ToggleShuffleCommand}"
+                                ToolTip.Tip="Shuffle">
                             <controls:TablerIcon Size="19" Data="{StaticResource IconShuffle}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
-                        <Button Classes="transport lead" Command="{Binding PreviousCommand}">
+                        <Button Classes="transport lead" Command="{Binding PreviousCommand}"
+                                IsEnabled="{Binding HasNowPlaying}"
+                                ToolTip.Tip="Previous">
                             <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipBack}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
-                        <Button Classes="play" Command="{Binding TogglePlayPauseCommand}">
+                        <Button Classes="play" Command="{Binding TogglePlayPauseCommand}"
+                                IsEnabled="{Binding HasNowPlaying}">
                             <Panel>
                                 <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}"
                                                      Brush="{Binding $parent[Button].Foreground}"
@@ -1367,40 +1467,66 @@
                                                      IsVisible="{Binding IsPlaying}" />
                             </Panel>
                         </Button>
-                        <Button Classes="transport lead" Command="{Binding NextCommand}">
+                        <Button Classes="transport lead" Command="{Binding NextCommand}"
+                                IsEnabled="{Binding HasNextTrack}"
+                                ToolTip.Tip="Next">
                             <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
-                        <Button Classes="transport">
-                            <controls:TablerIcon Size="19" Data="{StaticResource IconRepeat}"
-                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        <!-- Repeat is three-state, so the glyph carries the third:
+                             the plain loop for "repeat all" and the loop with a 1
+                             for "repeat this track". Colour alone cannot say which. -->
+                        <Button Classes="transport" Classes.active="{Binding IsRepeatActive}"
+                                Command="{Binding CycleRepeatCommand}"
+                                ToolTip.Tip="Repeat">
+                            <Panel>
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconRepeat}"
+                                                     Brush="{Binding $parent[Button].Foreground}"
+                                                     IsVisible="{Binding !IsRepeatOne}" />
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconRepeatOnce}"
+                                                     Brush="{Binding $parent[Button].Foreground}"
+                                                     IsVisible="{Binding IsRepeatOne}" />
+                            </Panel>
                         </Button>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                        <TextBlock Text="{Binding PositionText, FallbackValue='0:00'}" Classes="secondary" FontSize="11"
-                                   VerticalAlignment="Center" />
-                        <Slider Classes="scrub" Width="420" Minimum="0"
-                                Maximum="{Binding DurationSeconds}"
-                                Value="{Binding PositionSeconds, Mode=TwoWay}"
-                                VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding DurationText, FallbackValue='0:00'}"
-                                   Classes="secondary" FontSize="11" VerticalAlignment="Center" />
-                    </StackPanel>
+
+                    <controls:SeekBar Width="468"
+                                      Position="{Binding PositionSeconds}"
+                                      Duration="{Binding DurationSeconds}"
+                                      TrackKey="{Binding NowPlayingKey}"
+                                      FormatLabel="{Binding NowPlayingFormat}"
+                                      SeekCommand="{Binding SeekToCommand}"
+                                      Tint="{DynamicResource TextPrimary}" />
                 </StackPanel>
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12"
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Classes="transport">
+                    <Button Classes="transport" Classes.active="{Binding IsQueueOpen}"
+                            Command="{Binding ToggleQueueCommand}"
+                            ToolTip.Tip="Up next">
                         <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
                                              Brush="{Binding $parent[Button].Foreground}" />
                     </Button>
-                    <Button Classes="transport">
-                        <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
-                                             Brush="{Binding $parent[Button].Foreground}" />
+                    <Button Classes="transport" Command="{Binding ToggleMuteCommand}"
+                            ToolTip.Tip="Mute">
+                        <Panel>
+                            <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
+                                                 Brush="{Binding $parent[Button].Foreground}"
+                                                 IsVisible="{Binding !IsMuted}" />
+                            <controls:TablerIcon Size="19" Data="{StaticResource IconVolumeOff}"
+                                                 Brush="{Binding $parent[Button].Foreground}"
+                                                 IsVisible="{Binding IsMuted}" />
+                        </Panel>
                     </Button>
-                    <Slider Classes="scrub" Width="96" Minimum="0" Maximum="1"
-                            Value="{Binding Volume, Mode=TwoWay}"
-                            VerticalAlignment="Center" />
+                    <controls:SeekBar Width="104"
+                                      Position="{Binding Volume, Mode=TwoWay}"
+                                      Duration="1"
+                                      IsContinuous="True"
+                                      ShowLabels="False"
+                                      RestHeight="5" ActiveHeight="9"
+                                      KeyboardStep="0.05"
+                                      Tint="{DynamicResource TextPrimary}"
+                                      VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
         </Border>

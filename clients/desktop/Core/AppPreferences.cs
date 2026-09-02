@@ -16,6 +16,9 @@ public sealed class AppPreferences
     public const string AppearanceKey = "mozz.appearance";
     public const string DarkStyleKey = "mozz.darkStyle";
     public const string DeviceIdKey = "mozz.deviceID";
+    public const string VolumeKey = "mozz.volume";
+    public const string ShuffleKey = "mozz.shuffle";
+    public const string RepeatModeKey = "mozz.repeatMode";
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -52,6 +55,20 @@ public sealed class AppPreferences
     }
 
     public void SetString(string key, string value) => Set(key, value);
+
+    public double GetDouble(string key, double defaultValue)
+    {
+        lock (_gate)
+        {
+            return _values.TryGetValue(key, out var value)
+                   && value.ValueKind == JsonValueKind.Number
+                   && value.TryGetDouble(out var number)
+                ? number
+                : defaultValue;
+        }
+    }
+
+    public void SetDouble(string key, double value) => Set(key, value);
 
     public string GetOrCreateDeviceId()
     {

@@ -41,8 +41,10 @@ player-play         Play
 player-pause        Pause
 player-skip-forward SkipForward
 repeat              Repeat
+repeat-1            RepeatOnce
 list                Queue
 volume              Volume
+volume-3            VolumeOff
 home                Home
 music               Music
 disc                Disc
@@ -51,6 +53,7 @@ playlist            Playlist
 server              Server
 search              Search
 heart-filled        Heart
+heart               HeartOutline
 category            Settings
 refresh             Refresh
 waveform            Waveform
@@ -65,6 +68,8 @@ info-circle         Info
 code                Code
 star                Star
 x                   X
+dots-vertical       DotsVertical
+chevron-right       ChevronRight
 "
 
 tmp="${OUT}.tmp"

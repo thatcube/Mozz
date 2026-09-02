@@ -45,6 +45,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnQueueRowActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm &&
+            sender is ListBox { SelectedItem: QueueRow row } &&
+            vm.PlayQueueRowCommand.CanExecute(row))
+        {
+            vm.PlayQueueRowCommand.Execute(row);
+        }
+    }
+
     private void OnDetailRowActivated(object? sender, TappedEventArgs e)
     {
         if (DataContext is not MainViewModel vm || sender is not ListBox { SelectedItem: { } item }) return;

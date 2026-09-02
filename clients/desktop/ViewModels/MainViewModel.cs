@@ -31,13 +31,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly IAudioEngine? _engine;
     private readonly INowPlayingIntegration? _nowPlaying_os;
     private readonly DispatcherTimer? _positionTimer;
-    private readonly DispatcherTimer? _seekDebounce;
     // The queue is app logic — the engine only ever knows "current" and "next".
-    private readonly List<Track> _queue = [];
-    private int _queueIndex = -1;
-    private bool _suppressSeek;
-    private double _pendingSeek;
-    private long _lastUserSeekTicks;
+    private readonly PlaybackQueue _queue = new();
+    /// The level the user set, kept across a mute so unmuting restores it.
+    private double _unmutedVolume = 0.85;
+    /// Dragging the volume bar writes on every pointer move; this batches the save.
+    private DispatcherTimer? _volumePersist;
+    /// True while RestoreSettings is applying stored values, so restoring does not re-save them.
+    private bool _restoringSettings;
 
     [ObservableProperty] private LibrarySection _section = LibrarySection.Home;
     [ObservableProperty] private string _pageTitle = "Home";
@@ -60,6 +61,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _positionSeconds;
     [ObservableProperty] private double _durationSeconds;
     [ObservableProperty] private double _volume = 0.85;
+    [ObservableProperty] private bool _isShuffled;
+    [ObservableProperty] private RepeatMode _repeatMode = RepeatMode.Off;
+    [ObservableProperty] private bool _isQueueOpen;
 
     /// <summary>Left counter in the player bar (m:ss of the play head).</summary>
     public string PositionText => FormatClock(PositionSeconds);
@@ -69,6 +73,34 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>The play button glyph flips with transport state.</summary>
     public string PlayPauseGlyph => IsPlaying ? "\u23F8" : "\u23F5";
+
+    /// <summary>Identity of what is playing, so the scrubber can reset when it changes.</summary>
+    public string? NowPlayingKey => NowPlaying is null ? null : $"{NowPlaying.ServerId}:{NowPlaying.RemoteId}";
+
+    /// <summary>The codec pill under the scrubber — "FLAC", "AAC 256" — or null when unreported.</summary>
+    public string? NowPlayingFormat
+    {
+        get
+        {
+            var codec = NowPlaying?.Format;
+            if (string.IsNullOrWhiteSpace(codec)) return null;
+            var kbps = NowPlaying?.BitrateKbps;
+            return kbps is > 0 ? $"{codec} {kbps}" : codec;
+        }
+    }
+
+    public bool HasNowPlaying => NowPlaying is not null;
+
+    /// <summary>Silence is mute; there is no separate flag to fall out of step with.</summary>
+    public bool IsMuted => Volume <= 0.0001;
+    public bool HasNextTrack => _queue.HasNext;
+
+    /// <summary>Repeat is a three-state control; the icon changes on the third state.</summary>
+    public bool IsRepeatOne => RepeatMode == RepeatMode.One;
+    public bool IsRepeatActive => RepeatMode != RepeatMode.Off;
+
+    public ObservableCollection<QueueRow> UpNext { get; } = [];
+    public bool HasUpNext => UpNext.Count > 0;
 
     public ObservableCollection<Track> Tracks { get; } = [];
     public ObservableCollection<Album> Albums { get; } = [];
@@ -235,6 +267,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // have no constructor to hand it to.
         _artwork = ArtworkService.Install(_server);
 
+        _unmutedVolume = Volume;
         _engine = new MiniAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far
         // more than it plays an album end to end, and album mode deliberately
@@ -256,25 +289,45 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nowPlaying_os.PreviousRequested += (_, _) => Dispatcher.UIThread.Post(() => _ = PreviousAsync());
         _nowPlaying_os.StopRequested += (_, _) => Dispatcher.UIThread.Post(StopPlayback);
 
+        _volumePersist = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _volumePersist.Tick += OnVolumePersistTick;
+
         // ~10 Hz is enough for a smooth progress bar and costs almost nothing.
         _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _positionTimer.Tick += OnPositionTick;
         _positionTimer.Start();
-
-        // A one-shot debounce so dragging the scrubber issues one seek, not fifty.
-        _seekDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
-        _seekDebounce.Tick += OnSeekDebounceTick;
 
         _ = InitializeAsync();
     }
 
     private void RestoreSettings()
     {
+        _restoringSettings = true;
+        try
+        {
+            RestoreSettingsCore();
+        }
+        finally
+        {
+            _restoringSettings = false;
+        }
+    }
+
+    private void RestoreSettingsCore()
+    {
         NormalizationEnabled = _preferences.GetBool(AppPreferences.NormalizationEnabledKey, true);
         EnrichmentEnabled = _preferences.GetBool(AppPreferences.EnrichmentEnabledKey, true);
         Appearance = _preferences.GetString(AppPreferences.AppearanceKey, "system");
         DarkStyle = _preferences.GetString(AppPreferences.DarkStyleKey, "dim");
         EqualizerEnabled = _preferences.GetBool(AppPreferences.EqualizerEnabledKey, false);
+        Volume = Math.Clamp(_preferences.GetDouble(AppPreferences.VolumeKey, 0.85), 0, 1);
+        IsShuffled = _preferences.GetBool(AppPreferences.ShuffleKey, false);
+        RepeatMode = _preferences.GetString(AppPreferences.RepeatModeKey, "off") switch
+        {
+            "all" => RepeatMode.All,
+            "one" => RepeatMode.One,
+            _ => RepeatMode.Off,
+        };
         var profile = _preferences.GetEqualizerProfile();
         EqualizerPreamp = profile.PreampDB;
         EqualizerBands.Clear();
@@ -1720,7 +1773,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 IsPlaying = true;
                 break;
             default:
-                _ = PlayIndexAsync(_queueIndex < 0 ? 0 : _queueIndex);
+                _ = PlayCurrentAsync();
                 break;
         }
         _nowPlaying_os?.UpdateState(_engine.State);
@@ -1732,19 +1785,73 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private Task Previous() => PreviousAsync();
 
+    [RelayCommand]
+    private void ToggleShuffle() => IsShuffled = !IsShuffled;
+
+    /// <summary>off → all → one → off, the order every music player cycles in.</summary>
+    [RelayCommand]
+    private void CycleRepeat() => RepeatMode = RepeatMode switch
+    {
+        RepeatMode.Off => RepeatMode.All,
+        RepeatMode.All => RepeatMode.One,
+        _ => RepeatMode.Off,
+    };
+
+    [RelayCommand]
+    private void ToggleMute() =>
+        Volume = IsMuted ? (_unmutedVolume > 0 ? _unmutedVolume : 0.5) : 0;
+
+    [RelayCommand]
+    private void ToggleQueue() => IsQueueOpen = !IsQueueOpen;
+
+    [RelayCommand]
+    private async Task PlayQueueRow(QueueRow? row)
+    {
+        if (row is null || !_queue.MoveToOrderIndex(row.OrderIndex)) return;
+        SkipHistoryForCurrent();
+        RefreshQueueState();
+        await PlayCurrentAsync();
+    }
+
+    /// <summary>Clicking the now-playing cover opens the record it came from.</summary>
+    [RelayCommand]
+    private Task OpenNowPlayingAlbum() => OpenTrackAlbum(NowPlaying);
+
+    /// <summary>
+    /// Republish everything the transport derives from the queue. One place,
+    /// because "next is disabled" and "Up Next is stale" are the same bug.
+    /// </summary>
+    private void RefreshQueueState()
+    {
+        OnPropertyChanged(nameof(HasNextTrack));
+
+        UpNext.Clear();
+        var start = _queue.Position + 1;
+        var upNext = _queue.UpNext;
+        for (var i = 0; i < upNext.Count && i < UpNextLimit; i++)
+            UpNext.Add(new QueueRow(start + i, upNext[i], IsCurrent: false));
+        OnPropertyChanged(nameof(HasUpNext));
+    }
+
+    /// <summary>
+    /// How much of the queue the panel lists. A shuffled library can be tens of
+    /// thousands of tracks and nobody reads past the first screenful; the cap
+    /// keeps rebuilding the list on every track change free.
+    /// </summary>
+    private const int UpNextLimit = 100;
+
     private async Task StartQueueAsync(IReadOnlyList<Track> tracks, int index)
     {
         SkipHistoryForCurrent();
-        _queue.Clear();
-        _queue.AddRange(tracks);
-        await PlayIndexAsync(index);
+        _queue.SetItems(tracks, index);
+        RefreshQueueState();
+        await PlayCurrentAsync();
     }
 
-    private async Task PlayIndexAsync(int index)
+    /// <summary>Play whatever the queue is parked on. Every transport path ends here.</summary>
+    private async Task PlayCurrentAsync()
     {
-        if (_engine is null || index < 0 || index >= _queue.Count) return;
-        _queueIndex = index;
-        var track = _queue[index];
+        if (_engine is null || _queue.Current is not { } track) return;
 
         // Resolving a source can spawn ffprobe or call the core, so keep it off
         // the UI thread.
@@ -1754,9 +1861,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         NowPlaying = track;
         DurationSeconds = source.KnownDuration?.TotalSeconds
             ?? (track.DurationSeconds > 0 ? track.DurationSeconds : 0);
-        _suppressSeek = true;
         PositionSeconds = 0;
-        _suppressSeek = false;
 
         if (!_engine.Play(source, track)) return;
         StartHistoryFor(track);
@@ -1773,10 +1878,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Hand the engine the next track so it can stitch it in gaplessly.</summary>
     private async Task PreloadNeighborAsync()
     {
-        if (_engine is null) return;
-        int next = _queueIndex + 1;
-        if (next < 0 || next >= _queue.Count) return;
-        var track = _queue[next];
+        if (_engine is null || _queue.PeekNext is not { } track) return;
         var source = await Task.Run(() => ResolveSource(track));
         if (source is not null) _engine.PreloadNext(source, track);
     }
@@ -1784,8 +1886,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task NextAsync()
     {
         SkipHistoryForCurrent();
-        if (_queueIndex + 1 < _queue.Count)
-            await PlayIndexAsync(_queueIndex + 1);
+        if (_queue.Advance())
+        {
+            RefreshQueueState();
+            await PlayCurrentAsync();
+        }
         else
         {
             _engine?.Stop();
@@ -1797,19 +1902,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_engine is null) return;
         // Standard behaviour: restart the track unless we're near its start.
-        if (_engine.Position.TotalSeconds > 3 || _queueIndex <= 0)
+        if (_engine.Position.TotalSeconds > 3 || !_queue.HasPrevious)
         {
             _engine.Seek(TimeSpan.Zero);
             SeekHistoryForCurrent(0);
-            _suppressSeek = true;
             PositionSeconds = 0;
-            _suppressSeek = false;
+            return;
         }
-        else
-        {
-            SkipHistoryForCurrent();
-            await PlayIndexAsync(_queueIndex - 1);
-        }
+
+        SkipHistoryForCurrent();
+        if (!_queue.Retreat()) return;
+        RefreshQueueState();
+        await PlayCurrentAsync();
     }
 
     private void StopPlayback()
@@ -1828,34 +1932,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var duration = _engine.Duration.TotalSeconds;
         if (duration > 0) DurationSeconds = duration;
 
-        // Don't fight the user while they're dragging the scrubber.
-        var msSinceUserSeek = (Stopwatch.GetTimestamp() - _lastUserSeekTicks) * 1000.0 / Stopwatch.Frequency;
-        if (msSinceUserSeek < 250) return;
-
-        _suppressSeek = true;
+        // PositionSeconds is display-only: the scrubber holds its own value
+        // while it is being dragged and reports the result through SeekTo, so
+        // there is nothing here to fight with.
         var pos = _engine.Position.TotalSeconds;
         PositionSeconds = DurationSeconds > 0 ? Math.Min(pos, DurationSeconds) : pos;
-        _suppressSeek = false;
 
         _nowPlaying_os?.UpdatePosition(_engine.Position, _engine.Duration);
     }
 
-    partial void OnPositionSecondsChanged(double value)
-    {
-        OnPropertyChanged(nameof(PositionText));
-        if (_suppressSeek || _engine is null) return;
-        // The change came from the slider: remember it and debounce the seek.
-        _pendingSeek = value;
-        _lastUserSeekTicks = Stopwatch.GetTimestamp();
-        _seekDebounce?.Stop();
-        _seekDebounce?.Start();
-    }
+    partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
 
-    private void OnSeekDebounceTick(object? sender, EventArgs e)
+    /// <summary>Seek to a point the scrubber released on, once, at the end of the gesture.</summary>
+    [RelayCommand]
+    private void SeekTo(double seconds)
     {
-        _seekDebounce?.Stop();
-        _engine?.Seek(TimeSpan.FromSeconds(_pendingSeek));
-        SeekHistoryForCurrent(_pendingSeek);
+        if (_engine is null || DurationSeconds <= 0) return;
+        var target = Math.Clamp(seconds, 0, DurationSeconds);
+        _engine.Seek(TimeSpan.FromSeconds(target));
+        SeekHistoryForCurrent(target);
+        PositionSeconds = target;
     }
 
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
@@ -1866,9 +1962,53 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nowPlaying_os?.UpdateState(value ? PlaybackState.Playing : PlaybackState.Paused);
     }
 
+    partial void OnNowPlayingChanged(Track? value)
+    {
+        OnPropertyChanged(nameof(NowPlayingKey));
+        OnPropertyChanged(nameof(NowPlayingFormat));
+        OnPropertyChanged(nameof(HasNowPlaying));
+    }
+
     partial void OnVolumeChanged(double value)
     {
+        // Mute is not a second piece of state: silence *is* muted, whether it
+        // was reached through the button or by dragging the bar to the floor.
+        // The only thing worth remembering is the level to come back to.
+        if (value > 0) _unmutedVolume = value;
         if (_engine is not null) _engine.Volume = value;
+        OnPropertyChanged(nameof(IsMuted));
+        if (_restoringSettings) return;
+        // Dragging the bar raises this on every pointer move, and each save is a
+        // rewrite of the whole preferences file. Coalesce.
+        _volumePersist?.Stop();
+        _volumePersist?.Start();
+    }
+
+    partial void OnRepeatModeChanged(RepeatMode value)
+    {
+        _queue.Repeat = value;
+        OnPropertyChanged(nameof(IsRepeatOne));
+        OnPropertyChanged(nameof(IsRepeatActive));
+        OnPropertyChanged(nameof(HasNextTrack));
+        if (!_restoringSettings)
+            _preferences.SetString(AppPreferences.RepeatModeKey, value.ToString().ToLowerInvariant());
+        // Repeat changes what plays after this track, and the engine may already
+        // be holding the old answer.
+        _ = PreloadNeighborAsync();
+    }
+
+    private void OnVolumePersistTick(object? sender, EventArgs e)
+    {
+        _volumePersist?.Stop();
+        _preferences.SetDouble(AppPreferences.VolumeKey, Volume);
+    }
+
+    partial void OnIsShuffledChanged(bool value)
+    {
+        _queue.SetShuffled(value);
+        if (!_restoringSettings) _preferences.SetBool(AppPreferences.ShuffleKey, value);
+        RefreshQueueState();
+        _ = PreloadNeighborAsync();
     }
 
     private void OnEngineTrackChanged(object? sender, TrackChangedEventArgs e)
@@ -1879,12 +2019,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             if (e.Token is not Track track) return;
             CompleteHistoryForCurrent();
             NowPlaying = track;
-            int idx = _queue.IndexOf(track);
-            if (idx >= 0) _queueIndex = idx;
+            // The engine has already stitched in what we preloaded, so walk the
+            // queue the same way and only fall back to a search if the two have
+            // somehow diverged.
+            _queue.AdvanceAfterFinish();
+            if (!Equals(_queue.Current, track)) _queue.MoveToTrack(track);
+            RefreshQueueState();
             DurationSeconds = _engine?.Duration.TotalSeconds is > 0 and var d ? d : track.DurationSeconds;
-            _suppressSeek = true;
             PositionSeconds = 0;
-            _suppressSeek = false;
             IsPlaying = true;
             StartHistoryFor(track);
             _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
@@ -1979,7 +2121,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 if (files.Count == 0) return null;
                 // Map each queue slot to a distinct file so a two-track queue
                 // exercises the gapless hand-off with real, different audio.
-                int i = _queue.IndexOf(track);
+                int i = _queue.BaseIndexOf(track);
                 if (i < 0) i = 0;
                 return files[i % files.Count];
             }
@@ -2084,7 +2226,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         _positionTimer?.Stop();
-        _seekDebounce?.Stop();
+        _volumePersist?.Stop();
         _engine?.Dispose();
         _nowPlaying_os?.Dispose();
         _artwork?.Dispose();

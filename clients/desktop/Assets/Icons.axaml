@@ -10,17 +10,20 @@
     <StreamGeometry x:Key="IconPlay">F1 M6 4v16a1 1 0 0 0 1.524 .852l13 -8a1 1 0 0 0 0 -1.704l-13 -8a1 1 0 0 0 -1.524 .852z</StreamGeometry>
     <StreamGeometry x:Key="IconPause">F1 M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z</StreamGeometry>
     <StreamGeometry x:Key="IconSkipForward">F1 M3 5v14a1 1 0 0 0 1.504 .864l12 -7a1 1 0 0 0 0 -1.728l-12 -7a1 1 0 0 0 -1.504 .864z M20 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z</StreamGeometry>
-    <StreamGeometry x:Key="IconRepeat">M4 12v-3a3 3 0 0 1 3 -3h13m-3 -3l3 3l-3 3 M20 12v3a3 3 0 0 1 -3 3h-13m3 3l-3 -3l3 -3</StreamGeometry>
+    <StreamGeometry x:Key="IconRepeat">M18.8 8.3 21 6l-2.2-2.2 M3 12a6 6 0 0 1 6-6h12M5.3 15.8 3 18l2.3 2.3 M21 12a6 6 0 0 1-6 6H3</StreamGeometry>
+    <StreamGeometry x:Key="IconRepeatOnce">M18.8 8.3 21 6l-2.2-2.2 M3 12a6 6 0 0 1 6-6h12M5.3 15.8 3 18l2.3 2.3 M21 12a6 6 0 0 1-6 6H3m8.3-7.5 1.4-.7v4.4</StreamGeometry>
     <StreamGeometry x:Key="IconQueue">M9 6l11 0 M9 12l11 0 M9 18l11 0 M5 6l0 .01 M5 12l0 .01 M5 18l0 .01</StreamGeometry>
     <StreamGeometry x:Key="IconVolume">M15 8a5 5 0 0 1 0 8 M17.7 5a9 9 0 0 1 0 14 M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5</StreamGeometry>
-    <StreamGeometry x:Key="IconHome">M5 12l-2 0l9 -9l9 9l-2 0 M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7 M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6</StreamGeometry>
+    <StreamGeometry x:Key="IconVolumeOff">M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5 M16 10l4 4 M16 14l4 -4</StreamGeometry>
+    <StreamGeometry x:Key="IconHome">M18 21h-2a1 1 0 0 1-1-1v-3.5q-.2-2.3-2.5-2.5h-1A2.5 2.5 0 0 0 9 16.5V20q0 1-1 1H6a3 3 0 0 1-3-3v-6a5 5 0 0 1 1.5-3.5l4-4c2-2 5-2 7 0l4 4a5 5 0 0 1 1.5 3.6V18a3 3 0 0 1-3 3Z</StreamGeometry>
     <StreamGeometry x:Key="IconMusic">M3 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0 M13 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0 M9 17v-13h10v13 M9 8h10</StreamGeometry>
     <StreamGeometry x:Key="IconDisc">M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M7 12a5 5 0 0 1 5 -5 M12 17a5 5 0 0 0 5 -5</StreamGeometry>
     <StreamGeometry x:Key="IconArtist">M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M9 10a3 3 0 1 0 6 0a3 3 0 1 0 -6 0 M6.168 18.849a4 4 0 0 1 3.832 -2.849h4a4 4 0 0 1 3.834 2.855</StreamGeometry>
     <StreamGeometry x:Key="IconPlaylist">M11 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0 M17 17v-13h4 M13 5h-10 M3 9l10 0 M9 13h-6</StreamGeometry>
     <StreamGeometry x:Key="IconServer">M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3 M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2 M7 8l0 .01 M7 16l0 .01</StreamGeometry>
-    <StreamGeometry x:Key="IconSearch">M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0 M21 21l-6 -6</StreamGeometry>
+    <StreamGeometry x:Key="IconSearch">M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0M16 16l5 5</StreamGeometry>
     <StreamGeometry x:Key="IconHeart">F1 M6.979 3.074a6 6 0 0 1 4.988 1.425l.037 .033l.034 -.03a6 6 0 0 1 4.733 -1.44l.246 .036a6 6 0 0 1 3.364 10.008l-.18 .185l-.048 .041l-7.45 7.379a1 1 0 0 1 -1.313 .082l-.094 -.082l-7.493 -7.422a6 6 0 0 1 3.176 -10.215z</StreamGeometry>
+    <StreamGeometry x:Key="IconHeartOutline">M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572</StreamGeometry>
     <StreamGeometry x:Key="IconSettings">M4 4h6v6h-6l0 -6 M14 4h6v6h-6l0 -6 M4 14h6v6h-6l0 -6 M14 17a3 3 0 1 0 6 0a3 3 0 1 0 -6 0</StreamGeometry>
     <StreamGeometry x:Key="IconRefresh">M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4 M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4</StreamGeometry>
     <StreamGeometry x:Key="IconWaveform">M21 12h-2c-.894 0 -1.662 -.857 -1.761 -2c-.296 -3.45 -.749 -6 -2.749 -6s-2.5 3.582 -2.5 8s-.5 8 -2.5 8s-2.452 -2.547 -2.749 -6c-.1 -1.147 -.867 -2 -1.763 -2h-2</StreamGeometry>
@@ -35,4 +38,6 @@
     <StreamGeometry x:Key="IconCode">M7 8l-4 4l4 4 M17 8l4 4l-4 4 M14 4l-4 16</StreamGeometry>
     <StreamGeometry x:Key="IconStar">M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873l-6.158 -3.245</StreamGeometry>
     <StreamGeometry x:Key="IconX">M18 6l-12 12 M6 6l12 12</StreamGeometry>
+    <StreamGeometry x:Key="IconDotsVertical">M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0</StreamGeometry>
+    <StreamGeometry x:Key="IconChevronRight">M9 6l6 6l-6 6</StreamGeometry>
 </ResourceDictionary>

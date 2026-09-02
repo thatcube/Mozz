@@ -232,6 +232,26 @@
         <Style Selector="Button.transport.lead">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
+        <!-- Shuffle, repeat and the queue toggle are stateful, so they need a
+             third look beyond rest and hover: crimson says "this is on" the same
+             way the sidebar's current item does. Hover still lifts it, so an
+             active control does not go dead under the pointer. -->
+        <Style Selector="Button.transport.active">
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+        </Style>
+        <Style Selector="Button.transport.active:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.transport:disabled">
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
+        <Style Selector="Button.transport:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.play:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
         <Style Selector="Button.transport:pointerover">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
