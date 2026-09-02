@@ -250,6 +250,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             : $"{TrackCount:N0} songs · {AlbumCount:N0} albums · {ArtistCount:N0} artists";
 
     public ServerAccount? ActiveAccount => Connect.Accounts.FirstOrDefault();
+
+    /// <summary>
+    /// The server every library read is scoped to.
+    ///
+    /// Reads used to leave this off, which meant "give me everything in the
+    /// database" rather than "give me everything on my server" — and those are
+    /// not the same set. A catalogue keeps rows for servers that are no longer
+    /// attached, so the counts double-counted, the walls listed each album
+    /// twice, and Liked Songs mixed in tracks the app could not stream, because
+    /// streamURL rightly refuses a server that is not attached.
+    ///
+    /// Null when nothing is signed in, which reads as unscoped — the same
+    /// behaviour as before, and nothing can play in that state anyway.
+    /// </summary>
+    public string? ActiveServerId => ActiveAccount?.ServerId;
     public bool HasActiveAccount => ActiveAccount is not null;
     public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
@@ -512,7 +527,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task RefreshCountsAsync()
     {
-        var counts = await _core.CallAsync<LibraryCounts>(new CoreRequest("counts"));
+        var counts = await _core.CallAsync<LibraryCounts>(new CoreRequest("counts") { ServerId = ActiveServerId });
         if (counts is null) return;
         ArtistCount = counts.Artists;
         AlbumCount = counts.Albums;
@@ -857,7 +872,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadTracksAsync()
     {
         var page = await _core.CallPageAsync<List<Track>>(
-            new CoreRequest("tracks") { Limit = PageSize });
+            new CoreRequest("tracks") { ServerId = ActiveServerId, Limit = PageSize });
         Replace(Tracks, page.Rows);
         _nextCursor = page.NextCursor;
     }
@@ -906,10 +921,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     private async Task<IReadOnlyList<HomeMix>> ReadHomeMixesAsync() =>
-        await _core.CallAsync<List<HomeMix>>(new CoreRequest("homeMixes")) ?? [];
+        await _core.CallAsync<List<HomeMix>>(
+            new CoreRequest("homeMixes") { ServerId = ActiveServerId }) ?? [];
 
     private async Task<IReadOnlyList<Track>> LoadLikedTracksAsync() =>
-        await _core.CallAsync<List<Track>>(new CoreRequest("likedTracks")) ?? [];
+        await _core.CallAsync<List<Track>>(
+            new CoreRequest("likedTracks") { ServerId = ActiveServerId }) ?? [];
 
     private async Task GenerateHomeMixesAsync(string serverId) =>
         await _core.CallAsync<object>(new CoreRequest("generateHomeMixes") { ServerId = serverId });
@@ -917,7 +934,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadAlbumsAsync()
     {
         var page = await _core.CallPageAsync<List<Album>>(
-            new CoreRequest("albums") { Limit = PageSize });
+            new CoreRequest("albums") { ServerId = ActiveServerId, Limit = PageSize });
         Replace(Albums, page.Rows);
         AlbumGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
@@ -926,7 +943,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadArtistsAsync()
     {
         var page = await _core.CallPageAsync<List<Artist>>(
-            new CoreRequest("artists") { Limit = PageSize });
+            new CoreRequest("artists") { ServerId = ActiveServerId, Limit = PageSize });
         Replace(Artists, page.Rows);
         ArtistGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
@@ -1253,7 +1270,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         var results = await _core.CallAsync<SearchResults>(
-            new CoreRequest("search") { Query = artist.Name, Limit = 50 });
+            new CoreRequest("search") { ServerId = ActiveServerId, Query = artist.Name, Limit = 50 });
         return results?.Artists.FirstOrDefault(a =>
             string.Equals(a.Name, artist.Name, StringComparison.CurrentCultureIgnoreCase)
             && a.ServerId == artist.ServerId) ?? artist;
@@ -1291,7 +1308,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         var results = await _core.CallAsync<SearchResults>(
-            new CoreRequest("search") { Query = artist.Name, Limit = 50 });
+            new CoreRequest("search") { ServerId = ActiveServerId, Query = artist.Name, Limit = 50 });
         return results?.Albums
             .Where(a => string.Equals(a.ArtistName, artist.Name, StringComparison.CurrentCultureIgnoreCase))
             .Take(limit)
@@ -1648,7 +1665,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             await Task.Delay(140, cts.Token);
             var results = await _core.CallAsync<SearchResults>(
-                new CoreRequest("search") { Query = query, Limit = 50 }, cts.Token);
+                new CoreRequest("search") { ServerId = ActiveServerId, Query = query, Limit = 50 }, cts.Token);
             if (cts.Token.IsCancellationRequested || results is null) return;
 
             _navigation.Replace(LibraryPage.ForSection(LibrarySection.Search), clearBackStack: true);
@@ -1940,15 +1957,33 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await PlayCurrentAsync();
     }
 
-    /// <summary>Play whatever the queue is parked on. Every transport path ends here.</summary>
-    private async Task PlayCurrentAsync()
+    /// <summary>
+    /// Play whatever the queue is parked on. Every transport path ends here.
+    ///
+    /// A track the server will not stream — moved, deleted, or belonging to a
+    /// server that is no longer attached — steps to the next one rather than
+    /// stopping. Pressing Play on a hundred liked songs and getting silence
+    /// because the first of them is gone is not a queue, and the reason is
+    /// already on screen. The budget bounds it so a queue that is entirely
+    /// unplayable stops instead of racing to the end.
+    /// </summary>
+    private async Task PlayCurrentAsync(int skipBudget = 4)
     {
         if (_engine is null || _queue.Current is not { } track) return;
 
         // Resolving a source can spawn ffprobe or call the core, so keep it off
         // the UI thread.
         var source = await Task.Run(() => ResolveSource(track));
-        if (source is null) return; // ResolveSource reported why.
+        if (source is null)
+        {
+            // ResolveSource has already put the reason on screen.
+            if (skipBudget > 0 && _queue.Advance())
+            {
+                RefreshQueueState();
+                await PlayCurrentAsync(skipBudget - 1);
+            }
+            return;
+        }
 
         NowPlaying = track;
         DurationSeconds = source.KnownDuration?.TotalSeconds
@@ -2173,6 +2208,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             }
         }
 
+        // The core answers this one, and when it refuses it says why — "streamURL
+        // needs an attached serverId", "no track <id>". Reporting that verbatim
+        // is the difference between a bug you can act on and one you can only
+        // guess at: this used to swallow every failure and print a note telling
+        // the user to set a developer environment variable, which was both wrong
+        // and impossible to act on.
+        string reason;
         try
         {
             var stream = _core.Call<StreamSource>(new CoreRequest("streamURL")
@@ -2184,7 +2226,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             {
                 return new AudioSource(
                     stream.Url,
-                    stream.Headers,
+                    // The core sends no headers with a stream URL — every backend
+                    // it supports authenticates in the URL itself.
+                    null,
                     // The server's own ReplayGain figure, so two albums mastered
                     // at different loudness play at the same level. Jellyfin and
                     // Subsonic both report it; Plex does not, and those tracks
@@ -2192,14 +2236,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     ReplayGainTrackDb: track.NormalizationGainDB,
                     KnownDuration: track.DurationSeconds > 0 ? TimeSpan.FromSeconds(track.DurationSeconds) : null);
             }
+            reason = "the server returned no stream URL";
         }
-        catch
+        catch (Exception ex)
         {
-            // The core doesn't expose a stream URL yet; fall through to the hint.
+            reason = ex.Message;
         }
 
-        Dispatcher.UIThread.Post(() => StatusMessage =
-            "No audio source for this track yet — set MOZZ_DEMO_AUDIO to a file or folder to hear playback.");
+        var detail = $"Can't play \u201C{track.Title}\u201D — {reason}.";
+        Dispatcher.UIThread.Post(() => StatusMessage = detail);
         return null;
     }
 
@@ -2273,10 +2318,6 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             ? $"{(int)span.TotalHours}:{span.Minutes:D2}:{span.Seconds:D2}"
             : $"{span.Minutes}:{span.Seconds:D2}";
     }
-
-    private sealed record StreamSource(
-        [property: System.Text.Json.Serialization.JsonPropertyName("url")] string Url,
-        [property: System.Text.Json.Serialization.JsonPropertyName("headers")] Dictionary<string, string>? Headers);
 
     private void RaiseDerived()
     {
