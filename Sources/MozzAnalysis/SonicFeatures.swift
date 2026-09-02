@@ -69,6 +69,14 @@ public enum SonicFeatureLayout {
     /// Pitch-class energy — harmonic content, roughly "what key and how tonal".
     public static let chromaCount = 12
 
+    /// The width for one configuration — `mfccCount` and the optional delta
+    /// block are the only things that move it.
+    public static func dimension(for configuration: SonicAnalyzer.Configuration) -> Int {
+        dimension
+            - mfccCount * 2
+            + configuration.mfccCount * (configuration.includeMFCCDeltas ? 3 : 2)
+    }
+
     /// mean+variance of each MFCC, then chroma means, then the scalar families.
     public static let dimension =
         mfccCount * 2      // MFCC mean + variance

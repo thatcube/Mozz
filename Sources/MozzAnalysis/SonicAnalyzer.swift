@@ -24,6 +24,34 @@ public struct SonicAnalyzer: Sendable {
         public var melBands: Int
         public var melMinHz: Double
         public var melMaxHz: Double
+        /// How many cepstral coefficients to keep. More is finer timbre detail
+        /// and more dimensions for the corpus to standardize.
+        public var mfccCount: Int
+        /// Whether to describe how fast timbre CHANGES as well as what it is —
+        /// the mean absolute frame-to-frame delta of each coefficient. A steady
+        /// pad and a chopped sample can share a spectrum and differ entirely
+        /// here.
+        public var includeMFCCDeltas: Bool
+        /// Whether to scale the input to a fixed RMS before analyzing, so a
+        /// track's mastering level stops colouring its timbre. Loudness itself
+        /// is still described — it is measured before the scaling.
+        public var normalizeGain: Bool
+
+        public init(sampleRate: Int, frameSize: Int, hopSize: Int, melBands: Int,
+                    melMinHz: Double, melMaxHz: Double,
+                    mfccCount: Int = SonicFeatureLayout.mfccCount,
+                    includeMFCCDeltas: Bool = false,
+                    normalizeGain: Bool = false) {
+            self.sampleRate = sampleRate
+            self.frameSize = frameSize
+            self.hopSize = hopSize
+            self.melBands = melBands
+            self.melMinHz = melMinHz
+            self.melMaxHz = melMaxHz
+            self.mfccCount = mfccCount
+            self.includeMFCCDeltas = includeMFCCDeltas
+            self.normalizeGain = normalizeGain
+        }
 
         public static let v1 = Configuration(
             sampleRate: 16_000, frameSize: 1024, hopSize: 256,
@@ -57,12 +85,27 @@ public struct SonicAnalyzer: Sendable {
     /// silent. A nil is a track to leave unanalyzed and retry later, never a
     /// zero vector: a zero vector would sit in the index claiming to be
     /// equidistant from everything.
-    public func analyze(_ samples: [Float]) -> SonicFeatures? {
+    public func analyze(_ input: [Float]) -> SonicFeatures? {
         let config = configuration
-        guard samples.count >= config.frameSize * 8 else { return nil }
+        guard input.count >= config.frameSize * 8 else { return nil }
+
+        // Mastering level is not timbre. Scaling to a fixed RMS first stops a
+        // loud master reading as a different instrument from a quiet one; the
+        // track's actual loudness is still described, measured below from the
+        // signal as it arrived.
+        let inputRMS = (input.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(input.count)).squareRoot()
+        let samples: [Float]
+        if config.normalizeGain, inputRMS > 1e-6 {
+            let gain = Float(0.1 / inputRMS)
+            samples = input.map { $0 * gain }
+        } else {
+            samples = input
+        }
 
         let bins = config.frameSize / 2 + 1
-        var mfccStats = (0..<SonicFeatureLayout.mfccCount).map { _ in RunningStat() }
+        var mfccStats = (0..<config.mfccCount).map { _ in RunningStat() }
+        var mfccDeltas = (0..<config.mfccCount).map { _ in RunningStat() }
+        var previousMFCC: [Double]?
         var chromaSum = [Double](repeating: 0, count: SonicFeatureLayout.chromaCount)
         var centroid = RunningStat(), rolloff = RunningStat(), flatness = RunningStat()
         var flux = RunningStat(), zcr = RunningStat(), rms = RunningStat()
@@ -148,8 +191,12 @@ public struct SonicAnalyzer: Sendable {
                     }
                     logMel[m] = log(acc + 1e-10)
                 }
-                let mfcc = Self.dct(logMel, count: SonicFeatureLayout.mfccCount)
-                for i in 0..<SonicFeatureLayout.mfccCount { mfccStats[i].add(mfcc[i]) }
+                let mfcc = Self.dct(logMel, count: config.mfccCount)
+                for i in 0..<config.mfccCount { mfccStats[i].add(mfcc[i]) }
+                if let previous = previousMFCC {
+                    for i in 0..<config.mfccCount { mfccDeltas[i].add(abs(mfcc[i] - previous[i])) }
+                }
+                previousMFCC = mfcc
             } else {
                 flux.add(0)
                 onsets.append(0)
@@ -162,7 +209,7 @@ public struct SonicAnalyzer: Sendable {
         guard rms.count > 0, energySum > 0 else { return nil }
 
         let overallRMS = (energySum / Double(sampleCount)).squareRoot()
-        let loudnessDBFS = 20 * log10(Swift.max(overallRMS, 1e-9))
+        let loudnessDBFS = 20 * log10(Swift.max(config.normalizeGain ? inputRMS : overallRMS, 1e-9))
         // Silence, or so near it that everything above is describing noise floor.
         guard loudnessDBFS > -70 else { return nil }
 
@@ -181,22 +228,27 @@ public struct SonicAnalyzer: Sendable {
         // dynamics colour it, second-order spread breaks ties".
         var values: [Double] = []
         var weights: [Double] = []
-        values.reserveCapacity(SonicFeatureLayout.dimension)
-        weights.reserveCapacity(SonicFeatureLayout.dimension)
+        values.reserveCapacity(SonicFeatureLayout.dimension(for: config))
+        weights.reserveCapacity(SonicFeatureLayout.dimension(for: config))
         func add(_ value: Double, weight: Double) {
             values.append(value)
             weights.append(weight)
         }
 
         // --- Timbre. Weighted highest: it carries most of "sounds like". ---
-        for i in 0..<SonicFeatureLayout.mfccCount {
+        for i in 0..<config.mfccCount {
             // c0 is overall log energy and runs an order of magnitude wider than
             // the rest, so it gets its own scale.
             let scale = i == 0 ? 25.0 : 12.0
             add(squashSigned(mfccStats[i].mean, scale: scale), weight: 1.0)
         }
-        for i in 0..<SonicFeatureLayout.mfccCount {
+        for i in 0..<config.mfccCount {
             add(clamp01(mfccStats[i].standardDeviation / 12), weight: 0.6)
+        }
+        if config.includeMFCCDeltas {
+            for i in 0..<config.mfccCount {
+                add(clamp01(mfccDeltas[i].mean / 6), weight: 0.7)
+            }
         }
         // --- Harmony. ---
         for c in chroma { add(clamp01(c), weight: 0.5) }
@@ -220,7 +272,7 @@ public struct SonicAnalyzer: Sendable {
         add(tempo.map { clamp01(($0 - 40) / 180) } ?? 0.5, weight: 1.0)
         add(clamp01(onsets.reduce(0, +) / Double(Swift.max(onsets.count, 1)) * 4), weight: 0.5)
 
-        assert(values.count == SonicFeatureLayout.dimension)
+        assert(values.count == SonicFeatureLayout.dimension(for: config))
 
         // Centre, then weight, then normalize. Every feature above lands in
         // 0...1, and a set of all-positive vectors makes cosine similarity
@@ -234,6 +286,6 @@ public struct SonicAnalyzer: Sendable {
 
         return SonicFeatures(values: unit, engine: Self.engine, tempoBPM: tempo,
                              loudnessDBFS: loudnessDBFS,
-                             analyzedSeconds: Double(samples.count) / Double(config.sampleRate))
+                             analyzedSeconds: Double(input.count) / Double(config.sampleRate))
     }
 }
