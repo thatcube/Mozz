@@ -172,11 +172,17 @@ public static class HomeMixLoader
         Func<Task<IReadOnlyList<Track>>> readLikedTracks,
         Func<string, Task> generateMixes,
         IReadOnlyList<string> serverIds,
-        Action? generationStarted = null)
+        Action? generationStarted = null,
+        bool mixesAreStale = false)
     {
         var mixes = await readMixes();
         var liked = await readLikedTracks();
-        if (mixes.Count > 0)
+        // Mixes belong to the server they were built from, and generating them
+        // replaces the whole set rather than adding to it — so mixes left over
+        // from a different server are not merely old, they are wrong, and every
+        // track in them fails to stream. Regenerating is the only way back;
+        // waiting for the count to reach zero never happens.
+        if (mixes.Count > 0 && !mixesAreStale)
         {
             return new HomeMixLoadResult(mixes, liked, Generated: false, Message: null);
         }

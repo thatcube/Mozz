@@ -889,12 +889,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         RaiseDerived();
 
         var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        // Generating replaces every home set globally, so what is stored belongs
+        // to whichever server last generated it. Nothing recorded that, which is
+        // how mixes full of unstreamable tracks survived a server change: the
+        // loader only rebuilt when there were none at all.
+        var mixServer = _preferences.GetString(AppPreferences.HomeMixServerKey, string.Empty);
+        var stale = !string.IsNullOrWhiteSpace(serverId)
+                    && !string.Equals(mixServer, serverId, StringComparison.Ordinal);
+
         var result = await HomeMixLoader.LoadAsync(
             ReadHomeMixesAsync,
             LoadLikedTracksAsync,
             GenerateHomeMixesAsync,
             Connect.Accounts.Select(a => a.ServerId).ToList(),
-            () => StatusMessage = "Generating mixes for Home…");
+            () => StatusMessage = "Generating mixes for Home…",
+            mixesAreStale: stale);
+
+        if (result.Generated && !string.IsNullOrWhiteSpace(serverId))
+            _preferences.SetString(AppPreferences.HomeMixServerKey, serverId!);
 
         _homeMixTiles = HomeMixPresentation.BuildTiles(
             result.LikedTracks.Count,

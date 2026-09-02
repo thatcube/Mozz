@@ -204,4 +204,43 @@ public class HomeMixTests
 
     private static Playlist Playlist(string title) =>
         new(1, $"remote-{title}", "server", title, 10, "art");
+
+    /// <summary>
+    /// The case that shipped broken: mixes existed, so the loader never rebuilt
+    /// them — but they had been generated from a server that is no longer
+    /// attached, so every track in them refused to stream.
+    /// </summary>
+    [Fact]
+    public async Task StaleMixes_AreRegenerated_EvenThoughSomeExist()
+    {
+        var generatedFor = new List<string>();
+        var mixes = new List<HomeMix> { new("supermix", "Supermix", null, "supermix", null, 0) };
+
+        var result = await HomeMixLoader.LoadAsync(
+            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(mixes),
+            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
+            serverIds: ["srv-new"],
+            mixesAreStale: true);
+
+        Assert.True(result.Generated);
+        Assert.Equal(["srv-new"], generatedFor);
+    }
+
+    [Fact]
+    public async Task FreshMixes_AreLeftAlone()
+    {
+        var generatedFor = new List<string>();
+        var mixes = new List<HomeMix> { new("supermix", "Supermix", null, "supermix", null, 0) };
+
+        var result = await HomeMixLoader.LoadAsync(
+            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(mixes),
+            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
+            serverIds: ["srv-new"],
+            mixesAreStale: false);
+
+        Assert.False(result.Generated);
+        Assert.Empty(generatedFor);
+    }
 }

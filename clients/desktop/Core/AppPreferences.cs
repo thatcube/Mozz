@@ -19,6 +19,8 @@ public sealed class AppPreferences
     public const string VolumeKey = "mozz.volume";
     public const string ShuffleKey = "mozz.shuffle";
     public const string RepeatModeKey = "mozz.repeatMode";
+    /// <summary>Which server the stored Home mixes were generated from.</summary>
+    public const string HomeMixServerKey = "mozz.homeMixServer";
 
     private readonly string _path;
     private readonly object _gate = new();
