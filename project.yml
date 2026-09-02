@@ -101,6 +101,14 @@ targets:
         # CRITICAL for a music app: keep audio playing in the background.
         UIBackgroundModes:
           - audio
+          # Sonic analysis is hours of work on a whole library, which nobody is
+          # going to sit through with the app open. `processing` is what lets
+          # BGTaskScheduler hand it a window while the phone charges overnight.
+          - processing
+        # Every BGTask identifier the app may submit has to be declared here or
+        # the scheduler refuses it at registration.
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.thatcube.Mozz.sonic-analysis
         # Plex/Jellyfin servers are frequently self-hosted on the LAN over plain
         # HTTP; allow arbitrary + local-network loads. (A production build could
         # tighten this to per-host exceptions once a server is chosen.)

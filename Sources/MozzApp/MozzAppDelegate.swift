@@ -22,6 +22,24 @@ public final class MozzAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     #if os(iOS)
+    /// Registration has to happen before launching finishes — `BGTaskScheduler`
+    /// traps on a late one — which is why this lives here rather than anywhere
+    /// more convenient.
+    public func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        SonicAnalysisBackgroundTask.register { task in
+            Task { @MainActor in
+                await SharedEnvironment.shared.runSonicAnalysis(background: task)
+            }
+        }
+        SonicAnalysisBackgroundTask.schedule()
+        return true
+    }
+    #endif
+
+    #if os(iOS)
     /// One handler, kept for the life of the process: Siri resolves a request and
     /// then handles it as two separate calls, and the handler remembers between
     /// them what it just promised to play.

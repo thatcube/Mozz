@@ -7,6 +7,7 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.util.DebugLogger
 import com.thatcube.mozz.analysis.SonicAnalysisController
+import com.thatcube.mozz.analysis.SonicAnalysisWorker
 import com.thatcube.mozz.core.MozzCore
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
@@ -33,6 +34,15 @@ import java.io.IOException
  * reliable "app is quitting" callback to do it in.
  */
 class MozzApplication : Application(), SingletonImageLoader.Factory {
+
+    override fun onCreate() {
+        super.onCreate()
+        // A library is hours of work and nobody keeps a music app open for
+        // hours, so the scheduler owns this rather than the screen. Constrained
+        // to charging + unmetered; idempotent, so this costs nothing on every
+        // launch after the first.
+        SonicAnalysisWorker.schedule(this)
+    }
 
     /**
      * Coil's loader, built here rather than left to its defaults.

@@ -8,6 +8,9 @@ import MozzDatabase
 import MozzDownloads
 import MozzPlayback
 import MozzNetworking
+#if os(iOS)
+import BackgroundTasks
+#endif
 import MozzAnalysis
 import MozzRecommend
 import MozzEnrichment
@@ -709,6 +712,33 @@ public final class AppEnvironment: ObservableObject {
         guard let serverId = active?.connection.id else { return nil }
         return await sonicAnalysis.progress(serverId: serverId)
     }
+
+    #if os(iOS)
+    /// Run a pass inside a system-granted background window.
+    ///
+    /// The window is the system's to end, not ours: `expirationHandler` fires
+    /// with seconds to spare, so the pass is cancelled there and the vectors
+    /// already written are the progress that survives. The next window is asked
+    /// for up front, because a task that does not reschedule itself runs once.
+    public func runSonicAnalysis(background task: BGTask) async {
+        SonicAnalysisBackgroundTask.schedule()
+        guard let serverId = active?.connection.id, let backend = active?.backend else {
+            task.setTaskCompleted(success: true)
+            return
+        }
+        let service = sonicAnalysis
+        task.expirationHandler = {
+            Task { await service.cancel() }
+        }
+        await service.analyze(serverId: serverId, backend: backend)
+        // Hold the window open while the pass walks, polling rather than
+        // awaiting because the service is fire-and-forget by design.
+        while await service.progress(serverId: serverId).running {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+        task.setTaskCompleted(success: true)
+    }
+    #endif
 
     /// Why analysis is or isn't running, for Settings to say out loud.
     public var sonicAnalysisConditions: (powered: Bool, unmetered: Bool) {

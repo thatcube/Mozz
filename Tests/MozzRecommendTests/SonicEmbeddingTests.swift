@@ -54,6 +54,65 @@ final class SonicEmbeddingStoreTests: XCTestCase {
         XCTAssertNil(wrongEngine)
     }
 
+    func testTheWideFirstPassCoversArtistsBeforeItGoesDeep() async throws {
+        // The failure this prevents: three hundred vectors that are all the same
+        // handful of artists, so a station seeded from anything else in the
+        // library finds no acoustic neighbours at all.
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        try await writer.saveServer(ServerConnection(
+            id: "wsrv", kind: .plex, name: "W",
+            baseURL: URL(string: "https://w.local")!, userID: nil, clientIdentifier: "c"))
+        // Four artists, five tracks each.
+        var tracks: [Track] = []
+        for artist in 1...4 {
+            for song in 1...5 {
+                tracks.append(Track(id: "a\(artist)s\(song)", title: "S\(song)",
+                                    artistName: "Artist \(artist)", artistID: "a\(artist)",
+                                    genres: ["Rock"]))
+            }
+        }
+        try await writer.upsertTracks(tracks, serverId: "wsrv")
+        let store = RecommendationStore(db)
+
+        let spread = try await store.sonicSampleCandidates(
+            serverId: "wsrv", engine: engineV1, perArtist: 2, limit: 20)
+        XCTAssertEqual(spread.count, 8, "two from each of four artists")
+        let perArtist = Dictionary(grouping: spread, by: \.artistRemoteId).mapValues(\.count)
+        XCTAssertEqual(Set(perArtist.values), [2])
+        XCTAssertEqual(Set(perArtist.keys.compactMap { $0 }).count, 4)
+    }
+
+    func testTheSpreadLeadsWithArtistsTheListenerHasPlayed() async throws {
+        // Nine minutes of analysis that covers everything someone listens to
+        // beats four hours that covers the library alphabetically.
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        try await writer.saveServer(ServerConnection(
+            id: "psrv", kind: .plex, name: "P",
+            baseURL: URL(string: "https://p.local")!, userID: nil, clientIdentifier: "c"))
+        var tracks: [Track] = []
+        for artist in 1...5 {
+            for song in 1...3 {
+                tracks.append(Track(id: "a\(artist)s\(song)", title: "S\(song)",
+                                    artistName: "Artist \(artist)", artistID: "a\(artist)",
+                                    genres: ["Rock"]))
+            }
+        }
+        try await writer.upsertTracks(tracks, serverId: "psrv")
+        // Only artist 4 has ever been played, and only one of its tracks.
+        try await PlayEventStore(db).append(
+            PlayEvent(trackID: "a4s2", kind: .completed, createdAt: Date(timeIntervalSince1970: 500)),
+            serverId: "psrv")
+
+        let spread = try await RecommendationStore(db).sonicSampleCandidates(
+            serverId: "psrv", engine: engineV1, perArtist: 2, limit: 20)
+        // Both of artist 4's slots come first — the played track, then a
+        // stablemate, so the one artist we know they listen to has company.
+        XCTAssertEqual(spread.prefix(2).map(\.artistRemoteId), ["a4", "a4"])
+        XCTAssertEqual(spread.first?.remoteId, "a4s2")
+    }
+
     func testTheAnalysisQueueLeadsWithWhatIsWorthAnalyzingFirst() async throws {
         // Analyzing a library takes hours, and the vectors only pay off around
         // tracks someone actually plays — so the order matters more than the

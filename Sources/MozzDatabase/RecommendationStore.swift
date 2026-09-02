@@ -206,6 +206,73 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// The same backlog, but spread across the library instead of dug through
+    /// it — at most `perArtist` tracks from any one artist.
+    ///
+    /// The first few hundred vectors decide whether this feature seems to work
+    /// at all, and the plain queue spends them badly: ordered by what was played
+    /// recently, three hundred tracks can be forty artists, so a station seeded
+    /// from anything else in the library has no neighbours to find and falls
+    /// straight through to the genre tier. A track needs company more than the
+    /// library needs depth.
+    ///
+    /// So an unanalyzed library takes a wide first pass — a couple of tracks
+    /// from every artist — and only then goes back for the rest. Same queue,
+    /// same resumability; only the order changes.
+    ///
+    /// Within the spread, artists come in the order they were last listened to.
+    /// That ordering is what makes the feature testable on the day it ships: on
+    /// a 9,486-track library across 3,004 artists, two tracks from every artist
+    /// is 3,967 tracks and about four hours, but two tracks from every artist
+    /// the listener has actually PLAYED is 154 tracks and about nine minutes —
+    /// and those are the artists any station is going to be seeded from.
+    public func sonicSampleCandidates(serverId: ServerID, engine: String,
+                                      perArtist: Int = 2, limit: Int) async throws -> [TrackCandidate] {
+        guard limit > 0, perArtist > 0 else { return [] }
+        return try await database.read { db in
+            let sql = """
+                WITH backlog AS (
+                    SELECT \(Self.refExpr) AS track_ref, track.remoteId AS remoteId, track.title AS title,
+                           track.artistName AS artistName, track.artistRemoteId AS artistRemoteId,
+                           track.albumRemoteId AS albumRemoteId, track.genres AS genres, track.addedAt AS addedAt,
+                           (SELECT MAX(pe.created_at) FROM play_event pe
+                             WHERE pe.track_ref = \(Self.refExpr)
+                               AND pe.kind IN ('started','completed')) AS last_played,
+                           EXISTS (SELECT 1 FROM recommendation_item ri
+                                    WHERE ri.track_ref = \(Self.refExpr)) AS in_mix,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY COALESCE(track.artistRemoteId, track.artistName, track.remoteId)
+                               ORDER BY (SELECT MAX(pe2.created_at) FROM play_event pe2
+                                          WHERE pe2.track_ref = \(Self.refExpr)
+                                            AND pe2.kind IN ('started','completed')) DESC NULLS LAST,
+                                        track.addedAt DESC NULLS LAST,
+                                        track.remoteId ASC
+                           ) AS rank_in_artist,
+                           MAX((SELECT MAX(pe3.created_at) FROM play_event pe3
+                                 WHERE pe3.track_ref = \(Self.refExpr)
+                                   AND pe3.kind IN ('started','completed'))) OVER (
+                               PARTITION BY COALESCE(track.artistRemoteId, track.artistName, track.remoteId)
+                           ) AS artist_last_played
+                    FROM track
+                    LEFT JOIN track_features tf ON tf.track_ref = \(Self.refExpr)
+                    WHERE track.serverId = ?
+                      AND (tf.embedding IS NULL OR tf.feature_source IS NOT ?)
+                )
+                SELECT * FROM backlog
+                WHERE rank_in_artist <= ?
+                ORDER BY artist_last_played DESC NULLS LAST,
+                         rank_in_artist ASC,
+                         last_played DESC NULLS LAST,
+                         in_mix DESC,
+                         addedAt DESC NULLS LAST,
+                         remoteId ASC
+                LIMIT ?
+                """
+            return try Row.fetchAll(db, sql: sql, arguments: [serverId, engine, perArtist, limit])
+                .map { Self.candidate($0, enrich: false) }
+        }
+    }
+
     /// How much of a server's catalogue this engine has analyzed.
     public func sonicAnalysisProgress(serverId: ServerID, engine: String) async throws -> (analyzed: Int, total: Int) {
         try await database.read { db in

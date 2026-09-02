@@ -14,13 +14,23 @@ public struct SonicAnalysisConfig: Sendable {
     public var pauseBetweenTracks: TimeInterval
     /// Inactivity allowance per fetch.
     public var timeout: TimeInterval
+    /// How many tracks the wide first pass takes from any one artist before it
+    /// moves on. See ``RecommendationStore/sonicSampleCandidates``.
+    public var perArtistInSpread: Int
+    /// How much of a library must be analyzed before the spread gives way to
+    /// working through the rest. A share, not a count, because "enough to have
+    /// neighbours" scales with the library.
+    public var spreadFraction: Double
 
     public init(batchSize: Int = 20, maxPerPass: Int = 400,
-                pauseBetweenTracks: TimeInterval = 0.35, timeout: TimeInterval = 60) {
+                pauseBetweenTracks: TimeInterval = 0.35, timeout: TimeInterval = 60,
+                perArtistInSpread: Int = 2, spreadFraction: Double = 0.15) {
         self.batchSize = batchSize
         self.maxPerPass = maxPerPass
         self.pauseBetweenTracks = pauseBetweenTracks
         self.timeout = timeout
+        self.perArtistInSpread = perArtistInSpread
+        self.spreadFraction = spreadFraction
     }
 }
 
@@ -175,8 +185,7 @@ public actor SonicAnalysisService {
             guard checkpoint() else { break }
             let candidates: [TrackCandidate]
             do {
-                candidates = try await store.tracksNeedingSonicAnalysis(
-                    serverId: serverId, engine: SonicAnalyzer.engine, limit: config.batchSize + attempted.count)
+                candidates = try await queue(serverId: serverId, limit: config.batchSize + attempted.count)
             } catch {
                 log("sonic: cannot read the queue: \(error)")
                 break
@@ -213,6 +222,32 @@ public actor SonicAnalysisService {
         if analyzed > 0 || failed > 0 {
             log("sonic: analyzed \(analyzed), skipped \(failed)")
         }
+    }
+
+    /// What to analyze next.
+    ///
+    /// Early on that is a spread — a couple of tracks from every artist — so
+    /// that the first few hundred vectors have each other for company. Radio
+    /// finds nothing acoustically when three hundred analyzed tracks are forty
+    /// artists deep and the seed is none of them. Once enough of the library is
+    /// done for neighbours to exist, the queue reverts to working through the
+    /// rest in priority order, and the spread's own leftovers are simply part
+    /// of what remains.
+    private func queue(serverId: ServerID, limit: Int) async throws -> [TrackCandidate] {
+        let counts = try await store.sonicAnalysisProgress(serverId: serverId, engine: SonicAnalyzer.engine)
+        let spreadTarget = Int(Double(counts.total) * config.spreadFraction)
+        if counts.total > 0, counts.analyzed < spreadTarget {
+            let spread = try await store.sonicSampleCandidates(
+                serverId: serverId, engine: SonicAnalyzer.engine,
+                perArtist: config.perArtistInSpread, limit: limit)
+            // The spread runs out once every artist has had its couple of
+            // tracks, which happens well before the target on a library with few
+            // artists. Falling through keeps the pass working rather than
+            // ending it early.
+            if !spread.isEmpty { return spread }
+        }
+        return try await store.tracksNeedingSonicAnalysis(
+            serverId: serverId, engine: SonicAnalyzer.engine, limit: limit)
     }
 
     /// One track, end to end. Returns false when there was nothing usable to
