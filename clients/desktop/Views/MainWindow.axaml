@@ -1260,6 +1260,103 @@
 
                 </Panel>
             </Grid>
+            <!-- The transport is a dock, not a band across the bottom.
+            A full-width bar with a rule above it divides the window in two and
+            makes the library look like it ends early. A floating pill reads as
+            something laid ON the app: the content runs underneath it to the
+            window's edge, and the controls are a single object you can point
+            at. It is what Apple Music does on the desktop and what the phone
+            does with its mini player, so all three now agree.
+
+            It floats over row 0 as well as row 1 rather than occupying a band
+            of its own; the content column carries bottom padding of its own so
+            nothing ends up hidden beneath it. -->
+            <Border x:Name="BottomTransportBar" Grid.Column="1" ZIndex="10"
+            Height="80" MaxWidth="1180"
+            Margin="24,0,24,18"
+            HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+            Background="{DynamicResource DockBackground}"
+            BorderBrush="{DynamicResource DockBorder}"
+            BorderThickness="1"
+            CornerRadius="22"
+            BoxShadow="0 18 44 -14 #8C000000">
+            <Grid x:Name="BottomTransportGrid" ColumnDefinitions="*,Auto,*" Margin="18,0">
+
+            <Button Grid.Column="0" Classes="tile" HorizontalAlignment="Left"
+            Command="{Binding OpenNowPlayingCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="13" VerticalAlignment="Center">
+            <controls:ArtworkImage Width="56" Height="56" DisplaySize="56"
+            CornerRadius="7"
+            ServerId="{Binding NowPlaying.ServerId}"
+            ArtworkKey="{Binding NowPlaying.ArtworkKey}"
+            FallbackText="{Binding NowPlaying.AlbumTitle}"
+            FallbackFontSize="20"
+            FallbackFontWeight="SemiBold"
+            FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
+            <StackPanel x:Name="NowPlayingSummaryText" VerticalAlignment="Center" Spacing="3" MaxWidth="270">
+            <TextBlock Classes="primary" FontWeight="Medium"
+            Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
+            <TextBlock Classes="secondary"
+            Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
+            </StackPanel>
+            </StackPanel>
+            </Button>
+
+            <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
+            <Button x:Name="BottomShuffleButton" Classes="transport" Command="{Binding ToggleShuffleCommand}">
+            <controls:TablerIcon Size="19" Data="{StaticResource IconShuffle}"
+            Brush="{Binding $parent[Button].Foreground}" />
+            </Button>
+            <Button Classes="transport lead" Command="{Binding PreviousCommand}">
+            <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipBack}"
+            Brush="{Binding $parent[Button].Foreground}" />
+            </Button>
+            <Button Classes="play" Command="{Binding TogglePlayPauseCommand}">
+            <Panel>
+            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}"
+            Brush="{Binding $parent[Button].Foreground}"
+            IsVisible="{Binding !IsPlaying}" />
+            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPause}"
+            Brush="{Binding $parent[Button].Foreground}"
+            IsVisible="{Binding IsPlaying}" />
+            </Panel>
+            </Button>
+            <Button Classes="transport lead" Command="{Binding NextCommand}">
+            <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}"
+            Brush="{Binding $parent[Button].Foreground}" />
+            </Button>
+            <Button x:Name="BottomRepeatButton" Classes="transport" Command="{Binding CycleRepeatCommand}">
+            <controls:TablerIcon Size="19" Data="{StaticResource IconRepeat}"
+            Brush="{Binding $parent[Button].Foreground}" />
+            </Button>
+            </StackPanel>
+            <StackPanel x:Name="BottomPositionRow" Orientation="Horizontal" HorizontalAlignment="Center">
+            <controls:SeekBar x:Name="BottomScrubber" Width="420"
+            Position="{Binding PositionSeconds}"
+            Duration="{Binding DurationSeconds}"
+            TrackKey="{Binding NowPlayingKey}"
+            SeekCommand="{Binding SeekToCommand}"
+            Tint="{DynamicResource TextPrimary}" />
+            </StackPanel>
+            </StackPanel>
+
+            <StackPanel x:Name="BottomVolumeControls" Grid.Column="2" Orientation="Horizontal" Spacing="12"
+            HorizontalAlignment="Right" VerticalAlignment="Center">
+            <Button Classes="transport" Command="{Binding OpenNowPlayingCommand}">
+            <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
+            Brush="{Binding $parent[Button].Foreground}" />
+            </Button>
+            <Button Classes="transport">
+            <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
+            Brush="{Binding $parent[Button].Foreground}" />
+            </Button>
+            <Slider Classes="scrub" Width="96" Minimum="0" Maximum="1"
+            Value="{Binding Volume, Mode=TwoWay}"
+            VerticalAlignment="Center" />
+            </StackPanel>
+            </Grid>
+            </Border>
         </Grid>
 
         <!-- Compact navigation leaves the layout flow instead of stealing the
@@ -2408,103 +2505,6 @@
                     </Grid>
                 </Grid>
             </Border>
-<!-- The transport is a dock, not a band across the bottom.
-     A full-width bar with a rule above it divides the window in two and
-     makes the library look like it ends early. A floating pill reads as
-     something laid ON the app: the content runs underneath it to the
-     window's edge, and the controls are a single object you can point
-     at. It is what Apple Music does on the desktop and what the phone
-     does with its mini player, so all three now agree.
-
-     It floats over row 0 as well as row 1 rather than occupying a band
-     of its own; the content column carries bottom padding of its own so
-     nothing ends up hidden beneath it. -->
-<Border x:Name="BottomTransportBar" Grid.Column="1" ZIndex="10"
-        Height="80" MaxWidth="1180"
-        Margin="24,0,24,18"
-        HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
-        Background="{DynamicResource DockBackground}"
-        BorderBrush="{DynamicResource DockBorder}"
-        BorderThickness="1"
-        CornerRadius="22"
-        BoxShadow="0 18 44 -14 #8C000000">
-    <Grid x:Name="BottomTransportGrid" ColumnDefinitions="*,Auto,*" Margin="18,0">
-
-        <Button Grid.Column="0" Classes="tile" HorizontalAlignment="Left"
-                Command="{Binding OpenNowPlayingCommand}">
-            <StackPanel Orientation="Horizontal" Spacing="13" VerticalAlignment="Center">
-                <controls:ArtworkImage Width="56" Height="56" DisplaySize="56"
-                        CornerRadius="7"
-                        ServerId="{Binding NowPlaying.ServerId}"
-                        ArtworkKey="{Binding NowPlaying.ArtworkKey}"
-                        FallbackText="{Binding NowPlaying.AlbumTitle}"
-                        FallbackFontSize="20"
-                        FallbackFontWeight="SemiBold"
-                        FallbackForeground="{DynamicResource ArtworkFallbackPrimary}" />
-                <StackPanel x:Name="NowPlayingSummaryText" VerticalAlignment="Center" Spacing="3" MaxWidth="270">
-                    <TextBlock Classes="primary" FontWeight="Medium"
-                               Text="{Binding NowPlaying.Title, FallbackValue='Not playing'}" />
-                    <TextBlock Classes="secondary"
-                               Text="{Binding NowPlaying.ArtistName, FallbackValue=''}" />
-                </StackPanel>
-            </StackPanel>
-        </Button>
-
-        <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
-            <StackPanel Orientation="Horizontal" Spacing="11" HorizontalAlignment="Center">
-                <Button x:Name="BottomShuffleButton" Classes="transport" Command="{Binding ToggleShuffleCommand}">
-                    <controls:TablerIcon Size="19" Data="{StaticResource IconShuffle}"
-                                         Brush="{Binding $parent[Button].Foreground}" />
-                </Button>
-                <Button Classes="transport lead" Command="{Binding PreviousCommand}">
-                    <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipBack}"
-                                         Brush="{Binding $parent[Button].Foreground}" />
-                </Button>
-                <Button Classes="play" Command="{Binding TogglePlayPauseCommand}">
-                    <Panel>
-                        <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}"
-                                             Brush="{Binding $parent[Button].Foreground}"
-                                             IsVisible="{Binding !IsPlaying}" />
-                        <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPause}"
-                                             Brush="{Binding $parent[Button].Foreground}"
-                                             IsVisible="{Binding IsPlaying}" />
-                    </Panel>
-                </Button>
-                <Button Classes="transport lead" Command="{Binding NextCommand}">
-                    <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconSkipForward}"
-                                         Brush="{Binding $parent[Button].Foreground}" />
-                </Button>
-                <Button x:Name="BottomRepeatButton" Classes="transport" Command="{Binding CycleRepeatCommand}">
-                    <controls:TablerIcon Size="19" Data="{StaticResource IconRepeat}"
-                                         Brush="{Binding $parent[Button].Foreground}" />
-                </Button>
-            </StackPanel>
-            <StackPanel x:Name="BottomPositionRow" Orientation="Horizontal" HorizontalAlignment="Center">
-                <controls:SeekBar x:Name="BottomScrubber" Width="420"
-                                  Position="{Binding PositionSeconds}"
-                                  Duration="{Binding DurationSeconds}"
-                                  TrackKey="{Binding NowPlayingKey}"
-                                  SeekCommand="{Binding SeekToCommand}"
-                                  Tint="{DynamicResource TextPrimary}" />
-            </StackPanel>
-        </StackPanel>
-
-        <StackPanel x:Name="BottomVolumeControls" Grid.Column="2" Orientation="Horizontal" Spacing="12"
-                    HorizontalAlignment="Right" VerticalAlignment="Center">
-            <Button Classes="transport" Command="{Binding OpenNowPlayingCommand}">
-                <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
-                                     Brush="{Binding $parent[Button].Foreground}" />
-            </Button>
-            <Button Classes="transport">
-                <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
-                                     Brush="{Binding $parent[Button].Foreground}" />
-            </Button>
-            <Slider Classes="scrub" Width="96" Minimum="0" Maximum="1"
-                    Value="{Binding Volume, Mode=TwoWay}"
-                    VerticalAlignment="Center" />
-        </StackPanel>
-    </Grid>
-</Border>
         </Grid>
     </Grid>
 </Window>
