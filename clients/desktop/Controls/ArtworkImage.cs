@@ -68,12 +68,21 @@ public sealed class ArtworkImage : Control
     public static readonly StyledProperty<bool> ArtistHeroProperty =
         AvaloniaProperty.Register<ArtworkImage, bool>(nameof(ArtistHero));
 
+    /// <summary>
+    /// Take whatever space the parent gives instead of measuring square at
+    /// <see cref="DisplaySize"/>. For the player's backdrop, which has to fill a
+    /// window of any shape; <see cref="DisplaySize"/> then only says how large a
+    /// cover to ask the server for.
+    /// </summary>
+    public static readonly StyledProperty<bool> StretchToFillProperty =
+        AvaloniaProperty.Register<ArtworkImage, bool>(nameof(StretchToFill));
+
     static ArtworkImage()
     {
         AffectsRender<ArtworkImage>(
             FallbackTextProperty, FallbackFontSizeProperty, FallbackFontWeightProperty,
             FallbackForegroundProperty, CornerRadiusProperty, ArtistHeroProperty);
-        AffectsMeasure<ArtworkImage>(DisplaySizeProperty);
+        AffectsMeasure<ArtworkImage>(DisplaySizeProperty, StretchToFillProperty);
     }
 
     private ArtworkBinder<Bitmap>? _binder;
@@ -90,6 +99,7 @@ public sealed class ArtworkImage : Control
     public FontWeight FallbackFontWeight { get => GetValue(FallbackFontWeightProperty); set => SetValue(FallbackFontWeightProperty, value); }
     public IBrush? FallbackForeground { get => GetValue(FallbackForegroundProperty); set => SetValue(FallbackForegroundProperty, value); }
     public bool ArtistHero { get => GetValue(ArtistHeroProperty); set => SetValue(ArtistHeroProperty, value); }
+    public bool StretchToFill { get => GetValue(StretchToFillProperty); set => SetValue(StretchToFillProperty, value); }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
@@ -201,6 +211,9 @@ public sealed class ArtworkImage : Control
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        // Desiring nothing lets the parent arrange this to the whole cell; the
+        // renderer already crops cover-style to whatever bounds it ends up with.
+        if (StretchToFill) return default;
         var size = DisplaySize > 0 ? DisplaySize : 0;
         return new Size(size, size);
     }

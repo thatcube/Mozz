@@ -64,6 +64,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isShuffled;
     [ObservableProperty] private RepeatMode _repeatMode = RepeatMode.Off;
     [ObservableProperty] private bool _isQueueOpen;
+    [ObservableProperty] private bool _isPlayerOpen;
 
     /// <summary>Left counter in the player bar (m:ss of the play head).</summary>
     public string PositionText => FormatClock(PositionSeconds);
@@ -90,6 +91,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasNowPlaying => NowPlaying is not null;
+
+    /// <summary>"Playing from Reasonable Doubt" — where this track came from.</summary>
+    public string? NowPlayingContext =>
+        string.IsNullOrWhiteSpace(NowPlaying?.AlbumTitle) ? null : $"Playing from {NowPlaying!.AlbumTitle}";
 
     /// <summary>Silence is mute; there is no separate flag to fall out of step with.</summary>
     public bool IsMuted => Volume <= 0.0001;
@@ -1804,6 +1809,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void ToggleQueue() => IsQueueOpen = !IsQueueOpen;
 
+    /// <summary>Open the full player. Clicking the mini bar's cover or title does this.</summary>
+    [RelayCommand]
+    private void OpenPlayer()
+    {
+        if (NowPlaying is not null) IsPlayerOpen = true;
+    }
+
+    [RelayCommand]
+    private void ClosePlayer() => IsPlayerOpen = false;
+
     [RelayCommand]
     private async Task PlayQueueRow(QueueRow? row)
     {
@@ -1813,9 +1828,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await PlayCurrentAsync();
     }
 
-    /// <summary>Clicking the now-playing cover opens the record it came from.</summary>
+    /// <summary>Jump to the album the playing track came from, leaving the player.</summary>
     [RelayCommand]
-    private Task OpenNowPlayingAlbum() => OpenTrackAlbum(NowPlaying);
+    private Task OpenNowPlayingAlbum()
+    {
+        IsPlayerOpen = false;
+        return OpenTrackAlbum(NowPlaying);
+    }
+
+    /// <summary>Jump to the playing track's artist, leaving the player.</summary>
+    [RelayCommand]
+    private Task OpenNowPlayingArtist()
+    {
+        IsPlayerOpen = false;
+        return OpenTrackArtist(NowPlaying);
+    }
 
     /// <summary>
     /// Republish everything the transport derives from the queue. One place,
@@ -1966,7 +1993,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(NowPlayingKey));
         OnPropertyChanged(nameof(NowPlayingFormat));
+        OnPropertyChanged(nameof(NowPlayingContext));
         OnPropertyChanged(nameof(HasNowPlaying));
+        // Nothing playing is not a player worth showing.
+        if (value is null) IsPlayerOpen = false;
     }
 
     partial void OnVolumeChanged(double value)

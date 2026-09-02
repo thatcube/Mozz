@@ -60,6 +60,7 @@ internal static class DesktopPalette
             Set(app, "SliderThumbBackgroundPressed", "#000000");
             Set(app, "SliderThumbBackgroundDisabled", "#98989F");
             SetHeroScrim(app, "#F2F2F7");
+            SetPlayerScrim(app, "#F2F2F7");
             SetSurfaceBorder(app, null);
             return;
         }
@@ -94,6 +95,7 @@ internal static class DesktopPalette
         Set(app, "SliderThumbBackgroundPressed", "#FFFFFF");
         Set(app, "SliderThumbBackgroundDisabled", "#6A6A72");
         SetHeroScrim(app, blackout ? "#000000" : "#0B0B0D");
+        SetPlayerScrim(app, blackout ? "#000000" : "#0B0B0D");
         SetSurfaceBorder(app, blackout ? "#3A3A3A" : null);
     }
 
@@ -110,6 +112,34 @@ internal static class DesktopPalette
         app.Resources["SurfaceBorder"] = new SolidColorBrush(
             color is null ? Colors.Transparent : Color.Parse(color));
         app.Resources["SurfaceBorderThickness"] = new Thickness(color is null ? 0 : 1);
+    }
+
+    /// <summary>
+    /// What sits between the player's blown-up cover and its text.
+    ///
+    /// It is mostly the page's OWN background rather than a black veil, and that
+    /// is the whole point: a black scrim is only legible in a dark theme, and the
+    /// desktop has a light one. Painting the page colour at high opacity leaves
+    /// the cover reading as a tint of whatever theme is in effect, so the text on
+    /// top can keep using TextPrimary and be correct in all three.
+    ///
+    /// It is denser at the bottom, where the controls are, than at the top, where
+    /// there is only artwork to show off.
+    /// </summary>
+    private static void SetPlayerScrim(Application app, string background)
+    {
+        var opaque = Color.Parse(background);
+        app.Resources["PlayerScrim"] = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+            GradientStops =
+            {
+                new GradientStop(Color.FromArgb(0xB8, opaque.R, opaque.G, opaque.B), 0),
+                new GradientStop(Color.FromArgb(0xE8, opaque.R, opaque.G, opaque.B), 0.55),
+                new GradientStop(Color.FromArgb(0xF7, opaque.R, opaque.G, opaque.B), 1),
+            },
+        };
     }
 
     /// <summary>

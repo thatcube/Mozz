@@ -61,6 +61,13 @@
                 <GradientStop Color="#CC0B0B0D" Offset="1" />
             </LinearGradientBrush>
 
+            <!-- Replaced by DesktopPalette; see the note on SetPlayerScrim. -->
+            <LinearGradientBrush x:Key="PlayerScrim" StartPoint="0%,0%" EndPoint="0%,100%">
+                <GradientStop Color="#B80B0B0D" Offset="0" />
+                <GradientStop Color="#E80B0B0D" Offset="0.55" />
+                <GradientStop Color="#F70B0B0D" Offset="1" />
+            </LinearGradientBrush>
+
             <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
             <SolidColorBrush x:Key="TextSecondary" Color="#9A9AA2" />
             <SolidColorBrush x:Key="TextTertiary" Color="#6A6A72" />
@@ -365,6 +372,19 @@
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
+        <!-- The full player's transport is the same controls at the size a
+             screen-filling view wants, rather than a second set of styles. -->
+        <Style Selector="Button.transport.big">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="46" />
+            <Setter Property="CornerRadius" Value="23" />
+        </Style>
+        <Style Selector="Button.play.big">
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Height" Value="64" />
+            <Setter Property="CornerRadius" Value="32" />
+        </Style>
+
         <Style Selector="Button.play">
             <Setter Property="Background" Value="{DynamicResource Accent}" />
             <Setter Property="Foreground" Value="White" />
@@ -450,6 +470,28 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
+        <!-- The player's own type ramp. Larger than a page's because it is read
+             across a room rather than at arm's length, and because there are only
+             three lines of it competing for attention. -->
+        <Style Selector="TextBlock.playerTitle">
+            <Setter Property="FontSize" Value="27" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style Selector="TextBlock.playerArtist">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style Selector="TextBlock.playerCaption">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
         <Style Selector="TextBlock.primary">
             <Setter Property="FontSize" Value="13.5" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
