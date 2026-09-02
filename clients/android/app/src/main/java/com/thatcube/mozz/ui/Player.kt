@@ -1159,6 +1159,7 @@ private fun NowPlayingCard(
                     artworkKey = track.artworkKey,
                     pixels = artworkPixels(CARD_ART_SIDE),
                     modifier = Modifier.fillMaxSize(),
+                    shape = RoundedCornerShape(11.dp),
                 )
             }
         }

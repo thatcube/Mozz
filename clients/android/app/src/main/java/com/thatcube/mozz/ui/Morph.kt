@@ -32,6 +32,10 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -297,6 +301,21 @@ internal fun MorphHost(
             animationSpec = tween(PANEL_SWAP_MS),
             label = "cover-visible",
         )
+        // The cover's corner radius is animated by the morph, so the empty
+        // frame's hairline has to follow it. Resolved at draw time rather than
+        // read into composition: composition does not run per animation frame,
+        // and a hairline a few frames behind the clip is a hairline with its
+        // corners cut off — which is the artifact this exists to avoid.
+        val coverShape = remember(frame) {
+            object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density,
+                ): Outline = RoundedCornerShape(frame().artRadius)
+                    .createOutline(size, layoutDirection, density)
+            }
+        }
         Box(
             modifier = Modifier
                 .morphFrame {
@@ -328,6 +347,7 @@ internal fun MorphHost(
                 artworkKey = track.artworkKey,
                 pixels = coverPixels,
                 modifier = Modifier.fillMaxSize(),
+                shape = coverShape,
             )
         }
 

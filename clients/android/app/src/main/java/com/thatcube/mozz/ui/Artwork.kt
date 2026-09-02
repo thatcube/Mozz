@@ -3,7 +3,9 @@ package com.thatcube.mozz.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -56,7 +58,9 @@ fun Artwork(
      *
      * Only used to draw the empty frame's hairline in Black, where the
      * placeholder wash is black like everything else and a coverless album
-     * would otherwise be nothing at all. Pass the same shape as the `clip`.
+     * would otherwise be nothing at all. Pass the same shape as the `clip`:
+     * a hairline drawn in a rounder shape than the clip has its corners eaten
+     * by the clip, which is how a square cover ends up with four notches.
      */
     shape: Shape = RoundedCornerShape(6.dp),
 ) {
@@ -80,17 +84,27 @@ fun Artwork(
         // punched in it. In Black the wash goes too — nothing is a lighter shade
         // of the page there — and a hairline marks the empty frame instead.
         modifier = modifier
-            .background(if (blackout) Color.Transparent else Color.White.copy(alpha = 0.06f))
-            .then(
-                if (blackout) {
-                    Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape)
-                } else {
-                    Modifier
-                }
-            ),
+            .background(if (blackout) Color.Transparent else Color.White.copy(alpha = 0.06f)),
         contentAlignment = Alignment.Center,
     ) {
         val current = url
+        if (current == null && blackout) {
+            // The empty frame, and only the empty frame. This used to be a
+            // modifier on the Box, so it was drawn behind every cover as well —
+            // invisible under an opaque one, but there all the same, and showing
+            // through the crossfade and through art with transparency.
+            //
+            // Inset by its own width rather than sitting on the boundary. A
+            // stroke drawn flush to the edge is a stroke the caller's clip
+            // antialiases away at the corners, which is the whole reason these
+            // looked notched.
+            Spacer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(HAIRLINE)
+                    .border(HAIRLINE, MaterialTheme.colorScheme.outline, shape)
+            )
+        }
         if (current != null) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
@@ -131,6 +145,9 @@ suspend fun prefetchArtwork(server: MozzServer, context: android.content.Context
 
 /** Long enough to read as a dissolve, short enough not to feel slow. */
 private const val ARTWORK_FADE_MS = 220
+
+/** The empty frame's line, and the distance it keeps from the clip. */
+private val HAIRLINE = 1.dp
 
 /**
  * How many pixels to ask a server for, given how many pixels a slot will draw.

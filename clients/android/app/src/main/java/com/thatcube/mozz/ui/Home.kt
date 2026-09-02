@@ -240,6 +240,12 @@ private fun ShortcutGrid(
                                     artworkKey = cell.mix.artworkKey,
                                     pixels = artworkPixels(SHORTCUT_ART),
                                     modifier = Modifier.size(SHORTCUT_ART),
+                                    shape = RoundedCornerShape(
+                                        topStart = 8.dp,
+                                        bottomStart = 8.dp,
+                                        topEnd = 0.dp,
+                                        bottomEnd = 0.dp,
+                                    ),
                                 )
                             }
                         }

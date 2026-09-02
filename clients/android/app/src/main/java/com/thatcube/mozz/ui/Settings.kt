@@ -453,6 +453,7 @@ private fun SuppressionRow(
             modifier = Modifier
                 .size(44.dp)
                 .clip(if (item.isArtist) CircleShape else RoundedCornerShape(6.dp)),
+            shape = if (item.isArtist) CircleShape else RoundedCornerShape(6.dp),
         )
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
