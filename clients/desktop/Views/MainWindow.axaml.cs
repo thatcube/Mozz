@@ -120,7 +120,9 @@ public partial class MainWindow : Window
         BottomTransportGrid.ColumnDefinitions = expanded
             ? new ColumnDefinitions("*,Auto,*")
             : new ColumnDefinitions("*,Auto,0");
-        BottomTransportBar.Height = compact ? 70 : 80;
+        // Room for the transport row, the scrubber and its time labels, which
+        // used to overflow the pill's bottom edge.
+        BottomTransportBar.Height = compact ? 84 : 96;
         BottomVolumeControls.IsVisible = expanded;
 
         // Shuffle, repeat and volume are useful, but they are secondary. When the
@@ -129,8 +131,9 @@ public partial class MainWindow : Window
         // actually be driven.
         BottomShuffleButton.IsVisible = expanded;
         BottomRepeatButton.IsVisible = expanded;
-        BottomPositionRow.IsVisible = !compact;
-        BottomScrubber.Width = expanded ? 420 : 240;
+        // The scrubber stretches across the dock now, so it needs no width of
+        // its own — only whether it is shown at all.
+        BottomScrubber.IsVisible = !compact;
         NowPlayingSummaryText.MaxWidth = expanded ? 270 : compact ? 160 : 260;
     }
 
