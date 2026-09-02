@@ -229,11 +229,10 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="410" Margin="0,0,20,16"
+                                           <Button Classes="tile card" Width="410" Margin="0,0,20,16"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
-                                                       CornerRadius="12" ClipToBounds="True">
+                                               <Border Classes="tileSurface" CornerRadius="12" ClipToBounds="True">
                                                    <Grid ColumnDefinitions="88,*" Height="88">
                                                        <Border Grid.Column="0" Background="{DynamicResource Accent}"
                                                                IsVisible="{Binding IsLiked}">
@@ -280,12 +279,9 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
+                                           <Button Classes="tile card" Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Width="300" Margin="0,0,20,12" Padding="8" CornerRadius="8"
-                                                       Background="{DynamicResource SurfaceRaised}"
-                                                       BorderBrush="{DynamicResource SurfaceBorder}"
-                                                       BorderThickness="{DynamicResource SurfaceBorderThickness}">
+                                               <Border Classes="tileSurface" Width="300" Margin="0,0,20,12" Padding="8" CornerRadius="8">
                                                    <Grid ColumnDefinitions="44,*,64" Height="44">
                                                        <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
@@ -311,7 +307,7 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="176" Margin="0,0,20,22"
+                                           <Button Classes="tile" Width="196" Margin="0,0,0,2"
                                                    Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                    CommandParameter="{Binding}">
                                                <StackPanel Spacing="9">
@@ -336,11 +332,10 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="216" Margin="0,0,20,22"
+                                           <Button Classes="tile card" Width="216" Margin="0,0,20,22"
                                                    Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                    CommandParameter="{Binding}">
-                                               <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
-                                                       CornerRadius="12" Padding="18" Height="148">
+                                               <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="148">
                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
                                                                             Brush="{DynamicResource Accent}" />
@@ -451,7 +446,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="176" Margin="0,0,20,24"
+                                            <Button Classes="tile" Width="196" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="9">
@@ -514,7 +509,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="158" Margin="0,0,20,24"
+                                            <Button Classes="tile" Width="178" Margin="0,0,0,4"
                                                     Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="10">
@@ -555,7 +550,7 @@
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Button Classes="tile" Width="176" Margin="0,0,20,12"
+                                                        <Button Classes="tile" Width="196" Margin="0,0,0,0"
                                                                 Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                                 CommandParameter="{Binding}">
                                                             <StackPanel Spacing="9">
@@ -593,7 +588,7 @@
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Button Classes="tile" Width="158" Margin="0,0,20,12"
+                                                        <Button Classes="tile" Width="178" Margin="0,0,0,0"
                                                                 Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
                                                                 CommandParameter="{Binding}">
                                                             <StackPanel Spacing="10">
@@ -689,11 +684,10 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="216" Margin="0,0,20,24"
+                                            <Button Classes="tile card" Width="216" Margin="0,0,20,24"
                                                     Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                     CommandParameter="{Binding}">
-                                                <Border Background="{DynamicResource SurfaceRaised}" BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="{DynamicResource SurfaceBorderThickness}"
-                                                        CornerRadius="12" Padding="18" Height="148">
+                                                <Border Classes="tileSurface" CornerRadius="12" Padding="18" Height="148">
                                                     <StackPanel Spacing="8" VerticalAlignment="Center">
                                                         <controls:TablerIcon Size="32" Data="{StaticResource IconPlaylist}"
                                                                              Brush="{DynamicResource Accent}" />
@@ -879,7 +873,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="176" Margin="0,0,20,22"
+                                            <Button Classes="tile" Width="196" Margin="0,0,0,2"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                                 <StackPanel Spacing="9">
@@ -904,12 +898,9 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
+                                            <Button Classes="tile card" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
                                                     CommandParameter="{Binding Track}">
-                                                <Border Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
-                                                        Background="{DynamicResource SurfaceRaised}"
-                                                        BorderBrush="{DynamicResource SurfaceBorder}"
-                                                        BorderThickness="{DynamicResource SurfaceBorderThickness}">
+                                                <Border Classes="tileSurface" Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8">
                                                     <Grid ColumnDefinitions="44,*,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="38" Height="38" DisplaySize="38" CornerRadius="6"
                                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
@@ -1017,10 +1008,10 @@
                            <ItemsControl ItemsSource="{Binding SettingsLibraries}">
                              <ItemsControl.ItemTemplate>
                                <DataTemplate>
-                                 <Button Classes="tile" Margin="0,0,0,8"
+                                 <Button Classes="tile card" Margin="0,0,0,8"
                                          Command="{Binding $parent[ScrollViewer].DataContext.SelectMusicLibraryCommand}"
                                          CommandParameter="{Binding}">
-                                   <Border Background="{DynamicResource SurfaceHover}" CornerRadius="9" Padding="12">
+                                   <Border Classes="tileSurface" CornerRadius="9" Padding="12">
                                      <Grid ColumnDefinitions="*,Auto">
                                        <StackPanel Grid.Column="0" Spacing="3">
                                          <TextBlock Text="{Binding Name}" Classes="primary" />
@@ -1339,9 +1330,9 @@
                 BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="*,Auto,*" Margin="22,0">
 
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="13"
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="3"
                             VerticalAlignment="Center">
-                    <Button Classes="tile"
+                    <Button Classes="tile" Padding="8"
                             Command="{Binding OpenPlayerCommand}"
                             IsEnabled="{Binding HasNowPlaying}"
                             ToolTip.Tip="Open player">
@@ -1471,15 +1462,28 @@
              size scale — not a second set of styles. -->
         <Border Grid.Row="0" Grid.RowSpan="2"
                 IsVisible="{Binding IsPlayerOpen}"
-                Background="{DynamicResource AppBackground}">
+                Background="{Binding PlayerBackground}">
+            <!-- The player is always dark, on every platform and in every theme,
+                 because its foreground is white over whatever colour the record
+                 turned out to be. Overriding the text tiers for this subtree is
+                 what makes that true for everything inside it at once — the type,
+                 the transport icons, the seek bar's tint — instead of each one
+                 hard-coding white and the Light theme quietly breaking one of
+                 them. The values are the dark palette's own. -->
+            <Border.Resources>
+                <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
+                <SolidColorBrush x:Key="TextSecondary" Color="#B9B9C1" />
+                <SolidColorBrush x:Key="TextTertiary" Color="#8E8E97" />
+                <SolidColorBrush x:Key="SurfaceHover" Color="#26FFFFFF" />
+                <SolidColorBrush x:Key="SurfaceSelected" Color="#3AFFFFFF" />
+                <SolidColorBrush x:Key="SurfaceRaised" Color="#1AFFFFFF" />
+            </Border.Resources>
             <Panel>
-                <!-- The cover, blown up past the point of being a picture. At
-                     this scale it is a field of the record's colour, which is
-                     what the scrim above it turns into the page's own tint. -->
-                <controls:ArtworkImage StretchToFill="True" DisplaySize="420"
-                        ServerId="{Binding NowPlaying.ServerId}"
-                        ArtworkKey="{Binding NowPlaying.ArtworkKey}"
-                        FallbackText="" />
+                <!-- A wash over the tones, densest at the bottom where the
+                     controls are and lightest at the top where there is only
+                     colour to show off. It is what keeps the seek bar and the
+                     time labels legible over a pale record without darkening the
+                     whole field to mud. -->
                 <Border Background="{DynamicResource PlayerScrim}" />
 
                 <Grid RowDefinitions="Auto,*,Auto" Margin="30,20,30,34">

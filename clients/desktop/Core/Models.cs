@@ -174,6 +174,10 @@ public sealed record CoreRequest(
     [JsonPropertyName("sinceMS")] public long? SinceMS { get; init; }
     [JsonPropertyName("maxBytes")] public int? MaxBytes { get; init; }
     [JsonPropertyName("year")] public int? Year { get; init; }
+    /// <summary>Base64 of tightly packed RGBA, for <c>artworkTones</c>.</summary>
+    [JsonPropertyName("pixels")] public string? Pixels { get; init; }
+    [JsonPropertyName("width")] public int? Width { get; init; }
+    [JsonPropertyName("height")] public int? Height { get; init; }
 }
 
 /// <summary>
@@ -182,4 +186,23 @@ public sealed record CoreRequest(
 /// total for these listings, and counting rows would be wrong the moment a
 /// background sync added one.
 /// </summary>
+/// <summary>
+/// One channel of the artwork backdrop, 0…1 sRGB, exactly as
+/// <c>MozzCore.ArtworkPalette.Tone</c> emits it.
+/// </summary>
+public sealed record ArtworkTone(
+    [property: JsonPropertyName("red")] double Red,
+    [property: JsonPropertyName("green")] double Green,
+    [property: JsonPropertyName("blue")] double Blue);
+
+/// <summary>
+/// The player's backdrop, top to bottom: the middle band is the artwork's
+/// dominant colour and covers most of the view, the two accents are gentle
+/// bands at the edges.
+/// </summary>
+public sealed record ArtworkTones(
+    [property: JsonPropertyName("top")] ArtworkTone Top,
+    [property: JsonPropertyName("middle")] ArtworkTone Middle,
+    [property: JsonPropertyName("bottom")] ArtworkTone Bottom);
+
 public sealed record Page<T>(T? Rows, string? NextCursor);

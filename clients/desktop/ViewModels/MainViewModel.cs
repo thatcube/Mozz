@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using Avalonia.Styling;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -65,6 +67,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private RepeatMode _repeatMode = RepeatMode.Off;
     [ObservableProperty] private bool _isQueueOpen;
     [ObservableProperty] private bool _isPlayerOpen;
+    /// <summary>
+    /// The field behind the player, sampled from the cover by the shared core.
+    /// Deliberately never reset to null between tracks: the previous record's
+    /// field stays up until the next one has been computed, because blanking it
+    /// while the next cover loads is a flash of black in the middle of a song.
+    /// </summary>
+    [ObservableProperty] private IBrush _playerBackground = PlayerFallbackBrush;
 
     /// <summary>Left counter in the player bar (m:ss of the play head).</summary>
     public string PositionText => FormatClock(PositionSeconds);
@@ -91,6 +100,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasNowPlaying => NowPlaying is not null;
+
+    /// <summary>
+    /// What the player paints when the artwork yields nothing usable.
+    ///
+    /// A fixed dark tone rather than the theme's background, matching Android: the
+    /// player is always dark, because its foreground is white over whatever colour
+    /// the record turned out to be. Taking the page's floor here would have put
+    /// white text on near-white in the Light theme for any track without artwork.
+    /// </summary>
+    private static readonly IBrush PlayerFallbackBrush =
+        new ImmutableSolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
 
     /// <summary>"Playing from Reasonable Doubt" — where this track came from.</summary>
     public string? NowPlayingContext =>
@@ -368,6 +388,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (value is not ("dim" or "black")) value = "dim";
         _preferences.SetString(AppPreferences.DarkStyleKey, value);
         ApplyAppearance();
+        if (!_restoringSettings) _ = RefreshPlayerBackgroundAsync(NowPlaying);
     }
 
     partial void OnEqualizerEnabledChanged(bool value)
@@ -1819,6 +1840,50 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void ClosePlayer() => IsPlayerOpen = false;
 
+    /// <summary>
+    /// Re-derive the player's backdrop from the new track's cover.
+    ///
+    /// The colours come from the shared core (<c>artworkTones</c>) rather than
+    /// from anything decided here — see <see cref="ArtworkSampling"/> for why
+    /// that matters. Everything below is just fetching the cover and getting its
+    /// pixels into the shape the core reads.
+    /// </summary>
+    private async Task RefreshPlayerBackgroundAsync(Track? track)
+    {
+        // Black takes no colour from the artwork anywhere in the app, and
+        // returning before the fetch means the cover is never decoded for its
+        // histogram either — the work and the field it produced are both gone,
+        // not hidden.
+        if (DarkStyle == "black" && Appearance != "light")
+        {
+            PlayerBackground = Brushes.Black;
+            return;
+        }
+
+        if (_artwork is null || track?.ArtworkKey is not { Length: > 0 } key) return;
+
+        var request = new ArtworkRef(track.ServerId, key, ArtworkSampling.RequestSize);
+        var bitmap = await _artwork.LoadAsync(request, CancellationToken.None);
+        if (bitmap is null) return;
+
+        // Rasterising is a UI-thread job in Avalonia; the histogram behind the
+        // FFI call is not, so only the sampling is marshalled.
+        var pixels = ArtworkSampling.Rgba(bitmap);
+        if (pixels is null) return;
+
+        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+        {
+            Pixels = Convert.ToBase64String(pixels),
+            Width = ArtworkSampling.SampleDim,
+            Height = ArtworkSampling.SampleDim,
+        }));
+
+        // Same rule as the cover itself: only ever replaced by something real, so
+        // one track without usable artwork does not wash the field out.
+        if (tones is not null && NowPlaying == track)
+            PlayerBackground = ArtworkSampling.Brush(tones);
+    }
+
     [RelayCommand]
     private async Task PlayQueueRow(QueueRow? row)
     {
@@ -1997,6 +2062,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasNowPlaying));
         // Nothing playing is not a player worth showing.
         if (value is null) IsPlayerOpen = false;
+        _ = RefreshPlayerBackgroundAsync(value);
     }
 
     partial void OnVolumeChanged(double value)

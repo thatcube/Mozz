@@ -61,11 +61,16 @@
                 <GradientStop Color="#CC0B0B0D" Offset="1" />
             </LinearGradientBrush>
 
-            <!-- Replaced by DesktopPalette; see the note on SetPlayerScrim. -->
+            <!-- The wash between the player's artwork tones and its controls.
+                 Fixed rather than themed: the player is always dark, so this
+                 does not follow the palette the way HeroScrim does. Light at the
+                 top, where there is only colour to look at, and heavy at the
+                 bottom, where the seek bar and the times have to stay readable
+                 over a record that turned out pale. -->
             <LinearGradientBrush x:Key="PlayerScrim" StartPoint="0%,0%" EndPoint="0%,100%">
-                <GradientStop Color="#B80B0B0D" Offset="0" />
-                <GradientStop Color="#E80B0B0D" Offset="0.55" />
-                <GradientStop Color="#F70B0B0D" Offset="1" />
+                <GradientStop Color="#14000000" Offset="0" />
+                <GradientStop Color="#4D000000" Offset="0.55" />
+                <GradientStop Color="#A6000000" Offset="1" />
             </LinearGradientBrush>
 
             <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
@@ -148,6 +153,30 @@
              surface carries the selection and the title carries the colour.
              Lists whose rows are only a layout device — the album and artist
              walls — still override this locally to nothing. -->
+        <!-- =================================================================
+             Hover.
+
+             One rule for the whole app: anything you can click says so under the
+             pointer, with a rounded plate that has room around the content, and
+             it happens on the frame the pointer arrives. No fades — a hover that
+             animates in feels like the app is thinking about it, and at the speed
+             a pointer crosses a list of songs the fades pile up into a smear.
+
+             The plate is `SurfaceHover`, which is one step off the page in every
+             theme, so it reads as a light lift rather than as a selection.
+             ================================================================= -->
+        <Style Selector="ListBoxItem">
+            <!-- The inset that makes the plate look placed rather than painted
+                 edge to edge. Rows lay out inside it. -->
+            <Setter Property="Padding" Value="9,0" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="ListBoxItem /template/ ContentPresenter">
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+
         <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
         </Style>
@@ -210,6 +239,9 @@
                  buttons after an ordinary click. Opt out, then put a ring back
                  for keyboard focus only, below. -->
             <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button /template/ ContentPresenter">
+            <Setter Property="Transitions" Value="{x:Null}" />
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
@@ -283,34 +315,77 @@
         <Style Selector="Button.link:pressed /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
+        <!-- The artist and album names in a song row. They stay clickable —
+             going to the artist from the song is the reason the name is there —
+             but they sit inside a row that already lights up, so a second plate
+             under them would read as two overlapping targets. An underline says
+             "this one is a link" without competing. -->
         <Style Selector="Button.link:pointerover TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="TextDecorations" Value="Underline" />
         </Style>
         <Style Selector="Button.link:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <!-- A cover or a card that happens to be clickable. The artwork is the
-             affordance, so the button itself paints nothing at all — including
-             on press, which used to flash the theme's grey behind the art. -->
+        <!-- A cover you can click. At rest the artwork is the whole affordance,
+             so the button paints nothing; under the pointer a rounded plate
+             appears behind it, and the padding is what gives the plate room to
+             be seen around the art rather than hiding exactly beneath it.
+
+             The padding is not new space: it is the margin each wall used to put
+             BETWEEN its tiles, moved inside the tile. The footprint is unchanged,
+             which matters because the walls' column counts come from fixed pitch
+             constants in DesktopLayout — see the tile call sites. -->
         <Style Selector="Button.tile">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
+            <Setter Property="Padding" Value="10" />
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="CornerRadius" Value="12" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
         <Style Selector="Button.tile:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
         </Style>
         <Style Selector="Button.tile:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
         </Style>
         <Style Selector="Button.tile:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile:focus-visible /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+
+        <!-- A tile that is already a raised card — a mix shortcut, a playlist, a
+             recently-played row. A plate behind a card is a halo at the same
+             colour, so these lift the card itself instead. -->
+        <Style Selector="Button.tile.card">
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="Button.tile.card:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile.card:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile.card:focus-visible /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Border.tileSurface">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
+            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.tile.card:pointerover Border.tileSurface">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Button.tile.card:pressed Border.tileSurface">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
         </Style>
 
         <Style Selector="Button.transport">
