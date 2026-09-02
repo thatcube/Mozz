@@ -330,7 +330,6 @@
                                                    Width="{Binding $parent[Window].DataContext.AlbumTileWidth}"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
-                                               <StackPanel Spacing="8">
                                                    <Panel Width="{Binding $parent[Window].DataContext.AlbumArtSize}"
                                                           Height="{Binding $parent[Window].DataContext.AlbumArtSize}">
                                                        <controls:ArtworkImage
@@ -357,17 +356,24 @@
                                                                                 VerticalAlignment="Top" Margin="0,22,0,0" />
                                                        </Border>
                                                        <Border CornerRadius="8" Background="{DynamicResource TileTitleScrim}" />
-                                                       <TextBlock Text="{Binding Title}"
-                                                                  Foreground="White"
-                                                                  FontSize="19" FontWeight="Bold"
-                                                                  TextWrapping="Wrap" MaxLines="2"
-                                                                  TextTrimming="CharacterEllipsis"
-                                                                  VerticalAlignment="Bottom"
-                                                                  Margin="12,0,12,11" />
+                                                       <StackPanel VerticalAlignment="Bottom"
+                                                                   Margin="12,0,12,11" Spacing="1">
+                                                           <TextBlock Text="{Binding Title}"
+                                                                      Foreground="White"
+                                                                      FontSize="19" FontWeight="Bold"
+                                                                      TextWrapping="Wrap" MaxLines="2"
+                                                                      TextTrimming="CharacterEllipsis" />
+                                                           <!-- On the cover with the title rather than
+                                                                under the tile: it is the same thought, and
+                                                                splitting it across the artwork's edge made
+                                                                every tile two blocks tall for one idea. -->
+                                                           <TextBlock Text="{Binding Subtitle}"
+                                                                      Foreground="#C7FFFFFF"
+                                                                      FontSize="12" MaxLines="1"
+                                                                      TextTrimming="CharacterEllipsis"
+                                                                      IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                       </StackPanel>
                                                    </Panel>
-                                                   <TextBlock Text="{Binding Subtitle}" Classes="secondary"
-                                                              IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                                               </StackPanel>
                                            </Button>
                                        </DataTemplate>
                                    </ItemsControl.ItemTemplate>
