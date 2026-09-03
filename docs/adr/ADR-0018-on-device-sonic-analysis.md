@@ -1,6 +1,6 @@
 # ADR-0018 — On-device sonic analysis
 
-Status: **Accepted** (engine selection **in progress** — see Open questions)
+Status: **Accepted** (`mozz-vggish@1` selected; not yet switched on — see Open questions)
 
 ## Context
 
@@ -86,6 +86,7 @@ neighbours share the seed's label.
 | FMA genre, top-3 (n=1200) | 69.6% | 77.0% | significant |
 | FMA genre, 1-NN | 47.2% | 61.8% | significant |
 | MagnaTagATune human "which two sound alike" (n=378) | 59.0% | 62.7% | p = 0.20, underpowered |
+| Blind A/B on a real library, one listener (n=26 decisive) | 27% | 73% | p = 0.029 |
 | A real 753-track library, same-artist 1-NN | 49.9% | 70.2% | p < 0.0001 |
 | A real 753-track library, same-artist top-3 | 64.6% | 83.2% | p < 0.0001 |
 | A real 753-track library, same-album top-3 | 30.0% | 45.2% | p < 0.0001 |
@@ -148,9 +149,17 @@ confident, or says plainly that there is not much like this here.
 
 ## Open questions
 
-- **Which engine ships.** The evidence favours `mozz-vggish@1` on every axis,
-  significantly on three of four. It costs 9 MB of weights per platform, a few
-  seconds per track, and it writes no BPM. Not yet switched on.
+- **Which engine ships.** Resolved in favour of `mozz-vggish@1`: it wins every
+  axis, including — after 33 blind trials on a real library — the listener's own
+  ears, 19 to 7 (p = 0.029). That was the measurement I had said would be the
+  honest ceiling on confidence, and it agreed with the retrieval metrics rather
+  than contradicting them. Still to do before it can be switched on: shipping
+  9 MB of weights per platform, the engine bump that re-analyzes every library,
+  and the missing BPM (the DSP tempo estimator can run alongside cheaply).
+- **What a station plays when nothing fits.** In the same 33 trials, 12% had no
+  answer worth playing — three flagged outright plus the one-of-a-kind classical
+  seed. That is now the largest remaining defect, and it is not an analyzer
+  problem.
 - **A blind test with enough trials.** Thirty decisive trials cannot separate
   engines 3.7 points apart; about 196 can.
 - **Wider and more mainstream evaluation audio.** FMA and MagnaTagATune are both
