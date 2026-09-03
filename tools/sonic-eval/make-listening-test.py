@@ -5,16 +5,21 @@ but they are also the easy case, and a test made of easy cases tells you
 nothing about which engine to ship.
 """
 import json, pathlib, random, numpy as np
-SP = pathlib.Path(__file__).parent
-manifest = {m["key"]: m for m in json.loads((SP / "local/manifest.json").read_text())}
-keys = json.loads((SP / "local_keys.json").read_text())
+# Usage: make-listening-test.py <clips dir> <v1 vectors tsv> <out html> [trials]
+import sys
+SP = pathlib.Path(sys.argv[1])
+VECTORS = pathlib.Path(sys.argv[2])
+OUT = pathlib.Path(sys.argv[3])
+WANTED = int(sys.argv[4]) if len(sys.argv) > 4 else 30
+manifest = {m["key"]: m for m in json.loads((SP / "manifest.json").read_text())}
+keys = json.loads((SP / "keys.json").read_text())
 
 lookup = {}
-for line in (SP / "local_v1_vectors.tsv").read_text().splitlines():
+for line in VECTORS.read_text().splitlines():
     name, values = line.split("\t")
     lookup[name] = np.array([float(v) for v in values.split(",")])
 X_ours = np.array([lookup[k] for k in keys])
-X_vgg = np.load(SP / "local_vggish.npy")
+X_vgg = np.load(SP / "vggish.npy")
 
 def standardize(X):
     sd = X.std(0); sd = np.where(sd < 1e-9, 1.0, sd)
@@ -45,7 +50,7 @@ for i in random.sample(range(len(keys)), len(keys)):
         right=manifest[keys[a if flip else b]],
         leftEngine="vggish" if flip else "ours",
         rightEngine="ours" if flip else "vggish"))
-    if len(trials) == 30:
+    if len(trials) == WANTED:
         break
 
 html = """<!doctype html><meta charset="utf-8"><title>Mozz blind similarity test</title>
@@ -104,6 +109,6 @@ function finish(){
 }
 render();
 </script>"""
-out = SP / "listening-test.html"
+out = OUT
 out.write_text(html.replace("__TRIALS__", json.dumps(trials)))
 print(f"{len(trials)} trials -> {out}")

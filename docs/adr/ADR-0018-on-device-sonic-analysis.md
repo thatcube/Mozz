@@ -86,8 +86,16 @@ neighbours share the seed's label.
 | FMA genre, top-3 (n=1200) | 69.6% | 77.0% | significant |
 | FMA genre, 1-NN | 47.2% | 61.8% | significant |
 | MagnaTagATune human "which two sound alike" (n=378) | 59.0% | 62.7% | p = 0.20, underpowered |
-| A real 375-track library, same-artist 1-NN | 68.9% | 82.3% | p = 0.0001 |
-| A real 375-track library, same-album top-3 | 35.7% | 45.0% | p = 0.012 |
+| A real 753-track library, same-artist 1-NN | 49.9% | 70.2% | p < 0.0001 |
+| A real 753-track library, same-artist top-3 | 64.6% | 83.2% | p < 0.0001 |
+| A real 753-track library, same-album top-3 | 30.0% | 45.2% | p < 0.0001 |
+
+The real-library rows were first measured on 375 tracks across 40 artists
+(68.9% vs 82.3% artist 1-NN) and repeated on 753 across 132. Doubling it made
+the gap *wider* — 150 head-to-head wins for the learned engine against 25 — which
+is the opposite of what a result overfitted to a small sample does. Absolute
+numbers fell for both engines because 132 artists is a harder retrieval problem
+than 40, not because either got worse.
 
 The VGGish column is the **Swift port's own score**, not the Python
 prototype's. The prototype measured 78.3% / 62.9%; the port gives up about a

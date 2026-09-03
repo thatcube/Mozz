@@ -5,8 +5,10 @@ But it is real production audio at the bitrate the app actually analyzes, and
 album/artist agreement is a sharper probe than eight coarse genres.
 """
 import json, pathlib, sys, time, numpy as np, torch
-SP = pathlib.Path(__file__).parent
-manifest = json.loads((SP / "local/manifest.json").read_text())
+# Usage: real-library.py <clips dir with manifest.json> <v1 vectors tsv>
+SP = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path(__file__).parent / "local"
+VECTORS = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else SP.parent / "local_v1_vectors.tsv"
+manifest = json.loads((SP / "manifest.json").read_text())
 by_key = {m["key"]: m for m in manifest}
 
 def standardize(X):
@@ -32,7 +34,7 @@ def retrieval(X, keys, field, k=3):
 results, hits = {}, {}
 
 # ours, from the Swift dump
-dump = SP / "local_v1_vectors.tsv"
+dump = VECTORS
 lookup = {}
 for line in dump.read_text().splitlines():
     name, values = line.split("\t")
@@ -42,22 +44,27 @@ print(f"{len(keys)} clips analyzed by both", flush=True)
 X_ours = np.array([lookup[k] for k in keys])
 
 # VGGish trunk over the same clips
-from torchvggish import vggish, vggish_input
-model = vggish(); model.eval(); trunk = model.features
-X_vgg, t0 = [], time.time()
-for i, k in enumerate(keys):
-    try:
-        examples = vggish_input.wavfile_to_examples(by_key[k]["clip"])
-        with torch.no_grad():
-            feats = trunk(examples)
-        X_vgg.append(feats.amax(dim=(2, 3)).mean(0).numpy())
-    except Exception:
-        X_vgg.append(np.zeros(512))
-    if (i + 1) % 100 == 0:
-        print(f"  vggish {i+1}/{len(keys)}  {time.time()-t0:.0f}s", flush=True)
-X_vgg = np.array(X_vgg)
-np.save(SP / "local_vggish.npy", X_vgg)
-(SP / "local_keys.json").write_text(json.dumps(keys))
+cache = SP / "vggish.npy"
+if cache.exists():
+    X_vgg = np.load(cache)
+    print(f"loaded {len(X_vgg)} cached vggish vectors", flush=True)
+else:
+  from torchvggish import vggish, vggish_input
+  model = vggish(); model.eval(); trunk = model.features
+  X_vgg, t0 = [], time.time()
+  for i, k in enumerate(keys):
+      try:
+          examples = vggish_input.wavfile_to_examples(by_key[k]["clip"])
+          with torch.no_grad():
+              feats = trunk(examples)
+          X_vgg.append(feats.amax(dim=(2, 3)).mean(0).numpy())
+      except Exception:
+          X_vgg.append(np.zeros(512))
+      if (i + 1) % 100 == 0:
+          print(f"  vggish {i+1}/{len(keys)}  {time.time()-t0:.0f}s", flush=True)
+  X_vgg = np.array(X_vgg)
+  np.save(SP / "vggish.npy", X_vgg)
+(SP / "keys.json").write_text(json.dumps(keys))
 
 print("\n== a real library: does the neighbour come from the same artist / album? ==")
 print(f"{'engine':<24} {'artist top-3':>13} {'artist 1-NN':>12} {'album top-3':>12} {'album 1-NN':>11}")
