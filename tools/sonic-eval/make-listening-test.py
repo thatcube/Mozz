@@ -55,59 +55,106 @@ for i in random.sample(range(len(keys)), len(keys)):
 
 html = """<!doctype html><meta charset="utf-8"><title>Mozz blind similarity test</title>
 <style>
- body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;
+ body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:780px;margin:32px auto;padding:0 20px;
       background:#111;color:#eee}
- h1{font-size:20px} .seed{background:#1c1c1e;border-radius:12px;padding:16px;margin:24px 0 12px}
+ h1{font-size:20px;margin-bottom:4px}
+ .seed{background:#1c1c1e;border-radius:12px;padding:16px;margin:20px 0 12px;
+       border:1px solid #2c2c2e}
  .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
  .card{background:#1c1c1e;border-radius:12px;padding:14px}
- .card button{width:100%;padding:10px;border:0;border-radius:8px;background:#2c2c2e;color:#eee;
-      font:inherit;cursor:pointer;margin-top:8px}
- .card button:hover{background:#3a3a3c} audio{width:100%;margin-top:8px}
- .muted{color:#8e8e93;font-size:13px} .count{margin:18px 0}
- textarea{width:100%;height:120px;background:#1c1c1e;color:#eee;border:1px solid #333;border-radius:8px;padding:10px}
- .skip{background:none;border:0;color:#8e8e93;text-decoration:underline;cursor:pointer;font:inherit}
+ button{border:0;border-radius:8px;background:#2c2c2e;color:#eee;font:inherit;cursor:pointer;
+        padding:10px}
+ button:hover{background:#3a3a3c}
+ .card button{width:100%;margin-top:8px}
+ .both{width:100%;margin-top:12px;background:#1f3a2e}
+ .both:hover{background:#2a5040}
+ audio{width:100%;margin-top:8px}
+ .muted{color:#8e8e93;font-size:13px}
+ .bar{height:4px;background:#2c2c2e;border-radius:2px;margin:10px 0 18px;overflow:hidden}
+ .bar div{height:100%;background:#0a84ff;transition:width .2s}
+ .row{display:flex;gap:10px;align-items:center;margin-top:14px}
+ .row .link{background:none;color:#8e8e93;text-decoration:underline;padding:6px 0}
+ textarea{width:100%;height:120px;background:#1c1c1e;color:#eee;border:1px solid #333;
+          border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:12px}
+ .saved{color:#30d158;font-size:12px}
 </style>
 <h1>Which one sounds more like the seed?</h1>
-<p class="muted">Both are picked by an engine; you can't tell which from the page.
-Judge on sound, not on whether you like the song. 30 trials, skip any you can't call.</p>
-<div class="count" id="count"></div>
+<p class="muted">Both candidates were picked by an engine — you can't tell which from the page.
+Judge on sound, not on whether you like the song. Progress saves automatically, so you can
+close this and come back.</p>
+<div class="bar"><div id="bar"></div></div>
+<div class="muted" id="count"></div>
 <div class="seed" id="seed"></div>
 <div class="pair" id="pair"></div>
-<p><button class="skip" id="skip">can't tell / skip</button></p>
-<div id="done" hidden><h2>Done — paste this back</h2><textarea id="out"></textarea></div>
+<button class="both" id="both">Both are about equally close</button>
+<div class="row">
+  <button class="link" id="skip">can't tell / neither works</button>
+  <button class="link" id="back">undo last</button>
+  <button class="link" id="show">show results so far</button>
+  <span class="saved" id="saved"></span>
+</div>
+<div id="done" hidden><h2>Results</h2>
+ <p class="muted">Paste this back into the conversation. Partial is fine.</p>
+ <textarea id="out"></textarea>
+ <div class="row"><button id="copy">copy</button><button class="link" id="resume">keep going</button></div>
+</div>
 <script>
 const TRIALS = __TRIALS__;
-let i = 0; const picks = [];
+const KEY = 'mozz.listening.' + TRIALS.length + '.' + (TRIALS[0] ? TRIALS[0].seed.key : '0');
 const el = id => document.getElementById(id);
+let picks = [];
+try { picks = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { picks = []; }
+
+function save(){
+  try {
+    localStorage.setItem(KEY, JSON.stringify(picks));
+    el('saved').textContent = 'saved ' + picks.length + '/' + TRIALS.length;
+  } catch (e) {
+    el('saved').textContent = 'could not save — copy your results before closing';
+  }
+}
 function card(side, track){
   return `<div class="card"><b>${side}</b><div class="muted">${track.title}</div>
    <audio controls preload="none" src="file://${encodeURI(track.clip)}"></audio>
    <button data-side="${side.toLowerCase()}">${side} sounds closer</button></div>`;
 }
 function render(){
+  const i = picks.length;
+  el('bar').style.width = (i / TRIALS.length * 100) + '%';
   if (i >= TRIALS.length){ finish(); return; }
   const t = TRIALS[i];
+  el('done').hidden = true;
+  el('seed').hidden = el('pair').hidden = false;
+  el('both').hidden = false;
   el('count').textContent = `Trial ${i+1} of ${TRIALS.length}`;
   el('seed').innerHTML = `<b>SEED</b><div class="muted">${t.seed.artist} — ${t.seed.title}</div>
     <audio controls preload="none" src="file://${encodeURI(t.seed.clip)}"></audio>`;
   el('pair').innerHTML = card('A', t.left) + card('B', t.right);
-  el('pair').querySelectorAll('button').forEach(b =>
-    b.onclick = () => choose(b.dataset.side));
+  el('pair').querySelectorAll('button').forEach(b => b.onclick = () => choose(b.dataset.side));
+}
+function record(value){
+  const t = TRIALS[picks.length];
+  picks.push({seed: t.seed.artist + ' — ' + t.seed.title, chose: value});
+  save(); render();
 }
 function choose(side){
-  const t = TRIALS[i];
-  picks.push({seed: t.seed.title, chose: side === 'a' ? t.leftEngine : t.rightEngine});
-  i++; render();
+  const t = TRIALS[picks.length];
+  record(side === 'a' ? t.leftEngine : t.rightEngine);
 }
-el('skip').onclick = () => { picks.push({seed: TRIALS[i].seed.title, chose: 'skip'}); i++; render(); };
-function finish(){
-  el('seed').hidden = el('pair').hidden = el('skip').hidden = true;
-  el('count').textContent = '';
+el('both').onclick = () => record('both');
+el('skip').onclick = () => record('skip');
+el('back').onclick = () => { picks.pop(); save(); render(); };
+el('show').onclick = () => finish(true);
+el('resume').onclick = () => render();
+el('copy').onclick = () => { el('out').select(); document.execCommand('copy'); };
+function finish(partial){
+  el('seed').hidden = el('pair').hidden = el('both').hidden = true;
+  el('count').textContent = partial ? 'Partial results — you can keep going.' : 'Done.';
   el('done').hidden = false;
   const tally = picks.reduce((m,p) => (m[p.chose] = (m[p.chose]||0)+1, m), {});
-  el('out').value = JSON.stringify({tally, picks}, null, 1);
+  el('out').value = JSON.stringify({completed: picks.length, of: TRIALS.length, tally, picks}, null, 1);
 }
-render();
+save(); render();
 </script>"""
 out = OUT
 out.write_text(html.replace("__TRIALS__", json.dumps(trials)))
