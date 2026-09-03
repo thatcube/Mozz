@@ -75,6 +75,7 @@ final class SonicBenchmarkTests: XCTestCase {
 
         let analyzers = variants.map { ($0.name, SonicAnalyzer(configuration: $0.configuration)) }
         var labels: [String] = []
+        var names: [String] = []
         var byVariant: [[[Float]]] = Array(repeating: [], count: analyzers.count)
 
         let labelDirs = try FileManager.default.contentsOfDirectory(
@@ -102,11 +103,23 @@ final class SonicBenchmarkTests: XCTestCase {
                 // the comparison is over one identical set of songs.
                 guard features.allSatisfy({ $0 != nil }) else { continue }
                 labels.append(dir.lastPathComponent)
+                names.append(file.deletingPathExtension().lastPathComponent)
                 for (i, f) in features.enumerated() { byVariant[i].append(f!.values) }
             }
         }
 
         XCTAssertGreaterThan(labels.count, 50, "not enough analyzable audio to measure anything")
+
+        // Optional dump, so the same vectors can be scored against metadata this
+        // harness does not have — artist and album, which are sharper probes of
+        // "sounds like" than eight coarse genres.
+        if let out = ProcessInfo.processInfo.environment["MOZZ_BENCHMARK_OUT"] {
+            let shipping = byVariant[0]
+            let body = zip(names, shipping).map { name, vector in
+                "\(name)\t" + vector.map { String($0) }.joined(separator: ",")
+            }.joined(separator: "\n")
+            try? body.write(toFile: out, atomically: true, encoding: .utf8)
+        }
 
         let counts = labels.reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
         let n = Double(labels.count)
