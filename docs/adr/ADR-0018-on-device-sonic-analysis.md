@@ -123,6 +123,29 @@ is the *tail* — how often the nearest neighbour is badly wrong — and that is
 what a station is judged by. In a blind test on a real library, `mozz-dsp@1`
 answered AC/DC's "Jailbreak" with *NSYNC.
 
+## A seed with no neighbours
+
+Blind testing turned up a failure no engine can fix. A library held exactly one
+classical track — Katherine Jenkins singing the Flower Duet — and the analyzer
+answered it with Kate Bush. That is defensible as sound (a high theatrical
+soprano over lush arrangement is the nearest thing a pop library holds) and
+useless as radio: the listener wanted more opera, and there is no more opera.
+
+The dangerous part is the score. That match rated 0.746, **higher than 71% of
+every other best-match in the same library**. The engine was confident, and its
+confidence carried no information, because similarity is measured against the
+library's own distribution and a library with one opera track has no yardstick
+for opera. An absolute similarity floor would not have caught this.
+
+Roughly 10% of that library (76 of 753 tracks) has the same shape: a nearest
+neighbour that is nearest only by default.
+
+This separates two questions the design had been treating as one — *does it
+sound alike* (what the analyzer measures) and *would the listener want it next*
+(what radio needs). They coincide for most seeds and come apart entirely for
+outliers. The fix is not a better engine; it is a station that declines to be
+confident, or says plainly that there is not much like this here.
+
 ## Open questions
 
 - **Which engine ships.** The evidence favours `mozz-vggish@1` on every axis,
@@ -135,6 +158,12 @@ answered AC/DC's "Jailbreak" with *NSYNC.
   from a real library of mainstream music, which is also the smallest sample.
 - **Cross-device vector sync.** Every device analyses independently today.
   Sharing requires the relay in ADR-0012 and the pairing in ADR-0013.
+- **What a station does with an outlier seed.** See above: detecting "nothing
+  here is like this" needs something other than the similarity score, which is
+  relative by construction. Candidates: comparing a seed's best match against
+  the distribution of ITS OWN neighbours rather than the library's, or
+  cross-checking the acoustic neighbour against tags and refusing to lead with
+  a match both tiers disagree about.
 
 ## Reproducing any of this
 
