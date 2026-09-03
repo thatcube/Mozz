@@ -304,11 +304,11 @@ class MozzServer(
      * network, so it analyzes whenever it is asked to. See
      * `SonicAnalysisController`, which is what actually asks.
      */
-    suspend fun analyzeSonics(serverId: String): SonicProgress? =
-        core.call(CoreRequest(cmd = "analyzeSonics", serverId = serverId))
+    suspend fun analyzeSonics(serverId: String, weightsPath: String? = null): SonicProgress? =
+        core.call(CoreRequest(cmd = "analyzeSonics", serverId = serverId, weightsPath = weightsPath))
 
-    suspend fun sonicProgress(serverId: String): SonicProgress? =
-        core.call(CoreRequest(cmd = "sonicProgress", serverId = serverId))
+    suspend fun sonicProgress(serverId: String, weightsPath: String? = null): SonicProgress? =
+        core.call(CoreRequest(cmd = "sonicProgress", serverId = serverId, weightsPath = weightsPath))
 
     /**
      * Stop the pass. Vectors already written stay written, so the next call to

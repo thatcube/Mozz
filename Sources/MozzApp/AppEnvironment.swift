@@ -279,8 +279,14 @@ public final class AppEnvironment: ObservableObject {
             })
         let sonicConditions = SonicAnalysisConditions()
         self.sonicConditions = sonicConditions
+        // The learned engine's weights ship in the app bundle. Missing them is
+        // not fatal: the service falls back to the DSP engine, which is worse
+        // but real.
+        let trunk = Bundle.main.path(forResource: "vggish-trunk", ofType: "bin")
+            .flatMap { SonicAnalysisService.loadTrunk(at: $0) }
         self.sonicAnalysis = SonicAnalysisService(
             store: RecommendationStore(database),
+            trunk: trunk,
             isEnabled: { sonicConditions.isSatisfied() })
         self.favorites = FavoritesStore(database)
         self.clientIdentifier = Self.stableClientIdentifier(credentials)
@@ -2487,7 +2493,9 @@ public final class AppEnvironment: ObservableObject {
             // through to what this device heard for itself.
             matches = (try? await recommendations.localSonicMatches(
                 seedRemoteId: seedTrackId, serverId: serverId,
-                engine: SonicAnalyzer.engine, limit: limit * 3)) ?? []
+                // Whichever engine the runner is actually writing. Searching
+                // the other one finds nothing at all, silently.
+                engine: sonicAnalysis.engine, limit: limit * 3)) ?? []
         }
         guard !matches.isEmpty else { return [] }
         return (try? await recommendations.ownedSonicTracks(matches, serverId: serverId)) ?? []

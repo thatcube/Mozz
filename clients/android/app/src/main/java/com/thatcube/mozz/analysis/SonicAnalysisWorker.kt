@@ -49,7 +49,7 @@ class SonicAnalysisWorker(
             return Result.retry()
         }
 
-        runCatching { server.analyzeSonics(account.serverId) }.onFailure {
+        runCatching { server.analyzeSonics(account.serverId, SonicWeights.path(applicationContext)) }.onFailure {
             Log.w(TAG, "cannot start analysis", it)
             return Result.retry()
         }
@@ -60,7 +60,7 @@ class SonicAnalysisWorker(
         // a pulled charger from costing someone their battery.
         while (!isStopped) {
             delay(POLL_MS)
-            val progress = runCatching { server.sonicProgress(account.serverId) }.getOrNull() ?: continue
+            val progress = runCatching { server.sonicProgress(account.serverId, SonicWeights.path(applicationContext)) }.getOrNull() ?: continue
             if (!progress.running) {
                 Log.i(TAG, "analysis idle at ${progress.analyzed}/${progress.total}")
                 return Result.success()

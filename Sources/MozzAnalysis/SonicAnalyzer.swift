@@ -79,6 +79,43 @@ public struct SonicAnalyzer: Sendable {
         self.melFilters = Self.melFilterbank(configuration: configuration)
     }
 
+    /// Tempo alone, for when something else is describing the timbre.
+    ///
+    /// The learned engine has no opinion about tempo, and dropping BPM to gain
+    /// a better embedding would be a poor trade — so this runs the cheap half
+    /// of the pipeline: an onset envelope from spectral flux, and an
+    /// autocorrelation over it. No mel filterbank, no cepstrum, no statistics,
+    /// which is most of what `analyze` spends its time on.
+    public func tempo(of samples: [Float]) -> Double? {
+        let config = configuration
+        guard samples.count >= config.frameSize * 8 else { return nil }
+        let bins = config.frameSize / 2 + 1
+        var onsets: [Double] = []
+        var previous = [Double](repeating: 0, count: bins)
+        var frame = [Double](repeating: 0, count: config.frameSize)
+        var start = 0
+        while start + config.frameSize <= samples.count {
+            for i in 0..<config.frameSize {
+                frame[i] = Double(samples[start + i]) * window[i]
+            }
+            let magnitudes = fft.magnitudes(of: frame)
+            let total = magnitudes.reduce(0, +)
+            if total > 1e-9 {
+                var rising = 0.0
+                for b in 0..<bins {
+                    let delta = magnitudes[b] - previous[b]
+                    if delta > 0 { rising += delta }
+                }
+                onsets.append(rising / total)
+            } else {
+                onsets.append(0)
+            }
+            previous = magnitudes
+            start += config.hopSize
+        }
+        return Self.estimateTempo(onsets: onsets, frameRate: config.frameRate)
+    }
+
     /// Analyze one mono buffer.
     ///
     /// Returns nil when there is not enough signal to describe — too short, or

@@ -30,6 +30,8 @@ data class CoreRequest(
     val genre: String? = null,
     /** Opaque resume position from a previous page's `nextCursor`. */
     val cursor: String? = null,
+    /** Where this platform put the learned analyzer's weights, if it ships them. */
+    val weightsPath: String? = null,
 
     // Sign-in, sync and streaming.
     val kind: String? = null,

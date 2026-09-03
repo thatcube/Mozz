@@ -117,14 +117,14 @@ class SonicAnalysisController(
         if (isSatisfied()) {
             if (watcher?.isActive == true) return
             watcher = scope.launch {
-                runCatching { server.analyzeSonics(serverId) }
+                runCatching { server.analyzeSonics(serverId, SonicWeights.path(appContext)) }
                     .onSuccess { _progress.value = it }
                     .onFailure { Log.w(TAG, "could not start analysis", it) }
                 // Follow the pass so Settings can show it moving. Cheap: one
                 // small database read a few times a minute.
                 while (true) {
                     delay(POLL_MS)
-                    val progress = runCatching { server.sonicProgress(serverId) }.getOrNull()
+                    val progress = runCatching { server.sonicProgress(serverId, SonicWeights.path(appContext)) }.getOrNull()
                     _progress.value = progress ?: continue
                     if (!progress.running) return@launch
                 }

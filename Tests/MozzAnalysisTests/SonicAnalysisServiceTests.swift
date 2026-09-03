@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import MozzCore
+import GRDB
 import MozzDatabase
 @testable import MozzAnalysis
 
@@ -250,5 +251,92 @@ private final class Flag: @unchecked Sendable {
     }
     func set(_ newValue: Bool) {
         lock.lock(); flag = newValue; lock.unlock()
+    }
+}
+
+/// The runner with the learned engine in it. Skipped without weights, since
+/// they are nine megabytes and belong wherever each platform ships resources.
+final class SonicLearnedEngineTests: XCTestCase {
+    private let serverId = "lsrv"
+
+    private func trunk() throws -> VGGishTrunk {
+        guard let path = ProcessInfo.processInfo.environment["MOZZ_VGGISH_WEIGHTS"] else {
+            throw XCTSkip("set MOZZ_VGGISH_WEIGHTS to the exported vggish-trunk.bin")
+        }
+        return try VGGishTrunk(weights: Data(contentsOf: URL(fileURLWithPath: path)))
+    }
+
+    private func library() async throws -> (MusicDatabase, RecommendationStore) {
+        let db = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(db)
+        try await writer.saveServer(ServerConnection(
+            id: serverId, kind: .jellyfin, name: "L",
+            baseURL: URL(string: "https://l.example.com")!, userID: nil, clientIdentifier: "cid"))
+        try await writer.upsertTracks([
+            Track(id: "t1", title: "T1", artistName: "A", artistID: "a1", genres: ["Rock"]),
+        ], serverId: serverId)
+        return (db, RecommendationStore(db))
+    }
+
+    func testTheLearnedEngineStampsItsOwnNameAndKeepsTempo() async throws {
+        let trunk = try trunk()
+        let (db, store) = try await library()
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "tone-440-6s", withExtension: "mp3",
+                                                  subdirectory: "Fixtures"))
+        let payload = try Data(contentsOf: url)
+        let service = SonicAnalysisService(
+            store: store, trunk: trunk,
+            load: { _, _ in payload },
+            config: SonicAnalysisConfig(pauseBetweenTracks: 0))
+
+        XCTAssertEqual(service.engine, VGGishAnalyzer.engine)
+        await service.analyze(serverId: serverId, backend: StubBackend(serverId: serverId))
+        await service.waitForPass()
+
+        let vector = try await store.sonicEmbedding(trackRef: "\(serverId):t1",
+                                                    engine: VGGishAnalyzer.engine)
+        XCTAssertEqual(vector?.count, VGGishTrunk.embeddingSize)
+        // The DSP engine's vectors must not be mistaken for these.
+        let old = try await store.sonicEmbedding(trackRef: "\(serverId):t1", engine: SonicAnalyzer.engine)
+        XCTAssertNil(old)
+
+        // A 440 Hz tone has no beat, so a nil BPM here is the estimator being
+        // right rather than absent — see `testTheCheapTempoPathAgreesWithTheFullOne`
+        // for the contract that matters.
+        let row = try await db.read { database in
+            try Row.fetchOne(database, sql: "SELECT bpm, feature_source FROM track_features WHERE track_ref = ?",
+                             arguments: ["\(self.serverId):t1"])
+        }
+        XCTAssertEqual(row?["feature_source"], VGGishAnalyzer.engine)
+    }
+
+    /// The reason the cheap path exists: the learned engine writes no BPM, so
+    /// the DSP engine's tempo estimator runs beside it. It has to agree with
+    /// what the full analysis would have said, or the column means two
+    /// different things depending on which engine wrote the row.
+    func testTheCheapTempoPathAgreesWithTheFullOne() {
+        let analyzer = SonicAnalyzer()
+        let pulse = Signal.pulse(bpm: 120, seconds: 20)
+        let cheap = analyzer.tempo(of: pulse)
+        let full = analyzer.analyze(pulse)?.tempoBPM
+        XCTAssertNotNil(cheap)
+        XCTAssertNotNil(full)
+        XCTAssertEqual(cheap!, full!, accuracy: 0.001)
+        XCTAssertEqual(cheap!, 120, accuracy: 4)
+    }
+
+    func testSomethingWithNoBeatGetsNoTempoRatherThanAGuess() {
+        XCTAssertNil(SonicAnalyzer().tempo(of: Signal.sine(hz: 440, seconds: 8)))
+    }
+
+    func testWithoutWeightsItIsStillTheDSPEngine() async throws {
+        let (_, store) = try await library()
+        let service = SonicAnalysisService(store: store, trunk: nil,
+                                           config: SonicAnalysisConfig(pauseBetweenTracks: 0))
+        XCTAssertEqual(service.engine, SonicAnalyzer.engine)
+    }
+
+    func testUnreadableWeightsFallBackRatherThanFail() {
+        XCTAssertNil(SonicAnalysisService.loadTrunk(at: "/nonexistent/vggish-trunk.bin"))
     }
 }

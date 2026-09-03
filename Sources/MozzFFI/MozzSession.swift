@@ -78,6 +78,9 @@ struct SessionRequest: Decodable {
     /// a client that respects a user's "no third-party lookups" preference
     /// passes false.
     var useLRCLIB: Bool?
+    /// Where the host has put the learned analyzer's weights, if it ships them.
+    /// Absent means analyze with the DSP engine.
+    var weightsPath: String?
 
     // Likes and ratings. `liked` is the universal control — every backend can
     // express it, whatever it calls the thing. `stars` is the granular one and
@@ -454,10 +457,15 @@ final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
     let recommendations: RecommendationService
-    /// On-device sonic analysis (ADR-0011). Idle until the host asks for a pass,
-    /// because only the host can see whether this is a good moment to spend
-    /// somebody's battery and bandwidth on it.
-    let sonicAnalysis: SonicAnalysisService
+    /// On-device sonic analysis (ADR-0018). Idle until the host asks for a
+    /// pass, because only the host can see whether this is a good moment to
+    /// spend somebody's battery and bandwidth on it.
+    ///
+    /// Built on first use rather than at open, because which engine it runs
+    /// depends on whether the host can hand over the learned model's weights,
+    /// and only the host knows where those live on its platform.
+    private var sonicServices: [String: SonicAnalysisService] = [:]
+    private let sonicLock = NSLock()
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     let backends = BackendTable()
@@ -466,7 +474,32 @@ final class MozzSession: @unchecked Sendable {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
-        self.sonicAnalysis = SonicAnalysisService(store: RecommendationStore(database))
+    }
+
+    /// The analysis service for a given set of weights.
+    ///
+    /// Memoized on the path: a service owns the in-flight pass, so asking twice
+    /// has to give back the same one or a second call would start a second
+    /// crawl over the same library. A missing or unreadable file falls back to
+    /// the DSP engine rather than failing — analysis with the older engine
+    /// beats no analysis.
+    func sonicAnalysis(weightsPath: String?) -> SonicAnalysisService {
+        let key = weightsPath ?? ""
+        sonicLock.lock()
+        defer { sonicLock.unlock() }
+        if let existing = sonicServices[key] { return existing }
+        let trunk = weightsPath.flatMap { SonicAnalysisService.loadTrunk(at: $0) }
+        let service = SonicAnalysisService(store: RecommendationStore(database), trunk: trunk)
+        sonicServices[key] = service
+        return service
+    }
+
+    /// Every service built so far, for commands that must reach whichever one
+    /// is actually running (cancel, progress).
+    func allSonicServices() -> [SonicAnalysisService] {
+        sonicLock.lock()
+        defer { sonicLock.unlock() }
+        return Array(sonicServices.values)
     }
 }
 
@@ -476,7 +509,8 @@ protocol SessionContext: AnyObject {
     var database: MusicDatabase { get }
     var repository: LibraryRepository { get }
     var recommendations: RecommendationService { get }
-    var sonicAnalysis: SonicAnalysisService { get }
+    func sonicAnalysis(weightsPath: String?) -> SonicAnalysisService
+    func allSonicServices() -> [SonicAnalysisService]
     var backends: BackendTable { get }
 }
 
@@ -928,7 +962,10 @@ private func dispatch(
                 // heard for itself.
                 matches = (try? await session.recommendations.localSonicMatches(
                     seedRemoteId: seedTrackId, serverId: serverId,
-                    engine: SonicAnalyzer.engine, limit: limit * 3)) ?? []
+                    // Whichever engine the runner is actually writing. Searching
+                    // the other one finds nothing at all, silently.
+                    engine: session.sonicAnalysis(weightsPath: request.weightsPath).engine,
+                    limit: limit * 3)) ?? []
             }
             sonic = (try? await session.recommendations.ownedSonicTracks(
                 matches, serverId: serverId)) ?? []
@@ -994,8 +1031,9 @@ private func dispatch(
         guard let backend = session.backends.backend(serverId) else {
             return sessionFailure(request.id, request.cmd, "analyzeSonics needs an attached server")
         }
-        await session.sonicAnalysis.analyze(serverId: serverId, backend: backend)
-        let started = await session.sonicAnalysis.progress(serverId: serverId)
+        let service = session.sonicAnalysis(weightsPath: request.weightsPath)
+        await service.analyze(serverId: serverId, backend: backend)
+        let started = await service.progress(serverId: serverId)
         return sessionSuccess(request, WireSonicProgress(analyzed: started.analyzed, total: started.total,
                                                          running: started.running, lastError: started.lastError))
 
@@ -1003,7 +1041,8 @@ private func dispatch(
         guard let serverId else {
             return sessionFailure(request.id, request.cmd, "sonicProgress needs serverId")
         }
-        let progress = await session.sonicAnalysis.progress(serverId: serverId)
+        let progress = await session.sonicAnalysis(weightsPath: request.weightsPath)
+            .progress(serverId: serverId)
         return sessionSuccess(request, WireSonicProgress(analyzed: progress.analyzed, total: progress.total,
                                                          running: progress.running, lastError: progress.lastError))
 
@@ -1012,7 +1051,8 @@ private func dispatch(
         // the network turns metered, the user turns the feature off. Vectors
         // already written stay written, so the next pass resumes rather than
         // restarts.
-        await session.sonicAnalysis.cancel()
+        // Whichever engine is walking, stop it.
+        for service in session.allSonicServices() { await service.cancel() }
         return sessionSuccess(request, WireAction(ok: true))
 
     default:

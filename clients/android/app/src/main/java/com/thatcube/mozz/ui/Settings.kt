@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.thatcube.mozz.BuildConfig
 import com.thatcube.mozz.R
+import com.thatcube.mozz.analysis.SonicWeights
 import androidx.compose.foundation.lazy.items
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
@@ -87,7 +88,7 @@ fun SettingsPage(
     // ticks while this screen is open is the only visible sign it is working.
     val sonic by produceState<SonicProgress?>(null, account.serverId) {
         while (true) {
-            value = runCatching { server.sonicProgress(account.serverId) }.getOrNull()
+            value = runCatching { server.sonicProgress(account.serverId, SonicWeights.path(context)) }.getOrNull()
             delay(SONIC_POLL_MS)
         }
     }

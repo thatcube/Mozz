@@ -80,6 +80,10 @@ public struct SonicAnalysisProgress: Sendable, Hashable {
 public actor SonicAnalysisService {
     private let store: RecommendationStore
     private let analyzer: SonicAnalyzer
+    /// The learned engine, when its weights were available. When present it
+    /// describes the audio and the DSP analyzer is kept only for tempo, which
+    /// the network has no opinion about.
+    private let learned: VGGishAnalyzer?
     private let load: AnalysisAudioLoader
     private let config: SonicAnalysisConfig
     private let isEnabled: @Sendable () -> Bool
@@ -98,8 +102,23 @@ public actor SonicAnalysisService {
     /// rather than one that has been left behind.
     private var lastError: String?
 
+    /// Load the learned engine's weights from a file the host has placed
+    /// somewhere it can name.
+    ///
+    /// A path rather than the bytes themselves because the bytes are nine
+    /// megabytes and the FFI boundary is JSON; a path rather than a bundle
+    /// lookup because the core does not know what a bundle, an asset manager or
+    /// an application directory is. Returns nil when the file is missing or is
+    /// not weights, and the caller falls back to the DSP engine rather than
+    /// failing — analysis with the older engine beats no analysis.
+    public static func loadTrunk(at path: String) -> VGGishTrunk? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        return try? VGGishTrunk(weights: data)
+    }
+
     public init(store: RecommendationStore,
                 analyzer: SonicAnalyzer = SonicAnalyzer(),
+                trunk: VGGishTrunk? = nil,
                 load: @escaping AnalysisAudioLoader = AnalysisAudioFetcher.live(),
                 config: SonicAnalysisConfig = SonicAnalysisConfig(),
                 isEnabled: @escaping @Sendable () -> Bool = { true },
@@ -107,6 +126,7 @@ public actor SonicAnalysisService {
                 log: @escaping @Sendable (String) -> Void = { _ in }) {
         self.store = store
         self.analyzer = analyzer
+        self.learned = trunk.map { VGGishAnalyzer(trunk: $0) }
         self.load = load
         self.config = config
         self.isEnabled = isEnabled
@@ -115,7 +135,14 @@ public actor SonicAnalysisService {
     }
 
     /// The engine every read and write in this service is keyed on.
-    public nonisolated var engine: String { SonicAnalyzer.engine }
+    ///
+    /// Two engines are two unrelated coordinate spaces, so this is what keeps
+    /// them apart: rows carrying the other one count as unanalyzed and are
+    /// redone in the background.
+    public nonisolated var engine: String { engineName }
+    private nonisolated var engineName: String {
+        learned == nil ? SonicAnalyzer.engine : VGGishAnalyzer.engine
+    }
 
     // MARK: - Passes
 
@@ -151,7 +178,7 @@ public actor SonicAnalysisService {
     /// How much of this server's library this engine has done, and whether a
     /// pass is walking it right now.
     public func progress(serverId: ServerID) async -> SonicAnalysisProgress {
-        let counts = (try? await store.sonicAnalysisProgress(serverId: serverId, engine: SonicAnalyzer.engine))
+        let counts = (try? await store.sonicAnalysisProgress(serverId: serverId, engine: engineName))
             ?? (analyzed: 0, total: 0)
         return SonicAnalysisProgress(analyzed: counts.analyzed, total: counts.total,
                                      running: pass != nil && currentPassServerId == serverId,
@@ -234,11 +261,11 @@ public actor SonicAnalysisService {
     /// rest in priority order, and the spread's own leftovers are simply part
     /// of what remains.
     private func queue(serverId: ServerID, limit: Int) async throws -> [TrackCandidate] {
-        let counts = try await store.sonicAnalysisProgress(serverId: serverId, engine: SonicAnalyzer.engine)
+        let counts = try await store.sonicAnalysisProgress(serverId: serverId, engine: engineName)
         let spreadTarget = Int(Double(counts.total) * config.spreadFraction)
         if counts.total > 0, counts.analyzed < spreadTarget {
             let spread = try await store.sonicSampleCandidates(
-                serverId: serverId, engine: SonicAnalyzer.engine,
+                serverId: serverId, engine: engineName,
                 perArtist: config.perArtistInSpread, limit: limit)
             // The spread runs out once every artist has had its couple of
             // tracks, which happens well before the target on a library with few
@@ -247,7 +274,7 @@ public actor SonicAnalysisService {
             if !spread.isEmpty { return spread }
         }
         return try await store.tracksNeedingSonicAnalysis(
-            serverId: serverId, engine: SonicAnalyzer.engine, limit: limit)
+            serverId: serverId, engine: engineName, limit: limit)
     }
 
     /// One track, end to end. Returns false when there was nothing usable to
@@ -257,7 +284,7 @@ public actor SonicAnalysisService {
                               backend: any MusicBackend) async throws -> Bool {
         guard let source = try backend.analysisAudioSource(forTrackID: candidate.remoteId) else { return false }
         let data = try await load(source.url, Self.byteBudget(startsAtLeadIn: source.startsAtLeadIn))
-        let rate = analyzer.configuration.sampleRate
+        let rate = VGGishFrontEnd.sampleRate
         // Scoped so the decoded stereo PCM — tens of megabytes for a 90-second
         // window — is gone before the DSP starts. What survives is the mono
         // 16 kHz window, which is a few megabytes.
@@ -267,11 +294,25 @@ public actor SonicAnalysisService {
             return Self.window(prepared, sampleRate: rate, trimLeadIn: !source.startsAtLeadIn)
         }()
         guard !window.isEmpty else { return false }
-        guard let features = analyzer.analyze(window) else { return false }
+        let features: SonicFeatures?
+        var bpm: Double?
+        if let learned {
+            features = learned.analyze(window)
+            // The network has no opinion about tempo, so the cheap half of the
+            // DSP engine still runs: an onset envelope and an autocorrelation,
+            // a fraction of the cost of the convolutions, and the difference
+            // between a library with BPM and one without.
+            bpm = analyzer.tempo(of: window)
+        } else {
+            let described = analyzer.analyze(window)
+            features = described
+            bpm = described?.tempoBPM
+        }
+        guard let features else { return false }
 
         try await store.saveSonicEmbedding(features.values,
                                            engine: features.engine,
-                                           bpm: features.tempoBPM,
+                                           bpm: bpm,
                                            trackRef: candidate.trackRef,
                                            at: now().timeIntervalSince1970)
         return true
