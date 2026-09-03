@@ -74,6 +74,14 @@ final class SonicBenchmarkTests: XCTestCase {
         }
 
         let analyzers = variants.map { ($0.name, SonicAnalyzer(configuration: $0.configuration)) }
+        // The learned engine, when its weights are available. Scored on exactly
+        // the same audio, through exactly the same metric, so the comparison is
+        // the port's own numbers rather than the Python prototype's.
+        let learned: VGGishAnalyzer? = ProcessInfo.processInfo.environment["MOZZ_VGGISH_WEIGHTS"]
+            .flatMap { try? Data(contentsOf: URL(fileURLWithPath: $0)) }
+            .flatMap { try? VGGishTrunk(weights: $0) }
+            .map { VGGishAnalyzer(trunk: $0) }
+        var learnedVectors: [[Float]] = []
         var labels: [String] = []
         var names: [String] = []
         var byVariant: [[[Float]]] = Array(repeating: [], count: analyzers.count)
@@ -102,9 +110,17 @@ final class SonicBenchmarkTests: XCTestCase {
                 // A track only counts when every variant could describe it, so
                 // the comparison is over one identical set of songs.
                 guard features.allSatisfy({ $0 != nil }) else { continue }
+                var learnedVector: [Float]?
+                if let learned {
+                    // VGGish wants 16 kHz, which is what the DSP engine's
+                    // configuration already resamples to.
+                    guard let f = learned.analyze(prepared) else { continue }
+                    learnedVector = f.values
+                }
                 labels.append(dir.lastPathComponent)
                 names.append(file.deletingPathExtension().lastPathComponent)
                 for (i, f) in features.enumerated() { byVariant[i].append(f!.values) }
+                if let learnedVector { learnedVectors.append(learnedVector) }
             }
         }
 
@@ -165,6 +181,20 @@ final class SonicBenchmarkTests: XCTestCase {
                          precision * 100, nearest * 100))
             if precision > best.score { best = (name, precision) }
             perVariantByLabel[name] = byLabel.mapValues { Double($0.hits) / Double($0.total) }
+        }
+        if learned != nil, learnedVectors.count == labels.count {
+            let corpus = SonicCorpusStats(learnedVectors)
+            let space = learnedVectors.map { corpus.normalize($0) }
+            var hits = 0, nearestHits = 0
+            for i in space.indices {
+                let ranked = space.indices.filter { $0 != i }
+                    .sorted { dot(space[i], space[$0]) > dot(space[i], space[$1]) }
+                if ranked.prefix(3).contains(where: { labels[$0] == labels[i] }) { hits += 1 }
+                if let nearest = ranked.first, labels[nearest] == labels[i] { nearestHits += 1 }
+            }
+            print(String(format: "  %-24@  %5.1f%%  %5.1f%%   <- the port",
+                         "mozz-vggish@1" as NSString,
+                         Double(hits) / n * 100, Double(nearestHits) / n * 100))
         }
         print("\n  best: \(best.name)\n")
 
