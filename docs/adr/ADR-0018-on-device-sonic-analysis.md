@@ -83,11 +83,17 @@ neighbours share the seed's label.
 
 | test | mozz-dsp@1 | mozz-vggish@1 | verdict |
 | --- | --- | --- | --- |
-| FMA genre, top-3 (n=1200) | 69.6% | 78.3% | significant |
-| FMA genre, 1-NN | 47.2% | 62.9% | significant |
+| FMA genre, top-3 (n=1200) | 69.6% | 77.0% | significant |
+| FMA genre, 1-NN | 47.2% | 61.8% | significant |
 | MagnaTagATune human "which two sound alike" (n=378) | 59.0% | 62.7% | p = 0.20, underpowered |
 | A real 375-track library, same-artist 1-NN | 68.9% | 82.3% | p = 0.0001 |
 | A real 375-track library, same-album top-3 | 35.7% | 45.0% | p = 0.012 |
+
+The VGGish column is the **Swift port's own score**, not the Python
+prototype's. The prototype measured 78.3% / 62.9%; the port gives up about a
+point to half-precision weights, our own resampler, and sampling twelve patches
+per track where the prototype used every one. That gap is inside the noise floor
+for this sample and is the price of the thing being portable.
 
 Things measured and rejected along the way:
 
