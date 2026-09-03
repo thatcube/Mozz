@@ -73,3 +73,92 @@ final class SonicCorpusTests: XCTestCase {
         }
     }
 }
+
+/// Mutual closeness: judging a pairing from both sides, which is what stops a
+/// station being built out of a track's least-bad option.
+final class SonicMutualityTests: XCTestCase {
+    /// A dense cluster plus one track far away from everything — the shape of a
+    /// library with a single classical recording in it.
+    private func libraryWithAnOutlier() -> ([(remoteId: String, vector: [Float])], Int) {
+        var entries: [(remoteId: String, vector: [Float])] = []
+        for i in 0..<60 {
+            let jitter = Float(i % 7) * 0.01
+            entries.append(("crowd\(i)", [1.0 + jitter, 0.05 * Float(i % 5), 0.02 * jitter]))
+        }
+        entries.append(("loner", [0.0, 0.0, 1.0]))
+        return (entries, entries.count - 1)
+    }
+
+    func testTheLonerIsFurtherFromItsBestMatchThanAnyoneElseIs() {
+        let (entries, lonerIndex) = libraryWithAnOutlier()
+        let corpus = SonicCorpus(entries)
+        let vectors = corpus.entries.map(\.vector)
+
+        func separationOfBestMatch(_ i: Int) -> Double {
+            var best = (distance: Double.infinity, index: -1)
+            for j in vectors.indices where j != i {
+                var dot = 0.0
+                for k in 0..<vectors[i].count { dot += Double(vectors[i][k]) * Double(vectors[j][k]) }
+                let distance = 1 - dot
+                if distance < best.distance { best = (distance, j) }
+            }
+            guard let mine = corpus.distanceProfile(vectors[i]),
+                  let theirs = corpus.distanceProfile(vectors[best.index]) else { return 0 }
+            return Swift.max(SonicCorpus.separation(best.distance, mine),
+                             SonicCorpus.separation(best.distance, theirs))
+        }
+
+        let loner = separationOfBestMatch(lonerIndex)
+        let ordinary = (0..<10).map(separationOfBestMatch)
+        // Every ordinary track's best match is closer, from its worse side,
+        // than the loner's is.
+        for value in ordinary {
+            XCTAssertLessThan(value, loner)
+        }
+    }
+
+    func testAPairingIsJudgedFromTheSideThatLikesItLess() {
+        // The asymmetry the whole thing rests on: a distance can be a track's
+        // best available option and still be an outlier from the other track's
+        // point of view.
+        let near = (mean: 1.0, deviation: 0.05)   // a track in a dense cluster
+        let far = (mean: 1.6, deviation: 0.30)    // a track out on its own
+        let distance = 1.2
+
+        let fromFar = SonicCorpus.separation(distance, far)
+        let fromNear = SonicCorpus.separation(distance, near)
+        XCTAssertLessThan(fromFar, 0, "closer than that track's average")
+        XCTAssertGreaterThan(fromNear, 0, "further than that track's average")
+        XCTAssertGreaterThan(Swift.max(fromFar, fromNear), fromFar,
+                             "the worse side is what counts")
+    }
+
+    func testTailProbabilityIsAProperTail() {
+        let profile = (mean: 1.0, deviation: 0.2)
+        XCTAssertEqual(SonicCorpus.tailProbability(1.0, profile), 0.5, accuracy: 1e-6)
+        XCTAssertGreaterThan(SonicCorpus.tailProbability(0.6, profile), 0.97)
+        XCTAssertLessThan(SonicCorpus.tailProbability(1.4, profile), 0.03)
+        // A degenerate spread must not produce a NaN that poisons a ranking.
+        let flat = (mean: 1.0, deviation: 0.0)
+        XCTAssertEqual(SonicCorpus.tailProbability(0.5, flat), 1)
+        XCTAssertEqual(SonicCorpus.tailProbability(1.5, flat), 0)
+    }
+
+    func testTheReferenceSampleSpansTheLibrary() {
+        // Strided, not the first 256: a sample of the opening of a library
+        // describes the opening of a library, and these statistics are supposed
+        // to describe the whole of one.
+        let vectors = (0..<1000).map { i in [Float(i)] }
+        let sample = SonicCorpus.sample(vectors, count: SonicCorpus.referenceSample)
+        XCTAssertEqual(sample.count, SonicCorpus.referenceSample)
+        XCTAssertEqual(sample.first?[0], 0)
+        XCTAssertGreaterThan(sample.last?[0] ?? 0, 700)
+
+        // A library smaller than the sample is used whole.
+        let small = (0..<10).map { i in [Float(i)] }
+        XCTAssertEqual(SonicCorpus.sample(small, count: 256).count, 10)
+
+        let corpus = SonicCorpus((0..<1000).map { ("t\($0)", [Float($0), Float($0 % 3), 1.0]) })
+        XCTAssertEqual(corpus.reference.count, SonicCorpus.referenceSample)
+    }
+}

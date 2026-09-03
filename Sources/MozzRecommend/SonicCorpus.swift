@@ -50,6 +50,7 @@ struct SonicCorpus {
             self.inverseSD = []
             self.standardized = false
             self.entries = raw.map { ($0.remoteId, Self.unit($0.vector)) }
+            self.reference = Self.sample(entries.map(\.vector), count: Self.referenceSample)
             return
         }
 
@@ -79,6 +80,84 @@ struct SonicCorpus {
         self.inverseSD = inverseSD
         self.standardized = true
         self.entries = raw.map { ($0.remoteId, Self.standardize($0.vector, mean: mean, inverseSD: inverseSD)) }
+        self.reference = Self.sample(entries.map(\.vector), count: Self.referenceSample)
+    }
+
+    /// Every `stride`-th vector, so the sample spans the library rather than
+    /// its first few hundred tracks.
+    static func sample(_ vectors: [[Float]], count: Int) -> [[Float]] {
+        guard vectors.count > count else { return vectors }
+        let stride = Swift.max(vectors.count / count, 1)
+        return Swift.stride(from: 0, to: vectors.count, by: stride).prefix(count).map { vectors[$0] }
+    }
+
+    /// A fixed subset of the corpus, used to characterise how far any one track
+    /// sits from the library in general.
+    ///
+    /// Sampled rather than exhaustive: the statistics only need to describe a
+    /// distribution, and 256 draws pin a mean and a standard deviation far more
+    /// cheaply than ten thousand do. Taken at a fixed stride rather than at
+    /// random so the same library always produces the same numbers.
+    private(set) var reference: [[Float]] = []
+    static let referenceSample = 256
+
+    /// How far this vector sits from the library at large.
+    ///
+    /// Returns nil when the corpus is too small for the spread to mean
+    /// anything.
+    func distanceProfile(_ vector: [Float]) -> (mean: Double, deviation: Double)? {
+        guard reference.count >= 16, vector.count == reference[0].count else { return nil }
+        var sum = 0.0, sumSquares = 0.0
+        for other in reference {
+            var dot = 0.0
+            for i in 0..<vector.count { dot += Double(vector[i]) * Double(other[i]) }
+            let distance = 1 - dot
+            sum += distance
+            sumSquares += distance * distance
+        }
+        let count = Double(reference.count)
+        let mean = sum / count
+        let variance = Swift.max(sumSquares / count - mean * mean, 0)
+        return (mean, variance.squareRoot())
+    }
+
+    /// Mutual Proximity (Schnitzer, Flexer, Schedl & Widmer, 2011): the
+    /// probability that these two tracks are each other's neighbour, judged
+    /// from BOTH sides.
+    ///
+    /// This exists because a one-sided similarity cannot express the failure
+    /// this feature actually has. A library holding one opera track answers it
+    /// with a soprano-led pop song, and that match scores higher than 71% of
+    /// every other best-match in the library — because the score is relative to
+    /// the library's own distribution, and a library with one opera track has
+    /// no yardstick for opera. From the pop song's side the same distance is an
+    /// extreme outlier, and multiplying the two tail probabilities is what lets
+    /// the pairing say so.
+    ///
+    /// The literature calls the general problem hubness, and tracks that are
+    /// nobody's neighbour anti-hubs; a real recommender catalogue measured
+    /// 33-35% of them (Gasser, Flexer & Schnitzer, 2010).
+    func mutualProximity(distance: Double,
+                         seed: (mean: Double, deviation: Double),
+                         candidate: (mean: Double, deviation: Double)) -> Double {
+        Self.tailProbability(distance, seed) * Self.tailProbability(distance, candidate)
+    }
+
+    /// How far below a track's usual distance this one sits, in standard
+    /// deviations. Negative is closer than average; -3 is very close indeed.
+    static func separation(_ distance: Double,
+                           _ profile: (mean: Double, deviation: Double)) -> Double {
+        guard profile.deviation > 1e-9 else { return distance < profile.mean ? -.infinity : 0 }
+        return (distance - profile.mean) / profile.deviation
+    }
+
+    /// P(X > distance) for a normal fitted to one track's distances.
+    static func tailProbability(_ distance: Double,
+                                _ profile: (mean: Double, deviation: Double)) -> Double {
+        guard profile.deviation > 1e-9 else { return distance < profile.mean ? 1 : 0 }
+        let z = (distance - profile.mean) / profile.deviation
+        // 1 - Φ(z), written with erfc so the far tail keeps its precision.
+        return 0.5 * erfc(z / 2.0.squareRoot())
     }
 
     /// Put a vector from outside the corpus — the seed — into the same space.
