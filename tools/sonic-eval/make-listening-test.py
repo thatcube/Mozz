@@ -72,6 +72,9 @@ html = """<!doctype html><meta charset="utf-8"><title>Mozz blind similarity test
  .muted{color:#8e8e93;font-size:13px}
  .bar{height:4px;background:#2c2c2e;border-radius:2px;margin:10px 0 18px;overflow:hidden}
  .bar div{height:100%;background:#0a84ff;transition:width .2s}
+ .flag{display:block;margin-top:14px;padding:10px 12px;background:#2c2118;border-radius:8px;
+        color:#e8c39e;font-size:13px;cursor:pointer}
+ .flag input{margin-right:8px}
  .row{display:flex;gap:10px;align-items:center;margin-top:14px}
  .row .link{background:none;color:#8e8e93;text-decoration:underline;padding:6px 0}
  textarea{width:100%;height:120px;background:#1c1c1e;color:#eee;border:1px solid #333;
@@ -86,9 +89,11 @@ close this and come back.</p>
 <div class="muted" id="count"></div>
 <div class="seed" id="seed"></div>
 <div class="pair" id="pair"></div>
+<label class="flag"><input type="checkbox" id="poor">
+  Neither is really similar to the seed — I'm only saying which is <i>less</i> wrong</label>
 <button class="both" id="both">Both are about equally close</button>
 <div class="row">
-  <button class="link" id="skip">can't tell / neither works</button>
+  <button class="link" id="skip">can't rank them at all</button>
   <button class="link" id="back">undo last</button>
   <button class="link" id="show">show results so far</button>
   <span class="saved" id="saved"></span>
@@ -127,6 +132,7 @@ function render(){
   el('seed').hidden = el('pair').hidden = false;
   el('both').hidden = false;
   el('count').textContent = `Trial ${i+1} of ${TRIALS.length}`;
+  el('poor').checked = false;
   el('seed').innerHTML = `<b>SEED</b><div class="muted">${t.seed.artist} — ${t.seed.title}</div>
     <audio controls preload="none" src="file://${encodeURI(t.seed.clip)}"></audio>`;
   el('pair').innerHTML = card('A', t.left) + card('B', t.right);
@@ -134,7 +140,12 @@ function render(){
 }
 function record(value){
   const t = TRIALS[picks.length];
-  picks.push({seed: t.seed.artist + ' — ' + t.seed.title, chose: value});
+  // `usable` is a separate axis from `chose`: which engine ranked better, and
+  // whether its answer was worth playing, are different questions. A trial can
+  // be a clean win for one engine and still be two bad candidates.
+  picks.push({seed: t.seed.artist + ' — ' + t.seed.title, chose: value,
+              usable: !el('poor').checked});
+  el('poor').checked = false;
   save(); render();
 }
 function choose(side){
@@ -152,7 +163,9 @@ function finish(partial){
   el('count').textContent = partial ? 'Partial results — you can keep going.' : 'Done.';
   el('done').hidden = false;
   const tally = picks.reduce((m,p) => (m[p.chose] = (m[p.chose]||0)+1, m), {});
-  el('out').value = JSON.stringify({completed: picks.length, of: TRIALS.length, tally, picks}, null, 1);
+  const good = picks.filter(p => p.usable !== false).length;
+  el('out').value = JSON.stringify({completed: picks.length, of: TRIALS.length,
+    tally, worthPlaying: good, notWorthPlaying: picks.length - good, picks}, null, 1);
 }
 save(); render();
 </script>"""
