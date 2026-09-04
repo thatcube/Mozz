@@ -102,6 +102,25 @@ public struct CatalogSyncStore: Sendable {
         }
     }
 
+    /// The authoritative timestamp of the last completed full mirror.
+    ///
+    /// Relay publication uses this instead of "now", so a periodic background
+    /// pass can prove the catalog has not changed without re-uploading it.
+    public func completedRunAt(serverId: ServerID) async throws -> Date? {
+        try await database.read { db in
+            guard let timestamp = try Double.fetchOne(
+                db,
+                sql: """
+                    SELECT updatedAt FROM catalogSyncRun
+                    WHERE serverId = ? AND inProgress = 0
+                    """,
+                arguments: [serverId]) else {
+                return nil
+            }
+            return Date(timeIntervalSince1970: timestamp)
+        }
+    }
+
     public func checkpoint(serverId: ServerID, phase: String) async throws -> CatalogSyncCheckpoint? {
         try await database.read { db in
             guard let row = try Row.fetchOne(

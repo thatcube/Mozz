@@ -34,18 +34,15 @@ public struct AuthenticatedSession: Sendable, Hashable {
     public var userID: String?
     public var serverName: String
     public var clientIdentifier: String
+    /// Plex's server machine identifier. One Plex resource exposes several
+    /// addresses under this id, so it is the stable server identity when present.
+    public var serverMachineIdentifier: String?
     /// The Plex *account* token (distinct from the per-server access `token`),
     /// retained so the app can re-discover the account's servers later for the
     /// server picker. Nil for Jellyfin.
     public var accountToken: String?
-    /// The **server's** machine identifier (Plex's `clientIdentifier` for the
-    /// resource — not this app's, which is `clientIdentifier` above).
-    ///
-    /// A Plex server has several addresses and no single one of them is the
-    /// server; this is the thing that stays the same when the address changes,
-    /// so it is what re-resolution matches on. Nil for accounts signed in before
-    /// it was recorded, and for backends that have one address by definition.
-    public var machineIdentifier: String?
+    public var musicSectionID: String?
+    public var selectedMusicSectionIDs: [String]?
 
     public init(
         kind: BackendKind,
@@ -54,8 +51,10 @@ public struct AuthenticatedSession: Sendable, Hashable {
         userID: String? = nil,
         serverName: String,
         clientIdentifier: String,
+        serverMachineIdentifier: String? = nil,
         accountToken: String? = nil,
-        machineIdentifier: String? = nil
+        musicSectionID: String? = nil,
+        selectedMusicSectionIDs: [String]? = nil
     ) {
         self.kind = kind
         self.baseURL = baseURL
@@ -63,8 +62,40 @@ public struct AuthenticatedSession: Sendable, Hashable {
         self.userID = userID
         self.serverName = serverName
         self.clientIdentifier = clientIdentifier
+        self.serverMachineIdentifier = serverMachineIdentifier
         self.accountToken = accountToken
-        self.machineIdentifier = machineIdentifier
+        self.musicSectionID = musicSectionID
+        self.selectedMusicSectionIDs = selectedMusicSectionIDs
+    }
+}
+
+/// One Plex Home profile available under the signed-in account.
+///
+/// Managed users have no plex.tv login of their own, so selecting one and
+/// switching the account token is the only way they can use Mozz—and the only
+/// way Plex play state is attributed to the right person.
+public struct PlexHomeUser: Identifiable, Sendable, Hashable, Codable {
+    public let id: String
+    public let name: String
+    public let requiresPIN: Bool
+    public let isAdmin: Bool
+    public let isRestricted: Bool
+    public let avatarURL: URL?
+
+    public init(
+        id: String,
+        name: String,
+        requiresPIN: Bool,
+        isAdmin: Bool = false,
+        isRestricted: Bool = false,
+        avatarURL: URL? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.requiresPIN = requiresPIN
+        self.isAdmin = isAdmin
+        self.isRestricted = isRestricted
+        self.avatarURL = avatarURL
     }
 }
 
@@ -126,6 +157,7 @@ public struct PlexPinSession: Sendable, Hashable {
 public struct PlexResourceConnection: Sendable, Hashable {
     public var serverName: String
     public var clientIdentifier: String
+    public var serverMachineIdentifier: String?
     public var uri: URL
     public var isLocal: Bool
     public var isRelay: Bool
@@ -134,6 +166,7 @@ public struct PlexResourceConnection: Sendable, Hashable {
     public init(
         serverName: String,
         clientIdentifier: String,
+        serverMachineIdentifier: String? = nil,
         uri: URL,
         isLocal: Bool,
         isRelay: Bool,
@@ -141,6 +174,7 @@ public struct PlexResourceConnection: Sendable, Hashable {
     ) {
         self.serverName = serverName
         self.clientIdentifier = clientIdentifier
+        self.serverMachineIdentifier = serverMachineIdentifier
         self.uri = uri
         self.isLocal = isLocal
         self.isRelay = isRelay

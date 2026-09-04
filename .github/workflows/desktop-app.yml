@@ -40,6 +40,13 @@ on:
       - "clients/desktop-tests/**"
       - "Sources/**"
       - "Package.swift"
+      # The decoders, the DSP and the output device are all in here now, and
+      # both halves of this build link it: the Swift core takes the staticlib
+      # and the C# shell P/Invokes the cdylib. Leaving it out meant a change to
+      # how Mozz actually sounds produced no new desktop build at all - the fix
+      # for "picking a song does not change what is playing" sat in a green
+      # audio run while every desktop artifact still carried the bug.
+      - "audio/**"
       - ".github/workflows/desktop-app.yml"
 
 concurrency:
@@ -76,7 +83,12 @@ jobs:
       # job is the only place the Windows credential path — and the sample
       # pipeline — are ever run on Windows before a user signs in.
       - name: Test the credential store and audio pipeline
-        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+        # Everything that needs no core, run early for fast feedback. The typed
+        # command path needs the Swift library and so runs in a second pass
+        # after it is built, below.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName!~MozzCoreInvokeTests" 
 
       # Same amalgamation build as the spike, and for the same reason: GRDB's
       # GRDBSQLite is a systemLibrary target and Windows ships no SQLite. Static,
@@ -125,13 +137,63 @@ jobs:
           restore-keys: |
             swiftbuild-win-x64-6.3.3-
 
+      # The audio engine is Rust now, and both halves of this job need it: the
+      # Swift core links its staticlib, and the C# app P/Invokes its DLL (the
+      # .csproj builds that itself, but only if cargo is on PATH).
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            audio/target
+          key: cargo-win-x64-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: |
+            cargo-win-x64-
+
+      # The staticlib the Swift package links. Off Apple there is no
+      # XCFramework to carry it, so build it here and hand `swift build` the
+      # directory to find it in — the same way SQLite is handed over above.
+      - name: Build the audio engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location audio
+          cargo build --release -p mozz_audio_ffi
+          if ($LASTEXITCODE -ne 0) { Write-Error "cargo build failed"; exit 1 }
+          Pop-Location
+          $lib = "audio\target\release\mozz_audio_ffi.lib"
+          if (-not (Test-Path $lib)) { Write-Error "$lib was not produced"; exit 1 }
+          # Hand the linker a directory holding the static archive and nothing
+          # else. cargo emits the DLL and its import library beside this one for
+          # the C# shell to P/Invoke, and pointing -LIBPATH at all three invites
+          # the linker to bind the import library instead — which links without
+          # complaint and then cannot be loaded.
+          $link = Join-Path $env:RUNNER_TEMP "audiolink"
+          New-Item -ItemType Directory -Force -Path $link | Out-Null
+          Copy-Item $lib $link -Force
+          "MOZZ_AUDIO_LIB=$link" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build MozzFFI.dll
         shell: pwsh
         run: |
           swift build -c release --product MozzFFI `
             -Xcc -I"$env:SQLITE_ROOT\include" `
-            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib"
+            -Xlinker "/LIBPATH:$env:SQLITE_ROOT\lib" `
+            -Xlinker "/LIBPATH:$env:MOZZ_AUDIO_LIB"
 
+
+      - name: Test the typed command path against the built core
+        # The marshalling under test is an unsafe byte* LibraryImport, a fixed
+        # block and a span copied out before Swift's buffer is released. None of
+        # that can be checked with a stand-in, which is exactly where such a bug
+        # would hide — so this needs the real library and runs once it exists.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName~MozzCoreInvokeTests"
       - name: Publish the app
         shell: pwsh
         run: |
@@ -178,7 +240,13 @@ jobs:
 
           # System DLLs are provided by Windows; copying them is both pointless
           # and, for the UCRT, actively wrong.
-          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool|authz|netapi32|mpr)'
+          #
+          # The audio names at the end arrived with the Rust engine: cpal reaches
+          # the output device through WASAPI, so MozzFFI.dll now imports
+          # mmdevapi (the multimedia device API itself), and the rest are what
+          # that family pulls in. They ship with Windows and live in System32 —
+          # there is nothing to bundle and nothing to find beside the app.
+          $systemish = '^(api-ms-|ext-ms-|kernel32|user32|advapi32|ole32|oleaut32|shell32|ws2_32|crypt32|bcrypt|ncrypt|secur32|iphlpapi|dbghelp|shlwapi|userenv|version|winmm|gdi32|comdlg32|msvcrt|vcruntime|ucrtbase|msvcp|concrt|normaliz|dnsapi|winhttp|mswsock|rpcrt4|ntdll|combase|sechost|powrprof|pdh|psapi|setupapi|cfgmgr32|wintrust|imm32|dwmapi|uxtheme|d3d|dxgi|opengl32|winspool|authz|netapi32|mpr|mmdevapi|audioses|avrt|ksuser|mfplat)'
 
           $missing = New-Object System.Collections.Generic.List[string]
 
@@ -342,7 +410,12 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Test the credential store and audio pipeline
-        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+        # Everything that needs no core, run early for fast feedback. The typed
+        # command path needs the Swift library and so runs in a second pass
+        # after it is built, below.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName!~MozzCoreInvokeTests" 
 
       # Same reasoning as the Windows job, and worth having even though this one
       # is already the fastest: the build is still the largest part of it.
@@ -354,9 +427,56 @@ jobs:
           restore-keys: |
             swiftbuild-macos-arm64-
 
+      # macOS takes the XCFramework path, so it needs the one prerequisite
+      # SwiftPM cannot satisfy itself. Same step core-and-ios.yml already runs;
+      # without --all because this job builds no iOS slice.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            audio/target
+          key: cargo-macos-arm64-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-arm64-
+
+      # The XCFramework script regenerates the C header first, and that needs
+      # cbindgen. Pinned to the version audio-engine.yml uses, because the
+      # header it emits is compared against the committed copy — two versions
+      # formatting the same declarations differently would read as drift.
+      # Installed only when missing or wrong: ~/.cargo/bin is cached above, and
+      # `cargo install` over an existing binary is an error rather than a no-op.
+      - name: Install cbindgen
+        run: |
+          set -euo pipefail
+          want=0.29.4
+          have=$(cbindgen --version 2>/dev/null | awk '{print $2}' || true)
+          if [ "$have" != "$want" ]; then
+            cargo install cbindgen --version "$want" --locked --force
+          else
+            echo "cbindgen $want already present"
+          fi
+
+      - name: Build the audio engine
+        run: tools/build-audio-xcframework.sh
+
       - name: Build MozzFFI.dylib
         run: swift build -c release --product MozzFFI
 
+
+      - name: Test the typed command path against the built core
+        # The marshalling under test is an unsafe byte* LibraryImport, a fixed
+        # block and a span copied out before Swift's buffer is released. None of
+        # that can be checked with a stand-in, which is exactly where such a bug
+        # would hide — so this needs the real library and runs once it exists.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName~MozzCoreInvokeTests"
       - name: Publish the app
         run: |
           dotnet publish clients/desktop/Mozz.Desktop.csproj \
@@ -371,7 +491,9 @@ jobs:
         run: |
           set -euo pipefail
           otool -L publish/osx-arm64/libMozzFFI.dylib
-          for symbol in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string; do
+          # mozz_session_invoke/free_bytes carry the schema-described commands;
+          # they are a separate pair because protobuf cannot travel as a C string.
+          for symbol in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string mozz_session_invoke mozz_session_free_bytes; do
             if ! nm -gU publish/osx-arm64/libMozzFFI.dylib | grep -q "_${symbol}$"; then
               echo "exported symbol missing: ${symbol}" >&2
               exit 1
@@ -444,7 +566,12 @@ jobs:
             libicu-dev ffmpeg
 
       - name: Test the credential store and audio pipeline
-        run: dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+        # Everything that needs no core, run early for fast feedback. The typed
+        # command path needs the Swift library and so runs in a second pass
+        # after it is built, below.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName!~MozzCoreInvokeTests" 
 
       # Ubuntu does ship libsqlite3, unlike Windows — but shipping it is not the
       # same as shipping it with FTS5, and Mozz's search is FTS5. Building the
@@ -479,12 +606,53 @@ jobs:
           restore-keys: |
             swiftbuild-linux-${{ matrix.arch }}-6.1.2-
 
+      # Same as the Windows job: off Apple the Swift package links the Rust
+      # staticlib directly, so build it before `swift build` and pass the
+      # directory it landed in.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            audio/target
+          key: cargo-linux-${{ matrix.arch }}-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-${{ matrix.arch }}-
+
+      - name: Build the audio engine
+        run: |
+          set -euo pipefail
+          (cd audio && cargo build --release -p mozz_audio_ffi)
+          lib="audio/target/release/libmozz_audio_ffi.a"
+          [ -f "$lib" ] || { echo "$lib was not produced" >&2; exit 1; }
+          # Give the linker a directory holding the static archive alone. cargo
+          # also emits libmozz_audio_ffi.so there for the C# shell to P/Invoke,
+          # and `-l` prefers a shared object over an archive: that links, and
+          # then libMozzFFI.so will not load for want of an rpath to find it.
+          mkdir -p "$RUNNER_TEMP/audiolink"
+          cp "$lib" "$RUNNER_TEMP/audiolink/"
+          echo "MOZZ_AUDIO_LIB=$RUNNER_TEMP/audiolink" >> "$GITHUB_ENV"
+
       - name: Build libMozzFFI.so
         run: |
           swift build -c release --product MozzFFI \
             -Xcc -I"$SQLITE_ROOT/include" \
-            -Xlinker -L"$SQLITE_ROOT/lib"
+            -Xlinker -L"$SQLITE_ROOT/lib" \
+            -Xlinker -L"$MOZZ_AUDIO_LIB"
 
+
+      - name: Test the typed command path against the built core
+        # The marshalling under test is an unsafe byte* LibraryImport, a fixed
+        # block and a span copied out before Swift's buffer is released. None of
+        # that can be checked with a stand-in, which is exactly where such a bug
+        # would hide — so this needs the real library and runs once it exists.
+        run: >
+          dotnet test clients/desktop-tests/Mozz.Desktop.Tests.csproj -c Release
+          --filter "FullyQualifiedName~MozzCoreInvokeTests"
       - name: Publish the app
         run: |
           dotnet publish clients/desktop/Mozz.Desktop.csproj \

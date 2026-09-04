@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media;
@@ -15,11 +16,66 @@ namespace Mozz.Desktop.ViewModels;
 public sealed partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly MozzCore _core = new();
+
+    /// <summary>The open core, for windows that drive it directly (pairing).</summary>
+    public MozzCore Core => _core;
+
+    /// <summary>Completes after the local library and saved accounts are ready.</summary>
+    public Task Initialization { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    /// The running version, for About.
+    ///
+    /// AppVersion existed and was tested from the day the desktop shipped; it
+    /// was simply never put on screen, so About showed a description and a
+    /// licence and nothing that answered "which build am I looking at".
+    /// </summary>
+    public string AppVersionDisplay =>
+        Mozz.Desktop.Core.AppVersion.FromAssembly(typeof(MainViewModel).Assembly);
+
+    /// <summary>Devices known to be in this circle.</summary>
+    public ObservableCollection<Mozz.Desktop.Core.CircleMemberRow> CircleMembers { get; } = new();
+
+    /// <summary>
+    /// Membership comes from possessing the circle keys, not from having names
+    /// in a local roster. Older circles legitimately have no roster yet.
+    /// </summary>
+    public bool IsInCircle => PairingService.HasCircle;
+
+    public string CircleSummary => IsInCircle
+        ? CircleMembers.Count switch
+        {
+            0 => "This device is syncing. Device names appear as they connect.",
+            1 => "1 synced device.",
+            _ => $"{CircleMembers.Count} synced devices.",
+        }
+        : "This device is not syncing yet. Add another device to share listening, library and servers.";
+
+    /// <summary>
+    /// Discovery and ceremony state rendered directly by Settings → Devices.
+    /// One instance per app keeps a pending confirmation alive while settings
+    /// content moves between windows.
+    /// </summary>
+    public PairingViewModel Pairing { get; }
+
+    /// <summary>Re-read the roster, so About/Devices reflect reality.</summary>
+    public void RefreshCircle()
+    {
+        CircleMembers.Clear();
+        foreach (var member in Mozz.Desktop.Core.CircleRoster.Load())
+        {
+            CircleMembers.Add(member);
+        }
+        OnPropertyChanged(nameof(IsInCircle));
+        OnPropertyChanged(nameof(CircleSummary));
+    }
     private readonly AppPreferences _preferences = new();
     private readonly ISecretStore _secrets;
     private readonly MozzServer _server;
     private readonly string _deviceId;
     private readonly PlayHistoryRecorder _playHistory;
+    private readonly RelayHistoryService _relayHistory;
+    private readonly PlaybackSettingsCommands _playbackSettingsCommands;
     private readonly ArtworkService? _artwork;
     private CancellationTokenSource? _searchCts;
     private readonly NavigationStack<LibraryPage> _navigation =
@@ -33,14 +89,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly IAudioEngine? _engine;
     private readonly INowPlayingIntegration? _nowPlaying_os;
     private readonly DispatcherTimer? _positionTimer;
+    private readonly DispatcherTimer? _continuityReconcileTimer;
+    private readonly DispatcherTimer? _relayHistoryTimer;
+    private bool _themeObserverAttached;
     // The queue is app logic — the engine only ever knows "current" and "next".
     private readonly PlaybackQueue _queue = new();
-    /// The level the user set, kept across a mute so unmuting restores it.
-    private double _unmutedVolume = 0.85;
-    /// Dragging the volume bar writes on every pointer move; this batches the save.
-    private DispatcherTimer? _volumePersist;
-    /// True while RestoreSettings is applying stored values, so restoring does not re-save them.
-    private bool _restoringSettings;
+    private Guid _continuityRunId = Guid.NewGuid();
+    private ulong _continuitySequence;
+    private bool _continuityReconciled;
+    private string? _lastWrittenContinuityQueueHash;
+    private DateTimeOffset _lastPeriodicContinuity = DateTimeOffset.MinValue;
+    private CancellationTokenSource? _continuityFlushCts;
+    private long _continuityGeneration;
+    private readonly SemaphoreSlim _continuityFlushGate = new(1, 1);
+    private readonly SemaphoreSlim _relaySyncGate = new(1, 1);
+    private CancellationTokenSource? _playbackSettingsPersistCts;
+    private bool _applyingSyncedPlaybackSettings;
+    private string _replayGainMode = "track";
+    private double _replayGainPreampDB;
 
     [ObservableProperty] private LibrarySection _section = LibrarySection.Home;
     [ObservableProperty] private string _pageTitle = "Home";
@@ -57,23 +123,61 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _trackCount;
 
     [ObservableProperty] private Track? _nowPlaying;
+
+    /// <summary>
+    /// The field behind Now Playing, sampled from the cover by the shared core.
+    ///
+    /// Never reset to null between tracks: the previous record's field stays up
+    /// until the next has been computed, because blanking it while the next
+    /// cover loads is a flash of black in the middle of a song.
+    /// </summary>
+    [ObservableProperty] private IBrush _playerBackground = PlayerFallbackBrush;
+
+    /// <summary>
+    /// What Now Playing paints when the artwork yields nothing usable.
+    ///
+    /// A fixed dark tone rather than the theme's background, matching Android:
+    /// this view is always dark, because its foreground is white over whatever
+    /// colour the record turned out to be. Taking the page's floor here would
+    /// put white text on near-white in the Light theme for any track without
+    /// artwork.
+    /// </summary>
+    private static readonly IBrush PlayerFallbackBrush =
+        new ImmutableSolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
+
+    /// <summary>
+    /// Which of the player's two secondary panels is showing.
+    ///
+    /// They are mutually exclusive, as on the phone — PlayerPanel there is one
+    /// slot that queue and lyrics take turns in. A wide window gives that slot a
+    /// column of its own beside the hero instead of putting it in the hero's
+    /// place, but there is still only ever one of them.
+    /// </summary>
+    [ObservableProperty] private bool _showLyricsPanel;
+
+    public bool ShowQueuePanel => !ShowLyricsPanel;
+
+    partial void OnShowLyricsPanelChanged(bool value) => OnPropertyChanged(nameof(ShowQueuePanel));
+
+    [RelayCommand]
+    private void SelectLyricsPanel() => ShowLyricsPanel = true;
+
+    [RelayCommand]
+    private void SelectQueuePanel() => ShowLyricsPanel = false;
+
+    /// <summary>"Playing from Reasonable Doubt" — where this track came from.</summary>
+    public string? NowPlayingContext =>
+        string.IsNullOrWhiteSpace(NowPlaying?.AlbumTitle) ? null : $"Playing from {NowPlaying!.AlbumTitle}";
+
+    /// <summary>Identity of what is playing, so the scrubber resets when it changes.</summary>
+    public string? NowPlayingKey => NowPlaying is null ? null : $"{NowPlaying.ServerId}:{NowPlaying.RemoteId}";
+
     [ObservableProperty] private bool _isPlaying;
 
     // Transport surface bound by the player bar.
     [ObservableProperty] private double _positionSeconds;
     [ObservableProperty] private double _durationSeconds;
     [ObservableProperty] private double _volume = 0.85;
-    [ObservableProperty] private bool _isShuffled;
-    [ObservableProperty] private RepeatMode _repeatMode = RepeatMode.Off;
-    [ObservableProperty] private bool _isQueueOpen;
-    [ObservableProperty] private bool _isPlayerOpen;
-    /// <summary>
-    /// The field behind the player, sampled from the cover by the shared core.
-    /// Deliberately never reset to null between tracks: the previous record's
-    /// field stays up until the next one has been computed, because blanking it
-    /// while the next cover loads is a flash of black in the middle of a song.
-    /// </summary>
-    [ObservableProperty] private IBrush _playerBackground = PlayerFallbackBrush;
 
     /// <summary>Left counter in the player bar (m:ss of the play head).</summary>
     public string PositionText => FormatClock(PositionSeconds);
@@ -84,63 +188,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>The play button glyph flips with transport state.</summary>
     public string PlayPauseGlyph => IsPlaying ? "\u23F8" : "\u23F5";
 
-    /// <summary>Identity of what is playing, so the scrubber can reset when it changes.</summary>
-    public string? NowPlayingKey => NowPlaying is null ? null : $"{NowPlaying.ServerId}:{NowPlaying.RemoteId}";
-
-    /// <summary>The codec pill under the scrubber — "FLAC", "AAC 256" — or null when unreported.</summary>
-    public string? NowPlayingFormat
-    {
-        get
-        {
-            var codec = NowPlaying?.Format;
-            if (string.IsNullOrWhiteSpace(codec)) return null;
-            var kbps = NowPlaying?.BitrateKbps;
-            return kbps is > 0 ? $"{codec} {kbps}" : codec;
-        }
-    }
-
-    public bool HasNowPlaying => NowPlaying is not null;
-
-    /// <summary>
-    /// What the player paints when the artwork yields nothing usable.
-    ///
-    /// A fixed dark tone rather than the theme's background, matching Android: the
-    /// player is always dark, because its foreground is white over whatever colour
-    /// the record turned out to be. Taking the page's floor here would have put
-    /// white text on near-white in the Light theme for any track without artwork.
-    /// </summary>
-    private static readonly IBrush PlayerFallbackBrush =
-        new ImmutableSolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14));
-
-    /// <summary>"Playing from Reasonable Doubt" — where this track came from.</summary>
-    public string? NowPlayingContext =>
-        string.IsNullOrWhiteSpace(NowPlaying?.AlbumTitle) ? null : $"Playing from {NowPlaying!.AlbumTitle}";
-
-    /// <summary>Silence is mute; there is no separate flag to fall out of step with.</summary>
-    public bool IsMuted => Volume <= 0.0001;
-    public bool HasNextTrack => _queue.HasNext;
-
-    /// <summary>Repeat is a three-state control; the icon changes on the third state.</summary>
-    public bool IsRepeatOne => RepeatMode == RepeatMode.One;
-    public bool IsRepeatActive => RepeatMode != RepeatMode.Off;
-
-    public ObservableCollection<QueueRow> UpNext { get; } = [];
-    public bool HasUpNext => UpNext.Count > 0;
-
     public ObservableCollection<Track> Tracks { get; } = [];
     public ObservableCollection<Album> Albums { get; } = [];
     public ObservableCollection<Artist> Artists { get; } = [];
     public ObservableCollection<Playlist> Playlists { get; } = [];
+    public ObservableCollection<GenreTile> Genres { get; } = [];
     public ObservableCollection<AlbumTrackRow> AlbumTrackRows { get; } = [];
     public ObservableCollection<Album> ArtistAlbums { get; } = [];
     public ObservableCollection<Track> ArtistTracks { get; } = [];
     public ObservableCollection<Track> PlaylistTracks { get; } = [];
     public ObservableCollection<DetailRow> DetailRows { get; } = [];
     public ObservableCollection<HomeRow> HomeRows { get; } = [];
+    public ObservableCollection<SearchRow> SearchRows { get; } = [];
+    public ObservableCollection<QueueItemRow> QueueRows { get; } = [];
+    public ObservableCollection<LyricLineRow> LyricRows { get; } = [];
     public ObservableCollection<SettingsLibraryOption> SettingsLibraries { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedArtists { get; } = [];
     public ObservableCollection<SuppressedSettingsItem> SuppressedTracks { get; } = [];
     public ObservableCollection<EqualizerBandSetting> EqualizerBands { get; } = [];
+    public IReadOnlyList<SettingsCategoryDefinition> SettingsCategories { get; } =
+        Mozz.Desktop.ViewModels.SettingsCategories.All;
     public IReadOnlyList<SettingsOption> AppearanceOptions { get; } =
     [
         new("system", "System"),
@@ -160,11 +227,43 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public GridRows<HomeMixTile> HomeMixGrid { get; } = new();
     public GridRows<Album> AlbumGrid { get; } = new();
     public GridRows<Artist> ArtistGrid { get; } = new();
+    public GridRows<GenreTile> GenreGrid { get; } = new();
+    public GridRows<Album> GenreAlbumGrid { get; } = new();
     public GridRows<Album> ArtistAlbumGrid { get; } = new();
     public GridRows<Playlist> PlaylistGrid { get; } = new();
 
     /// Width available to the content pane, set by the view on layout. Drives
     /// how many tiles fit across.
+    /// <summary>
+    /// How wide one tile is, so a wall fills the pane instead of stopping short
+    /// of it.
+    ///
+    /// The pitch constants decide how many tiles fit; dividing the pane by that
+    /// count decides how wide each one is. Sizing tiles to a fixed pitch instead
+    /// left whatever did not divide evenly as dead space down the right-hand
+    /// edge — up to a whole tile of it — which reads as the grid giving up
+    /// partway across rather than as a margin.
+    /// </summary>
+    public double AlbumTileWidth => TileWidth(DesktopLayout.AlbumTilePitch);
+    public double ArtistTileWidth => TileWidth(DesktopLayout.ArtistTilePitch);
+    public double PlaylistTileWidth => TileWidth(DesktopLayout.PlaylistTilePitch);
+    public double GenreTileWidth => TileWidth(DesktopLayout.GenreTilePitch);
+    public double HomeMixTileWidth => TileWidth(DesktopLayout.HomeMixTilePitch);
+
+    /// <summary>The cover inside a tile: the tile less its hover padding.</summary>
+    public double AlbumArtSize => Math.Max(AlbumTileWidth - TilePadding * 2, 1);
+    public double ArtistArtSize => Math.Max(ArtistTileWidth - TilePadding * 2, 1);
+
+    /// <summary>Matches the Button.tile padding in App.axaml.</summary>
+    private const double TilePadding = 8;
+
+    private double TileWidth(double pitch)
+    {
+        var columns = Math.Max(ColumnsFor(pitch), 1);
+        var available = _contentWidth > 0 ? _contentWidth : pitch * columns;
+        return Math.Max(Math.Floor(available / columns), pitch * 0.6);
+    }
+
     public double ContentWidth
     {
         get => _contentWidth;
@@ -172,11 +271,20 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (Math.Abs(value - _contentWidth) < 1) return;
             _contentWidth = value;
+            OnPropertyChanged(nameof(AlbumTileWidth));
+            OnPropertyChanged(nameof(AlbumArtSize));
+            OnPropertyChanged(nameof(ArtistTileWidth));
+            OnPropertyChanged(nameof(ArtistArtSize));
+            OnPropertyChanged(nameof(PlaylistTileWidth));
+            OnPropertyChanged(nameof(GenreTileWidth));
+            OnPropertyChanged(nameof(HomeMixTileWidth));
             AlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             ArtistGrid.SetColumns(ColumnsFor(DesktopLayout.ArtistTilePitch));
+            GenreGrid.SetColumns(ColumnsFor(DesktopLayout.GenreTilePitch));
+            GenreAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             ArtistAlbumGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             PlaylistGrid.SetColumns(ColumnsFor(DesktopLayout.PlaylistTilePitch));
-            HomeMixGrid.SetColumns(Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)));
+            HomeMixGrid.SetColumns(ColumnsFor(DesktopLayout.AlbumTilePitch));
             RebuildHomeRows();
             RebuildDetailRows();
         }
@@ -191,12 +299,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private List<Album> _detailArtistAppearsOn = [];
     private List<Track> _detailArtistTopTracks = [];
     private List<Track> _detailPlaylistTracks = [];
+    private List<Album> _detailGenreAlbums = [];
     private List<HomeMixTile> _homeMixTiles = [];
     private List<Track> _homeRecentlyPlayed = [];
     private List<Album> _homeRecentlyAddedAlbums = [];
     private List<Playlist> _homePlaylists = [];
+    private string? _homeMessage;
     private HomeMixTile? _selectedMix;
     private AlbumReleaseKindLookup? _releaseKindLookup;
+    private readonly SettingsCategorySelectionState _settingsCategorySelection = new();
 
     private int ColumnsFor(double pitch) => DesktopLayout.ColumnsFor(_contentWidth, pitch);
 
@@ -205,15 +316,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsSongsSelected => Section == LibrarySection.Songs;
     public bool IsAlbumsSelected => Section == LibrarySection.Albums;
     public bool IsArtistsSelected => Section == LibrarySection.Artists;
+    public bool IsGenresSelected => Section == LibrarySection.Genres;
     public bool IsPlaylistsSelected => Section == LibrarySection.Playlists;
     public bool IsConnectSelected => Section == LibrarySection.Connect;
-    public bool IsSettingsSelected => Section == LibrarySection.Settings;
+    public bool IsSettingsSelected => IsSettingsDialogOpen;
 
     public bool ShowTracks => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Songs };
     public bool ShowHomeRows => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
                                 && HomeRows.Count > 0;
     public bool ShowHomeEmpty => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Home }
                                  && !IsBusy
+                                 && HomeRows.Count == 0
                                  && TrackCount > 0
                                  && HomeComposition.IsEmpty(
                                      _homeMixTiles,
@@ -222,18 +335,29 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                                      _homePlaylists);
     public bool ShowAlbums => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Albums };
     public bool ShowArtists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Artists };
+    public bool ShowGenres => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Genres };
     public bool ShowPlaylists => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Playlists };
     public bool ShowSearch => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Search };
     public bool ShowConnect => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Connect };
-    public bool ShowSettings => _navigation.Current is { Kind: LibraryPageKind.Section, Section: LibrarySection.Settings };
+    public bool ShowSettings => false;
     public bool ShowAlbumDetail => _navigation.Current.Kind == LibraryPageKind.AlbumDetail;
     public bool ShowArtistDetail => _navigation.Current.Kind == LibraryPageKind.ArtistDetail;
     public bool ShowPlaylistDetail => _navigation.Current.Kind == LibraryPageKind.PlaylistDetail;
     public bool ShowMixDetail => _navigation.Current.Kind == LibraryPageKind.MixDetail;
-    public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail || ShowMixDetail;
-    public bool HasSearchAlbums => ShowSearch && Albums.Count > 0;
-    public bool HasSearchArtists => ShowSearch && Artists.Count > 0;
-    public bool HasSearchTracks => ShowSearch && Tracks.Count > 0;
+    public bool ShowGenreDetail => _navigation.Current.Kind == LibraryPageKind.GenreDetail;
+    public bool ShowNowPlaying => _navigation.Current.Kind == LibraryPageKind.NowPlaying;
+    public bool ShowDetailPage => ShowAlbumDetail || ShowArtistDetail || ShowPlaylistDetail || ShowMixDetail || ShowGenreDetail;
+    public bool HasSearchRows => ShowSearch && SearchRows.Count > 0;
+    public bool HasQueue => QueueRows.Count > 0;
+    public bool HasLyrics => LyricRows.Count > 0;
+    public bool ShowLyricsSilent => ShowNowPlaying && !IsLyricsLoading && LyricStatus == "silent";
+    public string ShuffleStateText => _queue.Shuffle == ShuffleMode.On ? "Shuffle On" : "Shuffle";
+    public string RepeatStateText => _queue.Repeat switch
+    {
+        RepeatMode.All => "Repeat All",
+        RepeatMode.One => "Repeat One",
+        _ => "Repeat",
+    };
     public bool HasArtistAlbums => ArtistAlbums.Count > 0;
 
     /// <summary>
@@ -241,8 +365,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// Servers pane, which is where someone goes precisely because the library
     /// is empty and would otherwise be told so on top of the sign-in form.
     /// </summary>
-    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false
-                                  && ShowDetailPage == false && ShowHomeRows == false;
+    public bool IsLibraryEmpty => TrackCount == 0 && !IsBusy && ShowConnect == false && ShowSettings == false
+                                  && ShowDetailPage == false && ShowNowPlaying == false && ShowHomeRows == false;
 
     public string LibrarySummary =>
         TrackCount == 0
@@ -251,21 +375,41 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public ServerAccount? ActiveAccount => Connect.Accounts.FirstOrDefault();
 
-    /// <summary>
-    /// The server every library read is scoped to.
+
+    /// The server every library read must be scoped to.
+
     ///
-    /// Reads used to leave this off, which meant "give me everything in the
-    /// database" rather than "give me everything on my server" — and those are
-    /// not the same set. A catalogue keeps rows for servers that are no longer
-    /// attached, so the counts double-counted, the walls listed each album
-    /// twice, and Liked Songs mixed in tracks the app could not stream, because
-    /// streamURL rightly refuses a server that is not attached.
-    ///
-    /// Null when nothing is signed in, which reads as unscoped — the same
-    /// behaviour as before, and nothing can play in that state anyway.
-    /// </summary>
+
+    /// Without it, a request answers from whichever server the core happened
+
+    /// to have, so signing into a second one showed the first one's library.
+
     public string? ActiveServerId => ActiveAccount?.ServerId;
     public bool HasActiveAccount => ActiveAccount is not null;
+    public string SidebarProfileTitle => SettingsPresentation.ProfileTitle(ActiveAccount);
+    public string SidebarProfileSubtitle => SettingsPresentation.ProfileSubtitle(ActiveAccount, LibrarySummary);
+    public string? ActiveAccountAvatarUrl => ActiveAccountProfile?.AvatarUrl;
+    public bool HasActiveAccountAvatar => ActiveAccountAvatarUrl is { Length: > 0 };
+    public string ActiveAccountFallbackText =>
+        ActiveAccountProfile?.DisplayName
+        ?? ActiveAccountProfile?.Username
+        ?? ActiveAccount?.Username
+        ?? ActiveAccount?.ServerName
+        ?? "Settings";
+    public string ActiveServerTitle => SettingsPresentation.ServerSectionTitle(ActiveAccount);
+    public string ActiveServerSubtitle => SettingsPresentation.ServerSectionSubtitle(ActiveAccount);
+    public SettingsCategory SelectedSettingsCategory => _settingsCategorySelection.Selected;
+    public string SettingsCategoryTitle => _settingsCategorySelection.SelectedDefinition.Label;
+    public string SettingsCategorySubtitle => _settingsCategorySelection.SelectedDefinition.Subtitle;
+    public bool IsSettingsAccountSelected => _settingsCategorySelection.IsSelected(SettingsCategory.AccountServers);
+    public bool IsSettingsLibrarySelected => _settingsCategorySelection.IsSelected(SettingsCategory.Library);
+    public bool IsSettingsPlaybackSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Playback);
+    public bool IsSettingsLyricsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Lyrics);
+    public bool IsSettingsRecommendationsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Recommendations);
+    public bool IsSettingsAppearanceSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Appearance);
+    public bool IsSettingsDiagnosticsSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Diagnostics);
+    public bool IsSettingsDevicesSelected => _settingsCategorySelection.IsSelected(SettingsCategory.Devices);
+    public bool IsSettingsAboutSelected => _settingsCategorySelection.IsSelected(SettingsCategory.About);
     public bool HasSettingsLibraries => SettingsLibraries.Count > 0;
     public bool HasSuppressions => SuppressedArtists.Count > 0 || SuppressedTracks.Count > 0;
     public string SettingsStorageDescription => $"Preferences: {_preferences.Path}";
@@ -274,28 +418,62 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty] private bool _normalizationEnabled;
     [ObservableProperty] private bool _enrichmentEnabled;
+    [ObservableProperty] private bool _deviceSyncEnabled = true;
+    [ObservableProperty] private string _relaySyncStatus =
+        "Encrypted relay sync has not run yet.";
     [ObservableProperty] private string _appearance = "system";
     [ObservableProperty] private string _darkStyle = "dim";
     [ObservableProperty] private bool _equalizerEnabled;
     [ObservableProperty] private double _equalizerPreamp;
     [ObservableProperty] private string? _settingsMessage;
     [ObservableProperty] private bool _isSettingsBusy;
+    [ObservableProperty] private bool _isSettingsDialogOpen;
+    [ObservableProperty] private ServerAccountProfile? _activeAccountProfile;
+    [ObservableProperty] private string? _lyricStatus;
+    [ObservableProperty] private bool _isLyricsLoading;
+    [ObservableProperty] private string? _lyricsMessage;
+    [ObservableProperty] private ContinuityResumeOffer? _continuityOffer;
+
+    public bool HasContinuityOffer => ContinuityOffer is not null;
 
     public MainViewModel()
     {
         // Constructed before the design-mode bail-out because the previewer binds
         // to it. Nothing here touches the disk or the network until a command runs.
         _deviceId = _preferences.GetOrCreateDeviceId();
-        _playHistory = new PlayHistoryRecorder(evt => _ = RecordPlayEventAsync(evt));
+        _playHistory = new PlayHistoryRecorder(
+            evt => _ = RecordPlayEventAsync(evt),
+            report => _ = ReportPlaybackAsync(report));
         _secrets = SecretStore.ForCurrentPlatform();
         _server = new MozzServer(_core, _secrets);
+        _relayHistory = new RelayHistoryService(
+            _core, _deviceId, _server);
+        _playbackSettingsCommands = new PlaybackSettingsCommands(_core);
+        _relayHistory.CatalogChanged += () =>
+            Dispatcher.UIThread.Post(() => _ = ReloadAfterBackgroundSyncAsync());
+        _relayHistory.MembershipChanged += () =>
+            Dispatcher.UIThread.Post(RefreshCircle);
+        _relayHistory.BackgroundSyncFailed += error =>
+            Dispatcher.UIThread.Post(() =>
+                RelaySyncStatus =
+                    $"Library refresh is waiting: {error.Message}");
+        Pairing = new PairingViewModel(_core, _deviceId);
         Connect = new ConnectViewModel(_server, onLibraryChanged: ReloadAfterSyncAsync);
         Connect.Accounts.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(SidebarProfileTitle));
+            OnPropertyChanged(nameof(SidebarProfileSubtitle));
+            OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+            OnPropertyChanged(nameof(HasActiveAccountAvatar));
+            OnPropertyChanged(nameof(ActiveAccountFallbackText));
+            OnPropertyChanged(nameof(ActiveServerTitle));
+            OnPropertyChanged(nameof(ActiveServerSubtitle));
+            _ = RefreshActiveAccountProfileAsync();
         };
         RestoreSettings();
+        InitializeDownloads();
 
         // The previewer builds view models with no library present; don't try to
         // open a database from the designer.
@@ -306,9 +484,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         // does, and it is ambient because the tiles are made by data templates and
         // have no constructor to hand it to.
         _artwork = ArtworkService.Install(_server);
+        // Covers failing used to be silent, so a wall of letter placeholders
+        // looked the same whether the server had no art, the network was
+        // refusing the connection, or nothing had attached yet.
+        _artwork.ArtworkFailed += reason => Dispatcher.UIThread.Post(() => StatusMessage = reason);
+        // And take the complaint back down once covers start arriving, so a
+        // solved problem stops being advertised.
+        ArtworkService.ArtworkRecovered += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (StatusMessage?.Contains("album art", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                StatusMessage = null;
+            }
+        });
 
-        _unmutedVolume = Volume;
-        _engine = new MiniAudioEngine { Volume = Volume };
+        _engine = new Mozz.Desktop.Audio.Native.RustAudioEngine { Volume = Volume };
         // Track gain rather than album: Mozz plays across a whole library far
         // more than it plays an album end to end, and album mode deliberately
         // preserves the loudness relationship *within* a record — which is the
@@ -329,45 +519,60 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _nowPlaying_os.PreviousRequested += (_, _) => Dispatcher.UIThread.Post(() => _ = PreviousAsync());
         _nowPlaying_os.StopRequested += (_, _) => Dispatcher.UIThread.Post(StopPlayback);
 
-        _volumePersist = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
-        _volumePersist.Tick += OnVolumePersistTick;
-
         // ~10 Hz is enough for a smooth progress bar and costs almost nothing.
         _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _positionTimer.Tick += OnPositionTick;
         _positionTimer.Start();
 
-        _ = InitializeAsync();
+        // A one-shot debounce so dragging the scrubber issues one seek, not fifty.
+
+        _continuityReconcileTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _continuityReconcileTimer.Tick += (_, _) =>
+        {
+            if (!IsPlaying) _ = ReconcileContinuityAsync();
+        };
+        _continuityReconcileTimer.Start();
+
+        _relayHistoryTimer = new DispatcherTimer {
+            Interval = TimeSpan.FromMinutes(30),
+        };
+        _relayHistoryTimer.Tick += (_, _) => _ = SyncRelayHistoryAsync();
+        _relayHistoryTimer.Start();
+
+        Initialization = InitializeAsync();
     }
+
+    partial void OnActiveAccountProfileChanged(ServerAccountProfile? value)
+    {
+        OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+        OnPropertyChanged(nameof(HasActiveAccountAvatar));
+        OnPropertyChanged(nameof(ActiveAccountFallbackText));
+    }
+
+    partial void OnContinuityOfferChanged(ContinuityResumeOffer? value) =>
+        OnPropertyChanged(nameof(HasContinuityOffer));
 
     private void RestoreSettings()
     {
-        _restoringSettings = true;
-        try
-        {
-            RestoreSettingsCore();
-        }
-        finally
-        {
-            _restoringSettings = false;
-        }
-    }
-
-    private void RestoreSettingsCore()
-    {
         NormalizationEnabled = _preferences.GetBool(AppPreferences.NormalizationEnabledKey, true);
+        _replayGainMode = NormalizationEnabled
+            ? _preferences.GetString(
+                AppPreferences.ReplayGainModeKey,
+                "track") switch
+                {
+                    "album" => "album",
+                    _ => "track",
+                }
+            : "off";
+        _replayGainPreampDB = _preferences.GetDouble(
+            AppPreferences.ReplayGainPreampKey,
+            0);
         EnrichmentEnabled = _preferences.GetBool(AppPreferences.EnrichmentEnabledKey, true);
+        DeviceSyncEnabled = _preferences.GetBool(
+            AppPreferences.DeviceSyncEnabledKey, true);
         Appearance = _preferences.GetString(AppPreferences.AppearanceKey, "system");
         DarkStyle = _preferences.GetString(AppPreferences.DarkStyleKey, "dim");
         EqualizerEnabled = _preferences.GetBool(AppPreferences.EqualizerEnabledKey, false);
-        Volume = Math.Clamp(_preferences.GetDouble(AppPreferences.VolumeKey, 0.85), 0, 1);
-        IsShuffled = _preferences.GetBool(AppPreferences.ShuffleKey, false);
-        RepeatMode = _preferences.GetString(AppPreferences.RepeatModeKey, "off") switch
-        {
-            "all" => RepeatMode.All,
-            "one" => RepeatMode.One,
-            _ => RepeatMode.Off,
-        };
         var profile = _preferences.GetEqualizerProfile();
         EqualizerPreamp = profile.PreampDB;
         EqualizerBands.Clear();
@@ -385,11 +590,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     partial void OnNormalizationEnabledChanged(bool value)
     {
         _preferences.SetBool(AppPreferences.NormalizationEnabledKey, value);
-        _engine?.SetReplayGain(value ? ReplayGainMode.Track : ReplayGainMode.Off);
+        if (!_applyingSyncedPlaybackSettings)
+        {
+            _replayGainMode = value ? "track" : "off";
+            _preferences.SetString(
+                AppPreferences.ReplayGainModeKey,
+                _replayGainMode);
+            SchedulePlaybackSettingsPersistence();
+        }
+        ApplyReplayGainToEngine();
     }
 
     partial void OnEnrichmentEnabledChanged(bool value) =>
         _preferences.SetBool(AppPreferences.EnrichmentEnabledKey, value);
+
+    partial void OnDeviceSyncEnabledChanged(bool value)
+    {
+        _preferences.SetBool(AppPreferences.DeviceSyncEnabledKey, value);
+        if (value) _ = SyncRelayHistoryAsync();
+    }
 
     partial void OnAppearanceChanged(string value)
     {
@@ -403,13 +622,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (value is not ("dim" or "black")) value = "dim";
         _preferences.SetString(AppPreferences.DarkStyleKey, value);
         ApplyAppearance();
-        if (!_restoringSettings) _ = RefreshPlayerBackgroundAsync(NowPlaying);
     }
 
     partial void OnEqualizerEnabledChanged(bool value)
     {
         _preferences.SetBool(AppPreferences.EqualizerEnabledKey, value);
         ApplyEqualizerToEngine();
+        if (!_applyingSyncedPlaybackSettings)
+            SchedulePlaybackSettingsPersistence();
     }
 
     partial void OnEqualizerPreampChanged(double value)
@@ -433,48 +653,203 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(EqualizerPreampText));
         var profile = CurrentEqualizerProfile();
         _preferences.SetEqualizerProfile(profile);
+        _preferences.SetString(
+            AppPreferences.ReplayGainModeKey,
+            _replayGainMode);
+        _preferences.SetDouble(
+            AppPreferences.ReplayGainPreampKey,
+            _replayGainPreampDB);
         ApplyEqualizerToEngine();
+        if (!_applyingSyncedPlaybackSettings)
+            SchedulePlaybackSettingsPersistence();
     }
 
     private void ApplyEqualizerToEngine() =>
         _engine?.SetEqualizer(CurrentEqualizerProfile().ToAudioSettings(EqualizerEnabled));
 
+    private void ApplyReplayGainToEngine() =>
+        _engine?.SetReplayGain(
+            _replayGainMode switch
+            {
+                "off" => ReplayGainMode.Off,
+                "album" => ReplayGainMode.Album,
+                _ => ReplayGainMode.Track,
+            },
+            _replayGainPreampDB);
+
+    private CorePlaybackSettings CurrentCorePlaybackSettings()
+    {
+        var profile = CurrentEqualizerProfile();
+        return new CorePlaybackSettings(
+            EqualizerEnabled,
+            profile.Gains.ToArray(),
+            profile.PreampDB,
+            _replayGainMode,
+            _replayGainPreampDB);
+    }
+
+    private RelayPlaybackSettingsDto CurrentRelayPlaybackSettings()
+    {
+        var current = CurrentCorePlaybackSettings();
+        return new RelayPlaybackSettingsDto(
+            current.EqualizerEnabled,
+            new RelayEqualizerSettingsDto(
+                current.EqualizerBandGainsDB,
+                current.EqualizerPreampDB),
+            current.ReplayGainMode,
+            current.ReplayGainPreampDB);
+    }
+
+    private void SchedulePlaybackSettingsPersistence()
+    {
+        if (!_core.IsOpen) return;
+        _playbackSettingsPersistCts?.Cancel();
+        _playbackSettingsPersistCts?.Dispose();
+        _playbackSettingsPersistCts = new CancellationTokenSource();
+        _ = PersistPlaybackSettingsAfterDelayAsync(
+            _playbackSettingsPersistCts.Token);
+    }
+
+    private async Task PersistPlaybackSettingsAfterDelayAsync(
+        CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(400), token);
+            await _playbackSettingsCommands.SaveAsync(
+                CurrentCorePlaybackSettings(),
+                token);
+            _ = SyncRelayHistoryAsync();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            SettingsMessage =
+                $"Playback settings could not be saved: {error.Message}";
+        }
+    }
+
+    private void ApplySyncedPlaybackSettings(
+        RelayPlaybackSettingsDto settings)
+    {
+        _applyingSyncedPlaybackSettings = true;
+        try
+        {
+            _replayGainMode = settings.ReplayGainMode;
+            _replayGainPreampDB = settings.ReplayGainPreampDB;
+            NormalizationEnabled = settings.ReplayGainMode != "off";
+            EqualizerEnabled = settings.EqualizerEnabled;
+            var profile = new DesktopEqualizerProfile(
+                settings.Equalizer.Gains,
+                settings.Equalizer.PreampDB).Normalized();
+            EqualizerPreamp = profile.PreampDB;
+            for (var index = 0;
+                 index < EqualizerBands.Count && index < profile.Gains.Count;
+                 index++)
+            {
+                EqualizerBands[index].Gain = profile.Gains[index];
+            }
+            _preferences.SetBool(
+                AppPreferences.NormalizationEnabledKey,
+                NormalizationEnabled);
+            _preferences.SetBool(
+                AppPreferences.EqualizerEnabledKey,
+                EqualizerEnabled);
+            _preferences.SetEqualizerProfile(profile);
+            _preferences.SetString(
+                AppPreferences.ReplayGainModeKey,
+                _replayGainMode);
+            _preferences.SetDouble(
+                AppPreferences.ReplayGainPreampKey,
+                _replayGainPreampDB);
+            ApplyReplayGainToEngine();
+            ApplyEqualizerToEngine();
+        }
+        finally
+        {
+            _applyingSyncedPlaybackSettings = false;
+        }
+    }
+
     private void ApplyAppearance()
     {
         if (Avalonia.Application.Current is not { } app) return;
-        app.RequestedThemeVariant = Appearance switch
+        if (!_themeObserverAttached)
         {
-            "light" => ThemeVariant.Light,
-            "dark" => ThemeVariant.Dark,
-            _ => ThemeVariant.Default,
-        };
-
-        // Not `Appearance` — `ActualThemeVariant`. On "System" the request is
-        // Default, and only Avalonia knows what the desktop resolved that to.
-        // Reading the request instead is how System silently meant Dark.
-        if (!_watchingSystemTheme)
-        {
-            _watchingSystemTheme = true;
-            app.ActualThemeVariantChanged += (_, _) => ApplyPalette(app);
+            app.ActualThemeVariantChanged += OnActualThemeVariantChanged;
+            _themeObserverAttached = true;
         }
-        ApplyPalette(app);
+
+        MozzThemeApplicator.Apply(app, Appearance, DarkStyle);
     }
 
-    private bool _watchingSystemTheme;
-
-    private void ApplyPalette(Avalonia.Application app) =>
-        DesktopPalette.Apply(
-            app,
-            dark: app.ActualThemeVariant != ThemeVariant.Light,
-            blackout: DarkStyle == "black");
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => ApplyAppearance();
 
     /// Called when a sync finishes: the counts and whatever page is showing are
     /// both stale, and the empty-library message may no longer be true.
     private async Task ReloadAfterSyncAsync()
     {
         await RefreshCountsAsync();
-        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Home : Section, clearBackStack: true);
+        await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Settings : Section, clearBackStack: true);
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
+        _ = SyncRelayHistoryAsync();
+    }
+
+    private async Task ReloadAfterBackgroundSyncAsync()
+    {
+        try
+        {
+            await ReloadAfterSyncAsync();
+        }
+        catch (Exception error)
+        {
+            StatusMessage = $"Library refresh finished, but the view could not reload: {error.Message}";
+        }
+    }
+
+    private async Task SyncRelayHistoryAsync()
+    {
+        if (!DeviceSyncEnabled || !_core.IsOpen || !PairingService.HasCircle)
+            return;
+        if (!await _relaySyncGate.WaitAsync(0)) return;
+        try
+        {
+            var outcome = await _relayHistory.SyncAsync(
+                CurrentRelayPlaybackSettings());
+            Connect.ReloadSavedAccounts();
+            if (outcome?.PlaybackSettingsChanged == true
+                && outcome.PlaybackSettings is { } playbackSettings)
+            {
+                ApplySyncedPlaybackSettings(playbackSettings);
+            }
+            if (outcome is { } imported
+                && (imported.ImportedCatalogTracks > 0
+                    || imported.ImportedFavorites > 0))
+            {
+                await ReloadAfterSyncAsync();
+            }
+            RelaySyncStatus = outcome is null
+                ? "This device is not in a circle yet."
+                : outcome.ImportedCatalogTracks > 0
+                    ? $"Restored {outcome.ImportedCatalogTracks:N0} songs from your circle · refreshing from the server"
+                : outcome.ImportedHistoryEvents == 0
+                    ? $"Up to date · {DateTime.Now:t}"
+                    : $"Imported {outcome.ImportedHistoryEvents} new listening events · {DateTime.Now:t}";
+        }
+        catch (Exception error)
+        {
+            // The local log is the durable copy. A failed background pass must
+            // not turn app startup or playback into a failure, but Devices
+            // should say it is waiting rather than falsely claim success.
+            RelaySyncStatus =
+                $"Relay unavailable: {error.Message}";
+        }
+        finally
+        {
+            _relaySyncGate.Release();
+        }
     }
 
     private async Task InitializeAsync()
@@ -492,8 +867,20 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // database, but their stream URLs come from an attached backend.
             await Connect.AttachSavedAccountsAsync();
 
+            // Artwork resolves through an attached backend, and tiles start
+            // asking as soon as anything renders — which is before this point.
+            // Those requests come back "no attached server", which the cache
+            // cannot tell apart from "no such cover", so without this the whole
+            // library keeps its letter placeholders until the app restarts.
+            _artwork.ForgetFailures();
+            _artwork.ResetFailureReport();
+
+            await RefreshActiveAccountProfileAsync();
+            await ReconcileContinuityAsync();
+
             await RefreshCountsAsync();
             await LoadSectionAsync(LibrarySection.Home, clearBackStack: true);
+            await SyncRelayHistoryAsync();
 
             StatusMessage = TrackCount > 0
                 ? null
@@ -543,9 +930,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+            OnPropertyChanged(nameof(HasActiveAccountAvatar));
+            OnPropertyChanged(nameof(ActiveAccountFallbackText));
             SettingsLibraries.Clear();
             SuppressedArtists.Clear();
             SuppressedTracks.Clear();
+            await RefreshActiveAccountProfileAsync();
 
             if (ActiveAccount is not { } account || !_core.IsOpen) return;
 
@@ -557,8 +948,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             var suppressions = await _core.CallAsync<List<SuppressedRef>>(
                 new CoreRequest("suppressions") { ServerId = account.ServerId }) ?? [];
-            foreach (var item in suppressions.Select(
-                s => new SuppressedSettingsItem(s.Scope, s.Ref, s.CreatedAt, s.Title, s.Subtitle)))
+            foreach (var item in suppressions.Select(s => new SuppressedSettingsItem(s.Scope, s.Ref, s.CreatedAt)))
             {
                 if (item.Scope == "artist") SuppressedArtists.Add(item);
                 else SuppressedTracks.Add(item);
@@ -576,6 +966,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task RefreshActiveAccountProfileAsync()
+    {
+        var account = ActiveAccount;
+        if (account is null || !_core.IsOpen)
+        {
+            ActiveAccountProfile = null;
+            return;
+        }
+
+        try
+        {
+            ActiveAccountProfile = await _server.AccountAsync(account.ServerId, size: 120);
+        }
+        catch
+        {
+            ActiveAccountProfile = null;
+        }
+    }
+
     [RelayCommand]
     private Task RefreshSettingsPanel() => RefreshSettingsAsync();
 
@@ -586,6 +995,35 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await Connect.SyncAccountCommand.ExecuteAsync(ActiveAccount);
         await RefreshCountsAsync();
         await RefreshSettingsAsync();
+    }
+
+    [RelayCommand]
+    private async Task UseServerAsync(ServerAccount? account)
+    {
+        if (account is null) return;
+        var index = Connect.Accounts.IndexOf(account);
+        if (index > 0) Connect.Accounts.Move(index, 0);
+
+        try
+        {
+            IsSettingsBusy = true;
+            await _server.AttachAsync(account);
+            _artwork.ForgetFailures();
+            _lastWrittenContinuityQueueHash = null;
+            await RefreshActiveAccountProfileAsync();
+            await ReconcileContinuityAsync();
+            await RefreshCountsAsync();
+            await RefreshSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            SettingsMessage = ex.Message;
+        }
+        finally
+        {
+            IsSettingsBusy = false;
+            RaiseDerived();
+        }
     }
 
     [RelayCommand]
@@ -665,8 +1103,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         StopPlayback();
         _server.ForgetAllAccounts();
         Connect.Accounts.Clear();
+        ActiveAccountProfile = null;
         OnPropertyChanged(nameof(ActiveAccount));
         OnPropertyChanged(nameof(HasActiveAccount));
+        OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+        OnPropertyChanged(nameof(HasActiveAccountAvatar));
+        OnPropertyChanged(nameof(ActiveAccountFallbackText));
         SettingsLibraries.Clear();
         SuppressedArtists.Clear();
         SuppressedTracks.Clear();
@@ -675,7 +1117,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ClearLibrary();
         TrackCount = AlbumCount = ArtistCount = 0;
         SettingsMessage = "Signed out.";
-        await LoadSectionAsync(LibrarySection.Connect, clearBackStack: true);
+        await Task.CompletedTask;
     }
 
     private void ReplaceAccount(ServerAccount updated)
@@ -686,6 +1128,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Connect.Accounts[i] = updated;
             OnPropertyChanged(nameof(ActiveAccount));
             OnPropertyChanged(nameof(HasActiveAccount));
+            OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+            OnPropertyChanged(nameof(HasActiveAccountAvatar));
+            OnPropertyChanged(nameof(ActiveAccountFallbackText));
             return;
         }
     }
@@ -696,6 +1141,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Albums.Clear();
         Artists.Clear();
         Playlists.Clear();
+        Genres.Clear();
+        SearchRows.Clear();
+        QueueRows.Clear();
+        LyricRows.Clear();
         AlbumTrackRows.Clear();
         ArtistAlbums.Clear();
         ArtistTracks.Clear();
@@ -705,6 +1154,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         HomeMixGrid.Reset([]);
         AlbumGrid.Reset([]);
         ArtistGrid.Reset([]);
+        GenreGrid.Reset([]);
+        GenreAlbumGrid.Reset([]);
         ArtistAlbumGrid.Reset([]);
         PlaylistGrid.Reset([]);
     }
@@ -728,6 +1179,156 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Dispatcher.UIThread.Post(() => StatusMessage = $"Could not record play history: {ex.Message}");
+        }
+    }
+
+    private async Task ReportPlaybackAsync(DesktopPlaybackReport report)
+    {
+        if (!_core.IsOpen) return;
+        try
+        {
+            await _core.CallAsync<PlaybackReportResult>(new CoreRequest("reportPlayback")
+            {
+                ServerId = report.ServerId,
+                RemoteId = report.RemoteId,
+                State = report.State,
+                PositionSeconds = report.PositionSeconds,
+            });
+        }
+        catch
+        {
+            // Best-effort scrobbling must never interrupt or block audio.
+        }
+    }
+
+    private async Task ReconcileContinuityAsync()
+    {
+        if (!_core.IsOpen || ActiveAccount is not { } account)
+        {
+            _continuityReconciled = true;
+            _lastWrittenContinuityQueueHash = null;
+            ContinuityOffer = null;
+            return;
+        }
+
+        try
+        {
+            var snapshot = await _core.CallAsync<ContinuitySnapshot>(
+                new CoreRequest("continuityLoad") { ServerId = account.ServerId });
+            _continuityReconciled = true;
+            ContinuityOffer = ContinuityPresentation.OfferFor(
+                snapshot,
+                _deviceId,
+                IsPlaying,
+                DateTimeOffset.UtcNow);
+        }
+        catch
+        {
+            _continuityReconciled = true;
+        }
+    }
+
+    private void BeginContinuityRun()
+    {
+        _continuityRunId = Guid.NewGuid();
+        _continuitySequence = 0;
+        _lastPeriodicContinuity = DateTimeOffset.MinValue;
+    }
+
+    private void CheckpointContinuity(ContinuityCheckpointReason reason)
+    {
+        if (!_continuityReconciled || ActiveAccount is not { } account || NowPlaying is null || _queue.Current is null)
+            return;
+
+        if (reason == ContinuityCheckpointReason.Periodic)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (now - _lastPeriodicContinuity < TimeSpan.FromSeconds(20)) return;
+            _lastPeriodicContinuity = now;
+        }
+
+        _continuitySequence++;
+        var checkpoint = new PendingContinuityCheckpoint(
+            Interlocked.Increment(ref _continuityGeneration),
+            account,
+            _continuityRunId,
+            _continuitySequence,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            ContinuityPresentation.State(IsPlaying),
+            _queue.Current.RemoteId,
+            _queue.CurrentIndex,
+            ContinuityPresentation.Milliseconds(PositionSeconds),
+            ContinuityPresentation.QueueInput(account, _queue),
+            reason);
+        ScheduleContinuityFlush(checkpoint);
+    }
+
+    private void ScheduleContinuityFlush(PendingContinuityCheckpoint checkpoint)
+    {
+        _continuityFlushCts?.Cancel();
+        _continuityFlushCts?.Dispose();
+        _playbackSettingsPersistCts?.Cancel();
+        _playbackSettingsPersistCts?.Dispose();
+        _continuityFlushCts = new CancellationTokenSource();
+        var token = _continuityFlushCts.Token;
+        var delay = checkpoint.Reason == ContinuityCheckpointReason.Periodic
+            ? TimeSpan.FromSeconds(3)
+            : TimeSpan.Zero;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
+                if (!token.IsCancellationRequested) await FlushContinuityAsync(checkpoint, token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }, token);
+    }
+
+    private async Task FlushContinuityAsync(PendingContinuityCheckpoint checkpoint, CancellationToken token)
+    {
+        if (!_core.IsOpen) return;
+        await _continuityFlushGate.WaitAsync(CancellationToken.None);
+        try
+        {
+            if (checkpoint.Generation != Volatile.Read(ref _continuityGeneration)) return;
+            var hash = await _core.CallAsync<ContinuityHash>(
+                new CoreRequest("continuityQueueHash") { Queue = checkpoint.Queue },
+                token);
+            if (checkpoint.Generation != Volatile.Read(ref _continuityGeneration)) return;
+            var queueChanged = hash?.QueueHash != _lastWrittenContinuityQueueHash;
+            var shouldSendQueue = queueChanged || checkpoint.Account.Kind == BackendKind.Subsonic;
+            var saved = await _core.CallAsync<ContinuitySaveResult>(
+                new CoreRequest("continuitySave")
+                {
+                    ServerId = checkpoint.Account.ServerId,
+                    PlaybackRunID = checkpoint.RunId.ToString(),
+                    DeviceID = _deviceId,
+                    DeviceName = Environment.MachineName,
+                    Kind = "desktop",
+                    CursorSequence = checkpoint.Sequence,
+                    CapturedAtMS = checkpoint.CapturedAtMS,
+                    State = checkpoint.State,
+                    CurrentRemoteID = checkpoint.CurrentRemoteID,
+                    CurrentAbsoluteIndex = checkpoint.CurrentAbsoluteIndex,
+                    PositionMS = checkpoint.PositionMS,
+                    Queue = shouldSendQueue ? checkpoint.Queue : null,
+                },
+                token);
+
+            if (shouldSendQueue && (saved?.QueueHash ?? hash?.QueueHash) is { } written)
+                _lastWrittenContinuityQueueHash = written;
+        }
+        catch
+        {
+            // Continuity is opportunistic: the next checkpoint supersedes this one.
+        }
+        finally
+        {
+            _continuityFlushGate.Release();
         }
     }
 
@@ -777,7 +1378,74 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    private Task SelectSection(LibrarySection section) => LoadSectionAsync(section, clearBackStack: true);
+    private Task SelectSection(LibrarySection section) =>
+        section == LibrarySection.Settings
+            ? OpenSettingsAsync()
+            : LoadSectionAsync(section, clearBackStack: true);
+
+    [RelayCommand]
+    private async Task OpenSettingsAsync()
+    {
+        IsSettingsDialogOpen = true;
+        OnPropertyChanged(nameof(IsSettingsSelected));
+        RefreshCircle();
+        await RefreshSettingsAsync();
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>The app owns windows; the view model only requests one.</summary>
+    public event EventHandler? SettingsRequested;
+    public event EventHandler? SettingsCloseRequested;
+
+    [RelayCommand]
+    private void CloseSettings()
+    {
+        Pairing.StopWatching();
+        IsSettingsDialogOpen = false;
+        OnPropertyChanged(nameof(IsSettingsSelected));
+        SettingsCloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Called when the system title-bar closes Settings.</summary>
+    public void SettingsWindowClosed()
+    {
+        Pairing.StopWatching();
+        IsSettingsDialogOpen = false;
+        OnPropertyChanged(nameof(IsSettingsSelected));
+    }
+
+    [RelayCommand]
+    private void SelectSettingsCategory(SettingsCategory category)
+    {
+        if (!_settingsCategorySelection.Select(category)) return;
+        RaiseSettingsCategoryDerived();
+        if (category == SettingsCategory.Devices)
+        {
+            // Opening Devices is the request to look; the page owns discovery
+            // directly, so there is no second dialog and no extra Add click.
+            Pairing.StartWatching();
+        }
+        else
+        {
+            Pairing.StopWatching();
+        }
+    }
+
+    private void RaiseSettingsCategoryDerived()
+    {
+        OnPropertyChanged(nameof(SelectedSettingsCategory));
+        OnPropertyChanged(nameof(SettingsCategoryTitle));
+        OnPropertyChanged(nameof(SettingsCategorySubtitle));
+        OnPropertyChanged(nameof(IsSettingsAccountSelected));
+        OnPropertyChanged(nameof(IsSettingsLibrarySelected));
+        OnPropertyChanged(nameof(IsSettingsPlaybackSelected));
+        OnPropertyChanged(nameof(IsSettingsLyricsSelected));
+        OnPropertyChanged(nameof(IsSettingsRecommendationsSelected));
+        OnPropertyChanged(nameof(IsSettingsAppearanceSelected));
+        OnPropertyChanged(nameof(IsSettingsDiagnosticsSelected));
+        OnPropertyChanged(nameof(IsSettingsDevicesSelected));
+        OnPropertyChanged(nameof(IsSettingsAboutSelected));
+    }
 
     private async Task LoadSectionAsync(LibrarySection section, bool clearBackStack)
     {
@@ -797,6 +1465,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             LibrarySection.Songs => "Songs",
             LibrarySection.Albums => "Albums",
             LibrarySection.Artists => "Artists",
+            LibrarySection.Genres => "Genres",
             LibrarySection.Playlists => "Playlists",
             LibrarySection.Search => "Search",
             LibrarySection.Connect => "Servers",
@@ -826,6 +1495,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                     break;
                 case LibrarySection.Artists:
                     await LoadArtistsAsync();
+                    break;
+                case LibrarySection.Genres:
+                    await LoadGenresAsync();
                     break;
                 case LibrarySection.Playlists:
                     await LoadPlaylistsAsync();
@@ -872,7 +1544,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadTracksAsync()
     {
         var page = await _core.CallPageAsync<List<Track>>(
-            new CoreRequest("tracks") { ServerId = ActiveServerId, Limit = PageSize });
+            new CoreRequest("tracks") { Limit = PageSize });
         Replace(Tracks, page.Rows);
         _nextCursor = page.NextCursor;
     }
@@ -885,60 +1557,69 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _homeRecentlyPlayed = [];
         _homeRecentlyAddedAlbums = [];
         _homePlaylists = [];
+        _homeMessage = null;
         HomeRows.Clear();
         RaiseDerived();
 
-        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
-        // Generating replaces every home set globally, so what is stored belongs
-        // to whichever server last generated it. Nothing recorded that, which is
-        // how mixes full of unstreamable tracks survived a server change: the
-        // loader only rebuilt when there were none at all.
-        var mixServer = _preferences.GetString(AppPreferences.HomeMixServerKey, string.Empty);
-        var stale = !string.IsNullOrWhiteSpace(serverId)
-                    && !string.Equals(mixServer, serverId, StringComparison.Ordinal);
-
+        var attachedServerIds = Connect.Accounts
+            .Select(a => a.ServerId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var serverId = attachedServerIds.FirstOrDefault();
         var result = await HomeMixLoader.LoadAsync(
             ReadHomeMixesAsync,
             LoadLikedTracksAsync,
             GenerateHomeMixesAsync,
-            Connect.Accounts.Select(a => a.ServerId).ToList(),
-            () => StatusMessage = "Generating mixes for Home…",
-            mixesAreStale: stale);
-
-        if (result.Generated && !string.IsNullOrWhiteSpace(serverId))
-            _preferences.SetString(AppPreferences.HomeMixServerKey, serverId!);
+            attachedServerIds,
+            () => StatusMessage = "Generating mixes for Home…");
 
         _homeMixTiles = HomeMixPresentation.BuildTiles(
             result.LikedTracks.Count,
             result.Mixes,
             serverId).ToList();
         HomeMixGrid.Reset(_homeMixTiles);
+        _ = RefreshMixTonesAsync();
+        var messages = new List<string>();
+        if (!string.IsNullOrWhiteSpace(result.Message)) messages.Add(result.Message);
         if (!string.IsNullOrWhiteSpace(serverId))
         {
             var server = serverId!;
-            _homeRecentlyPlayed = (await _core.CallAsync<List<Track>>(
-                new CoreRequest("recentlyPlayedTracks") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
-                .ToList();
-            _homeRecentlyAddedAlbums = (await _core.CallAsync<List<Album>>(
-                new CoreRequest("recentlyAddedAlbums") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
-                .ToList();
-            _homePlaylists = (await _core.CallAsync<List<Playlist>>(
-                new CoreRequest("playlists") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize }) ?? [])
-                .Take(MediaDetailFormatting.ShelfPageSize)
-                .ToList();
+            _homeRecentlyPlayed = (await HomeShelfLoader.LoadAsync<Track>(
+                   "Recently Played",
+                   new CoreRequest("recentlyPlayedTracks") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize },
+                   async request => await _core.CallAsync<List<Track>>(request),
+                   messages))
+               .ToList();
+            _homeRecentlyAddedAlbums = (await HomeShelfLoader.LoadAsync<Album>(
+                   "Recently Added",
+                   new CoreRequest("recentlyAddedAlbums") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize },
+                   async request => await _core.CallAsync<List<Album>>(request),
+                   messages))
+               .ToList();
+            _homePlaylists = (await HomeShelfLoader.LoadAsync<Playlist>(
+                   "Your Playlists",
+                   new CoreRequest("playlists") { ServerId = server, Limit = MediaDetailFormatting.ShelfPageSize },
+                   async request => await _core.CallAsync<List<Playlist>>(request),
+                   messages))
+               .Take(MediaDetailFormatting.ShelfPageSize)
+               .ToList();
         }
+        else
+        {
+            _homeMessage = HomeMixPresentation.NoAttachedHomeServerMessage;
+        }
+
         RebuildHomeRows();
-        StatusMessage = result.Message;
+        StatusMessage = messages.Count == 0 ? null : string.Join(" ", messages.Distinct(StringComparer.Ordinal));
         RaiseDerived();
     }
 
     private async Task<IReadOnlyList<HomeMix>> ReadHomeMixesAsync() =>
-        await _core.CallAsync<List<HomeMix>>(
-            new CoreRequest("homeMixes") { ServerId = ActiveServerId }) ?? [];
+        await _core.CallAsync<List<HomeMix>>(new CoreRequest("homeMixes") { ServerId = ActiveServerId }) ?? [];
 
     private async Task<IReadOnlyList<Track>> LoadLikedTracksAsync() =>
-        await _core.CallAsync<List<Track>>(
-            new CoreRequest("likedTracks") { ServerId = ActiveServerId }) ?? [];
+        await _core.CallAsync<List<Track>>(new CoreRequest("likedTracks") { ServerId = ActiveServerId }) ?? [];
 
     private async Task GenerateHomeMixesAsync(string serverId) =>
         await _core.CallAsync<object>(new CoreRequest("generateHomeMixes") { ServerId = serverId });
@@ -946,7 +1627,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadAlbumsAsync()
     {
         var page = await _core.CallPageAsync<List<Album>>(
-            new CoreRequest("albums") { ServerId = ActiveServerId, Limit = PageSize });
+            new CoreRequest("albums") { Limit = PageSize });
         Replace(Albums, page.Rows);
         AlbumGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
@@ -955,10 +1636,22 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task LoadArtistsAsync()
     {
         var page = await _core.CallPageAsync<List<Artist>>(
-            new CoreRequest("artists") { ServerId = ActiveServerId, Limit = PageSize });
+            new CoreRequest("artists") { Limit = PageSize });
         Replace(Artists, page.Rows);
         ArtistGrid.Reset(page.Rows);
         _nextCursor = page.NextCursor;
+    }
+
+    private async Task LoadGenresAsync()
+    {
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        var names = string.IsNullOrWhiteSpace(serverId)
+            ? new List<string>()
+            : await _core.CallAsync<List<string>>(new CoreRequest("genres") { ServerId = serverId }) ?? [];
+        var genres = GenrePresentation.Build(names);
+        Replace(Genres, genres);
+        GenreGrid.Reset(genres);
+        _nextCursor = null;
     }
 
     private async Task LoadPlaylistsAsync()
@@ -1070,6 +1763,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task OpenGenre(GenreTile? genre)
+    {
+        if (genre is null) return;
+        _navigation.Push(LibraryPage.ForGenre(genre.Name));
+        await ApplyPageAsync(_navigation.Current, reload: true);
+    }
+
+    [RelayCommand]
+    private async Task OpenNowPlaying()
+    {
+        _navigation.Push(LibraryPage.ForNowPlaying());
+        await ApplyPageAsync(_navigation.Current, reload: false);
+    }
+
+    [RelayCommand]
     private async Task OpenMix(HomeMixTile? mix)
     {
         if (mix is null) return;
@@ -1157,6 +1865,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 PageTitle = "Playlist";
                 if (reload && page.Playlist is not null) await LoadPlaylistDetailAsync(page.Playlist);
                 break;
+            case LibraryPageKind.GenreDetail:
+                Section = LibrarySection.Genres;
+                SelectedAlbum = null;
+                SelectedArtist = null;
+                SelectedPlaylist = null;
+                _selectedMix = null;
+                PageTitle = page.Genre ?? "Genre";
+                if (reload && page.Genre is not null) await LoadGenreDetailAsync(page.Genre);
+                break;
             case LibraryPageKind.MixDetail:
                 Section = LibrarySection.Home;
                 SelectedAlbum = null;
@@ -1164,6 +1881,15 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 SelectedPlaylist = null;
                 PageTitle = page.Title ?? "Mix";
                 if (reload && page.MixId is not null) await LoadMixDetailAsync(page.MixId, page.Title);
+                break;
+            case LibraryPageKind.NowPlaying:
+                Section = LibrarySection.Search;
+                SelectedAlbum = null;
+                SelectedArtist = null;
+                SelectedPlaylist = null;
+                _selectedMix = null;
+                PageTitle = "Now Playing";
+                RefreshQueueRows();
                 break;
         }
 
@@ -1282,7 +2008,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         var results = await _core.CallAsync<SearchResults>(
-            new CoreRequest("search") { ServerId = ActiveServerId, Query = artist.Name, Limit = 50 });
+            new CoreRequest("search") { Query = artist.Name, Limit = 50 });
         return results?.Artists.FirstOrDefault(a =>
             string.Equals(a.Name, artist.Name, StringComparison.CurrentCultureIgnoreCase)
             && a.ServerId == artist.ServerId) ?? artist;
@@ -1320,7 +2046,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         var results = await _core.CallAsync<SearchResults>(
-            new CoreRequest("search") { ServerId = ActiveServerId, Query = artist.Name, Limit = 50 });
+            new CoreRequest("search") { Query = artist.Name, Limit = 50 });
         return results?.Albums
             .Where(a => string.Equals(a.ArtistName, artist.Name, StringComparison.CurrentCultureIgnoreCase))
             .Take(limit)
@@ -1455,6 +2181,42 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task LoadGenreDetailAsync(string genre)
+    {
+        _detailGenreAlbums = [];
+        GenreAlbumGrid.Reset([]);
+        DetailMeta = GenrePresentation.Metadata(genre, _detailGenreAlbums);
+        RebuildDetailRows();
+        RaiseDerived();
+
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsBusy = true;
+            var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+            if (string.IsNullOrWhiteSpace(serverId)) return;
+            var albums = await _core.CallAsync<List<Album>>(new CoreRequest("genreAlbums")
+            {
+                ServerId = serverId,
+                Genre = genre,
+            }) ?? [];
+            _detailGenreAlbums = albums;
+            GenreAlbumGrid.Reset(albums);
+            DetailMeta = GenrePresentation.Metadata(genre, albums);
+            RebuildDetailRows();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            RaiseDerived();
+        }
+    }
+
     private async Task AppendPlaylistTracksAsync()
     {
         if (SelectedPlaylist is null || _nextCursor is null) return;
@@ -1552,6 +2314,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _detailArtistAppearsOn = [];
         _detailArtistTopTracks = [];
         _detailPlaylistTracks = [];
+        _detailGenreAlbums = [];
+        GenreAlbumGrid.Reset([]);
     }
 
     private void RebuildDetailRows()
@@ -1605,6 +2369,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 if (_detailPlaylistTracks.Count > 0) rows.Add(new PlaylistTrackHeaderRow());
                 rows.AddRange(_detailPlaylistTracks.Select(t => new PlaylistTrackItemRow(t)));
                 break;
+            case LibraryPageKind.GenreDetail:
+                rows.Add(new GenreHeroRow(_navigation.Current.Genre ?? "Genre", DetailMeta ?? string.Empty));
+                AddAlbumShelf(rows, "Albums", _detailGenreAlbums);
+                break;
         }
 
         Replace(DetailRows, rows);
@@ -1623,10 +2391,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _homeRecentlyPlayed,
             _homeRecentlyAddedAlbums,
             _homePlaylists,
-            Math.Min(2, ColumnsFor(DesktopLayout.HomeMixTilePitch)),
+            ColumnsFor(DesktopLayout.AlbumTilePitch),
             ColumnsFor(DesktopLayout.TrackCardPitch),
             ColumnsFor(DesktopLayout.AlbumTilePitch),
-            ColumnsFor(DesktopLayout.PlaylistTilePitch)));
+            ColumnsFor(DesktopLayout.PlaylistTilePitch),
+            _homeMessage));
     }
 
     private void AddAlbumShelf(List<DetailRow> rows, string title, IReadOnlyList<Album> albums)
@@ -1675,10 +2444,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await Task.Delay(140, cts.Token);
+            await Task.Delay(SearchTiming.DebounceDelay, cts.Token);
             var results = await _core.CallAsync<SearchResults>(
-                new CoreRequest("search") { ServerId = ActiveServerId, Query = query, Limit = 50 }, cts.Token);
+                new CoreRequest("search") { Query = query, Limit = 50 }, cts.Token);
             if (cts.Token.IsCancellationRequested || results is null) return;
+            var playlists = await SearchPlaylistsAsync(query, cts.Token);
 
             _navigation.Replace(LibraryPage.ForSection(LibrarySection.Search), clearBackStack: true);
             Section = LibrarySection.Search;
@@ -1688,8 +2458,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             Replace(Tracks, results.Tracks);
             Replace(Albums, results.Albums);
             Replace(Artists, results.Artists);
-            AlbumGrid.Reset(results.Albums);
-            ArtistGrid.Reset(results.Artists);
+            Replace(SearchRows, SearchPresentation.Build(results, playlists, query));
             RaiseDerived();
         }
         catch (OperationCanceledException)
@@ -1700,6 +2469,166 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             StatusMessage = ex.Message;
         }
+    }
+
+    private async Task<IReadOnlyList<Playlist>> SearchPlaylistsAsync(string query, CancellationToken token)
+    {
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        if (string.IsNullOrWhiteSpace(serverId)) return [];
+        try
+        {
+            var page = await _core.CallPageAsync<List<Playlist>>(
+                new CoreRequest("playlists") { ServerId = serverId, Limit = PageSize }, token);
+            return SearchPresentation.Build(new SearchResults([], [], []), page.Rows, query)
+                .OfType<SearchPlaylistRow>()
+                .Select(r => r.Playlist)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleFavoriteAsync(Track? track)
+    {
+        if (track is null || !_core.IsOpen) return;
+        var liked = !track.IsFavorite;
+        ApplyTrackUpdate(track, t => t with { IsFavorite = liked, FavoritePending = true });
+        try
+        {
+            var result = await _core.CallAsync<FavoriteMutationResult>(new CoreRequest("setFavorite")
+            {
+                ServerId = track.ServerId,
+                RemoteId = track.RemoteId,
+                Liked = liked,
+                Flush = true,
+            });
+            ApplyTrackUpdate(track, t => t with
+            {
+                IsFavorite = result?.Liked ?? liked,
+                FavoritePending = result is { Synced: false },
+            });
+            StatusMessage = result is { Synced: false, Queued: true }
+                ? "Favorite queued — it will sync when the server is reachable."
+                : null;
+        }
+        catch (Exception ex)
+        {
+            ApplyTrackUpdate(track, t => t with { IsFavorite = track.IsFavorite, FavoritePending = false });
+            StatusMessage = $"Could not update favorite: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task RateNowPlayingAsync(string? value)
+    {
+        if (NowPlaying is not { } track || !_core.IsOpen) return;
+        // Half-stars are real values in a library, so parse as a double and clamp
+        // to the half-step range rather than rounding to whole stars on the way in.
+        var rating = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Clamp(parsed, 0.5, 5.0)
+            : (double?)null;
+        ApplyTrackUpdate(track, t => t with { Rating = rating, RatingPending = true });
+        try
+        {
+            var result = await _core.CallAsync<RatingMutationResult>(new CoreRequest("setRating")
+            {
+                ServerId = track.ServerId,
+                RemoteId = track.RemoteId,
+                Rating = rating,
+                Flush = true,
+            });
+            ApplyTrackUpdate(track, t => t with
+            {
+                Rating = result?.Value ?? rating,
+                RatingPending = result is { Synced: false },
+            });
+            StatusMessage = result is { Synced: false, Queued: true }
+                ? "Rating queued — it will sync when the server is reachable."
+                : null;
+        }
+        catch (Exception ex)
+        {
+            ApplyTrackUpdate(track, t => t with { Rating = track.Rating, RatingPending = false });
+            StatusMessage = $"Could not update rating: {ex.Message}";
+        }
+    }
+
+    private void ApplyTrackUpdate(Track original, Func<Track, Track> update)
+    {
+        static bool Same(Track a, Track b) => a.ServerId == b.ServerId && a.RemoteId == b.RemoteId;
+        Track Update(Track current) => Same(current, original) ? update(current) : current;
+
+        Replace(Tracks, Tracks.Select(Update).ToList());
+        Replace(ArtistTracks, ArtistTracks.Select(Update).ToList());
+        Replace(PlaylistTracks, PlaylistTracks.Select(Update).ToList());
+        _homeRecentlyPlayed = _homeRecentlyPlayed.Select(Update).ToList();
+        _detailArtistTopTracks = _detailArtistTopTracks.Select(Update).ToList();
+        _detailPlaylistTracks = _detailPlaylistTracks.Select(Update).ToList();
+        _detailAlbumTracks = _detailAlbumTracks
+            .Select(row => row with { Track = Update(row.Track) })
+            .ToList();
+        _queue.ReplaceTracks(Update);
+        if (NowPlaying is { } now && Same(now, original)) NowPlaying = Update(now);
+        RefreshQueueRows();
+        RebuildHomeRows();
+        RebuildDetailRows();
+        RaiseDerived();
+    }
+
+    private async Task LoadLyricsAsync(Track track, double positionSeconds)
+    {
+        LyricRows.Clear();
+        LyricsMessage = null;
+        LyricStatus = null;
+        OnPropertyChanged(nameof(HasLyrics));
+        OnPropertyChanged(nameof(ShowLyricsSilent));
+        if (!_core.IsOpen) return;
+
+        try
+        {
+            IsLyricsLoading = true;
+            var payload = await _core.CallAsync<LyricsPayload>(new CoreRequest("lyrics")
+            {
+                ServerId = track.ServerId,
+                RemoteId = track.RemoteId,
+                UseLRCLIB = true,
+                PositionSeconds = positionSeconds,
+            });
+            if (NowPlaying is null || NowPlaying.ServerId != track.ServerId || NowPlaying.RemoteId != track.RemoteId) return;
+            LyricStatus = payload?.Status;
+            if (payload?.Status == "silent")
+            {
+                LyricsMessage = "No lyrics for this track.";
+                LyricRows.Clear();
+                return;
+            }
+
+            var active = payload?.ActiveLineIndex ?? LyricLineSelector.ActiveIndex(payload?.Lyrics?.Lines, positionSeconds);
+            Replace(LyricRows, LyricLineSelector.Rows(payload?.Lyrics?.Lines, active));
+            LyricsMessage = LyricRows.Count == 0 ? "No lyrics for this track." : payload?.Lyrics?.SourceDisplayName;
+        }
+        catch (Exception ex)
+        {
+            LyricsMessage = $"Could not load lyrics: {ex.Message}";
+        }
+        finally
+        {
+            IsLyricsLoading = false;
+            OnPropertyChanged(nameof(HasLyrics));
+            OnPropertyChanged(nameof(ShowLyricsSilent));
+        }
+    }
+
+    private void UpdateActiveLyric(double positionSeconds)
+    {
+        if (LyricRows.Count == 0) return;
+        var lines = LyricRows.Select(r => new LyricLine(r.Text, r.StartSeconds)).ToList();
+        var active = LyricLineSelector.ActiveIndex(lines, positionSeconds);
+        Replace(LyricRows, LyricLineSelector.Rows(lines, active));
+        OnPropertyChanged(nameof(HasLyrics));
     }
 
     [RelayCommand]
@@ -1821,14 +2750,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             case PlaybackState.Playing:
                 _engine.Pause();
+                _playHistory.PauseCurrent(CurrentPositionSeconds());
                 IsPlaying = false;
+                CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
                 break;
             case PlaybackState.Paused:
                 _engine.Resume();
+                _playHistory.ResumeCurrent(CurrentPositionSeconds());
                 IsPlaying = true;
+                CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
                 break;
             default:
-                _ = PlayCurrentAsync();
+                _ = PlayIndexAsync(_queue.CurrentIndex < 0 ? 0 : _queue.CurrentIndex);
                 break;
         }
         _nowPlaying_os?.UpdateState(_engine.State);
@@ -1841,170 +2774,120 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private Task Previous() => PreviousAsync();
 
     [RelayCommand]
-    private void ToggleShuffle() => IsShuffled = !IsShuffled;
-
-    /// <summary>off → all → one → off, the order every music player cycles in.</summary>
-    [RelayCommand]
-    private void CycleRepeat() => RepeatMode = RepeatMode switch
+    private void ToggleShuffle()
     {
-        RepeatMode.Off => RepeatMode.All,
-        RepeatMode.All => RepeatMode.One,
-        _ => RepeatMode.Off,
-    };
-
-    [RelayCommand]
-    private void ToggleMute() =>
-        Volume = IsMuted ? (_unmutedVolume > 0 ? _unmutedVolume : 0.5) : 0;
-
-    [RelayCommand]
-    private void ToggleQueue() => IsQueueOpen = !IsQueueOpen;
-
-    /// <summary>Open the full player. Clicking the mini bar's cover or title does this.</summary>
-    [RelayCommand]
-    private void OpenPlayer()
-    {
-        if (NowPlaying is not null) IsPlayerOpen = true;
+        if (_queue.ToggleShuffle() == ShuffleMode.On) _queue.ShuffleUpcoming();
+        RefreshQueueRows();
+        OnPropertyChanged(nameof(ShuffleStateText));
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     [RelayCommand]
-    private void ClosePlayer() => IsPlayerOpen = false;
-
-    /// <summary>
-    /// Re-derive the player's backdrop from the new track's cover.
-    ///
-    /// The colours come from the shared core (<c>artworkTones</c>) rather than
-    /// from anything decided here — see <see cref="ArtworkSampling"/> for why
-    /// that matters. Everything below is just fetching the cover and getting its
-    /// pixels into the shape the core reads.
-    /// </summary>
-    private async Task RefreshPlayerBackgroundAsync(Track? track)
+    private void CycleRepeat()
     {
-        // Black takes no colour from the artwork anywhere in the app, and
-        // returning before the fetch means the cover is never decoded for its
-        // histogram either — the work and the field it produced are both gone,
-        // not hidden.
-        if (DarkStyle == "black" && Appearance != "light")
-        {
-            PlayerBackground = Brushes.Black;
-            return;
-        }
-
-        if (_artwork is null || track?.ArtworkKey is not { Length: > 0 } key) return;
-
-        var request = new ArtworkRef(track.ServerId, key, ArtworkSampling.RequestSize);
-        var bitmap = await _artwork.LoadAsync(request, CancellationToken.None);
-        if (bitmap is null) return;
-
-        // Rasterising is a UI-thread job in Avalonia; the histogram behind the
-        // FFI call is not, so only the sampling is marshalled.
-        var pixels = ArtworkSampling.Rgba(bitmap);
-        if (pixels is null) return;
-
-        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
-        {
-            Pixels = Convert.ToBase64String(pixels),
-            Width = ArtworkSampling.SampleDim,
-            Height = ArtworkSampling.SampleDim,
-        }));
-
-        // Same rule as the cover itself: only ever replaced by something real, so
-        // one track without usable artwork does not wash the field out.
-        if (tones is not null && NowPlaying == track)
-            PlayerBackground = ArtworkSampling.Brush(tones);
+        _queue.CycleRepeat();
+        OnPropertyChanged(nameof(RepeatStateText));
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
     [RelayCommand]
-    private async Task PlayQueueRow(QueueRow? row)
+    private async Task JumpToQueueItem(QueueItemRow? row)
     {
-        if (row is null || !_queue.MoveToOrderIndex(row.OrderIndex)) return;
-        SkipHistoryForCurrent();
-        RefreshQueueState();
-        await PlayCurrentAsync();
+        if (row is null || !_queue.JumpTo(row.Track, out var index)) return;
+        await PlayIndexAsync(index);
     }
 
-    /// <summary>Jump to the album the playing track came from, leaving the player.</summary>
     [RelayCommand]
-    private Task OpenNowPlayingAlbum()
+    private void MoveQueueItemUp(QueueItemRow? row)
     {
-        IsPlayerOpen = false;
-        return OpenTrackAlbum(NowPlaying);
+        if (row is null || !_queue.Move(row.Track, -1)) return;
+        RefreshQueueRows();
+        _ = PreloadNeighborAsync();
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
-    /// <summary>Jump to the playing track's artist, leaving the player.</summary>
     [RelayCommand]
-    private Task OpenNowPlayingArtist()
+    private void MoveQueueItemDown(QueueItemRow? row)
     {
-        IsPlayerOpen = false;
-        return OpenTrackArtist(NowPlaying);
+        if (row is null || !_queue.Move(row.Track, 1)) return;
+        RefreshQueueRows();
+        _ = PreloadNeighborAsync();
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
-    /// <summary>
-    /// Republish everything the transport derives from the queue. One place,
-    /// because "next is disabled" and "Up Next is stale" are the same bug.
-    /// </summary>
-    private void RefreshQueueState()
+    [RelayCommand]
+    private void RemoveQueueItem(QueueItemRow? row)
     {
-        OnPropertyChanged(nameof(HasNextTrack));
-
-        UpNext.Clear();
-        var start = _queue.Position + 1;
-        var upNext = _queue.UpNext;
-        for (var i = 0; i < upNext.Count && i < UpNextLimit; i++)
-            UpNext.Add(new QueueRow(start + i, upNext[i], IsCurrent: false));
-        OnPropertyChanged(nameof(HasUpNext));
+        if (row is null || !_queue.Remove(row.Track)) return;
+        RefreshQueueRows();
+        _ = PreloadNeighborAsync();
+        CheckpointContinuity(ContinuityCheckpointReason.QueueChanged);
     }
 
-    /// <summary>
-    /// How much of the queue the panel lists. A shuffled library can be tens of
-    /// thousands of tracks and nobody reads past the first screenful; the cap
-    /// keeps rebuilding the list on every track change free.
-    /// </summary>
-    private const int UpNextLimit = 100;
+    private void RefreshQueueRows()
+    {
+        QueueProjection.ReplaceRows(QueueRows, _queue);
+        OnPropertyChanged(nameof(HasQueue));
+    }
 
     private async Task StartQueueAsync(IReadOnlyList<Track> tracks, int index)
+        => await StartQueueAsync(tracks.Select((track, ordinal) => (track, ordinal)).ToList(), index, 0);
+
+    private async Task StartQueueAsync(IReadOnlyList<(Track Track, int BaseOrdinal)> tracks, int index, double initialPositionSeconds)
     {
         SkipHistoryForCurrent();
-        _queue.SetItems(tracks, index);
-        RefreshQueueState();
-        await PlayCurrentAsync();
+        BeginContinuityRun();
+        _queue.Start(tracks, index);
+        RefreshQueueRows();
+        await PlayIndexAsync(index, initialPositionSeconds);
     }
 
     /// <summary>
-    /// Play whatever the queue is parked on. Every transport path ends here.
-    ///
-    /// A track the server will not stream — moved, deleted, or belonging to a
-    /// server that is no longer attached — steps to the next one rather than
-    /// stopping. Pressing Play on a hundred liked songs and getting silence
-    /// because the first of them is gone is not a queue, and the reason is
-    /// already on screen. The budget bounds it so a queue that is entirely
-    /// unplayable stops instead of racing to the end.
+    /// A track the server will not stream — moved, deleted, or on a server that
+    /// is no longer attached — steps to the next one rather than stopping.
+    /// Pressing play on a hundred songs and getting silence because the first is
+    /// gone is not a queue, and ResolveSource has already said why on screen.
+    /// The budget bounds it so an entirely unplayable queue stops instead of
+    /// racing to the end.
     /// </summary>
-    private async Task PlayCurrentAsync(int skipBudget = 4)
+    private async Task PlayIndexAsync(int index, double initialPositionSeconds = 0, int skipBudget = 4)
     {
-        if (_engine is null || _queue.Current is not { } track) return;
+        if (_engine is null || index < 0 || index >= _queue.Tracks.Count) return;
+        var track = _queue.Tracks[index];
+        _queue.JumpTo(track, out _);
+        RefreshQueueRows();
 
         // Resolving a source can spawn ffprobe or call the core, so keep it off
         // the UI thread.
         var source = await Task.Run(() => ResolveSource(track));
         if (source is null)
         {
-            // ResolveSource has already put the reason on screen.
-            if (skipBudget > 0 && _queue.Advance())
-            {
-                RefreshQueueState();
-                await PlayCurrentAsync(skipBudget - 1);
-            }
+            if (skipBudget > 0 && _queue.NextIndex() is { } next && next != index)
+                await PlayIndexAsync(next, skipBudget: skipBudget - 1);
             return;
         }
 
+        // Ask the engine BEFORE committing the UI to this track. Setting
+        // NowPlaying first meant a load that failed left the title, the artwork
+        // and the duration describing a song that was never started, while the
+        // previous one played on underneath - which reads as "it played the
+        // wrong song" rather than "it could not play that song".
+        if (!_engine.Play(source, track)) return;
+
         NowPlaying = track;
+        _ = LoadLyricsAsync(track, 0);
         DurationSeconds = source.KnownDuration?.TotalSeconds
             ?? (track.DurationSeconds > 0 ? track.DurationSeconds : 0);
-        PositionSeconds = 0;
+        PositionSeconds = Math.Max(0, initialPositionSeconds);
 
-        if (!_engine.Play(source, track)) return;
         StartHistoryFor(track);
+        if (initialPositionSeconds > 0)
+        {
+            _engine.Seek(TimeSpan.FromSeconds(initialPositionSeconds));
+            SeekHistoryForCurrent(initialPositionSeconds);
+        }
         IsPlaying = true;
+        CheckpointContinuity(ContinuityCheckpointReason.TrackChanged);
 
         _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
             track.Title, track.ArtistName, track.AlbumTitle,
@@ -2017,7 +2900,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Hand the engine the next track so it can stitch it in gaplessly.</summary>
     private async Task PreloadNeighborAsync()
     {
-        if (_engine is null || _queue.PeekNext is not { } track) return;
+        if (_engine is null) return;
+        var next = _queue.NextIndex();
+        if (next is null || next.Value == _queue.CurrentIndex) return;
+        var track = _queue.Tracks[next.Value];
         var source = await Task.Run(() => ResolveSource(track));
         if (source is not null) _engine.PreloadNext(source, track);
     }
@@ -2025,15 +2911,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task NextAsync()
     {
         SkipHistoryForCurrent();
-        if (_queue.Advance())
-        {
-            RefreshQueueState();
-            await PlayCurrentAsync();
-        }
+        if (_queue.NextIndex() is { } next)
+            await PlayIndexAsync(next);
         else
         {
             _engine?.Stop();
             IsPlaying = false;
+            CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
         }
     }
 
@@ -2041,18 +2925,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_engine is null) return;
         // Standard behaviour: restart the track unless we're near its start.
-        if (_engine.Position.TotalSeconds > 3 || !_queue.HasPrevious)
+        if (_engine.Position.TotalSeconds > 3 || _queue.PreviousIndex() is null)
         {
             _engine.Seek(TimeSpan.Zero);
             SeekHistoryForCurrent(0);
             PositionSeconds = 0;
-            return;
+            CheckpointContinuity(ContinuityCheckpointReason.Seeked);
         }
-
-        SkipHistoryForCurrent();
-        if (!_queue.Retreat()) return;
-        RefreshQueueState();
-        await PlayCurrentAsync();
+        else
+        {
+            SkipHistoryForCurrent();
+            await PlayIndexAsync(_queue.PreviousIndex()!.Value);
+        }
     }
 
     private void StopPlayback()
@@ -2061,7 +2945,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _engine?.Stop();
         IsPlaying = false;
         _nowPlaying_os?.UpdateState(PlaybackState.Stopped);
+        CheckpointContinuity(ContinuityCheckpointReason.TransportChanged);
     }
+
+    [RelayCommand]
+    private async Task ContinueHereAsync()
+    {
+        var offer = ContinuityOffer;
+        var account = ActiveAccount;
+        if (offer is null || account is null) return;
+
+        var tracks = ContinuityPresentation.TracksForResume(offer.Snapshot, account.ServerId);
+        if (tracks.Count == 0) return;
+
+        ContinuityOffer = null;
+        var index = ContinuityPresentation.ResumeIndex(offer.Snapshot, tracks.Count);
+        await StartQueueAsync(tracks, index, offer.Snapshot.Cursor.PositionMS / 1000.0);
+    }
+
+    [RelayCommand]
+    private void DismissContinuityOffer() => ContinuityOffer = null;
 
     private void OnPositionTick(object? sender, EventArgs e)
     {
@@ -2071,18 +2974,135 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var duration = _engine.Duration.TotalSeconds;
         if (duration > 0) DurationSeconds = duration;
 
-        // PositionSeconds is display-only: the scrubber holds its own value
-        // while it is being dragged and reports the result through SeekTo, so
-        // there is nothing here to fight with.
+        // Nothing to fight over: the scrubber holds its own value while it is
+        // being dragged and hands back one seek at the end.
         var pos = _engine.Position.TotalSeconds;
         PositionSeconds = DurationSeconds > 0 ? Math.Min(pos, DurationSeconds) : pos;
+        _playHistory.ProgressCurrent(PositionSeconds);
+        UpdateActiveLyric(PositionSeconds);
+        CheckpointContinuity(ContinuityCheckpointReason.Periodic);
 
         _nowPlaying_os?.UpdatePosition(_engine.Position, _engine.Duration);
     }
 
+    partial void OnNowPlayingChanged(Track? value)
+    {
+        OnPropertyChanged(nameof(NowPlayingKey));
+        OnPropertyChanged(nameof(NowPlayingContext));
+        _ = RefreshPlayerBackgroundAsync(value);
+    }
+
+    /// <summary>
+    /// Re-derive Now Playing's backdrop from the current cover.
+    ///
+    /// The colours come from the shared core (<c>artworkTones</c>) rather than
+    /// from anything decided here: iOS samples them, Android's PlayerBackground
+    /// is a direct port of the iOS one "tuning constants included", and a third
+    /// client guessing separately at "colours from the artwork" would drift from
+    /// both immediately. Everything below is only fetching the cover and getting
+    /// its pixels into the shape the core reads — see ArtworkSampling.
+    /// </summary>
+    /// <summary>
+    /// Colours for the Home mix covers, keyed by artwork so two mixes sharing a
+    /// cover sample it once.
+    /// </summary>
+    private readonly Dictionary<string, Avalonia.Media.Color> _mixTones = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Derive each mix cover's dominant colour, then rebuild the shelf with it.
+    ///
+    /// The same path the player's backdrop uses, so a mix tile and the player
+    /// agree about what a record's colour is. Sampling is per artwork rather
+    /// than per mix because several mixes legitimately share a cover, and it
+    /// happens once: the results are kept for the life of the session.
+    /// </summary>
+    private async Task RefreshMixTonesAsync()
+    {
+        if (_artwork is null || _homeMixTiles.Count == 0) return;
+
+        var wanted = _homeMixTiles
+            .Select(tile => tile.ArtworkKey)
+            .Where(key => !string.IsNullOrEmpty(key) && !_mixTones.ContainsKey(key!))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (wanted.Count == 0) return;
+
+        var serverId = Connect.Accounts.FirstOrDefault()?.ServerId;
+        if (string.IsNullOrEmpty(serverId)) return;
+
+        var found = false;
+        foreach (var key in wanted)
+        {
+            var bitmap = await _artwork.LoadAsync(
+                new ArtworkRef(serverId!, key!, ArtworkSampling.RequestSize), CancellationToken.None);
+            if (bitmap is null) continue;
+            var pixels = ArtworkSampling.Rgba(bitmap);
+            if (pixels is null) continue;
+
+            var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+            {
+                Pixels = Convert.ToBase64String(pixels),
+                Width = ArtworkSampling.SampleDim,
+                Height = ArtworkSampling.SampleDim,
+            }));
+            if (tones is null) continue;
+            _mixTones[key!] = ArtworkSampling.ToColor(tones.Middle);
+            found = true;
+        }
+
+        if (!found) return;
+        _homeMixTiles = _homeMixTiles
+            .Select(tile => tile.ArtworkKey is { Length: > 0 } k && _mixTones.TryGetValue(k, out var tone)
+                ? tile with { Tone = tone }
+                : tile)
+            .ToList();
+        HomeMixGrid.Reset(_homeMixTiles);
+        RebuildHomeRows();
+    }
+
+    private async Task RefreshPlayerBackgroundAsync(Track? track)
+    {
+        // Black takes no colour from the artwork anywhere in the app, and
+        // returning before the fetch means the cover is never decoded for its
+        // histogram either.
+        if (DarkStyle == "black" && Appearance != "light")
+        {
+            PlayerBackground = Brushes.Black;
+            return;
+        }
+
+        if (_artwork is null || track?.ArtworkKey is not { Length: > 0 } key) return;
+
+        var request = new ArtworkRef(track.ServerId, key, ArtworkSampling.RequestSize);
+        var bitmap = await _artwork.LoadAsync(request, CancellationToken.None);
+        if (bitmap is null) return;
+
+        var pixels = ArtworkSampling.Rgba(bitmap);
+        if (pixels is null) return;
+
+        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+        {
+            Pixels = Convert.ToBase64String(pixels),
+            Width = ArtworkSampling.SampleDim,
+            Height = ArtworkSampling.SampleDim,
+        }));
+
+        // Same rule as the cover: only ever replaced by something real, so one
+        // track without usable artwork does not wash the field out.
+        if (tones is not null && NowPlaying == track)
+            PlayerBackground = ArtworkSampling.Brush(tones);
+    }
+
     partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
 
-    /// <summary>Seek to a point the scrubber released on, once, at the end of the gesture.</summary>
+    /// <summary>
+    /// Seek to the point the scrubber was released on.
+    ///
+    /// One seek at the end of a gesture rather than a debounced stream of them
+    /// during it: the scrubber paints its own value while it is being dragged
+    /// and only reports the result, so there is nothing to coalesce and nothing
+    /// to fight with the position tick.
+    /// </summary>
     [RelayCommand]
     private void SeekTo(double seconds)
     {
@@ -2090,6 +3110,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var target = Math.Clamp(seconds, 0, DurationSeconds);
         _engine.Seek(TimeSpan.FromSeconds(target));
         SeekHistoryForCurrent(target);
+        CheckpointContinuity(ContinuityCheckpointReason.Seeked);
         PositionSeconds = target;
     }
 
@@ -2099,59 +3120,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(PlayPauseGlyph));
         _nowPlaying_os?.UpdateState(value ? PlaybackState.Playing : PlaybackState.Paused);
-    }
-
-    partial void OnNowPlayingChanged(Track? value)
-    {
-        OnPropertyChanged(nameof(NowPlayingKey));
-        OnPropertyChanged(nameof(NowPlayingFormat));
-        OnPropertyChanged(nameof(NowPlayingContext));
-        OnPropertyChanged(nameof(HasNowPlaying));
-        // Nothing playing is not a player worth showing.
-        if (value is null) IsPlayerOpen = false;
-        _ = RefreshPlayerBackgroundAsync(value);
+        if (value) ContinuityOffer = null;
     }
 
     partial void OnVolumeChanged(double value)
     {
-        // Mute is not a second piece of state: silence *is* muted, whether it
-        // was reached through the button or by dragging the bar to the floor.
-        // The only thing worth remembering is the level to come back to.
-        if (value > 0) _unmutedVolume = value;
         if (_engine is not null) _engine.Volume = value;
-        OnPropertyChanged(nameof(IsMuted));
-        if (_restoringSettings) return;
-        // Dragging the bar raises this on every pointer move, and each save is a
-        // rewrite of the whole preferences file. Coalesce.
-        _volumePersist?.Stop();
-        _volumePersist?.Start();
-    }
-
-    partial void OnRepeatModeChanged(RepeatMode value)
-    {
-        _queue.Repeat = value;
-        OnPropertyChanged(nameof(IsRepeatOne));
-        OnPropertyChanged(nameof(IsRepeatActive));
-        OnPropertyChanged(nameof(HasNextTrack));
-        if (!_restoringSettings)
-            _preferences.SetString(AppPreferences.RepeatModeKey, value.ToString().ToLowerInvariant());
-        // Repeat changes what plays after this track, and the engine may already
-        // be holding the old answer.
-        _ = PreloadNeighborAsync();
-    }
-
-    private void OnVolumePersistTick(object? sender, EventArgs e)
-    {
-        _volumePersist?.Stop();
-        _preferences.SetDouble(AppPreferences.VolumeKey, Volume);
-    }
-
-    partial void OnIsShuffledChanged(bool value)
-    {
-        _queue.SetShuffled(value);
-        if (!_restoringSettings) _preferences.SetBool(AppPreferences.ShuffleKey, value);
-        RefreshQueueState();
-        _ = PreloadNeighborAsync();
     }
 
     private void OnEngineTrackChanged(object? sender, TrackChangedEventArgs e)
@@ -2161,13 +3135,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (e.Token is not Track track) return;
             CompleteHistoryForCurrent();
+            var changedTrack = NowPlaying?.RemoteId != track.RemoteId;
             NowPlaying = track;
-            // The engine has already stitched in what we preloaded, so walk the
-            // queue the same way and only fall back to a search if the two have
-            // somehow diverged.
-            _queue.AdvanceAfterFinish();
-            if (!Equals(_queue.Current, track)) _queue.MoveToTrack(track);
-            RefreshQueueState();
+            _queue.JumpTo(track, out _);
+            RefreshQueueRows();
             DurationSeconds = _engine?.Duration.TotalSeconds is > 0 and var d ? d : track.DurationSeconds;
             PositionSeconds = 0;
             IsPlaying = true;
@@ -2175,6 +3146,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             _nowPlaying_os?.UpdateMetadata(new NowPlayingMetadata(
                 track.Title, track.ArtistName, track.AlbumTitle,
                 _engine?.Duration ?? TimeSpan.FromSeconds(track.DurationSeconds)));
+            if (changedTrack) CheckpointContinuity(ContinuityCheckpointReason.TrackChanged);
             _ = PreloadNeighborAsync();
         });
     }
@@ -2221,11 +3193,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         // The core answers this one, and when it refuses it says why — "streamURL
-        // needs an attached serverId", "no track <id>". Reporting that verbatim
-        // is the difference between a bug you can act on and one you can only
-        // guess at: this used to swallow every failure and print a note telling
-        // the user to set a developer environment variable, which was both wrong
-        // and impossible to act on.
+        // needs an attached serverId", "no track <id>". Reporting that verbatim is
+        // the difference between a fault you can act on and one you can only guess
+        // at: every failure used to collapse into a note telling the user to set a
+        // developer environment variable, which was neither the reason nor
+        // something they could do anything about.
         string reason;
         try
         {
@@ -2238,9 +3210,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             {
                 return new AudioSource(
                     stream.Url,
-                    // The core sends no headers with a stream URL — every backend
-                    // it supports authenticates in the URL itself.
-                    null,
+                    stream.Headers,
                     // The server's own ReplayGain figure, so two albums mastered
                     // at different loudness play at the same level. Jellyfin and
                     // Subsonic both report it; Plex does not, and those tracks
@@ -2274,7 +3244,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
                 if (files.Count == 0) return null;
                 // Map each queue slot to a distinct file so a two-track queue
                 // exercises the gapless hand-off with real, different audio.
-                int i = _queue.BaseIndexOf(track);
+                int i = _queue.Tracks.ToList().IndexOf(track);
                 if (i < 0) i = 0;
                 return files[i % files.Count];
             }
@@ -2331,6 +3301,23 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             : $"{span.Minutes}:{span.Seconds:D2}";
     }
 
+    private sealed record StreamSource(
+        [property: System.Text.Json.Serialization.JsonPropertyName("url")] string Url,
+        [property: System.Text.Json.Serialization.JsonPropertyName("headers")] Dictionary<string, string>? Headers);
+
+    private sealed record PendingContinuityCheckpoint(
+        long Generation,
+        ServerAccount Account,
+        Guid RunId,
+        ulong Sequence,
+        long CapturedAtMS,
+        string State,
+        string CurrentRemoteID,
+        int CurrentAbsoluteIndex,
+        long PositionMS,
+        ContinuityQueueInput Queue,
+        ContinuityCheckpointReason Reason);
+
     private void RaiseDerived()
     {
         OnPropertyChanged(nameof(CanGoBack));
@@ -2338,31 +3325,47 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsSongsSelected));
         OnPropertyChanged(nameof(IsAlbumsSelected));
         OnPropertyChanged(nameof(IsArtistsSelected));
+        OnPropertyChanged(nameof(IsGenresSelected));
         OnPropertyChanged(nameof(IsPlaylistsSelected));
         OnPropertyChanged(nameof(IsConnectSelected));
         OnPropertyChanged(nameof(IsSettingsSelected));
+        OnPropertyChanged(nameof(IsDownloadsSelected));
         OnPropertyChanged(nameof(ShowTracks));
         OnPropertyChanged(nameof(ShowHomeRows));
         OnPropertyChanged(nameof(ShowHomeEmpty));
         OnPropertyChanged(nameof(ShowAlbums));
         OnPropertyChanged(nameof(ShowArtists));
+        OnPropertyChanged(nameof(ShowGenres));
         OnPropertyChanged(nameof(ShowPlaylists));
         OnPropertyChanged(nameof(ShowSearch));
+        OnPropertyChanged(nameof(ShowDownloads));
         OnPropertyChanged(nameof(ShowConnect));
         OnPropertyChanged(nameof(ShowSettings));
         OnPropertyChanged(nameof(ShowAlbumDetail));
         OnPropertyChanged(nameof(ShowArtistDetail));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
         OnPropertyChanged(nameof(ShowMixDetail));
+        OnPropertyChanged(nameof(ShowGenreDetail));
+        OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowDetailPage));
-        OnPropertyChanged(nameof(HasSearchAlbums));
-        OnPropertyChanged(nameof(HasSearchArtists));
-        OnPropertyChanged(nameof(HasSearchTracks));
+        OnPropertyChanged(nameof(HasSearchRows));
+        OnPropertyChanged(nameof(HasQueue));
+        OnPropertyChanged(nameof(HasLyrics));
+        OnPropertyChanged(nameof(ShowLyricsSilent));
+        OnPropertyChanged(nameof(ShuffleStateText));
+        OnPropertyChanged(nameof(RepeatStateText));
         OnPropertyChanged(nameof(HasArtistAlbums));
         OnPropertyChanged(nameof(IsLibraryEmpty));
         OnPropertyChanged(nameof(LibrarySummary));
         OnPropertyChanged(nameof(ActiveAccount));
         OnPropertyChanged(nameof(HasActiveAccount));
+        OnPropertyChanged(nameof(SidebarProfileTitle));
+        OnPropertyChanged(nameof(SidebarProfileSubtitle));
+        OnPropertyChanged(nameof(ActiveAccountAvatarUrl));
+        OnPropertyChanged(nameof(HasActiveAccountAvatar));
+        OnPropertyChanged(nameof(ActiveAccountFallbackText));
+        OnPropertyChanged(nameof(ActiveServerTitle));
+        OnPropertyChanged(nameof(ActiveServerSubtitle));
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IReadOnlyList<T>? source)
@@ -2374,8 +3377,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        if (_themeObserverAttached && Avalonia.Application.Current is { } app)
+            app.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         _positionTimer?.Stop();
-        _volumePersist?.Stop();
+        _continuityReconcileTimer?.Stop();
+        _relayHistoryTimer?.Stop();
+        _downloadPollTimer?.Stop();
+        _continuityFlushCts?.Cancel();
+        _continuityFlushCts?.Dispose();
         _engine?.Dispose();
         _nowPlaying_os?.Dispose();
         _artwork?.Dispose();

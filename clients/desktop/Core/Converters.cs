@@ -24,23 +24,11 @@ public sealed class ArtworkPlaceholderConverter : IValueConverter
 
     // Deep, desaturated tones. Album art is the loudest thing on the screen when
     // it exists; a placeholder should recede rather than compete.
-    private static readonly (Color From, Color To)[] Palette =
-    [
-        (Color.Parse("#3A2C4E"), Color.Parse("#241C33")),
-        (Color.Parse("#2C3E4E"), Color.Parse("#1C2833")),
-        (Color.Parse("#4E3A2C"), Color.Parse("#33241C")),
-        (Color.Parse("#2C4E3E"), Color.Parse("#1C3328")),
-        (Color.Parse("#4E2C3A"), Color.Parse("#331C24")),
-        (Color.Parse("#3E4E2C"), Color.Parse("#28331C")),
-        (Color.Parse("#2C334E"), Color.Parse("#1C2033")),
-        (Color.Parse("#4E4A2C"), Color.Parse("#33301C")),
-    ];
-
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         var text = value as string ?? string.Empty;
-        var index = StableIndex(text, Palette.Length);
-        var (from, to) = Palette[index];
+        var index = StableIndex(text, MozzTheme.ArtworkPlaceholderGradients.Count);
+        var (fromHex, toHex) = MozzTheme.ArtworkPlaceholderGradients[index];
 
         return new LinearGradientBrush
         {
@@ -48,8 +36,8 @@ public sealed class ArtworkPlaceholderConverter : IValueConverter
             EndPoint = new Avalonia.RelativePoint(1, 1, Avalonia.RelativeUnit.Relative),
             GradientStops =
             {
-                new GradientStop(from, 0),
-                new GradientStop(to, 1),
+                new GradientStop(Color.Parse(fromHex), 0),
+                new GradientStop(Color.Parse(toHex), 1),
             },
         };
     }
@@ -133,4 +121,39 @@ public sealed class StringMatchConverter : IValueConverter
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => value is true && parameter is string expected ? expected : BindingOperations.DoNothing;
+}
+
+public sealed class PendingOpacityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? 0.55 : 1.0;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+public sealed class RatingAtLeastConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (parameter is not string text
+            || !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold))
+        {
+            return false;
+        }
+
+        // Ratings are half-stars, so this arrives as a double. It used to be
+        // matched as `value is int`, which silently returned false for every
+        // rating once the type was corrected — the stars would simply never
+        // fill, with nothing to indicate why.
+        return value switch
+        {
+            double rating => rating >= threshold,
+            int rating => rating >= threshold,
+            _ => false,
+        };
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
 }

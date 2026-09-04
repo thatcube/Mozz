@@ -17,6 +17,7 @@ namespace Mozz.Desktop.Core;
 /// hands it back on the next launch through <c>Attach</c>.
 /// </summary>
 public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? accountsPath = null)
+    : Downloads.IDownloadSourceResolver
 {
     private const string AccountsKey = "accounts.json";
     private readonly string _accountsPath = accountsPath ?? Path.Combine(AppPaths.SupportDirectory, AccountsKey);
@@ -68,20 +69,68 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// Poll once. Returns null while the user has not finished linking, which is
     /// the normal case for the first several seconds.
     /// </summary>
-    public async Task<ServerAccount?> PollPlexLinkAsync(PlexLink link, CancellationToken token = default)
+    public async Task<string?> PollPlexTokenAsync(
+        PlexLink link,
+        CancellationToken token = default)
     {
-        var session = await core.CallAsync<SessionPayload>(new
+        var payload = await core.CallAsync<PlexAccountTokenPayload>(new
         {
-            cmd = "plexPinCheck",
+            cmd = "plexPinToken",
             pinId = link.PinId,
             code = link.Code,
             clientIdentifier = link.ClientIdentifier,
         }, token).ConfigureAwait(false);
+        return payload?.AccountToken;
+    }
 
-        // The core answers `{ "url": null }` for "not linked yet", which
-        // deserializes to a session with no token.
-        if (session is null || string.IsNullOrEmpty(session.Token)) return null;
-        return Persist(session, username: null, link.ClientIdentifier);
+    public async Task<IReadOnlyList<PlexHomeUser>> PlexHomeUsersAsync(
+        string accountToken,
+        string clientIdentifier,
+        CancellationToken token = default)
+    {
+        return await core.CallAsync<IReadOnlyList<PlexHomeUser>>(new
+        {
+            cmd = "plexHomeUsers",
+            accountToken,
+            clientIdentifier,
+        }, token).ConfigureAwait(false) ?? [];
+    }
+
+    /// <summary>
+    /// Finish Plex login for the selected Home profile. If it is managed, the
+    /// owner token is used once to switch and only the switched token survives.
+    /// </summary>
+    public async Task<ServerAccount> CompletePlexLoginAsync(
+        string accountToken,
+        string clientIdentifier,
+        PlexHomeUser? user,
+        string? profilePIN,
+        CancellationToken token = default)
+    {
+        var selectedToken = accountToken;
+        if (user is { IsAdmin: false })
+        {
+            var switched = await core.CallAsync<PlexSwitchedTokenPayload>(new
+            {
+                cmd = "plexHomeSwitch",
+                accountToken,
+                homeUserID = user.Id,
+                profilePIN,
+                clientIdentifier,
+            }, token).ConfigureAwait(false)
+                ?? throw new MozzCoreException("Plex returned no profile token");
+            selectedToken = switched.AccountToken;
+        }
+
+        var session = await core.CallAsync<SessionPayload>(new
+        {
+            cmd = "plexCompleteLogin",
+            accountToken = selectedToken,
+            homeUserID = user?.Id,
+            clientIdentifier,
+        }, token).ConfigureAwait(false)
+            ?? throw new MozzCoreException("Plex returned no session");
+        return Persist(session, user?.Name, clientIdentifier);
     }
 
     // MARK: Attach
@@ -92,18 +141,15 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// </summary>
     public async Task AttachAsync(ServerAccount account, CancellationToken token = default)
     {
-        var secret = secrets.Get(SecretKey(account.ServerId))
+        var originalAccount = account;
+        account = NormalizeSavedAccount(account);
+        var secret = await Task.Run(() => SecretFor(account, originalAccount), token).ConfigureAwait(false)
             ?? throw new MozzCoreException(
                 $"No stored credential for {account.ServerName}. Sign in again.");
 
         await core.CallAsync<AttachPayload>(new
         {
             cmd = "attach",
-            // The account's own id, not one derived from the address it happens
-            // to be reachable at today. The catalogue, the likes and the play
-            // history are keyed on this, and a server's address can change
-            // without the server changing. See ADR-0017.
-            serverId = account.ServerId,
             kind = account.Kind.Wire(),
             baseURL = account.BaseUrl,
             token = secret,
@@ -111,8 +157,16 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             username = account.Username,
             serverName = account.ServerName,
             clientIdentifier = account.ClientIdentifier,
+            serverMachineIdentifier = account.ServerMachineIdentifier,
             musicSectionID = account.MusicSectionId,
+            musicSectionIDs = EffectiveMusicSectionIds(account),
+            allMusicLibraries = account.AllMusicLibraries,
         }, token).ConfigureAwait(false);
+        ServerSyncJournal.Upsert(
+            secrets,
+            account,
+            secret,
+            secrets.Get($"plex.account.{account.ServerId}"));
     }
 
     /// <summary>
@@ -131,7 +185,12 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     {
         await AttachAsync(account, token).ConfigureAwait(false);
 
-        if (account.Kind != BackendKind.Plex || account.MusicSectionId is { Length: > 0 })
+        if (account.Kind != BackendKind.Plex)
+        {
+            return account;
+        }
+        if (!account.AllMusicLibraries
+            && EffectiveMusicSectionIds(account).Length > 0)
         {
             return account;
         }
@@ -146,75 +205,16 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 $"{account.ServerName} has no music library for Mozz to sync.");
         }
 
-        var resolved = account with { MusicSectionId = libraries[0].Id };
+        var sectionIDs = libraries.Select(library => library.Id).ToArray();
+        var resolved = account with
+        {
+            MusicSectionId = sectionIDs[0],
+            MusicSectionIds = sectionIDs,
+            AllMusicLibraries = true,
+        };
         SaveAccount(resolved);
         await AttachAsync(resolved, token).ConfigureAwait(false);
         return resolved;
-    }
-
-    /// <summary>
-    /// Ask the Plex account for an address that answers, and re-attach the
-    /// account on it.
-    ///
-    /// Plex hands out several addresses for one server — LAN, remote, relay —
-    /// and any of them can stop working while the others are fine. Signing in
-    /// picks one and, left alone, keeps it forever: when it dies, every cover
-    /// goes grey and playback fails, which reads as a broken app rather than a
-    /// bad address. (One did die, for twenty minutes, on 2026-09-01. See
-    /// ADR-0017.)
-    ///
-    /// The account's id is passed through unchanged, so the catalogue, the likes
-    /// and the play history stay attached to it. Returns null when there was
-    /// nothing to change — no account token, no candidate that answered, or the
-    /// stored address already being the right one. That is not a failure worth
-    /// surfacing: it means "still the best we know of".
-    /// </summary>
-    public async Task<ServerAccount?> RepointAccountAsync(
-        ServerAccount account, CancellationToken token = default)
-    {
-        if (account.Kind != BackendKind.Plex) return null;
-        var accountToken = secrets.Get($"plex.account.{account.ServerId}");
-        if (accountToken is not { Length: > 0 }) return null;
-
-        SessionPayload? session;
-        try
-        {
-            session = await core.CallAsync<SessionPayload>(new
-            {
-                cmd = "plexResolve",
-                serverId = account.ServerId,
-                accountToken,
-                machineIdentifier = account.MachineIdentifier,
-                serverName = account.ServerName,
-                clientIdentifier = account.ClientIdentifier,
-            }, token).ConfigureAwait(false);
-        }
-        catch (MozzCoreException)
-        {
-            return null;
-        }
-
-        if (session is null
-            || string.IsNullOrEmpty(session.BaseUrl)
-            || string.IsNullOrEmpty(session.Token))
-        {
-            return null;
-        }
-        if (session.BaseUrl == account.BaseUrl
-            && session.Token == secrets.Get(SecretKey(account.ServerId)))
-        {
-            return null;
-        }
-
-        var updated = account with
-        {
-            BaseUrl = session.BaseUrl,
-            MachineIdentifier = session.MachineIdentifier ?? account.MachineIdentifier,
-        };
-        secrets.Set(SecretKey(updated.ServerId), session.Token);
-        SaveAccount(updated);
-        await AttachAsync(updated, token).ConfigureAwait(false);
-        return updated;
     }
 
     public Task<IReadOnlyList<MusicLibrary>?> LibrariesAsync(
@@ -227,7 +227,12 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(libraryId)) return account;
-        var updated = account with { MusicSectionId = libraryId };
+        var updated = account with
+        {
+            MusicSectionId = libraryId,
+            MusicSectionIds = [libraryId],
+            AllMusicLibraries = false,
+        };
         SaveAccount(updated);
         await AttachAsync(updated, token).ConfigureAwait(false);
         return updated;
@@ -284,6 +289,31 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             maxBitrateKbps,
         }, token);
 
+    /// <summary>
+    /// Resolve a track to the URL and auth headers its bytes are fetched from,
+    /// for the download service. This is the same <c>streamURL</c> command the
+    /// player resolves through — so a download carries exactly the credentials a
+    /// stream does — but it keeps the <c>headers</c> the playback
+    /// <see cref="StreamSource"/> record throws away. Null when the core has no
+    /// URL for the track.
+    /// </summary>
+    public async Task<Downloads.DownloadSource?> ResolveAsync(
+        string serverId, string remoteId, CancellationToken token = default)
+    {
+        var payload = await core.CallAsync<DownloadStreamPayload>(new
+        {
+            cmd = "streamURL",
+            serverId,
+            remoteId,
+        }, token).ConfigureAwait(false);
+
+        if (payload is null || string.IsNullOrWhiteSpace(payload.Url)) return null;
+
+        IReadOnlyDictionary<string, string> headers =
+            payload.Headers ?? new Dictionary<string, string>();
+        return new Downloads.DownloadSource(payload.Url, headers);
+    }
+
     public async Task<string?> ArtworkUrlAsync(
         string serverId, string artworkKey, int size = 512, CancellationToken token = default)
     {
@@ -293,6 +323,15 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         }, token).ConfigureAwait(false);
         return result?.Url;
     }
+
+    public Task<ServerAccountProfile?> AccountAsync(
+        string serverId, int size = 120, CancellationToken token = default)
+        => core.CallAsync<ServerAccountProfile>(new
+        {
+            cmd = "account",
+            serverId,
+            size,
+        }, token);
 
     // MARK: Saved accounts
 
@@ -307,7 +346,8 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         if (!File.Exists(path)) return [];
         try
         {
-            return JsonSerializer.Deserialize<List<ServerAccount>>(File.ReadAllText(path)) ?? [];
+            var decoded = JsonSerializer.Deserialize<List<ServerAccount>>(File.ReadAllText(path)) ?? [];
+            return NormalizeSavedAccounts(decoded, writeIfChanged: true);
         }
         catch (JsonException)
         {
@@ -319,18 +359,31 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
 
     public void ForgetAccount(string serverId)
     {
-        var remaining = SavedAccounts().Where(a => a.ServerId != serverId).ToList();
+        var accounts = SavedAccounts();
+        var canonical = CanonicalServerId(accounts.FirstOrDefault(a => a.ServerId == serverId)) ?? serverId;
+        var removed = accounts.Where(a => a.ServerId == serverId || CanonicalServerId(a) == canonical).ToList();
+        foreach (var account in removed)
+        {
+            ServerSyncJournal.Tombstone(
+                secrets, account.ServerId, account.Kind);
+        }
+        var remaining = accounts.Except(removed).ToList();
         WriteAccounts(remaining);
-        secrets.Set(SecretKey(serverId), null);
-        secrets.Set($"plex.account.{serverId}", null);
+        foreach (var account in removed)
+        {
+            DeleteCredentialKeys(account);
+        }
+        secrets.Set(SecretKey(canonical), null);
+        secrets.Set($"plex.account.{canonical}", null);
     }
 
     public void ForgetAllAccounts()
     {
         foreach (var account in SavedAccounts())
         {
-            secrets.Set(SecretKey(account.ServerId), null);
-            secrets.Set($"plex.account.{account.ServerId}", null);
+            ServerSyncJournal.Tombstone(
+                secrets, account.ServerId, account.Kind);
+            DeleteCredentialKeys(account);
         }
         WriteAccounts([]);
     }
@@ -348,9 +401,10 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             ClientIdentifier = string.IsNullOrEmpty(session.ClientIdentifier)
                 ? identifier
                 : session.ClientIdentifier,
+            ServerMachineIdentifier = session.ServerMachineIdentifier,
             MusicSectionId = null,
-            MachineIdentifier = session.MachineIdentifier,
         };
+        account = NormalizeSavedAccount(account);
 
         secrets.Set(SecretKey(account.ServerId), session.Token);
         if (session.AccountToken is { Length: > 0 } accountToken)
@@ -367,16 +421,111 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     /// <summary>Insert or replace one account, leaving the others alone.</summary>
     internal void SaveAccount(ServerAccount account)
     {
-        var accounts = SavedAccounts().Where(a => a.ServerId != account.ServerId).ToList();
+        account = NormalizeSavedAccount(account);
+        var accounts = SavedAccounts()
+            .Where(a => a.ServerId != account.ServerId && CanonicalServerId(a) != account.ServerId)
+            .ToList();
         accounts.Add(account);
         WriteAccounts(accounts);
+        if (SecretFor(account) is { } token)
+        {
+            ServerSyncJournal.Upsert(
+                secrets,
+                account,
+                token,
+                secrets.Get($"plex.account.{account.ServerId}"));
+        }
     }
 
     internal void SaveAccount(ServerAccount account, string secret, string? accountToken = null)
     {
+        account = NormalizeSavedAccount(account);
         secrets.Set(SecretKey(account.ServerId), secret);
         if (accountToken is not null) secrets.Set($"plex.account.{account.ServerId}", accountToken);
         SaveAccount(account);
+    }
+
+    internal IReadOnlyList<RelayServerRecordDto> ExportSyncedServers()
+    {
+        // Seed journals created by builds before server sync existed.
+        foreach (var account in SavedAccounts())
+        {
+            if (SecretFor(account) is { } token)
+            {
+                ServerSyncJournal.Upsert(
+                    secrets,
+                    account,
+                    token,
+                    secrets.Get($"plex.account.{account.ServerId}"));
+            }
+        }
+        return ServerSyncJournal.Load(secrets);
+    }
+
+    internal SyncedServerImport ImportSyncedServers(
+        IReadOnlyList<RelayServerRecordDto> remote)
+    {
+        var previousAccounts = SavedAccounts();
+        var previousIDs = previousAccounts
+            .Select(account => account.ServerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var previousRecords = ServerSyncJournal.Load(secrets)
+            .ToDictionary(record => record.Id, StringComparer.Ordinal);
+        var merged = ServerSyncJournal.Merge(
+            ServerSyncJournal.Load(secrets), remote);
+        ServerSyncJournal.Save(secrets, merged);
+
+        var accounts = new List<ServerAccount>();
+        foreach (var record in merged)
+        {
+            if (record.IsRemoved)
+            {
+                secrets.Set(SecretKey(record.Id), null);
+                secrets.Set($"plex.account.{record.Id}", null);
+                continue;
+            }
+            if (record.Token is not { Length: > 0 } token
+                || record.BaseUrl is not { Length: > 0 } baseUrl
+                || record.Name is not { Length: > 0 } name)
+            {
+                continue;
+            }
+            var account = new ServerAccount
+            {
+                ServerId = record.Id,
+                Kind = BackendKindExtensions.Parse(record.Kind),
+                BaseUrl = baseUrl,
+                ServerName = name,
+                UserId = record.UserId,
+                Username = record.Username,
+                ClientIdentifier = ClientIdentifier,
+                ServerMachineIdentifier = record.ServerMachineIdentifier,
+                MusicSectionId = record.MusicSectionIds?.FirstOrDefault(),
+                MusicSectionIds = record.MusicSectionIds,
+                AllMusicLibraries = record.AllMusicLibraries ?? false,
+            };
+            accounts.Add(account);
+            secrets.Set(SecretKey(account.ServerId), token);
+            if (record.AccountToken is not null)
+            {
+                secrets.Set(
+                    $"plex.account.{account.ServerId}",
+                    record.AccountToken);
+            }
+        }
+        WriteAccounts(accounts);
+        var added = accounts
+            .Where(account => !previousIDs.Contains(account.ServerId))
+            .ToArray();
+        var changed = accounts
+            .Where(account =>
+            {
+                var next = merged.First(record => record.Id == account.ServerId);
+                return !previousRecords.TryGetValue(account.ServerId, out var old)
+                    || next.MutationAtMS > old.MutationAtMS;
+            })
+            .ToArray();
+        return new SyncedServerImport(changed, added);
     }
 
     private void WriteAccounts(IReadOnlyList<ServerAccount> accounts)
@@ -387,6 +536,187 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     }
 
     private static string SecretKey(string serverId) => $"token.{serverId}";
+
+    private string? SecretFor(ServerAccount account, ServerAccount? originalAccount = null)
+    {
+        var canonical = NormalizeSavedAccount(account);
+        var key = SecretKey(canonical.ServerId);
+        if (secrets.Get(key) is { } current) return current;
+
+        var legacyIds = LegacyServerIds(account)
+            .Concat(originalAccount is null ? Enumerable.Empty<string>() : LegacyServerIds(originalAccount));
+        foreach (var legacyKey in legacyIds.Select(SecretKey))
+        {
+            if (legacyKey == key) continue;
+            if (secrets.Get(legacyKey) is { } legacy)
+            {
+                secrets.Set(key, legacy);
+                return legacy;
+            }
+        }
+        return null;
+    }
+
+    private IReadOnlyList<ServerAccount> NormalizeSavedAccounts(
+        IReadOnlyList<ServerAccount> accounts,
+        bool writeIfChanged)
+    {
+        var normalized = new List<ServerAccount>();
+        var changed = false;
+
+        foreach (var account in accounts.Where(a => a.Kind != BackendKind.Plex || PlexMachineIdentifier(a) is null))
+        {
+            var fixedAccount = NormalizeSavedAccount(account);
+            changed |= fixedAccount != account;
+            normalized.Add(fixedAccount);
+        }
+
+        foreach (var group in accounts
+                     .Where(a => a.Kind == BackendKind.Plex && PlexMachineIdentifier(a) is not null)
+                     .GroupBy(a => PlexMachineIdentifier(a)!))
+        {
+            var chosen = group
+                .OrderBy(a => PlexAddressRank(a.BaseUrl))
+                .ThenByDescending(a => HasCredential(a))
+                .First();
+            var machine = group.Key;
+            var canonical = chosen with
+            {
+                ServerId = $"plex-{machine}",
+                ServerMachineIdentifier = machine,
+                MusicSectionId = chosen.MusicSectionId ?? group.Select(a => a.MusicSectionId).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+                MusicSectionIds = group
+                    .SelectMany(EffectiveMusicSectionIds)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order()
+                    .ToArray(),
+                AllMusicLibraries = group.Any(a => a.AllMusicLibraries),
+            };
+            normalized.Add(canonical);
+
+            if (canonical != chosen || group.Count() > 1) changed = true;
+            MigrateCredential(group, canonical.ServerId, SecretKey);
+            MigrateCredential(group, canonical.ServerId, id => $"plex.account.{id}");
+        }
+
+        if (writeIfChanged && changed) WriteAccounts(normalized);
+        return normalized;
+    }
+
+    private void MigrateCredential(
+        IEnumerable<ServerAccount> accounts,
+        string canonicalServerId,
+        Func<string, string> keyFor)
+    {
+        var canonicalKey = keyFor(canonicalServerId);
+        if (secrets.Get(canonicalKey) is not null) return;
+
+        foreach (var legacyId in accounts.SelectMany(LegacyServerIds))
+        {
+            var legacyKey = keyFor(legacyId);
+            if (legacyKey == canonicalKey) continue;
+            if (secrets.Get(legacyKey) is { } value)
+            {
+                secrets.Set(canonicalKey, value);
+                return;
+            }
+        }
+    }
+
+    private ServerAccount NormalizeSavedAccount(ServerAccount account)
+    {
+        var machine = PlexMachineIdentifier(account);
+        if (account.Kind != BackendKind.Plex || string.IsNullOrWhiteSpace(machine)) return account;
+        return account with
+        {
+            ServerId = $"plex-{machine}",
+            ServerMachineIdentifier = machine,
+        };
+    }
+
+    private static string? CanonicalServerId(ServerAccount? account)
+        => account is null ? null : NormalizeServerId(account);
+
+    private static string NormalizeServerId(ServerAccount account)
+    {
+        var machine = PlexMachineIdentifier(account);
+        return account.Kind == BackendKind.Plex && !string.IsNullOrWhiteSpace(machine)
+            ? $"plex-{machine}"
+            : account.ServerId;
+    }
+
+    private static IEnumerable<string> LegacyServerIds(ServerAccount account)
+    {
+        yield return account.ServerId;
+        if (PlexMachineIdentifier(account) is { Length: > 0 } machine)
+        {
+            yield return $"plex-{machine}";
+        }
+    }
+
+    internal static string[] EffectiveMusicSectionIds(ServerAccount account) =>
+        account.MusicSectionIds is { Length: > 0 } ids
+            ? ids.Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .Order()
+                .ToArray()
+            : account.MusicSectionId is { Length: > 0 } section
+                ? [section]
+                : [];
+
+    private bool HasCredential(ServerAccount account)
+        => LegacyServerIds(account).Any(id => secrets.Get(SecretKey(id)) is not null);
+
+    private void DeleteCredentialKeys(ServerAccount account)
+    {
+        foreach (var id in LegacyServerIds(account).Distinct())
+        {
+            secrets.Set(SecretKey(id), null);
+            secrets.Set($"plex.account.{id}", null);
+        }
+    }
+
+    private static string? PlexMachineIdentifier(ServerAccount account)
+    {
+        if (account.Kind != BackendKind.Plex) return null;
+        if (!string.IsNullOrWhiteSpace(account.ServerMachineIdentifier)) return account.ServerMachineIdentifier;
+        if (account.ServerId.StartsWith("plex-", StringComparison.Ordinal)
+            && !account.ServerId.StartsWith("plex-http://", StringComparison.Ordinal)
+            && !account.ServerId.StartsWith("plex-https://", StringComparison.Ordinal))
+        {
+            return account.ServerId["plex-".Length..];
+        }
+
+        if (!Uri.TryCreate(account.BaseUrl, UriKind.Absolute, out var uri)) return null;
+        var host = uri.Host;
+        const string suffix = ".plex.direct";
+        if (!host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return null;
+        var withoutSuffix = host[..^suffix.Length];
+        var dot = withoutSuffix.LastIndexOf('.');
+        return dot < 0 || dot == withoutSuffix.Length - 1 ? null : withoutSuffix[(dot + 1)..];
+    }
+
+    private static int PlexAddressRank(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) return 1;
+        var host = uri.Host;
+        const string suffix = ".plex.direct";
+        if (host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            var encodedIp = host[..^suffix.Length].Split('.').FirstOrDefault()?.Replace('-', '.');
+            if (IsDockerBridgeAddress(encodedIp)) return 2;
+        }
+        return 0;
+    }
+
+    private static bool IsDockerBridgeAddress(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address)) return false;
+        var parts = address.Split('.');
+        if (parts.Length != 4) return false;
+        if (!int.TryParse(parts[0], out var a) || !int.TryParse(parts[1], out var b)) return false;
+        return a == 172 && b is >= 16 and <= 31;
+    }
 
     /// <summary>
     /// A stable per-installation id. Servers show it in their device list, so it
@@ -448,19 +778,16 @@ public sealed record ServerAccount
     public string? UserId { get; init; }
     public string? Username { get; init; }
     public required string ClientIdentifier { get; init; }
+    public string? ServerMachineIdentifier { get; init; }
     public string? MusicSectionId { get; init; }
-
-    /// <summary>
-    /// The Plex <em>server's</em> machine identifier — not this app's, which is
-    /// <see cref="ClientIdentifier"/>.
-    ///
-    /// A Plex server has several addresses and none of them is the server; this
-    /// is what stays the same when the address changes, so it is what
-    /// re-resolution matches on. Null for accounts signed in before it was
-    /// recorded.
-    /// </summary>
-    public string? MachineIdentifier { get; init; }
+    public string[]? MusicSectionIds { get; init; }
+    public bool AllMusicLibraries { get; init; }
 }
+
+public sealed record ServerAccountProfile(
+    [property: JsonPropertyName("displayName")] string? DisplayName,
+    [property: JsonPropertyName("username")] string? Username,
+    [property: JsonPropertyName("avatarURL")] string? AvatarUrl);
 
 public sealed record PlexLink(int PinId, string Code, string ClientIdentifier, string? LinkUrl);
 
@@ -482,7 +809,9 @@ public sealed record SyncStatus(
     [property: JsonPropertyName("artists")] int? Artists,
     [property: JsonPropertyName("albums")] int? Albums,
     [property: JsonPropertyName("tracks")] int? Tracks,
-    [property: JsonPropertyName("playlists")] int? Playlists)
+    [property: JsonPropertyName("playlists")] int? Playlists,
+    [property: JsonPropertyName("details")] IReadOnlyList<SyncPhaseDetail>? Details = null,
+    [property: JsonPropertyName("phaseLabel")] string? PhaseLabel = null)
 {
     /// <summary>Short label for a progress row, e.g. "Songs 3,712 / 20,004".</summary>
     public string Describe()
@@ -505,10 +834,114 @@ public sealed record SyncStatus(
     }
 }
 
+public sealed record SyncPhaseRow(string Label, string State, int Synced, int? Total, bool IsComplete)
+{
+    public string CountText => State switch
+    {
+        "done" when Synced == 0 => "None",
+        "pending" when Synced == 0 && (Total ?? 0) == 0 => string.Empty,
+        _ => Total is > 0 ? $"{Synced:N0} / {Total.Value:N0}" : $"{Synced:N0}",
+    };
+
+    public bool IsDone => State == "done" || IsComplete;
+    public bool IsSyncing => State == "syncing";
+}
+
+public sealed class SyncProgressSmoother
+{
+    private readonly Dictionary<string, SyncCounterPacer> _pacers = new(StringComparer.Ordinal);
+    private DateTimeOffset? _lastUpdate;
+
+    public IReadOnlyList<SyncPhaseRow> Update(SyncStatus status, DateTimeOffset? now = null)
+    {
+        var at = now ?? DateTimeOffset.UtcNow;
+        var elapsed = _lastUpdate is { } last ? Math.Max(0, (at - last).TotalSeconds) : 0;
+        _lastUpdate = at;
+
+        var details = status.Details is { Count: > 0 }
+            ? status.Details
+            : [new SyncPhaseDetail(status.Phase ?? "syncing", status.PhaseLabel ?? "Syncing", status.Finished ? "done" : "syncing", status.ItemsSynced, status.Total, status.Finished)];
+
+        var rows = new List<SyncPhaseRow>(details.Count);
+        foreach (var detail in details)
+        {
+            var pacer = _pacers.TryGetValue(detail.Phase, out var existing) ? existing : new SyncCounterPacer();
+            if (detail.State == "done" || detail.IsComplete) pacer.Settle(detail.Synced);
+            else pacer.Report(detail.Synced, at);
+            if (elapsed > 0) pacer.Advance(elapsed);
+            _pacers[detail.Phase] = pacer;
+            rows.Add(new SyncPhaseRow(detail.Label, detail.State, pacer.Displayed, detail.Total, detail.IsComplete));
+        }
+        return rows;
+    }
+}
+
+public sealed class SyncCounterPacer
+{
+    private const double Stretch = 1.25;
+    private const double MinimumSpread = 4.0;
+    private const double MaximumSpread = 60.0;
+    private const double MinimumRate = 0.8;
+    private double _position;
+    private double _target;
+    private double _pageInterval = 15;
+    private DateTimeOffset? _lastArrival;
+    private bool _seeded;
+
+    public int Displayed => (int)Math.Floor(_position);
+
+    public void Report(int count, DateTimeOffset now)
+    {
+        var value = (double)count;
+        if (!_seeded)
+        {
+            _position = value;
+            _target = value;
+            _lastArrival = now;
+            _seeded = true;
+            return;
+        }
+        if (Math.Abs(value - _target) < 0.001) return;
+        if (value > _target && _lastArrival is { } last)
+        {
+            var elapsed = (now - last).TotalSeconds;
+            if (elapsed > 0.25 && elapsed < 300) _pageInterval = _pageInterval * 0.6 + elapsed * 0.4;
+            _lastArrival = now;
+        }
+        _target = value;
+        if (_position > _target) _position = _target;
+    }
+
+    public void Settle(int count)
+    {
+        _position = count;
+        _target = count;
+        _seeded = true;
+    }
+
+    public bool Advance(double elapsed)
+    {
+        if (_position >= _target)
+        {
+            _position = Math.Min(_position, _target);
+            return false;
+        }
+        var spread = Math.Min(Math.Max(_pageInterval * Stretch, MinimumSpread), MaximumSpread);
+        var gap = _target - _position;
+        var rate = Math.Max(gap / spread, MinimumRate);
+        _position = Math.Min(_position + rate * elapsed, _target);
+        return _position < _target;
+    }
+}
+
 public sealed record StreamSource(
     [property: JsonPropertyName("url")] string Url,
     [property: JsonPropertyName("isTranscoded")] bool IsTranscoded,
     [property: JsonPropertyName("sessionID")] string? SessionId);
+
+internal sealed record DownloadStreamPayload(
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("headers")] Dictionary<string, string>? Headers);
 
 internal sealed record SessionPayload(
     [property: JsonPropertyName("serverId")] string ServerId,
@@ -518,14 +951,25 @@ internal sealed record SessionPayload(
     [property: JsonPropertyName("userID")] string? UserId,
     [property: JsonPropertyName("serverName")] string ServerName,
     [property: JsonPropertyName("clientIdentifier")] string ClientIdentifier,
-    [property: JsonPropertyName("accountToken")] string? AccountToken,
-    [property: JsonPropertyName("machineIdentifier")] string? MachineIdentifier = null);
+    [property: JsonPropertyName("serverMachineIdentifier")] string? ServerMachineIdentifier,
+    [property: JsonPropertyName("accountToken")] string? AccountToken);
 
 internal sealed record PlexPinPayload(
     [property: JsonPropertyName("pinId")] int PinId,
     [property: JsonPropertyName("code")] string Code,
     [property: JsonPropertyName("clientIdentifier")] string ClientIdentifier,
     [property: JsonPropertyName("linkURL")] string? LinkUrl);
+
+public sealed record PlexHomeUser(
+    string Id,
+    string Name,
+    bool RequiresPIN,
+    bool IsAdmin,
+    bool IsRestricted,
+    string? AvatarURL);
+
+internal sealed record PlexAccountTokenPayload(string? AccountToken);
+internal sealed record PlexSwitchedTokenPayload(string AccountToken);
 
 internal sealed record AttachPayload(
     [property: JsonPropertyName("serverId")] string ServerId);

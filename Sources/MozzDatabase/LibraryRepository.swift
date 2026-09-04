@@ -133,16 +133,35 @@ public struct LibraryRepository: Sendable {
             self.id = id
         }
 
-        /// Round-trips through a string so the FFI can carry it as JSON.
+        /// Round-trips through a string so the FFI can carry it.
+        ///
+        /// Each part is base64-encoded *before* being joined, rather than being
+        /// joined raw. That looks redundant and is not: a key may contain any
+        /// character, including the separator. `albumGroupKey` is itself a
+        /// composite that `AlbumGrouping` joins with U+001F — the same
+        /// character this once used — so an album cursor split into two keys on
+        /// the way back, the seek clause was built for one key while the
+        /// arguments were bound for two, and SQLite rejected the statement.
+        /// Paging albums over the FFI failed on the second page.
+        ///
+        /// Base64's alphabet cannot contain the separator, so the split is
+        /// unambiguous no matter what the keys hold.
         public var token: String {
-            let joined = (keys + [String(id)]).joined(separator: "\u{1F}")
-            return Data(joined.utf8).base64EncodedString()
+            let parts = (keys + [String(id)])
+                .map { Data($0.utf8).base64EncodedString() }
+                .joined(separator: "\u{1F}")
+            return Data(parts.utf8).base64EncodedString()
         }
 
         public init?(token: String) {
-            guard let data = Data(base64Encoded: token),
-                  let text = String(data: data, encoding: .utf8) else { return nil }
-            var parts = text.components(separatedBy: "\u{1F}")
+            guard let outer = Data(base64Encoded: token),
+                  let text = String(data: outer, encoding: .utf8) else { return nil }
+            var parts: [String] = []
+            for encoded in text.components(separatedBy: "\u{1F}") {
+                guard let data = Data(base64Encoded: encoded),
+                      let part = String(data: data, encoding: .utf8) else { return nil }
+                parts.append(part)
+            }
             guard parts.count >= 2, let id = Int64(parts.removeLast()) else { return nil }
             self.keys = parts
             self.id = id
@@ -336,6 +355,26 @@ public struct LibraryRepository: Sendable {
                 SELECT * FROM track WHERE serverId = ? AND remoteId IN (\(placeholders))
                 """, arguments: StatementArguments(args))
                 .reduce(into: [String: Track]()) { $0[$1.remoteId] = $1.toDomain() }
+            return remoteIds.compactMap { byId[$0] }
+        }
+    }
+
+    /// The `TrackRecord`s for `remoteIds`, in exactly that order, skipping any the
+    /// catalog does not have. The record form (not the domain form
+    /// ``tracksForPlayback`` returns) so a caller that needs the full wire summary
+    /// — id, artwork key, favorite, rating — has it without a second fetch. Used to
+    /// hydrate the ranked remote ids that ``EnrichmentStore/similarOwnedTracks``
+    /// yields back into full rows while preserving the similarity order.
+    public func tracks(forRemoteIds remoteIds: [String], serverId: ServerID) async throws -> [TrackRecord] {
+        guard !remoteIds.isEmpty else { return [] }
+        return try await database.read { db in
+            let placeholders = Array(repeating: "?", count: remoteIds.count).joined(separator: ", ")
+            var args: [DatabaseValueConvertible?] = [serverId]
+            args.append(contentsOf: remoteIds)
+            let byId = try TrackRecord.fetchAll(db, sql: """
+                SELECT * FROM track WHERE serverId = ? AND remoteId IN (\(placeholders))
+                """, arguments: StatementArguments(args))
+                .reduce(into: [String: TrackRecord]()) { $0[$1.remoteId] = $1 }
             return remoteIds.compactMap { byId[$0] }
         }
     }
@@ -780,6 +819,54 @@ public struct LibraryRepository: Sendable {
                 downloadedTrackCount: row?["c"] ?? 0,
                 totalBytes: row?["b"] ?? 0
             )
+        }
+    }
+
+    /// A download record together with the (server, remote) identity of its
+    /// track. `downloads(in:)` returns the bare record, which is keyed only by
+    /// the internal `trackId`; a cross-platform command surface addresses tracks
+    /// by (server_id, remote_id), so a listable download has to carry that
+    /// identity for a shell to act on it the same way it addresses everything
+    /// else. The two ids live on the `track` row, hence the join.
+    public struct IdentifiedDownload: Sendable {
+        public var record: DownloadRecord
+        public var serverId: ServerID
+        public var remoteId: String
+
+        public init(record: DownloadRecord, serverId: ServerID, remoteId: String) {
+            self.record = record
+            self.serverId = serverId
+            self.remoteId = remoteId
+        }
+    }
+
+    /// Download records in the given states (default: everything), joined to
+    /// their track so each entry carries its (server, remote) identity. Newest
+    /// request first. Downloads whose track has been pruned from the catalog are
+    /// dropped by the inner join — a download with no track is not actionable.
+    public func identifiedDownloads(
+        in states: [DownloadState] = DownloadState.allCases
+    ) async throws -> [IdentifiedDownload] {
+        // An empty filter would build `IN ()`, which is a syntax error; treat it
+        // as "every state" so callers need not special-case it.
+        let effective = states.isEmpty ? DownloadState.allCases : states
+        let placeholders = effective.map { _ in "?" }.joined(separator: ", ")
+        let args = StatementArguments(effective.map(\.rawValue))
+        return try await database.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT download.*, track.serverId AS trackServerId,
+                       track.remoteId AS trackRemoteId
+                FROM download
+                JOIN track ON track.id = download.trackId
+                WHERE download.state IN (\(placeholders))
+                ORDER BY download.requestedAt DESC, download.trackId DESC
+                """, arguments: args).map { row in
+                IdentifiedDownload(
+                    record: try DownloadRecord(row: row),
+                    serverId: row["trackServerId"],
+                    remoteId: row["trackRemoteId"]
+                )
+            }
         }
     }
 

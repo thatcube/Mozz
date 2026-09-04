@@ -25,9 +25,14 @@ public sealed partial class ConnectViewModel : ViewModelBase
         _server = server;
         _onLibraryChanged = onLibraryChanged;
         Accounts = new(server.SavedAccounts());
+        Accounts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasAccounts));
+        PlexHomeUsers.CollectionChanged += (_, _) =>
+            OnPropertyChanged(nameof(HasPlexHomeUsers));
     }
 
     public System.Collections.ObjectModel.ObservableCollection<ServerAccount> Accounts { get; }
+    public System.Collections.ObjectModel.ObservableCollection<SyncPhaseRow> SyncPhaseRows { get; } = [];
+    public System.Collections.ObjectModel.ObservableCollection<PlexHomeUser> PlexHomeUsers { get; } = [];
 
     [ObservableProperty] private BackendKind _kind = BackendKind.Jellyfin;
     [ObservableProperty] private string _serverUrl = string.Empty;
@@ -43,10 +48,16 @@ public sealed partial class ConnectViewModel : ViewModelBase
     /// <summary>Plex's link code, shown while its PIN flow is in progress.</summary>
     [ObservableProperty] private string? _plexCode;
     [ObservableProperty] private string? _plexLinkUrl;
+    [ObservableProperty] private PlexHomeUser? _selectedPlexHomeUser;
+    [ObservableProperty] private string _plexProfilePIN = string.Empty;
+    [ObservableProperty] private bool _needsPlexProfilePIN;
+    private string? _pendingPlexAccountToken;
+    private string? _pendingPlexClientIdentifier;
 
     public bool IsPlex => Kind == BackendKind.Plex;
     public bool NeedsCredentials => Kind != BackendKind.Plex;
     public bool HasAccounts => Accounts.Count > 0;
+    public bool HasPlexHomeUsers => PlexHomeUsers.Count > 0;
 
     partial void OnKindChanged(BackendKind value)
     {
@@ -121,14 +132,35 @@ public sealed partial class ConnectViewModel : ViewModelBase
             while (!token.IsCancellationRequested && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), token);
-                var account = await _server.PollPlexLinkAsync(link, token);
-                if (account is null) continue;
+                var accountToken = await _server.PollPlexTokenAsync(link, token);
+                if (accountToken is null) continue;
 
                 PlexCode = null;
                 PlexLinkUrl = null;
+                var users = await _server.PlexHomeUsersAsync(
+                    accountToken, link.ClientIdentifier, token);
+                if (users.Count > 1
+                    || users.FirstOrDefault() is
+                        { IsAdmin: false, RequiresPIN: true })
+                {
+                    _pendingPlexAccountToken = accountToken;
+                    _pendingPlexClientIdentifier = link.ClientIdentifier;
+                    PlexHomeUsers.Clear();
+                    foreach (var user in users) PlexHomeUsers.Add(user);
+                    Message = "Who’s listening?";
+                    return;
+                }
+
+                var account = await _server.CompletePlexLoginAsync(
+                    accountToken,
+                    link.ClientIdentifier,
+                    users.FirstOrDefault(),
+                    profilePIN: null,
+                    token);
                 await AfterSignInAsync(account);
                 return;
             }
+
             if (!token.IsCancellationRequested)
             {
                 PlexCode = null;
@@ -148,6 +180,76 @@ public sealed partial class ConnectViewModel : ViewModelBase
         {
             IsBusy = false;
         }
+    }
+
+    [RelayCommand]
+    private async Task SelectPlexHomeUserAsync(PlexHomeUser user)
+    {
+        SelectedPlexHomeUser = user;
+        if (user.RequiresPIN && !user.IsAdmin)
+        {
+            PlexProfilePIN = string.Empty;
+            NeedsPlexProfilePIN = true;
+            Message = $"Enter the PIN for {user.Name}.";
+            return;
+        }
+        await FinishPlexHomeUserAsync(user, profilePIN: null);
+    }
+
+    [RelayCommand]
+    private async Task ConfirmPlexProfilePINAsync()
+    {
+        if (SelectedPlexHomeUser is not { } user
+            || string.IsNullOrWhiteSpace(PlexProfilePIN))
+        {
+            return;
+        }
+        await FinishPlexHomeUserAsync(user, PlexProfilePIN);
+    }
+
+    private async Task FinishPlexHomeUserAsync(
+        PlexHomeUser user,
+        string? profilePIN)
+    {
+        if (_pendingPlexAccountToken is not { } accountToken
+            || _pendingPlexClientIdentifier is not { } clientIdentifier)
+        {
+            return;
+        }
+        try
+        {
+            IsBusy = true;
+            Message = $"Switching to {user.Name}…";
+            var account = await _server.CompletePlexLoginAsync(
+                accountToken,
+                clientIdentifier,
+                user,
+                profilePIN);
+            // The owner token is no longer retained once MozzServer persists
+            // the switched token.
+            ClearPlexProfileSelection();
+            await AfterSignInAsync(account);
+        }
+        catch (Exception ex)
+        {
+            Message = user.RequiresPIN
+                ? "That PIN was not accepted."
+                : Explain(ex);
+        }
+        finally
+        {
+            IsBusy = false;
+            PlexProfilePIN = string.Empty;
+        }
+    }
+
+    private void ClearPlexProfileSelection()
+    {
+        _pendingPlexAccountToken = null;
+        _pendingPlexClientIdentifier = null;
+        SelectedPlexHomeUser = null;
+        NeedsPlexProfilePIN = false;
+        PlexHomeUsers.Clear();
     }
 
     private async Task AfterSignInAsync(ServerAccount account)
@@ -181,7 +283,6 @@ public sealed partial class ConnectViewModel : ViewModelBase
             try
             {
                 await _server.AttachAsync(account);
-                _ = VerifyReachableAsync(account);
             }
             catch (Exception ex)
             {
@@ -193,66 +294,11 @@ public sealed partial class ConnectViewModel : ViewModelBase
         }
     }
 
-    /// <summary>
-    /// Check that the address this account is pinned to still answers, and
-    /// quietly move to one that does if it does not.
-    ///
-    /// Deliberately not awaited by the caller: the library is on disk and should
-    /// be on screen immediately, so this costs the user nothing when the address
-    /// is fine. The symptom it catches is otherwise silent and total — every
-    /// cover grey, nothing playable, with a library that looks intact. See
-    /// ADR-0017.
-    /// </summary>
-    private async Task VerifyReachableAsync(ServerAccount account)
+    public void ReloadSavedAccounts()
     {
-        try
-        {
-            // A real request to the server (Plex answers it from
-            // library/sections), so it fails exactly when the address is dead.
-            await _server.LibrariesAsync(account.ServerId);
-            return;
-        }
-        catch (Exception)
-        {
-            // Fall through to the repair.
-        }
-
-        try
-        {
-            var repointed = await _server.RepointAccountAsync(account);
-            if (repointed is null) return;
-            Accounts.Clear();
-            foreach (var saved in _server.SavedAccounts()) Accounts.Add(saved);
-            OnPropertyChanged(nameof(HasAccounts));
-        }
-        catch (Exception ex)
-        {
-            Message = Explain(ex);
-        }
-    }
-
-    /// <summary>
-    /// Run a sync, and if it fails against a dead address, move to a working one
-    /// and run it again — once.
-    ///
-    /// Retrying on its own would not help: every retry goes to the same address
-    /// that just refused. When there is nothing better to move to,
-    /// <c>RepointAccountAsync</c> returns null and the original failure is the
-    /// honest one to report.
-    /// </summary>
-    private async Task<SyncStatus> SyncWithRepointAsync(
-        ServerAccount account, IProgress<SyncStatus> progress)
-    {
-        try
-        {
-            return await _server.SyncAsync(account.ServerId, progress);
-        }
-        catch (Exception)
-        {
-            var repointed = await _server.RepointAccountAsync(account);
-            if (repointed is null) throw;
-            return await _server.SyncAsync(repointed.ServerId, progress);
-        }
+        Accounts.Clear();
+        foreach (var saved in _server.SavedAccounts()) Accounts.Add(saved);
+        OnPropertyChanged(nameof(HasAccounts));
     }
 
     // MARK: Sync
@@ -281,6 +327,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
             var progress = new Progress<SyncStatus>(status =>
             {
                 SyncDetail = status.Describe();
+                ReplaceSyncRows(status);
                 // Only a fraction when the server told us a total; otherwise the
                 // bar stays indeterminate rather than inventing a position.
                 SyncProgress = status.Total is > 0
@@ -288,7 +335,8 @@ public sealed partial class ConnectViewModel : ViewModelBase
                     : 0;
             });
 
-            var final = await SyncWithRepointAsync(account, progress);
+            var final = await _server.SyncAsync(account.ServerId, progress);
+            ReplaceSyncRows(final);
             SyncDetail = $"{final.Tracks:N0} songs · {final.Albums:N0} albums · {final.Artists:N0} artists";
             Message = $"{account.ServerName} is ready.";
             await _onLibraryChanged();
@@ -302,6 +350,15 @@ public sealed partial class ConnectViewModel : ViewModelBase
         {
             IsSyncing = false;
         }
+    }
+
+    private readonly SyncProgressSmoother _syncSmoother = new();
+
+    private void ReplaceSyncRows(SyncStatus status)
+    {
+        var rows = _syncSmoother.Update(status).ToList();
+        SyncPhaseRows.Clear();
+        foreach (var row in rows) SyncPhaseRows.Add(row);
     }
 
     [RelayCommand]
@@ -354,6 +411,7 @@ public sealed partial class ConnectViewModel : ViewModelBase
     private void CancelPlex()
     {
         CancelPlexPoll();
+        ClearPlexProfileSelection();
         PlexCode = null;
         PlexLinkUrl = null;
         Message = null;

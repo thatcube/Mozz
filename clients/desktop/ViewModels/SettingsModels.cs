@@ -5,6 +5,95 @@ namespace Mozz.Desktop.ViewModels;
 
 public sealed record SettingsOption(string Id, string Label);
 
+public enum SettingsCategory
+{
+    AccountServers,
+    Library,
+    Playback,
+    Lyrics,
+    Recommendations,
+    Appearance,
+    Devices,
+    Diagnostics,
+    About,
+}
+
+public enum SettingsSetting
+{
+    AccountHeader,
+    ServerAccounts,
+    AddServer,
+    SyncNow,
+    MusicLibraries,
+    VolumeNormalization,
+    Equalizer,
+    LyricsOnlineLookup,
+    LyricsOfflineCapture,
+    ImproveRecommendations,
+    SuppressedItems,
+    AppearanceTheme,
+    DarkStyle,
+    Diagnostics,
+    About,
+}
+
+public sealed record SettingsCategoryDefinition(SettingsCategory Category, string Label, string Subtitle);
+
+public static class SettingsCategories
+{
+    public static readonly IReadOnlyList<SettingsCategoryDefinition> All =
+    [
+        new(SettingsCategory.AccountServers, "Account & Servers", "Sign in, switch servers and sync"),
+        new(SettingsCategory.Library, "Library", "Music libraries"),
+        new(SettingsCategory.Playback, "Playback", "Normalization and equalizer"),
+        new(SettingsCategory.Lyrics, "Lyrics", "Lookup and offline lyrics"),
+        new(SettingsCategory.Recommendations, "Recommendations", "Enrichment and hidden items"),
+        new(SettingsCategory.Devices, "Sync", "Music, history and settings across devices"),
+        new(SettingsCategory.Appearance, "Appearance", "Theme"),
+        new(SettingsCategory.Diagnostics, "Diagnostics", "Storage and sync details"),
+        new(SettingsCategory.About, "About", "Version and source"),
+    ];
+
+    public static SettingsCategory CategoryFor(SettingsSetting setting) => setting switch
+    {
+        SettingsSetting.AccountHeader or
+        SettingsSetting.ServerAccounts or
+        SettingsSetting.AddServer or
+        SettingsSetting.SyncNow => SettingsCategory.AccountServers,
+        SettingsSetting.MusicLibraries => SettingsCategory.Library,
+        SettingsSetting.VolumeNormalization or
+        SettingsSetting.Equalizer => SettingsCategory.Playback,
+        SettingsSetting.LyricsOnlineLookup or
+        SettingsSetting.LyricsOfflineCapture => SettingsCategory.Lyrics,
+        SettingsSetting.ImproveRecommendations or
+        SettingsSetting.SuppressedItems => SettingsCategory.Recommendations,
+        SettingsSetting.AppearanceTheme or
+        SettingsSetting.DarkStyle => SettingsCategory.Appearance,
+        SettingsSetting.Diagnostics => SettingsCategory.Diagnostics,
+        SettingsSetting.About => SettingsCategory.About,
+        _ => throw new ArgumentOutOfRangeException(nameof(setting), setting, null),
+    };
+
+    public static SettingsCategoryDefinition Definition(SettingsCategory category) =>
+        All.First(d => d.Category == category);
+}
+
+public sealed class SettingsCategorySelectionState
+{
+    public SettingsCategory Selected { get; private set; } = SettingsCategory.AccountServers;
+
+    public SettingsCategoryDefinition SelectedDefinition => SettingsCategories.Definition(Selected);
+
+    public bool Select(SettingsCategory category)
+    {
+        if (Selected == category) return false;
+        Selected = category;
+        return true;
+    }
+
+    public bool IsSelected(SettingsCategory category) => Selected == category;
+}
+
 public sealed record SettingsLibraryOption(string Id, string Name, bool IsSelected)
 {
     public string Status => IsSelected ? "Syncing" : "Not syncing";
@@ -23,6 +112,36 @@ public sealed record SuppressedSettingsItem(
         : Detail;
 }
 
+public static class SettingsPresentation
+{
+    public static string ProfileTitle(ServerAccount? account) =>
+        account?.ServerName is { Length: > 0 } name ? name : "Settings";
+
+    public static string ProfileSubtitle(ServerAccount? account, string librarySummary) =>
+        account is null ? "Connect a server" : librarySummary;
+
+    public static string ServerSectionTitle(ServerAccount? account) =>
+        account is null ? "No server signed in" : account.ServerName;
+
+    public static string ServerSectionSubtitle(ServerAccount? account) =>
+        account is null
+            ? "Add Plex, Jellyfin or Subsonic to sync your music."
+            : $"{account.Kind.Display()} · {account.BaseUrl}";
+}
+
+public static class EqualizerFaderScale
+{
+    public static double NormalizedPosition(double db)
+    {
+        var clamped = DesktopEqualizerProfile.ClampGain(db);
+        return (clamped - DesktopEqualizerProfile.MinGainDb)
+            / (DesktopEqualizerProfile.MaxGainDb - DesktopEqualizerProfile.MinGainDb);
+    }
+
+    public static double ZeroLinePosition =>
+        NormalizedPosition(0);
+}
+
 public sealed partial class EqualizerBandSetting(
     int index,
     string label,
@@ -37,6 +156,7 @@ public sealed partial class EqualizerBandSetting(
     [ObservableProperty] private double _gain = gain;
 
     public string GainText => FormatGain(Gain);
+    public double NormalizedPosition => EqualizerFaderScale.NormalizedPosition(Gain);
 
     partial void OnGainChanged(double value)
     {
@@ -49,6 +169,7 @@ public sealed partial class EqualizerBandSetting(
         }
 
         OnPropertyChanged(nameof(GainText));
+        OnPropertyChanged(nameof(NormalizedPosition));
         _onChanged(Index, clamped);
     }
 
@@ -59,6 +180,7 @@ public sealed partial class EqualizerBandSetting(
         {
             Gain = DesktopEqualizerProfile.ClampGain(value);
             OnPropertyChanged(nameof(GainText));
+            OnPropertyChanged(nameof(NormalizedPosition));
         }
         finally
         {

@@ -2,8 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:Mozz.Desktop"
              x:Class="Mozz.Desktop.App"
-             Name="Mozz"
-             RequestedThemeVariant="Dark">
+             Name="Mozz">
 
     <Application.DataTemplates>
         <local:ViewLocator />
@@ -16,6 +15,8 @@
     <NativeMenu.Menu>
         <NativeMenu>
             <NativeMenuItem Header="About Mozz" Click="OnAboutMozz" />
+            <NativeMenuItem Header="Settings…" Gesture="Cmd+," Click="OnSettingsMozz" />
+            <NativeMenuItem Header="Your Devices…" Click="OnPairDevice" />
         </NativeMenu>
     </NativeMenu.Menu>
 
@@ -30,70 +31,61 @@
 
             <FontFamily x:Key="InterFont">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
 
-            <!-- Mozz crimson, taken from the iOS app icon so the two read as
-                 one product rather than two apps that share a name. -->
-            <SolidColorBrush x:Key="Accent" Color="#D8213F" />
-            <SolidColorBrush x:Key="AccentHover" Color="#E63A55" />
-            <SolidColorBrush x:Key="AccentDeep" Color="#B00023" />
+            <!-- Initial values are replaced by MozzThemeApplicator after preferences
+                 load. They match the iOS dark-dim ladder so startup never flashes red. -->
+            <SolidColorBrush x:Key="Accent" Color="#F50031" />
+            <SolidColorBrush x:Key="AccentHover" Color="#FF244E" />
+            <SolidColorBrush x:Key="AccentDeep" Color="#C80028" />
+            <SolidColorBrush x:Key="Brand" Color="#F50031" />
+            <SolidColorBrush x:Key="BrandForeground" Color="#FFFFFF" />
 
-            <!-- Near-black rather than black: Apple Music and Spotify both do
-                 this, and it stops album art appearing to float. -->
-            <SolidColorBrush x:Key="AppBackground" Color="#0B0B0D" />
-            <SolidColorBrush x:Key="SidebarBackground" Color="#121214" />
-            <SolidColorBrush x:Key="BarBackground" Color="#141416" />
-            <SolidColorBrush x:Key="SurfaceRaised" Color="#1C1C20" />
-            <SolidColorBrush x:Key="SurfaceHover" Color="#232328" />
-            <SolidColorBrush x:Key="SurfaceSelected" Color="#2A2A30" />
-            <SolidColorBrush x:Key="Divider" Color="#232327" />
+            <SolidColorBrush x:Key="AppBackground" Color="#1C1C1E" />
+            <SolidColorBrush x:Key="SidebarBackground" Color="#2C2C2E" />
+            <SolidColorBrush x:Key="BarBackground" Color="#2C2C2E" />
+            <SolidColorBrush x:Key="Surface" Color="#2C2C2E" />
+            <SolidColorBrush x:Key="SurfaceRaised" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="SurfaceHover" Color="#48484A" />
+            <SolidColorBrush x:Key="SurfaceSelected" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="DetailBackground" Color="#121212" />
+            <SolidColorBrush x:Key="Divider" Color="#99545458" />
 
-            <!-- What separates a raised surface from the page in Black, where the
-                 two are the same colour. Transparent and zero-width in Dim and
-                 Light, so every surface that opts in is unchanged there.
-                 DesktopPalette swaps both. -->
-            <SolidColorBrush x:Key="SurfaceBorder" Color="Transparent" />
-            <Thickness x:Key="SurfaceBorderThickness">0</Thickness>
-
-            <!-- The wash under an artist banner's name. Declared here so the
-                 template can bind it at load; DesktopPalette replaces it with
-                 one that fades into whichever background is in effect. -->
-            <LinearGradientBrush x:Key="HeroScrim" StartPoint="0%,0%" EndPoint="0%,100%">
-                <GradientStop Color="#000B0B0D" Offset="0" />
-                <GradientStop Color="#CC0B0B0D" Offset="1" />
+            <!-- The dock's own surface. Lifted off the page rather than equal
+                 to it, so the pill reads as laid on top; DesktopPalette swaps
+                 both for the light and blackout ladders. -->
+            <!-- Under a title laid on artwork. Nothing at the top, where the
+                 cover should be seen, deepening to near-opaque at the bottom
+                 where the words are — so the text is legible over a pale record
+                 and a dark one alike without flattening either. -->
+            <LinearGradientBrush x:Key="TileTitleScrim" StartPoint="0%,0%" EndPoint="0%,100%">
+                <GradientStop Color="#00000000" Offset="0.32" />
+                <GradientStop Color="#40000000" Offset="0.6" />
+                <GradientStop Color="#A6000000" Offset="0.84" />
+                <GradientStop Color="#D9000000" Offset="1" />
             </LinearGradientBrush>
 
-            <!-- The wash between the player's artwork tones and its controls.
-                 Fixed rather than themed: the player is always dark, so this
-                 does not follow the palette the way HeroScrim does. Light at the
-                 top, where there is only colour to look at, and heavy at the
-                 bottom, where the seek bar and the times have to stay readable
-                 over a record that turned out pale. -->
-            <LinearGradientBrush x:Key="PlayerScrim" StartPoint="0%,0%" EndPoint="0%,100%">
-                <GradientStop Color="#14000000" Offset="0" />
-                <GradientStop Color="#4D000000" Offset="0.55" />
-                <GradientStop Color="#A6000000" Offset="1" />
-            </LinearGradientBrush>
+            <SolidColorBrush x:Key="DockBackground" Color="#F21C1C20" />
+            <SolidColorBrush x:Key="DockBorder" Color="#26FFFFFF" />
 
-            <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
-            <SolidColorBrush x:Key="TextSecondary" Color="#9A9AA2" />
-            <SolidColorBrush x:Key="TextTertiary" Color="#6A6A72" />
+            <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#99EBEBF5" />
+            <SolidColorBrush x:Key="TextTertiary" Color="#4DEBEBF5" />
+            <SolidColorBrush x:Key="SearchBackground" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="ArtworkFallbackPrimary" Color="#66FFFFFF" />
+            <SolidColorBrush x:Key="ArtworkFallbackSecondary" Color="#88FFFFFF" />
+            <SolidColorBrush x:Key="ArtworkFallbackTertiary" Color="#55FFFFFF" />
+            <SolidColorBrush x:Key="ArtworkHeroFallback" Color="#44FFFFFF" />
+            <Color x:Key="HeroGradientStart">#00000000</Color>
+            <Color x:Key="HeroGradientEnd">#CC121212</Color>
 
-            <!-- Fluent's own accent, overridden to the same crimson.
-                 The brushes above only reach controls we style by hand. Every
-                 built-in control — the sliders, the progress bar, list
-                 selection, focus rings — reads SystemAccentColor instead, which
-                 ships as a Windows blue. Leaving it meant the seek bar, the
-                 volume slider and the selected row were all bright blue in an
-                 otherwise crimson app, which read as unfinished rather than as
-                 a choice. The Light/Dark ramp is what Fluent reaches for on
-                 hover, press and disabled states, so all six are given rather
-                 than just the base. -->
-            <Color x:Key="SystemAccentColor">#D8213F</Color>
-            <Color x:Key="SystemAccentColorLight1">#E63A55</Color>
-            <Color x:Key="SystemAccentColorLight2">#EE5C73</Color>
-            <Color x:Key="SystemAccentColorLight3">#F58193</Color>
-            <Color x:Key="SystemAccentColorDark1">#B00023</Color>
-            <Color x:Key="SystemAccentColorDark2">#8C001C</Color>
-            <Color x:Key="SystemAccentColorDark3">#680015</Color>
+            <!-- Fluent's accent powers built-in controls. Keep it neutral; use Mozz
+                 brand red only through the explicit primary/play/destructive styles. -->
+            <Color x:Key="SystemAccentColor">#8E8E93</Color>
+            <Color x:Key="SystemAccentColorLight1">#AEAEB2</Color>
+            <Color x:Key="SystemAccentColorLight2">#C7C7CC</Color>
+            <Color x:Key="SystemAccentColorLight3">#D1D1D6</Color>
+            <Color x:Key="SystemAccentColorDark1">#6C6C70</Color>
+            <Color x:Key="SystemAccentColorDark2">#545458</Color>
+            <Color x:Key="SystemAccentColorDark3">#3A3A3C</Color>
 
             <!-- Slider geometry.
                  Fluent's horizontal slider is a three-row grid — a 15px spacer,
@@ -111,21 +103,19 @@
             <CornerRadius x:Key="SliderThumbCornerRadius">6</CornerRadius>
             <x:Double x:Key="SliderTrackThemeHeight">4</x:Double>
 
-            <!-- Slider colour. The played side is crimson, the rest is a muted
-                 rail that stays visible against the near-black bar, and the
-                 handle is near-white so it reads against the played side. -->
-            <SolidColorBrush x:Key="SliderTrackFill" Color="#3A3A42" />
-            <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#45454F" />
-            <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#45454F" />
-            <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="#2A2A30" />
-            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#D8213F" />
-            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#E63A55" />
-            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#E63A55" />
-            <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#5A2A32" />
-            <SolidColorBrush x:Key="SliderThumbBackground" Color="#F2F2F4" />
+            <!-- Slider colour: neutral chrome, not brand red. -->
+            <SolidColorBrush x:Key="SliderTrackFill" Color="#48484A" />
+            <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#545458" />
+            <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#545458" />
+            <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#8E8E93" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#AEAEB2" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#AEAEB2" />
+            <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="#545458" />
+            <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#6A6A72" />
+            <SolidColorBrush x:Key="SliderThumbBackgroundDisabled" Color="#636366" />
 
             <!-- The template paints a plate behind the whole slider on hover.
                  In a transport bar that is a grey rectangle appearing under the
@@ -135,6 +125,17 @@
             <SolidColorBrush x:Key="SliderContainerBackgroundPressed" Color="Transparent" />
             <SolidColorBrush x:Key="SliderContainerBackgroundDisabled" Color="Transparent" />
         </ResourceDictionary>
+
+            <!-- The wash between Now Playing's artwork tones and its controls.
+                 Fixed rather than themed: that view is always dark, so this does
+                 not follow the palette. Light at the top, where there is only
+                 colour to look at, and heavy at the bottom, where the seek bar
+                 and the times have to stay readable over a pale record. -->
+            <LinearGradientBrush x:Key="PlayerScrim" StartPoint="0%,0%" EndPoint="0%,100%">
+                <GradientStop Color="#14000000" Offset="0" />
+                <GradientStop Color="#4D000000" Offset="0.55" />
+                <GradientStop Color="#A6000000" Offset="1" />
+            </LinearGradientBrush>
     </Application.Resources>
 
     <Application.Styles>
@@ -153,68 +154,6 @@
              surface carries the selection and the title carries the colour.
              Lists whose rows are only a layout device — the album and artist
              walls — still override this locally to nothing. -->
-        <!-- =================================================================
-             Hover.
-
-             One rule for the whole app: anything you can click says so under the
-             pointer, with a rounded plate that has room around the content, and
-             it happens on the frame the pointer arrives. No fades — a hover that
-             animates in feels like the app is thinking about it, and at the speed
-             a pointer crosses a list of songs the fades pile up into a smear.
-
-             The plate is `SurfaceHover`, which is one step off the page in every
-             theme, so it reads as a light lift rather than as a selection.
-             ================================================================= -->
-        <!-- The row plate.
-             It lives in the row TEMPLATE, on a Border we own, rather than on the
-             ListBoxItem's ContentPresenter — for two reasons, both learned the
-             hard way.
-
-             First, a ListBox whose rows are of mixed kinds cannot style hover at
-             the item level: the album and artist detail pages put a hero banner,
-             section titles and track rows in ONE ListBox, so they had to switch
-             item hover off wholesale to stop the banner lighting up, and that
-             took the track rows down with it. A plate on the track template
-             lights up the rows that are rows and nothing else.
-
-             Second, `:pointerover` on the Border itself needs no descendant
-             selector reaching into a theme's template internals, so it cannot be
-             broken by a template we do not own. The Border must be hit-testable
-             for that, which is what the transparent rest background is for.
-
-             The padding is the plate's, not the row's, so the artwork inside sits
-             the same distance from the left edge as from the top — the columns
-             used to centre a 38px cover in a 44px column, giving 3px at the side
-             against 6px above, which read as a lopsided row. -->
-        <Style Selector="Border.rowPlate">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="CornerRadius" Value="10" />
-            <!-- Even on all four sides. The horizontal half was already here; the
-                 vertical half was not, so a 40px cover filled a 40px plate and
-                 touched its top and bottom edges while sitting 8px from the
-                 left. -->
-            <Setter Property="Padding" Value="8" />
-            <!-- And a gap, so two rows are two rows. Without it consecutive
-                 plates share an edge, the rounded corners cancel out against
-                 each other, and hovering one row looks like a band of colour
-                 rather than a card under the pointer. -->
-            <Setter Property="Margin" Value="0,2" />
-            <Setter Property="Transitions" Value="{x:Null}" />
-        </Style>
-        <Style Selector="Border.rowPlate:pointerover">
-            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
-        </Style>
-
-        <Style Selector="ListBoxItem">
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="CornerRadius" Value="9" />
-            <Setter Property="Transitions" Value="{x:Null}" />
-        </Style>
-        <Style Selector="ListBoxItem /template/ ContentPresenter">
-            <Setter Property="CornerRadius" Value="9" />
-            <Setter Property="Transitions" Value="{x:Null}" />
-        </Style>
-
         <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
         </Style>
@@ -235,51 +174,89 @@
         </Style>
 
         <!-- =================================================================
-             Buttons.
+             Hover.
 
-             Every button in the app is one of these. The base style below is a
-             complete, finished button on its own — the standard pill, in the
-             secondary colour — and the classes after it only say how a button
-             differs from that: bigger, smaller, louder, quieter, or not
-             pill-shaped at all.
+             One rule for everything clickable: it says so under the pointer,
+             with a rounded plate that has room around the content, on the frame
+             the pointer arrives. No fades — a hover that animates in feels like
+             the app is thinking about it, and at the speed a pointer crosses a
+             list of songs the fades pile up into a smear.
 
-             It is written this way round because the failure it fixes was a
-             button with NO class on it. "Sync Now" carried `accent` and came out
-             a crimson pill; "Refresh Settings" beside it carried nothing and
-             came out a grey Fluent rectangle with a different height, a
-             different radius and a different font. Half a dozen buttons across
-             Settings and Connect were in the same state. Styling only the
-             classes leaves the default as a trap, and someone falls into it
-             every time a button is added; styling the DEFAULT means forgetting
-             a class produces the right button instead of the theme's.
+             The plate lives in the row TEMPLATE, on a Border we own, rather than
+             on the ListBoxItem's ContentPresenter — because a list whose rows
+             are of mixed kinds cannot style hover at the item level. The detail
+             pages put a hero banner, section titles and track rows in ONE
+             ListBox, so they switch item hover off wholesale to stop the banner
+             lighting up, and that takes the track rows down with it. A plate on
+             the track template lights the rows that are rows and nothing else.
+             `:pointerover` on the Border needs no selector reaching into a
+             theme's template internals, so nothing outside this file can turn it
+             off; the transparent resting background is what keeps it
+             hit-testable.
+             ================================================================= -->
+        <Style Selector="Border.rowPlate">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="10" />
+            <!-- Even on all four sides, so the gap left of a cover is the gap
+                 above it. -->
+            <Setter Property="Padding" Value="8" />
+            <!-- And a gap, so two rows read as two rows. Without it consecutive
+                 plates share an edge, the rounded corners cancel out against
+                 each other, and hovering one row looks like a band of colour
+                 across the list rather than a card under the pointer. -->
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Border.rowPlate:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
 
-             The scale is three sizes — small / standard / large — and the radius
-             is always half the height, so everything is a true pill and nothing
-             is a rounded rectangle. Sizes are set with MinHeight plus horizontal
-             padding rather than a fixed Height, so a button still grows for a
-             long label or a large system font instead of clipping it.
+        <!-- A tile that is already a raised card lifts its own surface: a plate
+             behind a card is a halo at the same colour. -->
+        <Style Selector="Border.tileSurface">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Border.tileSurface:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="ListBoxItem /template/ ContentPresenter">
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+
+        <!-- The default button.
+             Everything below is a variation on this one, and it is written this
+             way round because the failure it fixes is a button with NO class on
+             it: those fall through to Fluent and arrive with a different height,
+             a different corner radius and a different font from every styled
+             button beside them. Styling only the classes leaves the default as a
+             trap that someone falls into each time a button is added; styling
+             the default means forgetting a class produces the right button
+             instead of the theme's.
+
+             The metrics are the same ones the role classes use, and the colours
+             are `secondary`, because a button with nothing said about it is a
+             secondary button. It is declared first so every class after it —
+             nav, link, tile, and the roles — still wins.
              ================================================================= -->
         <Style Selector="Button">
-            <Setter Property="MinHeight" Value="34" />
-            <Setter Property="Padding" Value="17,0" />
-            <Setter Property="CornerRadius" Value="17" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
-            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="Cursor" Value="Hand" />
-            <!-- Fluent's DefaultFocusAdorner draws a rounded rect around whatever
-                 last took focus, and clicking focuses — so it appeared behind
-                 buttons after an ordinary click. Opt out, then put a ring back
-                 for keyboard focus only, below. -->
-            <Setter Property="FocusAdorner" Value="{x:Null}" />
-        </Style>
-        <Style Selector="Button /template/ ContentPresenter">
-            <Setter Property="Transitions" Value="{x:Null}" />
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
@@ -292,26 +269,6 @@
         <Style Selector="Button:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
             <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
-        </Style>
-        <Style Selector="Button:focus-visible /template/ ContentPresenter">
-            <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
-            <Setter Property="BorderThickness" Value="1.5" />
-        </Style>
-
-        <!-- The other two rungs of the scale. Large is for the one action a page
-             is about — Play on an album; small is for an action that belongs to
-             a row rather than to the page. -->
-        <Style Selector="Button.large">
-            <Setter Property="MinHeight" Value="38" />
-            <Setter Property="Padding" Value="21,0" />
-            <Setter Property="CornerRadius" Value="19" />
-            <Setter Property="FontSize" Value="14" />
-        </Style>
-        <Style Selector="Button.small">
-            <Setter Property="MinHeight" Value="28" />
-            <Setter Property="Padding" Value="13,0" />
-            <Setter Property="CornerRadius" Value="14" />
-            <Setter Property="FontSize" Value="12.5" />
         </Style>
 
         <Style Selector="Button.nav">
@@ -326,6 +283,18 @@
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
+        <!-- The resting background, stated rather than inherited.
+             Only the hover and selected styles below used to set this, so at
+             rest the presenter fell back to the template binding. Navigating
+             changes Classes.selected on all seven buttons at once, and while
+             that resolves, every one of them briefly painted as though the
+             pointer were over it - a flash across the whole sidebar on each
+             click. Giving the resting state a value of its own leaves nothing
+             to resolve. It must stay above the two styles that follow, which
+             are meant to override it. -->
+        <Style Selector="Button.nav /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
         <Style Selector="Button.nav:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
             <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
@@ -335,29 +304,20 @@
             <Setter Property="TextElement.Foreground" Value="{DynamicResource Accent}" />
         </Style>
 
-        <!-- Not a button in the visual sense: a run of text you can click, in a
-             row that is already dense. It resets every part of the base pill —
-             the height most of all, because a 34px minimum inside a 50px track
-             row would push the title off its baseline. -->
         <Style Selector="Button.link">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CornerRadius" Value="0" />
             <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
-        <Style Selector="Button.link:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <!-- The artist and album names in a song row. They stay clickable —
-             going to the artist from the song is the reason the name is there —
-             but they sit inside a row that already lights up, so a second plate
-             under them would read as two overlapping targets. An underline says
-             "this one is a link" without competing. -->
+        <!-- The artist and album names in a row stay clickable, but they sit
+             inside a plate that already lights up, so a second surface under
+             them would read as two overlapping targets. -->
         <Style Selector="Button.link:pointerover TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
             <Setter Property="TextDecorations" Value="Underline" />
@@ -365,62 +325,169 @@
         <Style Selector="Button.link:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <!-- A cover you can click. At rest the artwork is the whole affordance,
-             so the button paints nothing; under the pointer a rounded plate
-             appears behind it, and the padding is what gives the plate room to
-             be seen around the art rather than hiding exactly beneath it.
+        <!-- A cover that opens something, where the artwork fills the control
+             and a plate around it would have nowhere to go. The affordance is a
+             scrim with a chevron over the art itself, which also says WHAT the
+             click does — this opens upward into the player — in a way a
+             highlight cannot. -->
+        <!-- The switch between the player's two panels. A quiet pair of pills:
+             the panel underneath is the content, and the tabs only need to say
+             which one it is. -->
+        <Style Selector="Button.panelTab">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
+        <Style Selector="Button.panelTab:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.panelTab.active">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.panelTab.active /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
 
-             The padding is not new space: it is the margin each wall used to put
-             BETWEEN its tiles, moved inside the tile. The footprint is unchanged,
-             which matters because the walls' column counts come from fixed pitch
-             constants in DesktopLayout — see the tile call sites. -->
-        <Style Selector="Button.tile">
+        <Style Selector="Button.cover">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="10" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.cover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.cover:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.cover:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <!-- The resting opacity has to live here rather than on the element: a
+             value set inline in XAML is a local value, and a local value beats
+             every style setter, so `Opacity="0"` on the Border made the hover
+             rule below unable to raise it. -->
+        <Style Selector="Border.coverHover">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="Transitions" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.cover:pointerover Border.coverHover">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+
+        <Style Selector="Button.tile">
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CornerRadius" Value="12" />
+            <!-- The padding is not new space: it is the margin each wall used to
+                 put BETWEEN its tiles, moved inside the tile, so the hover plate
+                 has room to be seen around the art and the footprint is
+                 unchanged — which matters because the walls' column counts come
+                 from fixed pitch constants in DesktopLayout. -->
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
+        <!-- At rest the artwork is the whole affordance, so the button paints
+             nothing; under the pointer a rounded plate appears behind it, and
+             the padding is what gives the plate room to be seen around the art
+             rather than hiding exactly beneath it. -->
         <Style Selector="Button.tile:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
-        </Style>
-        <Style Selector="Button.tile:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
-        </Style>
-        <Style Selector="Button.tile:disabled /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Button.tile:focus-visible /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
         </Style>
-
-        <!-- A tile that is already a raised card — a mix shortcut, a playlist, a
-             recently-played row. A plate behind a card is a halo at the same
-             colour, so these lift the card itself instead. -->
+        <!-- A tile that is already a raised card lifts that card instead. -->
         <Style Selector="Button.tile.card">
             <Setter Property="Padding" Value="0" />
         </Style>
         <Style Selector="Button.tile.card:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Button.tile.card:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
         <Style Selector="Button.tile.card:focus-visible /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Border.tileSurface">
-            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
-            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
-            <Setter Property="Transitions" Value="{x:Null}" />
+        <!-- The base button now paints a pressed state, and a cover must not get
+             one behind it: the artwork is the whole affordance. -->
+        <Style Selector="Button.tile:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Border.tileSurface:pointerover">
+        <Style Selector="Button.tile:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.link:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.link:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style Selector="Button.primary, Button.secondary, Button.ghost, Button.destructive">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.primary:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
+        </Style>
+        <Style Selector="Button.secondary">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.secondary:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Button.secondary:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.destructive">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+        </Style>
+        <Style Selector="Button.destructive:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <Style Selector="Button.primary:focus-visible /template/ ContentPresenter,
+                         Button.secondary:focus-visible /template/ ContentPresenter,
+                         Button.ghost:focus-visible /template/ ContentPresenter,
+                         Button.destructive:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource TextTertiary}" />
+            <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
         <Style Selector="Button.transport">
@@ -448,26 +515,6 @@
         <Style Selector="Button.transport.lead">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
-        <!-- Shuffle, repeat and the queue toggle are stateful, so they need a
-             third look beyond rest and hover: crimson says "this is on" the same
-             way the sidebar's current item does. Hover still lifts it, so an
-             active control does not go dead under the pointer. -->
-        <Style Selector="Button.transport.active">
-            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
-        </Style>
-        <Style Selector="Button.transport.active:pointerover">
-            <Setter Property="Foreground" Value="{DynamicResource AccentHover}" />
-        </Style>
-        <Style Selector="Button.transport:disabled">
-            <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
-        </Style>
-        <Style Selector="Button.transport:disabled /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-        <Style Selector="Button.play:disabled /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
-            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
-        </Style>
         <Style Selector="Button.transport:pointerover">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
@@ -482,17 +529,28 @@
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
 
-        <!-- The full player's transport is the same controls at the size a
-             screen-filling view wants, rather than a second set of styles. -->
-        <Style Selector="Button.transport.big">
-            <Setter Property="Width" Value="46" />
-            <Setter Property="Height" Value="46" />
-            <Setter Property="CornerRadius" Value="23" />
+        <!-- A star is one fifth of a single control, so it carries none of a
+             button's chrome: no minimum height, no padding, no plate. Five ghost
+             buttons at 36px tall with 16px of side padding read as five separate
+             widgets scattered across a line. -->
+        <Style Selector="Button.star">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
-        <Style Selector="Button.play.big">
-            <Setter Property="Width" Value="64" />
-            <Setter Property="Height" Value="64" />
-            <Setter Property="CornerRadius" Value="32" />
+        <Style Selector="Button.star:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.star:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.star:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
         </Style>
 
         <Style Selector="Button.play">
@@ -508,13 +566,33 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
-        <!-- The player's play button.
-             Crimson is the app's accent, and it is right in the transport bar,
-             which sits on the app's own chrome. It is wrong in the player, whose
-             field is the RECORD's colour: over a red album the crimson button
-             disappeared into the backdrop. White reads on every tone the core
-             can produce, and the same reasoning makes the player's other
-             controls monochrome — see the resource overrides on the player. -->
+        <Style Selector="Button.play:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+        </Style>
+        <!-- Press deepens the crimson rather than flashing Fluent's grey pressed fill. -->
+        <Style Selector="Button.play:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
+        </Style>
+        <Style Selector="Button.play:focus-visible /template/ ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="BorderThickness" Value="1.5" />
+        </Style>
+
+        <!-- The transport, one rung up, for the full player. -->
+        <Style Selector="Button.transport.big">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="46" />
+            <Setter Property="CornerRadius" Value="23" />
+        </Style>
+        <Style Selector="Button.play.big">
+            <Setter Property="Width" Value="62" />
+            <Setter Property="Height" Value="62" />
+            <Setter Property="CornerRadius" Value="31" />
+        </Style>
+        <!-- The player's play button. Crimson is right on the app's own chrome
+             and wrong on the record's colour: over a red album it disappears
+             into its own backdrop. White reads on every tone the core can
+             produce. -->
         <Style Selector="Button.play.onArtwork">
             <Setter Property="Background" Value="#F2F2F4" />
             <Setter Property="Foreground" Value="#101014" />
@@ -528,67 +606,6 @@
             <Setter Property="TextElement.Foreground" Value="#101014" />
         </Style>
 
-        <Style Selector="Button.play:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
-        </Style>
-        <!-- Press deepens the crimson rather than flashing Fluent's grey pressed fill. -->
-        <Style Selector="Button.play:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
-        </Style>
-        <Style Selector="Button.play:focus-visible /template/ ContentPresenter">
-            <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
-            <Setter Property="BorderThickness" Value="1.5" />
-        </Style>
-
-        <!-- The three voices, all on the same scale as the base pill. Only
-             colour changes: `accent` is the one action a group is about,
-             `ghost` is the dismissal beside it, and `danger` is the one you
-             should have to mean. There is no `secondary` class because the
-             base style IS secondary. -->
-        <Style Selector="Button.accent">
-            <Setter Property="Background" Value="{DynamicResource Accent}" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentHover}" />
-            <Setter Property="TextElement.Foreground" Value="White" />
-        </Style>
-        <Style Selector="Button.accent:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AccentDeep}" />
-            <Setter Property="TextElement.Foreground" Value="White" />
-        </Style>
-        <Style Selector="Button.accent:disabled /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
-            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextTertiary}" />
-        </Style>
-        <Style Selector="Button.accent:focus-visible /template/ ContentPresenter">
-            <Setter Property="BorderBrush" Value="White" />
-            <Setter Property="BorderThickness" Value="1.5" />
-        </Style>
-
-        <Style Selector="Button.ghost">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="Button.ghost:disabled /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-        </Style>
-
-        <Style Selector="Button.danger">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
-            <Setter Property="BorderThickness" Value="0" />
-        </Style>
-        <Style Selector="Button.danger:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
-            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentHover}" />
-        </Style>
-        <Style Selector="Button.danger:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
-            <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentHover}" />
-        </Style>
 
         <Style Selector="TextBlock.pageTitle">
             <Setter Property="FontSize" Value="30" />
@@ -600,28 +617,6 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
-        <!-- The player's own type ramp. Larger than a page's because it is read
-             across a room rather than at arm's length, and because there are only
-             three lines of it competing for attention. -->
-        <Style Selector="TextBlock.playerTitle">
-            <Setter Property="FontSize" Value="27" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-        </Style>
-        <Style Selector="TextBlock.playerArtist">
-            <Setter Property="FontSize" Value="16" />
-            <Setter Property="FontWeight" Value="Medium" />
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-        </Style>
-        <Style Selector="TextBlock.playerCaption">
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
-            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-        </Style>
-
         <Style Selector="TextBlock.primary">
             <Setter Property="FontSize" Value="13.5" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
@@ -633,14 +628,24 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
 
-        <!-- Also the artwork placeholder: in Black its fill is the page's own
-             black, so the hairline is the only thing that makes a coverless
-             album a cover-shaped hole rather than nothing. -->
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="{DynamicResource SearchBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource SurfaceSelected}" />
+            <Setter Property="PlaceholderForeground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource SearchBackground}" />
+        </Style>
+        <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{DynamicResource SearchBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource TextTertiary}" />
+        </Style>
+
         <Style Selector="Border.albumArt">
             <Setter Property="CornerRadius" Value="7" />
             <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
-            <Setter Property="BorderThickness" Value="{DynamicResource SurfaceBorderThickness}" />
             <Setter Property="ClipToBounds" Value="True" />
         </Style>
 

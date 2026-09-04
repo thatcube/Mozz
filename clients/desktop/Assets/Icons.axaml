@@ -6,6 +6,7 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <StreamGeometry x:Key="IconShuffle">M18 4l3 3l-3 3 M18 20l3 -3l-3 -3 M3 7h3a5 5 0 0 1 5 5a5 5 0 0 0 5 5h5 M21 7h-5a4.978 4.978 0 0 0 -3 1m-4 8a4.984 4.984 0 0 1 -3 1h-3</StreamGeometry>
     <StreamGeometry x:Key="IconChevronLeft">M15 6l-6 6l6 6</StreamGeometry>
+    <StreamGeometry x:Key="IconChevronUp">M6 15l6 -6l6 6</StreamGeometry>
     <StreamGeometry x:Key="IconSkipBack">F1 M19.496 4.136l-12 7a1 1 0 0 0 0 1.728l12 7a1 1 0 0 0 1.504 -.864v-14a1 1 0 0 0 -1.504 -.864z M4 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z</StreamGeometry>
     <StreamGeometry x:Key="IconPlay">F1 M6 4v16a1 1 0 0 0 1.524 .852l13 -8a1 1 0 0 0 0 -1.704l-13 -8a1 1 0 0 0 -1.524 .852z</StreamGeometry>
     <StreamGeometry x:Key="IconPause">F1 M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z</StreamGeometry>

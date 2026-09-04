@@ -8,7 +8,7 @@ name: Core and iOS
 # Apple — that is a portability question. This one asks whether the code is
 # CORRECT, and whether the app that is actually in production still compiles.
 #
-# Those were both unchecked until this existed. `swift test` — 500-plus tests
+# Those were both unchecked until this existed. `swift test` — 658 tests
 # covering the database, the three server clients, sync, history, continuity and
 # the FFI boundary — ran only when someone remembered to run it locally. And
 # nothing built the iOS app at all, so the one platform with real users was the
@@ -28,6 +28,18 @@ on:
       - "Package.resolved"
       - "project.yml"
       - "spec/**"
+      # The command schema and the clients generated from it. A schema change
+      # that was not regenerated leaves the two disagreeing, and the check that
+      # catches it lives in this workflow.
+      - "schema/**"
+      - "tools/generate-schema.sh"
+      # The scripts that *produce* the Xcode project and stamp its version. A
+      # change here can break the iOS build while touching nothing under
+      # Sources/, and this job would not have run to notice — which is exactly
+      # what happened when the version scheme moved to a shared derivation.
+      - "tools/generate-project.sh"
+      - "tools/build-ios.sh"
+      - "tools/version-info.py"
       - ".github/workflows/core-and-ios.yml"
   pull_request:
   workflow_dispatch:
@@ -67,8 +79,50 @@ jobs:
       # the same bytes. The continuity queue hash matters most: two devices
       # compute it independently and compare, so a drift between the code and
       # the fixture surfaces months later as devices that will not pair.
+      # The core now contains a Rust audio engine, so building the package has a
+      # prerequisite SwiftPM cannot satisfy itself: it cannot run cargo. This is
+      # the honest cost of the engine being real rather than a stub behind a
+      # flag, and it is paid here rather than by whoever first runs the tests.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # --all builds every Apple slice, because this job also builds the iOS
+      # app. A macOS-only framework links on the Mac and then fails at the one
+      # step that matters, which is exactly the failure CI exists to catch.
+      - name: Build the audio engine
+        run: tools/build-audio-xcframework.sh --all
+
+      # The Apple app reaches into core modules directly, 122 times across 13 of
+      # them, while every other shell goes through the Facade. That private door
+      # is why a feature can ship on iOS and be invisible everywhere else -
+      # downloads, lyrics, similar tracks and artwork were all in exactly that
+      # state. Closing it is phased; this makes sure it cannot widen meanwhile.
+      - name: The Apple app has not reached further into the core
+        run: tools/check-shell-imports.sh --check
+
+      # A platform lacking a capability is behind, never exempt. That is easy to
+      # agree with and hard to notice breaking: a command can exist, be
+      # implemented, be in every generated client, and still be reachable from
+      # one app, with nothing in the build objecting.
+      - name: No shell lost a capability
+        run: tools/check-parity.sh --check
+
       - name: Run the test suite
         run: swift test --parallel
+
+      # The generated command clients are committed rather than built, so that
+      # protoc is not a prerequisite on any of the four desktop targets. That
+      # trade means the committed output can silently fall behind the schema —
+      # which would be the same class of failure the schema exists to remove,
+      # just moved. Regenerate here and fail if anything differs.
+      #
+      # This job already has the Swift toolchain; protoc and protoc-gen-swift
+      # are the only additions, and they are only needed on this one runner.
+      - name: Schema tools
+        run: brew install protobuf swift-protobuf
+
+      - name: Generated clients match the schema
+        run: tools/generate-schema.sh --check
 
       # Release separately, because debug and release disagree about what
       # *compiles*. A six-element tuple of mixed optionals once type-checked

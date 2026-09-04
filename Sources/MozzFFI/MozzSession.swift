@@ -1,8 +1,21 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// Off Apple the URL loading system is its own module. The artwork fetch below
+// uses URLSession directly, and this facade is what the Windows and Linux
+// shells link, so it has to import it where it actually lives.
+import FoundationNetworking
+#endif
+import MozzCommands
+import MozzContinuity
 import MozzCore
-import MozzDatabase
 import MozzAnalysis
+import MozzDatabase
+import MozzEnrichment
+import MozzJellyfin
 import MozzRecommend
+import MozzRelay
+import MozzSubsonic
+import MozzSync
 
 // MARK: - The session facade
 //
@@ -40,6 +53,10 @@ struct SessionRequest: Decodable {
     var offset: Int?
     var limit: Int?
     var query: String?
+    /// Base64 of tightly packed RGBA, for `artworkTones`.
+    var pixels: String?
+    var width: Int?
+    var height: Int?
     var remoteId: String?
     var artistRemoteId: String?
     var groupKey: String?
@@ -58,47 +75,37 @@ struct SessionRequest: Decodable {
     var password: String?
     var apiKey: String?
     var token: String?
+    var accountToken: String?
+    var homeUserID: String?
+    var profilePIN: String?
     var userID: String?
     var serverName: String?
     var clientIdentifier: String?
+    var serverMachineIdentifier: String?
     var musicSectionID: String?
     var pinId: Int?
     var code: String?
-    /// The Plex *account* token, for `plexResolve` only. Every other command
-    /// works from the per-server access token in `token`.
-    var accountToken: String?
-    /// The Plex **server's** machine identifier, so re-resolution stays on the
-    /// same machine rather than wandering to another server on the account.
-    var machineIdentifier: String?
+    // Pairing. The host owns the socket and pumps frames through these.
+    var pairingId: String?
+    var role: String?
+    var pairingPath: String?
+    var scannedCode: String?
+    var frame: String?
+    var matched: Bool?
+    var circle: WireCircleSecrets?
+    var transcript: String?
+    var joinerPublicKey: String?
+    var encapsulated: String?
+    var ciphertext: String?
     var artworkKey: String?
     var size: Int?
     var maxBitrateKbps: Int?
     var forceTranscode: Bool?
-    /// Lyrics: whether the LRCLIB fallback may be consulted. Defaults to true;
-    /// a client that respects a user's "no third-party lookups" preference
-    /// passes false.
-    var useLRCLIB: Bool?
-    /// Where the host has put the learned analyzer's weights, if it ships them.
-    /// Absent means analyze with the DSP engine.
-    var weightsPath: String?
-
-    // Likes and ratings. `liked` is the universal control — every backend can
-    // express it, whatever it calls the thing. `stars` is the granular one and
-    // only means anything where `supportsRatings` is true.
-    var liked: Bool?
-    var stars: Double?
-    /// Which kind of thing is being liked. Defaults to a track.
     var itemType: String?
-
-    // Artwork palette. The client decodes and downscales its own artwork — that
-    // part is irreducibly platform work — and hands the raw pixels over.
-    /// Base64 RGBA, 8 bits per channel, `width * height * 4` bytes.
-    var pixels: String?
-    var width: Int?
-    var height: Int?
 
     // Listening history.
     var eventKind: String?
+    var state: String?
     var positionSeconds: Double?
     var durationSeconds: Double?
     var positionMS: Int64?
@@ -115,6 +122,41 @@ struct SessionRequest: Decodable {
     var maxBytes: Int?
     var batch: HistoryExchangeBatch?
     var batches: [HistoryExchangeBatch]?
+    var relayEndpoint: String?
+    var servers: [RelayServerRecord]?
+    var members: [RelayMemberRecord]?
+    var musicSectionIDs: [String]?
+    var allMusicLibraries: Bool?
+    var playbackSettings: PlaybackSettings?
+
+    // Lyrics.
+    var useLRCLIB: Bool?
+    /// Where the host has put the learned analyzer's weights, if it ships them.
+    /// Absent means analyze with the DSP engine.
+    var weightsPath: String?
+    var userInitiated: Bool?
+    var leadSeconds: Double?
+
+    // Favorites / ratings.
+    var liked: Bool?
+    var isFavorite: Bool?
+    var rating: Double?
+    var flush: Bool?
+
+    // Continuity.
+    var playbackRunID: String?
+    var cursorSequence: UInt64?
+    var capturedAtMS: Int64?
+    var currentRemoteID: String?
+    var currentAbsoluteIndex: Int?
+    var queue: WireContinuityQueueInput?
+    var descriptor: WireQueueDescriptor?
+    var items: [WireContinuityItemInput]?
+    var repeatMode: String?
+    var isShuffled: Bool?
+    var totalCount: Int?
+    var startAbsoluteIndex: Int?
+    var windowStartAbsoluteIndex: Int?
 
     // Recommendations.
     var setId: String?
@@ -154,6 +196,23 @@ private struct WireServer: Encodable {
     var kind: String
     var name: String
     var baseURL: String
+}
+
+struct WireAccount: Encodable {
+    var displayName: String?
+    var username: String?
+    var avatarURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case displayName, username, avatarURL
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(username, forKey: .username)
+        try container.encode(avatarURL, forKey: .avatarURL)
+    }
 }
 
 private struct WireArtist: Encodable {
@@ -265,28 +324,43 @@ private struct WireTrack: Encodable {
     var artistName: String
     var albumTitle: String?
     var albumRemoteId: String?
-    /// Who made it, as a reference rather than a name — so a row can offer "go to
-    /// artist" without a second lookup by title, which is ambiguous the moment two
-    /// artists share one.
-    var artistRemoteId: String?
     var trackNumber: Int?
     var discNumber: Int?
     var durationSeconds: Double
     var artworkKey: String?
     var isFavorite: Bool
-    /// The track's star rating where the backend keeps one (Plex, Subsonic).
-    /// Carried alongside `isFavorite` because on a ratings backend that flag is
-    /// always false and the rating is what "liked" actually means.
     var rating: Double?
-    /// Codec and bitrate as the server reported them — what a client needs to
-    /// show a format badge, and to tell a lossless file from a transcode.
-    var codec: String?
-    var bitrateKbps: Int?
+    var addedAt: Double?
     /// ReplayGain in dB, when the server supplied one. Carried across the
     /// boundary because without it a client has no way to level a library, and
     /// the loudness difference between two albums is the most audible thing a
     /// music player can get wrong.
     var normalizationGainDB: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, remoteId, serverId, title, artistName, albumTitle, albumRemoteId
+        case trackNumber, discNumber, durationSeconds, artworkKey, isFavorite
+        case rating, addedAt, normalizationGainDB
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(remoteId, forKey: .remoteId)
+        try container.encode(serverId, forKey: .serverId)
+        try container.encode(title, forKey: .title)
+        try container.encode(artistName, forKey: .artistName)
+        try container.encodeIfPresent(albumTitle, forKey: .albumTitle)
+        try container.encodeIfPresent(albumRemoteId, forKey: .albumRemoteId)
+        try container.encodeIfPresent(trackNumber, forKey: .trackNumber)
+        try container.encodeIfPresent(discNumber, forKey: .discNumber)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encodeIfPresent(artworkKey, forKey: .artworkKey)
+        try container.encode(isFavorite, forKey: .isFavorite)
+        try container.encodeIfPresent(rating, forKey: .rating)
+        try container.encodeIfPresent(addedAt, forKey: .addedAt)
+        try container.encodeIfPresent(normalizationGainDB, forKey: .normalizationGainDB)
+    }
 }
 
 private struct WirePlaylist: Encodable {
@@ -295,11 +369,6 @@ private struct WirePlaylist: Encodable {
     var serverId: String
     var title: String
     var trackCount: Int?
-    /// The cover. Absent from this shape until now, which is why no client
-    /// outside the iPhone could draw one: the sync stored the key and nothing
-    /// ever carried it across.
-    var artworkKey: String?
-    var durationSeconds: Double?
 }
 
 private struct WireCounts: Encodable {
@@ -353,13 +422,6 @@ private struct WireSuppression: Encodable {
     var scope: String
     var ref: String
     var createdAt: Double
-    /// The track title or artist name. Falls back to the ref for something
-    /// suppressed and then removed from the library — but only then. A list that
-    /// shows remote ids where names belong is not a list anyone can act on.
-    var title: String
-    /// The artist name, for a track. Nil for an artist.
-    var subtitle: String?
-    var artworkKey: String?
 }
 
 private struct WireAction: Encodable {
@@ -376,6 +438,259 @@ private struct WireSonicProgress: Encodable {
 
 private struct WireHistoryImport: Encodable {
     var imported: Int
+}
+
+private struct WireRelayHistorySync: Encodable {
+    var imported: Int
+    /// Replacement capability after initial provisioning or renewal. The host
+    /// persists it in its platform secure store.
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireRelayServerSync: Encodable {
+    var servers: [RelayServerRecord]
+    var members: [RelayMemberRecord]
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireRelayCatalogSync: Encodable {
+    var status: String
+    var counts: CatalogSnapshotCounts
+    var published: Bool
+    var importedFavorites: Int
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireRelayPlaybackSettingsSync: Encodable {
+    var settings: PlaybackSettings
+    var changed: Bool
+    var relayKey: String
+    var expiresAtMS: Int64
+}
+
+private struct WireFavoriteMutation: Encodable {
+    var serverId: String
+    var remoteId: String
+    var itemType: String
+    var kind: String
+    var value: Double?
+    var liked: Bool
+    var queued: Bool
+    var synced: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case serverId, remoteId, itemType, kind, value, liked, queued, synced
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(serverId, forKey: .serverId)
+        try container.encode(remoteId, forKey: .remoteId)
+        try container.encode(itemType, forKey: .itemType)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(value, forKey: .value)
+        try container.encode(liked, forKey: .liked)
+        try container.encode(queued, forKey: .queued)
+        try container.encode(synced, forKey: .synced)
+    }
+}
+
+private struct WirePlaybackReportResult: Encodable {
+    var reported: Bool
+}
+
+private struct WireLyricsLine: Encodable {
+    var text: String
+    var startSeconds: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case text, startSeconds
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(startSeconds, forKey: .startSeconds)
+    }
+}
+
+private struct WireLyrics: Encodable {
+    var source: String?
+    var sourceDisplayName: String?
+    var isSynced: Bool
+    var lines: [WireLyricsLine]
+
+    enum CodingKeys: String, CodingKey {
+        case source, sourceDisplayName, isSynced, lines
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(source, forKey: .source)
+        try container.encode(sourceDisplayName, forKey: .sourceDisplayName)
+        try container.encode(isSynced, forKey: .isSynced)
+        try container.encode(lines, forKey: .lines)
+    }
+}
+
+private struct WireLyricsResolution: Encodable {
+    var status: String
+    var staySilent: Bool
+    var activeLineIndex: Int?
+    var lyrics: WireLyrics?
+
+    enum CodingKeys: String, CodingKey {
+        case status, staySilent, activeLineIndex, lyrics
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encode(staySilent, forKey: .staySilent)
+        try container.encode(activeLineIndex, forKey: .activeLineIndex)
+        try container.encode(lyrics, forKey: .lyrics)
+    }
+}
+
+struct WireServerAccountFingerprint: Codable, Sendable, Hashable {
+    var backend: String
+    var serverID: String
+    var accountID: String
+}
+
+struct WireTrackLocator: Codable, Sendable, Hashable {
+    var server: WireServerAccountFingerprint
+    var remoteID: String
+}
+
+struct WireQueueDescriptor: Codable, Sendable, Hashable {
+    var kind: String
+    var sourceID: String?
+    var sourceRevision: String?
+}
+
+struct WireContinuityItemInput: Codable, Sendable, Hashable {
+    var remoteID: String
+    var backend: String?
+    var serverID: String?
+    var accountID: String?
+    var baseOrdinal: Int
+    var title: String
+    var artist: String
+    var durationMS: Int64
+    var artworkKey: String?
+}
+
+struct WireContinuityQueueInput: Codable, Sendable, Hashable {
+    var descriptor: WireQueueDescriptor
+    var items: [WireContinuityItemInput]
+    var repeatMode: String
+    var isShuffled: Bool
+    var totalCount: Int
+    var startAbsoluteIndex: Int?
+    var windowStartAbsoluteIndex: Int?
+    var isTruncated: Bool?
+}
+
+private struct WireContinuityItem: Encodable {
+    var locator: WireTrackLocator
+    var baseOrdinal: Int
+    var title: String
+    var artist: String
+    var durationMS: Int64
+    var artworkKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case locator, baseOrdinal, title, artist, durationMS, artworkKey
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(locator, forKey: .locator)
+        try container.encode(baseOrdinal, forKey: .baseOrdinal)
+        try container.encode(title, forKey: .title)
+        try container.encode(artist, forKey: .artist)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(artworkKey, forKey: .artworkKey)
+    }
+}
+
+private struct WireContinuityQueue: Encodable {
+    var queueHash: String
+    var descriptor: WireQueueDescriptor
+    var items: [WireContinuityItem]
+    var startAbsoluteIndex: Int
+    var totalCount: Int
+    var isTruncated: Bool
+    var repeatMode: String
+    var isShuffled: Bool
+}
+
+private struct WireContinuityCursor: Encodable {
+    var playbackRunID: String
+    var deviceID: String
+    var deviceName: String
+    var deviceKind: String?
+    var cursorSequence: UInt64
+    var capturedAtMS: Int64
+    var state: String
+    var current: WireTrackLocator
+    var currentAbsoluteIndex: Int
+    var positionMS: Int64
+    var queueHash: String?
+
+    enum CodingKeys: String, CodingKey {
+        case playbackRunID, deviceID, deviceName, deviceKind, cursorSequence, capturedAtMS
+        case state, current, currentAbsoluteIndex, positionMS, queueHash
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(playbackRunID, forKey: .playbackRunID)
+        try container.encode(deviceID, forKey: .deviceID)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(deviceKind, forKey: .deviceKind)
+        try container.encode(cursorSequence, forKey: .cursorSequence)
+        try container.encode(capturedAtMS, forKey: .capturedAtMS)
+        try container.encode(state, forKey: .state)
+        try container.encode(current, forKey: .current)
+        try container.encode(currentAbsoluteIndex, forKey: .currentAbsoluteIndex)
+        try container.encode(positionMS, forKey: .positionMS)
+        try container.encode(queueHash, forKey: .queueHash)
+    }
+}
+
+private struct WireContinuitySnapshot: Encodable {
+    var cursor: WireContinuityCursor
+    var queue: WireContinuityQueue?
+    var isQueueMissing: Bool
+    var hydratedTracks: [WireTrack]
+
+    enum CodingKeys: String, CodingKey {
+        case cursor, queue, isQueueMissing, hydratedTracks
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cursor, forKey: .cursor)
+        try container.encode(queue, forKey: .queue)
+        try container.encode(isQueueMissing, forKey: .isQueueMissing)
+        try container.encode(hydratedTracks, forKey: .hydratedTracks)
+    }
+}
+
+private struct WireContinuityHash: Encodable {
+    var queueHash: String
+    var canonicalByteCount: Int
+    var canonicalBytesHex: String
+}
+
+private struct WireContinuitySave: Encodable {
+    var saved: Bool
+    var queueHash: String?
 }
 
 // MARK: - Mapping
@@ -419,11 +734,11 @@ private func wire(_ r: TrackRecord) -> WireTrack {
     WireTrack(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
         title: r.title, artistName: r.artistName, albumTitle: r.albumTitle,
-        albumRemoteId: r.albumRemoteId, artistRemoteId: r.artistRemoteId,
-        trackNumber: r.trackNumber,
+        albumRemoteId: r.albumRemoteId, trackNumber: r.trackNumber,
         discNumber: r.discNumber, durationSeconds: r.duration,
         artworkKey: r.artworkKey, isFavorite: r.isFavorite,
-        rating: r.rating, codec: r.codec, bitrateKbps: r.bitrateKbps,
+        rating: r.rating,
+        addedAt: r.addedAt,
         normalizationGainDB: r.normalizationGainDB
     )
 }
@@ -431,8 +746,7 @@ private func wire(_ r: TrackRecord) -> WireTrack {
 private func wire(_ r: PlaylistRecord) -> WirePlaylist {
     WirePlaylist(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
-        title: r.title, trackCount: r.trackCount,
-        artworkKey: r.artworkKey, durationSeconds: r.durationSeconds
+        title: r.title, trackCount: r.trackCount
     )
 }
 
@@ -450,39 +764,194 @@ private func wire(_ r: RecommendationItemRecord) -> WireRecommendationItem {
                            score: r.score, inLibrary: r.inLibrary, reason: r.reason)
 }
 
+private func wire(_ lyrics: Lyrics) -> WireLyrics {
+    WireLyrics(
+        source: lyrics.source?.rawValue,
+        sourceDisplayName: lyrics.source?.displayName,
+        isSynced: lyrics.isSynced,
+        lines: lyrics.lines.map { WireLyricsLine(text: $0.text, startSeconds: $0.start) }
+    )
+}
+
+private func wire(_ fingerprint: ServerAccountFingerprint) -> WireServerAccountFingerprint {
+    WireServerAccountFingerprint(
+        backend: fingerprint.backend.rawValue,
+        serverID: fingerprint.serverID,
+        accountID: fingerprint.accountID
+    )
+}
+
+private func wire(_ locator: TrackLocator) -> WireTrackLocator {
+    WireTrackLocator(server: wire(locator.server), remoteID: locator.remoteID)
+}
+
+private func wire(_ descriptor: QueueDescriptor) -> WireQueueDescriptor {
+    WireQueueDescriptor(
+        kind: descriptor.kind.rawValue,
+        sourceID: descriptor.sourceID,
+        sourceRevision: descriptor.sourceRevision
+    )
+}
+
+private func wire(_ item: ContinuityItem) -> WireContinuityItem {
+    WireContinuityItem(
+        locator: wire(item.locator),
+        baseOrdinal: item.baseOrdinal,
+        title: item.title,
+        artist: item.artist,
+        durationMS: item.durationMS,
+        artworkKey: item.artwork?.key
+    )
+}
+
+private func wire(_ queue: ContinuityQueue) -> WireContinuityQueue {
+    WireContinuityQueue(
+        queueHash: queue.queueHash,
+        descriptor: wire(queue.descriptor),
+        items: queue.items.map(wire),
+        startAbsoluteIndex: queue.startAbsoluteIndex,
+        totalCount: queue.totalCount,
+        isTruncated: queue.isTruncated,
+        repeatMode: queue.repeatMode.rawValue,
+        isShuffled: queue.isShuffled
+    )
+}
+
+private func wire(_ cursor: ContinuityCursor) -> WireContinuityCursor {
+    WireContinuityCursor(
+        playbackRunID: cursor.playbackRunID.uuidString,
+        deviceID: cursor.deviceID,
+        deviceName: cursor.deviceName,
+        deviceKind: cursor.deviceKind?.rawValue,
+        cursorSequence: cursor.cursorSequence,
+        capturedAtMS: cursor.capturedAtMS,
+        state: cursor.state.rawValue,
+        current: wire(cursor.current),
+        currentAbsoluteIndex: cursor.currentAbsoluteIndex,
+        positionMS: cursor.positionMS,
+        queueHash: cursor.queueHash
+    )
+}
+
+private func wire(_ snapshot: ContinuitySnapshot, hydrated: [TrackRecord]) -> WireContinuitySnapshot {
+    WireContinuitySnapshot(
+        cursor: wire(snapshot.cursor),
+        queue: snapshot.queue.map(wire),
+        isQueueMissing: snapshot.isQueueMissing,
+        hydratedTracks: hydrated.map(wire)
+    )
+}
+
 // MARK: - Session
+
+private actor RelayStorePool {
+    private struct Identity: Equatable {
+        let configuration: B2RelayConfiguration
+        let channelID: String
+        let deviceID: String
+        let epoch: Int
+        let channelKey: Data
+        let credentialsKey: Data?
+    }
+
+    private var cached: (Identity, RelayHistoryStore)?
+
+    func store(
+        configuration: B2RelayConfiguration,
+        channelID: String,
+        deviceID: String,
+        epoch: Int,
+        channelKey: Data,
+        credentialsKey: Data?
+    ) throws -> RelayHistoryStore {
+        let identity = Identity(
+            configuration: configuration,
+            channelID: channelID,
+            deviceID: deviceID,
+            epoch: epoch,
+            channelKey: channelKey,
+            credentialsKey: credentialsKey)
+        if let cached, cached.0 == identity {
+            return cached.1
+        }
+        let store = try RelayHistoryStore(
+            objects: B2NativeRelayObjectStore(configuration: configuration),
+            channelID: channelID,
+            localDeviceID: deviceID,
+            epoch: epoch,
+            channelKey: channelKey,
+            credentialsKey: credentialsKey)
+        cached = (identity, store)
+        return store
+    }
+}
 
 /// One open library, owning the database pool for its lifetime.
 final class MozzSession: @unchecked Sendable {
     let database: MusicDatabase
     let repository: LibraryRepository
     let recommendations: RecommendationService
-    /// On-device sonic analysis (ADR-0018). Idle until the host asks for a
-    /// pass, because only the host can see whether this is a good moment to
-    /// spend somebody's battery and bandwidth on it.
-    ///
-    /// Built on first use rather than at open, because which engine it runs
-    /// depends on whether the host can hand over the learned model's weights,
-    /// and only the host knows where those live on its platform.
-    private var sonicServices: [String: SonicAnalysisService] = [:]
-    private let sonicLock = NSLock()
+    let lyrics: LyricsService
+    let favorites: FavoritesStore
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
+    /// On-device sonic analysis (ADR-0018). Built on first use, because which
+    /// engine it runs depends on whether the host can hand over the learned
+    /// model's weights — and only the host knows where those live.
+    private var sonicServices: [String: SonicAnalysisService] = [:]
+    private let sonicLock = NSLock()
+
     let backends = BackendTable()
+    /// The core's artwork cache. Resolves a reference through whichever backend
+    /// is attached, downloads it, and keeps it on disk under a byte budget so
+    /// every shell stops solving that separately. `var` only so a test can swap
+    /// in a store pointed at a temp directory with a scripted fetch.
+    var artworkStore: ArtworkStore
+    /// The session's audio engine, behind the Facade.
+    ///
+    /// One per session rather than one per request, because an engine that did
+    /// not outlive a single command could not play anything: the next command
+    /// would find a different engine with nothing loaded. Building it per
+    /// request is what made every playback command answer "not available".
+    ///
+    /// The engine itself is still constructed lazily inside the service, on the
+    /// first play — it opens the output device the moment it exists, and on iOS
+    /// a device opened before the audio session is active emits silence while
+    /// reporting itself healthy.
+    let playback: PlaybackCommandService
+    fileprivate let relayStores = RelayStorePool()
 
     init(path: String) throws {
         self.database = try MusicDatabase.open(at: URL(fileURLWithPath: path))
         self.repository = LibraryRepository(database)
         self.recommendations = RecommendationService(store: RecommendationStore(database))
+        self.lyrics = LyricsService()
+        self.favorites = FavoritesStore(database)
+        // Capture the backend table, not `self`: the fetch closure resolves the
+        // reference against whichever server is attached when the cover is asked
+        // for, which is the point of resolving lazily rather than at attach time.
+        let backends = self.backends
+        self.artworkStore = ArtworkStore(
+            directory: ArtworkStore.defaultDirectory(),
+            byteLimit: MozzSession.artworkByteLimit,
+            fetch: { query in await MozzSession.fetchArtwork(query, backends: backends) }
+        )
+        // Resolve per server, at play time. Capturing the table rather than a
+        // backend is the same reasoning as artwork: which server a track comes
+        // from is known when it is asked for, not when the session opens.
+        self.playback = PlaybackCommandService(
+            resolverFor: { serverId in
+                guard let backend = backends.backend(serverId) else { return nil }
+                return StreamingTrackURLResolver(backend: backend)
+            }
+        )
     }
 
-    /// The analysis service for a given set of weights.
-    ///
-    /// Memoized on the path: a service owns the in-flight pass, so asking twice
-    /// has to give back the same one or a second call would start a second
-    /// crawl over the same library. A missing or unreadable file falls back to
-    /// the DSP engine rather than failing — analysis with the older engine
-    /// beats no analysis.
+
+    /// The analysis service for a given set of weights, memoized: a service owns
+    /// the in-flight pass, so asking twice must give back the same one or a
+    /// second call would start a second crawl. Unreadable weights fall back to
+    /// the DSP engine — analysis with the older engine beats no analysis.
     func sonicAnalysis(weightsPath: String?) -> SonicAnalysisService {
         let key = weightsPath ?? ""
         sonicLock.lock()
@@ -494,12 +963,49 @@ final class MozzSession: @unchecked Sendable {
         return service
     }
 
-    /// Every service built so far, for commands that must reach whichever one
-    /// is actually running (cancel, progress).
+    /// Every service built so far, for commands that must reach whichever one is
+    /// running (cancel, progress).
     func allSonicServices() -> [SonicAnalysisService] {
         sonicLock.lock()
         defer { sonicLock.unlock() }
         return Array(sonicServices.values)
+    }
+
+
+    /// The disk budget for cached covers, matching iOS's 256 MB so all three
+    /// platforms keep about the same amount and behave alike under pressure.
+    static let artworkByteLimit = 256 * 1024 * 1024
+
+    /// Resolve a reference to a URL through the attached backend and download it,
+    /// mapping every outcome onto the absent/unavailable distinction the store
+    /// remembers differently. This is the same resolution the `artworkURL` JSON
+    /// handler does — `backend.artworkURL(for:size:)` — with the fetch added.
+    ///
+    ///  - no backend yet (still attaching) → unavailable; asking again later is
+    ///    right, and remembering it as absent is the bug the desktop's
+    ///    ArtworkUnavailableException exists to prevent.
+    ///  - backend resolves the reference to nothing → absent; the server has no
+    ///    such cover.
+    ///  - HTTP 404 → absent; a non-404 error status or a thrown network error →
+    ///    unavailable; an empty body → absent; otherwise the bytes.
+    static func fetchArtwork(
+        _ query: ArtworkQuery, backends: BackendTable
+    ) async -> ArtworkOutcome {
+        guard let backend = backends.backend(query.serverId) else { return .unavailable }
+        guard let url = backend.artworkURL(
+            for: ArtworkRef(key: query.artworkKey), size: query.size) else {
+            return .absent
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse {
+                if http.statusCode == 404 { return .absent }
+                guard (200..<300).contains(http.statusCode) else { return .unavailable }
+            }
+            return data.isEmpty ? .absent : .bytes(data)
+        } catch {
+            return .unavailable
+        }
     }
 }
 
@@ -511,6 +1017,8 @@ protocol SessionContext: AnyObject {
     var recommendations: RecommendationService { get }
     func sonicAnalysis(weightsPath: String?) -> SonicAnalysisService
     func allSonicServices() -> [SonicAnalysisService]
+    var lyrics: LyricsService { get }
+    var favorites: FavoritesStore { get }
     var backends: BackendTable { get }
 }
 
@@ -530,7 +1038,7 @@ extension SessionContext {
 /// Swift object pointer is easy to get subtly wrong, and an integer that indexes
 /// a guarded table turns a use-after-free into a clean "unknown handle" error
 /// instead of a crash.
-private final class SessionRegistry: @unchecked Sendable {
+final class SessionRegistry: @unchecked Sendable {
     static let shared = SessionRegistry()
     private let lock = NSLock()
     private var sessions: [Int64: MozzSession] = [:]
@@ -606,6 +1114,83 @@ private func pageCursor(_ request: SessionRequest) -> LibraryRepository.PageCurs
     (request.after ?? request.cursor).flatMap(LibraryRepository.PageCursor.init(token:))
 }
 
+private func hex(_ data: Data) -> String {
+    data.map { String(format: "%02x", $0) }.joined()
+}
+
+private func queueDescriptor(_ wire: WireQueueDescriptor) throws -> QueueDescriptor {
+    guard let kind = QueueDescriptor.Kind(rawValue: wire.kind) else {
+        throw MozzError.unsupported("unknown continuity descriptor kind: \(wire.kind)")
+    }
+    return QueueDescriptor(kind: kind, sourceID: wire.sourceID, sourceRevision: wire.sourceRevision)
+}
+
+private func continuityFingerprint(
+    _ item: WireContinuityItemInput,
+    fallback: ServerAccountFingerprint?
+) throws -> ServerAccountFingerprint {
+    let backendRaw = item.backend ?? fallback?.backend.rawValue
+    guard let backendRaw, let backend = BackendKind(rawValue: backendRaw) else {
+        throw MozzError.unsupported("continuity item needs backend")
+    }
+    return ServerAccountFingerprint(
+        backend: backend,
+        serverID: item.serverID ?? fallback?.serverID ?? "",
+        accountID: item.accountID ?? fallback?.accountID ?? ""
+    )
+}
+
+private func continuityQueue(
+    _ input: WireContinuityQueueInput,
+    fallbackFingerprint: ServerAccountFingerprint? = nil
+) throws -> ContinuityQueue {
+    let descriptor = try queueDescriptor(input.descriptor)
+    let items = try input.items.map { item -> ContinuityItem in
+        let fingerprint = try continuityFingerprint(item, fallback: fallbackFingerprint)
+        return ContinuityItem(
+            locator: TrackLocator(server: fingerprint, remoteID: item.remoteID),
+            baseOrdinal: item.baseOrdinal,
+            title: item.title,
+            artist: item.artist,
+            durationMS: item.durationMS,
+            artwork: item.artworkKey.map(ArtworkRef.init(key:))
+        )
+    }
+    guard let repeatMode = RepeatMode(rawValue: input.repeatMode) else {
+        throw MozzError.unsupported("unknown continuity repeatMode: \(input.repeatMode)")
+    }
+    return ContinuityQueueBuilder.make(
+        items: items,
+        descriptor: descriptor,
+        repeatMode: repeatMode,
+        isShuffled: input.isShuffled,
+        totalCount: input.totalCount,
+        startAbsoluteIndex: input.startAbsoluteIndex ?? input.windowStartAbsoluteIndex ?? 0,
+        isTruncated: input.isTruncated ?? false
+    )
+}
+
+private func continuityQueueInput(_ request: SessionRequest) throws -> WireContinuityQueueInput {
+    if let queue = request.queue { return queue }
+    guard let descriptor = request.descriptor,
+          let items = request.items,
+          let repeatMode = request.repeatMode,
+          let isShuffled = request.isShuffled,
+          let totalCount = request.totalCount else {
+        throw MozzError.unsupported("continuity queue needs descriptor, items, repeatMode, isShuffled and totalCount")
+    }
+    return WireContinuityQueueInput(
+        descriptor: descriptor,
+        items: items,
+        repeatMode: repeatMode,
+        isShuffled: isShuffled,
+        totalCount: totalCount,
+        startAbsoluteIndex: request.startAbsoluteIndex,
+        windowStartAbsoluteIndex: request.windowStartAbsoluteIndex,
+        isTruncated: nil
+    )
+}
+
 // MARK: - Dispatch
 
 private func dispatch(
@@ -674,18 +1259,6 @@ private func dispatch(
             return sessionFailure(request.id, request.cmd, "album not found: \(remoteId)")
         }
         return sessionSuccess(request, wireHeader(album))
-
-    case "track":
-        // One track, by remote id. Exists so a client can re-resolve a durable
-        // reference it stored — a "recently searched" row, a deep link — without
-        // having kept a snapshot of the row itself.
-        guard let remoteId = request.remoteId, let serverId else {
-            return sessionFailure(request.id, request.cmd, "track needs remoteId and serverId")
-        }
-        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
-            return sessionFailure(request.id, request.cmd, "track not found: \(remoteId)")
-        }
-        return sessionSuccess(request, wire(record))
 
     case "artistAlbums":
         guard let remoteId = request.remoteId, let serverId else {
@@ -758,6 +1331,13 @@ private func dispatch(
             return sessionFailure(request.id, request.cmd, "recentlyAddedAlbums needs serverId")
         }
         let rows = try await repo.recentlyAddedAlbums(serverId: serverId, limit: limit)
+        return sessionSuccess(request, rows.map(wire))
+
+    case "recentlyAddedTracks":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "recentlyAddedTracks needs serverId")
+        }
+        let rows = try await repo.recentlyAddedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
 
     case "recentlyPlayedTracks":
@@ -847,9 +1427,342 @@ private func dispatch(
         )
         return sessionSuccess(request, rollup)
 
+    case "relaySyncHistory":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncHistory needs deviceID")
+        }
+        guard let wireCircle = request.circle else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncHistory needs circle")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncHistory needs a valid relayEndpoint")
+        }
+
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
+            channelID: circle.channelId,
+            deviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
+        let exchange = HistoryExchangeStore(session.database)
+
+        // Import first, exactly like HistoryCoordinator. A device returning
+        // after a month should see its peers before publishing its own window.
+        let remote = try await relay.loadBatches()
+            .map(HistoryExchangeBatch.init)
+        let imported = try await exchange.importBatches(
+            remote, localDeviceID: deviceID)
+        let local = try await exchange.exportBatch(
+            localDeviceID: deviceID,
+            deviceName: request.deviceName ?? "",
+            sinceMS: request.sinceMS,
+            windowDays: request.windowDays ?? 180,
+            maximumBytes: relay.maximumBatchBytes)
+        try await relay.save(local.historyBatch)
+
+        let calendar = HistoryRollupBuilder.utcCalendar
+        let year = request.year
+            ?? calendar.component(.year, from: Date())
+        let rollup = try await exchange.yearRollup(
+            year: year, localDeviceID: deviceID)
+        try await relay.save(rollup.historyRollup)
+
+        return sessionSuccess(request, WireRelayHistorySync(
+            imported: imported,
+            relayKey: try configuration.encoded()
+                .base64EncodedString(),
+            expiresAtMS: configuration.expiresAtMS))
+
+    case "relaySyncServers":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs deviceID")
+        }
+        guard let wireCircle = request.circle else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs circle")
+        }
+        guard let localServers = request.servers else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs servers")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncServers needs a valid relayEndpoint")
+        }
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
+            channelID: circle.channelId,
+            deviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
+        try await relay.save(RelayServerSnapshot(
+            deviceID: deviceID,
+            writtenAtMS: localServers.map(\.mutationAtMS).max() ?? 0,
+            servers: localServers))
+        let merged = RelayHistoryStore.mergedServerRecords(
+            try await relay.loadServerSnapshots())
+        let localMembers = request.members ?? []
+        try await relay.save(RelayMembershipSnapshot(
+            deviceID: deviceID, records: localMembers))
+        let members = RelayHistoryStore.mergedMembership(
+            try await relay.loadMembershipSnapshots())
+        return sessionSuccess(request, WireRelayServerSync(
+            servers: merged,
+            members: members,
+            relayKey: try configuration.encoded()
+                .base64EncodedString(),
+            expiresAtMS: configuration.expiresAtMS))
+
+    case "relaySyncCatalog":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs deviceID")
+        }
+        guard let wireCircle = request.circle else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs circle")
+        }
+        guard let serverId = request.serverId,
+              let backend = session.backends.backend(serverId) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs an attached serverId")
+        }
+        guard let scope = CatalogSnapshotScope(
+            connection: backend.connection,
+            libraryIDs: request.allMusicLibraries == true
+                ? ["*"]
+                : request.musicSectionIDs) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs a stable server account identity")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncCatalog needs a valid relayEndpoint")
+        }
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
+            channelID: circle.channelId,
+            deviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
+        let catalog = CatalogRelayCoordinator(
+            database: session.database,
+            relay: relay,
+            localDeviceID: deviceID)
+        let hydration = try await catalog.hydrateIfEmpty(scope: scope)
+        let importedFavorites = try await FavoritesRelayCoordinator(
+            database: session.database,
+            relay: relay,
+            localDeviceID: deviceID
+        ).sync(scope: scope)
+        if importedFavorites > 0 {
+            _ = try? await flushFavoriteOutbox(
+                session: session,
+                serverId: serverId)
+        }
+        let published: Bool
+        if hydration.status == .imported {
+            published = false
+        } else {
+            published = try await catalog.publishLatestComplete(
+                scope: scope) != nil
+        }
+        return sessionSuccess(request, WireRelayCatalogSync(
+            status: {
+                switch hydration.status {
+                case .notNeeded: "notNeeded"
+                case .unavailable: "unavailable"
+                case .imported: "imported"
+                }
+            }(),
+            counts: hydration.counts,
+            published: published,
+            importedFavorites: importedFavorites,
+            relayKey: try configuration.encoded()
+                .base64EncodedString(),
+            expiresAtMS: configuration.expiresAtMS))
+
+    case "relaySyncPlaybackSettings":
+        guard let deviceID = request.deviceID ?? request.deviceId,
+              !deviceID.isEmpty else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncPlaybackSettings needs deviceID")
+        }
+        guard let wireCircle = request.circle,
+              let seed = request.playbackSettings else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncPlaybackSettings needs circle and playbackSettings")
+        }
+        let circle = try wireCircle.decoded()
+        let endpointText = request.relayEndpoint
+            ?? "https://relay.mozzmusic.com"
+        guard let endpoint = URL(string: endpointText) else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "relaySyncPlaybackSettings needs a valid relayEndpoint")
+        }
+        let provisioner = RelayProvisioner(endpoint: endpoint)
+        var configuration: B2RelayConfiguration
+        if circle.relayKey.isEmpty {
+            configuration = try await provisioner.create(
+                channelID: circle.channelId)
+        } else {
+            configuration = try B2RelayConfiguration.decode(
+                circle.relayKey)
+            if RelayProvisioner.needsRenewal(configuration) {
+                configuration = try await provisioner.renew(
+                    channelID: circle.channelId,
+                    current: configuration)
+            }
+        }
+        let relay = try await session.relayStores.store(
+            configuration: configuration,
+            channelID: circle.channelId,
+            deviceID: deviceID,
+            epoch: circle.epoch,
+            channelKey: circle.channelKey,
+            credentialsKey: circle.credentialsKey.count == 32
+                ? circle.credentialsKey
+                : nil)
+        let synced = try await PlaybackSettingsRelayCoordinator(
+            database: session.database,
+            relay: relay,
+            localDeviceID: deviceID
+        ).sync(seed: seed)
+        return sessionSuccess(
+            request,
+            WireRelayPlaybackSettingsSync(
+                settings: synced.stored.settings,
+                changed: synced.changedLocally,
+                relayKey: try configuration.encoded()
+                    .base64EncodedString(),
+                expiresAtMS: configuration.expiresAtMS))
+
     case "likedTracks":
         let rows = try await repo.likedTracks(serverId: serverId, limit: limit)
         return sessionSuccess(request, rows.map(wire))
+
+    case "likedTracksCount":
+        let count = try await repo.likedTracksCount(serverId: serverId)
+        return sessionSuccess(request, ["count": count])
+
+    case "setFavorite":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "setFavorite needs serverId and remoteId")
+        }
+        guard let liked = request.liked ?? request.isFavorite else {
+            return sessionFailure(request.id, request.cmd, "setFavorite needs liked")
+        }
+        return try await applyFavoriteMutation(
+            request,
+            session: session,
+            serverId: serverId,
+            remoteId: remoteId,
+            value: .favorite(liked),
+            flush: request.flush ?? true
+        )
+
+    case "setRating":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "setRating needs serverId and remoteId")
+        }
+        return try await applyFavoriteMutation(
+            request,
+            session: session,
+            serverId: serverId,
+            remoteId: remoteId,
+            value: .rating(request.rating),
+            flush: request.flush ?? true
+        )
+
+    case "flushFavoriteOutbox":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "flushFavoriteOutbox needs serverId")
+        }
+        let flushed = try await flushFavoriteOutbox(session: session, serverId: serverId)
+        return sessionSuccess(request, ["flushed": flushed])
 
     case "genres":
         guard let serverId else {
@@ -940,30 +1853,22 @@ private func dispatch(
                              genres: request.seedGenres ?? [],
                              artistIds: request.seedArtistIds ?? [],
                              seedTrackRef: request.seedTrackRef)
-        // The acoustic tier is resolved HERE, not in each client. iOS resolves
-        // its ListenBrainz tier in its own app layer, which is precisely why
-        // Android and the desktop have never had one — a signal wired into one
-        // shell is a signal four platforms do not get. This one is shared.
+        // The acoustic tier, which every non-Apple client was going without:
+        // a server that speaks OpenSubsonic's sonicSimilarity answers first,
+        // and otherwise the vectors this device analysed itself.
         var sonic: [ScoredOwnedTrack] = []
         if let backend = session.backends.backend(serverId), let seedRef = request.seedTrackRef {
             let prefix = "\(serverId):"
             let seedTrackId = seedRef.hasPrefix(prefix)
                 ? String(seedRef.dropFirst(prefix.count))
                 : seedRef
-            // Ask for more than the batch needs: the blender's artist and album
-            // caps throw a lot of an analyzer's nearest neighbours away, and a
-            // list trimmed to `limit` before capping arrives short.
             var matches = (try? await backend.sonicallySimilarTracks(
                 to: seedTrackId, limit: limit * 3)) ?? []
             if matches.isEmpty {
-                // Nothing analyzed it for us, which is the ordinary case: a
-                // server answers this only with a subscription or a second
-                // service installed beside it. Fall through to what this device
-                // heard for itself.
                 matches = (try? await session.recommendations.localSonicMatches(
                     seedRemoteId: seedTrackId, serverId: serverId,
-                    // Whichever engine the runner is actually writing. Searching
-                    // the other one finds nothing at all, silently.
+                    // Whichever engine the runner is writing; searching the
+                    // other one finds nothing at all, silently.
                     engine: session.sonicAnalysis(weightsPath: request.weightsPath).engine,
                     limit: limit * 3)) ?? []
             }
@@ -981,6 +1886,137 @@ private func dispatch(
             }
         }
         return sessionSuccess(request, WireRadioBatch(remoteIds: remoteIds, tracks: tracks))
+
+    case "lyrics":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "lyrics needs serverId and remoteId")
+        }
+        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "lyrics track not found: \(remoteId)")
+        }
+        let backend = session.backends.backend(serverId)
+        let resolution = await session.lyrics.resolve(
+            track: record.toDomain(),
+            backend: backend,
+            context: .visible,
+            useLRCLIB: request.useLRCLIB ?? true,
+            userInitiated: request.userInitiated ?? false
+        )
+        let lyrics = resolution.lyrics.flatMap { $0.isEmpty ? nil : $0 }
+        let activeIndex: Int?
+        if let lyrics, let positionSeconds = request.positionSeconds {
+            activeIndex = lyrics.activeLineIndex(
+                at: positionSeconds,
+                lead: request.leadSeconds ?? 0
+            )
+        } else {
+            activeIndex = nil
+        }
+        return sessionSuccess(request, WireLyricsResolution(
+            status: lyrics != nil ? "loaded" : (resolution.staySilent ? "silent" : "unavailable"),
+            staySilent: resolution.staySilent,
+            activeLineIndex: activeIndex,
+            lyrics: lyrics.map(wire)
+        ))
+
+    case "reportPlayback":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback needs serverId and remoteId")
+        }
+        guard let stateRaw = request.state, let state = PlaybackState(rawValue: stateRaw) else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback needs state (playing|paused|stopped)")
+        }
+        guard let backend = session.backends.backend(serverId) else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback needs an attached serverId")
+        }
+        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "reportPlayback track not found: \(remoteId)")
+        }
+        try await backend.reportPlayback(PlaybackReport(
+            track: record.toDomain(),
+            state: state,
+            positionSeconds: request.positionSeconds ?? request.positionMS.map { Double($0) / 1000 } ?? 0,
+            sessionID: request.contextID ?? request.contextId
+        ))
+        return sessionSuccess(request, WirePlaybackReportResult(reported: true))
+
+    case "continuityQueueHash":
+        do {
+            let input = try continuityQueueInput(request)
+            let queue = try continuityQueue(input)
+            let bytes = ContinuityQueueBuilder.canonicalBytes(
+                items: queue.items,
+                descriptor: queue.descriptor,
+                repeatMode: queue.repeatMode,
+                isShuffled: queue.isShuffled,
+                totalCount: queue.totalCount,
+                startAbsoluteIndex: queue.startAbsoluteIndex
+            )
+            return sessionSuccess(request, WireContinuityHash(
+                queueHash: queue.queueHash,
+                canonicalByteCount: bytes.count,
+                canonicalBytesHex: hex(bytes)
+            ))
+        } catch {
+            return sessionFailure(request.id, request.cmd, String(describing: error))
+        }
+
+    case "continuityLoad":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "continuityLoad needs serverId")
+        }
+        guard let store = try await continuityStore(request, session: session, serverId: serverId) else {
+            return sessionFailure(request.id, request.cmd, "continuityLoad needs an attached Jellyfin or Subsonic serverId")
+        }
+        guard let snapshot = try await store.load() else {
+            return sessionSuccess(request, Optional<WireContinuitySnapshot>.none)
+        }
+        var hydrated: [TrackRecord] = []
+        for remoteID in snapshot.hydrated.keys.sorted() {
+            if let record = try await repo.track(serverId: serverId, remoteId: remoteID) {
+                hydrated.append(record)
+            }
+        }
+        return sessionSuccess(request, wire(snapshot, hydrated: hydrated))
+
+    case "continuitySave":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs serverId")
+        }
+        guard let store = try await continuityStore(request, session: session, serverId: serverId),
+              let fingerprint = try await continuityFingerprint(session: session, serverId: serverId) else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs an attached Jellyfin or Subsonic serverId")
+        }
+        guard let playbackRunID = request.playbackRunID.flatMap(UUID.init(uuidString:)) else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs playbackRunID")
+        }
+        guard let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs deviceID")
+        }
+        guard let stateRaw = request.state, let state = ContinuityPlaybackState(rawValue: stateRaw) else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs state (playing|paused|stopped)")
+        }
+        guard let currentRemoteID = request.currentRemoteID ?? request.remoteId,
+              let currentAbsoluteIndex = request.currentAbsoluteIndex,
+              let positionMS = request.positionMS else {
+            return sessionFailure(request.id, request.cmd, "continuitySave needs currentRemoteID, currentAbsoluteIndex and positionMS")
+        }
+        let queue = try request.queue.map { try continuityQueue($0, fallbackFingerprint: fingerprint) }
+        let cursor = ContinuityCursor(
+            playbackRunID: playbackRunID,
+            deviceID: deviceID,
+            deviceName: request.deviceName ?? "",
+            deviceKind: request.kind.flatMap(ContinuityDeviceKind.init(rawValue:)),
+            cursorSequence: request.cursorSequence ?? 0,
+            capturedAtMS: request.capturedAtMS ?? Int64(Date().timeIntervalSince1970 * 1000),
+            state: state,
+            current: TrackLocator(server: fingerprint, remoteID: currentRemoteID),
+            currentAbsoluteIndex: currentAbsoluteIndex,
+            positionMS: positionMS,
+            queueHash: (store.features.storesQueue ? queue?.queueHash : nil)
+        )
+        try await store.save(cursor, queue: queue)
+        return sessionSuccess(request, WireContinuitySave(saved: true, queueHash: queue?.queueHash))
 
     case "suppressTrack":
         guard let remoteId = request.remoteId, let serverId else {
@@ -1014,12 +2050,21 @@ private func dispatch(
         guard let serverId else {
             return sessionFailure(request.id, request.cmd, "suppressions needs serverId")
         }
-        let rows = try await session.recommendations.suppressedItems(serverId: serverId)
-            .map {
-                WireSuppression(scope: $0.scope, ref: $0.ref, createdAt: $0.createdAt,
-                                title: $0.title, subtitle: $0.subtitle, artworkKey: $0.artworkKey)
-            }
+        let rows = try await session.recommendations.suppressions(serverId: serverId)
+            .map { WireSuppression(scope: $0.scope, ref: $0.ref, createdAt: $0.createdAt) }
         return sessionSuccess(request, rows)
+
+    case "track":
+        // One track, by remote id. Exists so a client can re-resolve a durable
+        // reference it stored — a "recently searched" row, a deep link — without
+        // having kept a snapshot of the row itself.
+        guard let remoteId = request.remoteId, let serverId else {
+            return sessionFailure(request.id, request.cmd, "track needs remoteId and serverId")
+        }
+        guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+            return sessionFailure(request.id, request.cmd, "track not found: \(remoteId)")
+        }
+        return sessionSuccess(request, wire(record))
 
     case "analyzeSonics":
         // Fire-and-forget: the pass runs for as long as the host lets the
@@ -1058,9 +2103,131 @@ private func dispatch(
     default:
         // Not a catalog command — try the server/sync/streaming table before
         // declaring it unknown, so both halves share one envelope and one error.
+        if let response = try await dispatchPairingCommand(request) { return response }
         if let response = try await dispatchServerCommand(request, session) { return response }
         return sessionFailure(request.id, request.cmd, unknownCommandMessage(request.cmd))
     }
+}
+
+private func applyFavoriteMutation(
+    _ request: SessionRequest,
+    session: MozzSession,
+    serverId: String,
+    remoteId: String,
+    value: FavoriteChange.Value,
+    flush: Bool
+) async throws -> String {
+    let itemType = request.itemType.flatMap(CatalogItemType.init(rawValue:)) ?? .track
+    guard itemType == .track else {
+        return sessionFailure(request.id, request.cmd, "only track favorites are supported over the ABI")
+    }
+    guard let track = try await session.repository.track(serverId: serverId, remoteId: remoteId) else {
+        return sessionFailure(request.id, request.cmd, "\(request.cmd) track not found: \(remoteId)")
+    }
+    let wasLiked = LikePolicy.isLiked(isFavorite: track.isFavorite, rating: track.rating)
+    let change = FavoriteChange(serverId: serverId, remoteId: remoteId, itemType: itemType, value: value)
+    let nowLiked = try await session.favorites.applyLocally(change)
+    if nowLiked != wasLiked {
+        try? await PlayEventStore(session.database).append(
+            PlayEvent(trackID: remoteId, kind: nowLiked ? .liked : .unliked),
+            serverId: serverId
+        )
+    }
+    if flush {
+        _ = try? await flushFavoriteOutbox(session: session, serverId: serverId)
+    }
+    let queued = try await session.favorites.pending(serverId: serverId).contains {
+        $0.remoteId == remoteId && $0.itemType == itemType.rawValue
+    }
+    let kind: String
+    let storedValue: Double?
+    switch value {
+    case .favorite(let favorite):
+        kind = "favorite"
+        storedValue = favorite ? 1 : 0
+    case .rating(let rating):
+        kind = "rating"
+        storedValue = rating
+    }
+    return sessionSuccess(request, WireFavoriteMutation(
+        serverId: serverId,
+        remoteId: remoteId,
+        itemType: itemType.rawValue,
+        kind: kind,
+        value: storedValue,
+        liked: nowLiked,
+        queued: queued,
+        synced: !queued
+    ))
+}
+
+private func flushFavoriteOutbox(session: MozzSession, serverId: String) async throws -> Int {
+    guard let backend = session.backends.backend(serverId) else { return 0 }
+    let pending = try await session.favorites.pending(serverId: serverId)
+    var flushed = 0
+    for op in pending {
+        let type = CatalogItemType(rawValue: op.itemType) ?? .track
+        do {
+            if op.kind == "favorite" {
+                try await backend.setFavorite((op.value ?? 0) >= 0.5, itemID: op.remoteId, type: type)
+            } else {
+                try await backend.setRating(op.value, itemID: op.remoteId, type: type)
+            }
+        } catch {
+            break
+        }
+        if let id = op.id,
+           try await session.favorites.removePending(id: id, ifUnchangedSince: op.createdAt) {
+            flushed += 1
+        }
+    }
+    return flushed
+}
+
+private func continuityFingerprint(
+    session: MozzSession,
+    serverId: String
+) async throws -> ServerAccountFingerprint? {
+    guard let backend = session.backends.backend(serverId) else { return nil }
+    switch backend.connection.kind {
+    case .jellyfin:
+        let cached = try await session.repository.capabilities(serverId: serverId)
+        let detected = try? await backend.detectCapabilities().serverIdentity
+        let serverIdentity = cached?.serverIdentity ?? detected ?? ""
+        return ServerAccountFingerprint(
+            backend: .jellyfin,
+            serverID: serverIdentity,
+            accountID: backend.connection.userID ?? ""
+        )
+    case .subsonic:
+        return ServerAccountFingerprint(
+            backend: .subsonic,
+            serverID: "",
+            accountID: backend.connection.userID ?? ""
+        )
+    case .plex:
+        return nil
+    }
+}
+
+private func continuityStore(
+    _ request: SessionRequest,
+    session: MozzSession,
+    serverId: String
+) async throws -> (any ContinuityStore)? {
+    guard let backend = session.backends.backend(serverId) else { return nil }
+    if let jellyfin = backend as? JellyfinBackend {
+        let cached = try await session.repository.capabilities(serverId: serverId)
+        let detected = try? await backend.detectCapabilities().serverIdentity
+        let serverIdentity = cached?.serverIdentity ?? detected
+        return jellyfin.makeContinuityStore(serverIdentity: serverIdentity)
+    }
+    if let subsonic = backend as? SubsonicBackend {
+        let cached = try await session.repository.capabilities(serverId: serverId)
+        let supportsIndex = cached?.supportsIndexBasedQueue ?? false
+        return subsonic.makeContinuityStore(supportsIndexBasedQueue: supportsIndex)
+    }
+    return nil
 }
 
 /// Every command the dispatcher accepts.
@@ -1070,19 +2237,27 @@ private func dispatch(
 /// hand-maintained and make the failure it protects against loud.
 let mozzSessionCommands = [
     "ping", "servers", "counts", "artists", "albums", "tracks",
-    "artist", "album", "track", "artistAlbums", "artistTopTracks", "artistAppearsOn",
+    "artist", "album", "artistAlbums", "artistTopTracks", "artistAppearsOn",
     "albumTracks", "albumReleaseKind", "playlists", "playlistTracks",
-    "recentlyAddedAlbums", "recentlyPlayedTracks", "likedTracks",
+    "recentlyAddedAlbums", "recentlyAddedTracks", "recentlyPlayedTracks",
+    "likedTracks", "likedTracksCount",
+    "setFavorite", "setRating", "flushFavoriteOutbox",
     "recordPlayEvent", "playHistory", "historyExportBatch",
     "historyImportBatches", "historyYearRollup",
+    "relaySyncHistory", "relaySyncServers", "relaySyncCatalog",
+    "relaySyncPlaybackSettings",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
-    "mozzWeeklyItems", "radioBatch", "suppressTrack", "suppressArtist",
+    "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",
+    "continuityQueueHash", "continuityLoad", "continuitySave",
+    "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
-    "analyzeSonics", "sonicProgress", "cancelSonics",
-    "connect", "plexPin", "plexPinCheck", "plexResolve", "attach", "libraries",
+    "connect", "plexPin", "plexPinCheck", "plexPinToken",
+    "plexHomeUsers", "plexHomeSwitch", "plexCompleteLogin",
+    "attach", "libraries", "account",
     "sync", "syncStatus", "streamURL", "artworkURL",
-    "capabilities", "setLiked", "setRating",
+    "track",
+    "analyzeSonics", "sonicProgress", "cancelSonics",
 ].sorted()
 
 /// A wrong command name is one of the few mistakes that can only be made across
@@ -1143,7 +2318,7 @@ private func copySessionString(_ string: String) -> UnsafeMutablePointer<CChar>?
 
 // MARK: - async bridge
 
-private final class SessionResultBox<T>: @unchecked Sendable {
+final class SessionResultBox<T>: @unchecked Sendable {
     var result: Result<T, any Error>?
 }
 
@@ -1154,7 +2329,10 @@ private final class SessionResultBox<T>: @unchecked Sendable {
 /// polled-completion API is the eventual answer, but every call here is a
 /// database read measured in single-digit milliseconds, so the simpler shape
 /// buys correctness now and can change without the request format moving.
-private func runBlockingSession<T: Sendable>(
+/// Not file-private: `mozz_session_invoke` in MozzSessionInvoke.swift bridges the
+/// same way, and a second copy of a semaphore-and-detached-task dance is exactly
+/// the kind of duplication that drifts.
+func runBlockingSession<T: Sendable>(
     _ body: @escaping @Sendable () async throws -> T
 ) throws -> T {
     let box = SessionResultBox<T>()

@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import MozzCore
 
 /// Owns the schema. All schema changes are additive migrations so an installed
 /// catalog survives app updates (we never want to force a full re-sync).
@@ -23,6 +24,12 @@ enum Schema {
         registerV15(&migrator)
         registerV16(&migrator)
         registerV17(&migrator)
+        registerV18(&migrator)
+        registerV19(&migrator)
+        registerV20(&migrator)
+        registerV21(&migrator)
+        registerV22(&migrator)
+        registerV23(&migrator)
         return migrator
     }
     private static func registerV1(_ migrator: inout DatabaseMigrator) {
@@ -630,4 +637,394 @@ enum Schema {
         }
     }
 
+    /// v18 — Plex server identity repair. Plex resources are servers and their
+    /// `connections` are alternate addresses for the same machine. Earlier builds
+    /// keyed Plex servers by URL, so one resource could create rows for both a
+    /// Docker bridge URI and a LAN URI. Re-key every dependent row to the stable
+    /// machine id and remove duplicate server rows in one migration.
+    private static func registerV18(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v18.plexMachineServerIdentity") { db in
+            try repairPlexServerIdentities(db)
+        }
+    }
+
+    /// v19 — playback settings live in the core, not per-platform preference
+    /// stores. Everything that shapes the *sound* (the graphic EQ, loudness
+    /// normalization) is one definition persisted here, reachable through the
+    /// command Facade, so it can sync between devices and the shells can no
+    /// longer drift in which settings exist or what they mean.
+    ///
+    /// A single-row table (the CHECK pins `id = 1`) rather than key/value rows:
+    /// the settings are one cohesive record with typed columns, and a single-row
+    /// upsert is simpler and atomic. The EQ curve is stored as the exact
+    /// `{gains, preampDB}` JSON both shells already persisted, so no re-encoding
+    /// semantics change. No rows are seeded — an absent row means "defaults",
+    /// which the store materializes in Swift so the defaults have one home.
+    private static func registerV19(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v19.playbackSettings") { db in
+            try db.create(table: "playback_settings") { t in
+                t.primaryKey("id", .integer).check { $0 == 1 }
+                t.column("equalizerEnabled", .boolean).notNull()
+                t.column("equalizer", .text).notNull()
+                t.column("replayGainMode", .text).notNull()
+                t.column("replayGainPreampDB", .double).notNull()
+            }
+        }
+    }
+
+    /// v20 — records which server account and library selection owns each local
+    /// catalog. Catalog rows are keyed by server id for fast browsing, so this
+    /// marker prevents a profile switch from briefly displaying another Plex
+    /// Home user's library or accepting that user's relay snapshot.
+    private static func registerV20(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v20.catalogScope") { db in
+            try db.create(table: "catalogScope") { t in
+                t.primaryKey("serverId", .text)
+                    .references("server", onDelete: .cascade)
+                t.column("scope", .text).notNull()
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [
+                .sortedKeys,
+                .withoutEscapingSlashes,
+            ]
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, kind, userID, musicSectionID
+                    FROM server
+                    """) {
+                let serverID: String = row["id"]
+                let rawKind: String = row["kind"]
+                guard let kind = BackendKind(rawValue: rawKind) else {
+                    continue
+                }
+                let storedUserID: String? = row["userID"]
+                let accountID: String
+                if let storedUserID, !storedUserID.isEmpty {
+                    accountID = storedUserID
+                } else if kind == .plex {
+                    accountID = "owner"
+                } else {
+                    continue
+                }
+                let sectionID: String? = row["musicSectionID"]
+                let scope = CatalogSnapshotScope(
+                    backend: kind,
+                    serverID: serverID,
+                    accountID: accountID,
+                    libraryIDs: sectionID.map { [$0] } ?? [])
+                let encoded = try String(
+                    decoding: encoder.encode(scope),
+                    as: UTF8.self)
+                try db.execute(
+                    sql: """
+                        INSERT INTO catalogScope (serverId, scope)
+                        VALUES (?, ?)
+                        """,
+                    arguments: [serverID, encoded])
+            }
+        }
+    }
+
+    /// v21 — mutable playback settings need a mutation timestamp so devices can
+    /// converge without treating every launch as a new edit.
+    private static func registerV21(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v21.playbackSettingsTimestamp") { db in
+            try db.alter(table: "playback_settings") { t in
+                t.add(
+                    column: "updatedAtMS",
+                    .integer
+                ).notNull().defaults(to: 0)
+            }
+        }
+    }
+
+    private static func registerV22(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v22.durableFavoriteState") { db in
+            try db.alter(table: "favorite_outbox") { t in
+                t.add(column: "isPending", .boolean).notNull().defaults(to: true)
+                t.add(column: "sourceDeviceID", .text).notNull().defaults(to: "")
+            }
+        }
+    }
+
+    /// v23 — collapse Plex duplicates that appeared *after* v18 repaired them.
+    ///
+    /// v18 is a one-shot, and one-shot is not enough. A catalogue can gain a
+    /// second identity for one server again at any time — an older build, or a
+    /// branch that predates the machine-identifier work, signing in and deriving
+    /// an id from the address it happened to answer on. Once that has happened
+    /// v18 is already recorded as applied and will never look again, so the
+    /// library stays doubled: every count twice its real size, every album
+    /// listed twice, and anything reached through the losing id refusing to play
+    /// because streaming rightly declines a server that is not attached.
+    ///
+    /// The repair itself is unchanged and is deliberately the same routine v18
+    /// runs, rather than a second implementation of the same idea. It is
+    /// idempotent — a catalogue whose servers are already canonical is left
+    /// untouched — so running it again costs one query on an install that does
+    /// not need it.
+    private static func registerV23(_ migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("v23.repairPlexServerIdentitiesAgain") { db in
+            try repairPlexServerIdentities(db)
+        }
+    }
+
+    static func repairPlexServerIdentities(_ db: Database) throws {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT id, kind, name, baseURL, userID, clientIdentifier, musicSectionID
+            FROM server
+            WHERE kind = 'plex'
+            """)
+        let groups = Dictionary(grouping: rows) { row in
+            plexMachineIdentifier(serverId: row["id"], baseURL: row["baseURL"]) ?? ""
+        }.filter { !$0.key.isEmpty }
+
+        for (machine, servers) in groups {
+            let canonicalId = "plex-\(machine)"
+            guard servers.contains(where: { ($0["id"] as String) != canonicalId }) else { continue }
+
+            let chosen = servers.sorted { lhs, rhs in
+                let lhsId: String = lhs["id"]
+                let rhsId: String = rhs["id"]
+                let lhsURL: String = lhs["baseURL"]
+                let rhsURL: String = rhs["baseURL"]
+                let lhsRank = (plexAddressRank(lhsURL), lhsId == canonicalId ? 0 : 1)
+                let rhsRank = (plexAddressRank(rhsURL), rhsId == canonicalId ? 0 : 1)
+                return lhsRank < rhsRank
+            }.first!
+            let section: String? = chosen["musicSectionID"]
+                ?? servers.compactMap { $0["musicSectionID"] as String? }.first { !$0.isEmpty }
+
+            try db.execute(sql: """
+                INSERT INTO server (id, kind, name, baseURL, userID, clientIdentifier, musicSectionID)
+                VALUES (?, 'plex', ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    kind = excluded.kind,
+                    name = excluded.name,
+                    baseURL = excluded.baseURL,
+                    userID = excluded.userID,
+                    clientIdentifier = excluded.clientIdentifier,
+                    musicSectionID = COALESCE(server.musicSectionID, excluded.musicSectionID)
+                """, arguments: [
+                    canonicalId,
+                    chosen["name"] as String,
+                    chosen["baseURL"] as String,
+                    chosen["userID"] as String?,
+                    chosen["clientIdentifier"] as String,
+                    section,
+                ])
+
+            for oldId in servers.map({ $0["id"] as String }).filter({ $0 != canonicalId }) {
+                try mergeUniqueServerTable(db, table: "artist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "album", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "track", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergePlaylists(db, oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "favorite_outbox", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "suppressed_ref", columns: ["scope", "ref"], oldId: oldId, canonicalId: canonicalId)
+                try mergeSingleServerRow(db, table: "serverCapabilities", oldId: oldId, canonicalId: canonicalId)
+                try mergeSingleServerRow(db, table: "catalogSyncRun", oldId: oldId, canonicalId: canonicalId)
+                try mergeUniqueServerTable(db, table: "catalogSyncProgress", columns: ["phase"], oldId: oldId, canonicalId: canonicalId)
+                try rekeyTrackRefTable(db, table: "play_event", column: "track_ref", oldId: oldId, canonicalId: canonicalId)
+                try rekeyTrackRefTable(db, table: "track_features", column: "track_ref", oldId: oldId, canonicalId: canonicalId, primaryKey: true)
+                try rekeyRecommendationItems(db, oldId: oldId, canonicalId: canonicalId)
+                if try db.tableExists("catalogScope") {
+                    try rekeyCatalogScope(
+                        db,
+                        oldId: oldId,
+                        canonicalId: canonicalId)
+                }
+            }
+
+            let stale = servers.map { $0["id"] as String }.filter { $0 != canonicalId }
+            if !stale.isEmpty {
+                try db.execute(
+                    sql: "DELETE FROM server WHERE id IN (\(stale.map { _ in "?" }.joined(separator: ",")))",
+                    arguments: StatementArguments(stale)
+                )
+            }
+        }
+    }
+
+    /// Merge one server's playlists into another's, taking their items with them.
+    ///
+    /// `playlistItem` references `playlist(id)` with ON DELETE CASCADE, which
+    /// would normally make this a non-problem — but a migration runs with
+    /// foreign keys DISABLED, so the cascade does not fire. Dropping a duplicate
+    /// playlist therefore leaves its items behind pointing at a row that no
+    /// longer exists, and GRDB's end-of-migration `foreign_key_check` fails the
+    /// whole migration. The library then cannot be opened at all, which presents
+    /// as the app quitting on launch rather than as anything to do with
+    /// playlists.
+    ///
+    /// So the items are removed explicitly, for exactly the playlists the merge
+    /// is about to delete. The surviving server's copy of each playlist brings
+    /// its own items with it.
+    private static func mergePlaylists(
+        _ db: Database,
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        try db.execute(sql: """
+            DELETE FROM playlistItem
+            WHERE playlistId IN (
+              SELECT canonical.id FROM playlist canonical
+              WHERE canonical.serverId = ?
+                AND EXISTS (
+                  SELECT 1 FROM playlist old
+                  WHERE old.serverId = ? AND old.remoteId = canonical.remoteId
+                )
+            )
+            """, arguments: [canonicalId, oldId])
+        try mergeUniqueServerTable(
+            db, table: "playlist", columns: ["remoteId"], oldId: oldId, canonicalId: canonicalId)
+    }
+
+    private static func mergeUniqueServerTable(
+        _ db: Database,
+        table: String,
+        columns: [String],
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        let equality = columns.map { "old.\($0) = \(table).\($0)" }.joined(separator: " AND ")
+        try db.execute(sql: """
+            DELETE FROM \(table)
+            WHERE serverId = ?
+              AND EXISTS (
+                SELECT 1 FROM \(table) old
+                WHERE old.serverId = ? AND \(equality)
+              )
+            """, arguments: [canonicalId, oldId])
+        try db.execute(sql: "UPDATE \(table) SET serverId = ? WHERE serverId = ?", arguments: [canonicalId, oldId])
+    }
+
+    private static func mergeSingleServerRow(
+        _ db: Database,
+        table: String,
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        try db.execute(
+            sql: "DELETE FROM \(table) WHERE serverId = ? AND EXISTS (SELECT 1 FROM \(table) WHERE serverId = ?)",
+            arguments: [canonicalId, oldId]
+        )
+        try db.execute(sql: "UPDATE \(table) SET serverId = ? WHERE serverId = ?", arguments: [canonicalId, oldId])
+    }
+
+    private static func rekeyTrackRefTable(
+        _ db: Database,
+        table: String,
+        column: String,
+        oldId: String,
+        canonicalId: String,
+        primaryKey: Bool = false
+    ) throws {
+        let prefix = "\(oldId):"
+        let prefixLength = prefix.count
+        let suffixStart = oldId.count + 1
+        if primaryKey {
+            try db.execute(sql: """
+                DELETE FROM \(table)
+                WHERE \(column) IN (
+                    SELECT ? || substr(old.\(column), ?)
+                    FROM \(table) old
+                    WHERE substr(old.\(column), 1, ?) = ?
+                )
+                """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+        }
+        try db.execute(sql: """
+            UPDATE \(table)
+            SET \(column) = ? || substr(\(column), ?)
+            WHERE substr(\(column), 1, ?) = ?
+            """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+    }
+
+    private static func rekeyRecommendationItems(_ db: Database, oldId: String, canonicalId: String) throws {
+        let prefix = "\(oldId):"
+        let prefixLength = prefix.count
+        let suffixStart = oldId.count + 1
+        try db.execute(sql: """
+            DELETE FROM recommendation_item
+            WHERE EXISTS (
+                SELECT 1 FROM recommendation_item old
+                WHERE substr(old.track_ref, 1, ?) = ?
+                  AND recommendation_item.set_id = old.set_id
+                  AND recommendation_item.track_ref = ? || substr(old.track_ref, ?)
+            )
+            """, arguments: [prefixLength, prefix, canonicalId, suffixStart])
+        try db.execute(sql: """
+            UPDATE recommendation_item
+            SET track_ref = ? || substr(track_ref, ?)
+            WHERE substr(track_ref, 1, ?) = ?
+            """, arguments: [canonicalId, suffixStart, prefixLength, prefix])
+    }
+
+    private static func rekeyCatalogScope(
+        _ db: Database,
+        oldId: String,
+        canonicalId: String
+    ) throws {
+        guard let encoded = try String.fetchOne(
+            db,
+            sql: "SELECT scope FROM catalogScope WHERE serverId = ?",
+            arguments: [oldId]),
+              var scope = try? JSONDecoder().decode(
+                CatalogSnapshotScope.self,
+                from: Data(encoded.utf8)) else {
+            return
+        }
+        scope.serverID = canonicalId
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let canonicalScope = try String(
+            decoding: encoder.encode(scope),
+            as: UTF8.self)
+        try db.execute(
+            sql: "DELETE FROM catalogScope WHERE serverId = ?",
+            arguments: [canonicalId])
+        try db.execute(
+            sql: """
+                UPDATE catalogScope
+                SET serverId = ?, scope = ?
+                WHERE serverId = ?
+                """,
+            arguments: [canonicalId, canonicalScope, oldId])
+    }
+
+    private static func plexMachineIdentifier(serverId: String, baseURL: String) -> String? {
+        if serverId.hasPrefix("plex-"),
+           !serverId.hasPrefix("plex-http://"),
+           !serverId.hasPrefix("plex-https://") {
+            return String(serverId.dropFirst("plex-".count)).nonEmpty
+        }
+        let urlString = serverId.hasPrefix("plex-http") ? String(serverId.dropFirst("plex-".count)) : baseURL
+        guard let host = URL(string: urlString)?.host?.lowercased() else { return nil }
+        let suffix = ".plex.direct"
+        guard host.hasSuffix(suffix) else { return nil }
+        let withoutSuffix = String(host.dropLast(suffix.count))
+        guard let dot = withoutSuffix.lastIndex(of: ".") else { return nil }
+        return String(withoutSuffix[withoutSuffix.index(after: dot)...]).nonEmpty
+    }
+
+    private static func plexAddressRank(_ baseURL: String) -> Int {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return 1 }
+        let suffix = ".plex.direct"
+        guard host.hasSuffix(suffix) else { return 0 }
+        let encodedAddress = host.dropLast(suffix.count).split(separator: ".").first.map { $0.replacingOccurrences(of: "-", with: ".") }
+        return isDockerBridgeAddress(encodedAddress) ? 2 : 0
+    }
+
+    private static func isDockerBridgeAddress(_ address: String?) -> Bool {
+        guard let address else { return false }
+        let parts = address.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        return parts[0] == 172 && (16...31).contains(parts[1])
+    }
+
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

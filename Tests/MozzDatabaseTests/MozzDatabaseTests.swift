@@ -22,6 +22,7 @@ final class SchemaAndWriteTests: XCTestCase {
             "server", "artist", "album", "track", "playlist", "playlistItem",
             "download", "play_event", "track_fts", "album_fts", "artist_fts",
             "catalogSyncRun", "catalogSyncProgress",
+            "playback_settings",
         ] {
             XCTAssertTrue(tables.contains(expected), "missing table \(expected)")
         }
@@ -64,6 +65,208 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertTrue(schema.1.isSuperset(of: [
             "serverId", "sourceFingerprint", "inProgress", "updatedAt",
         ]))
+    }
+
+    func testV18MigrationRekeysDuplicatePlexServerRowsWithoutDroppingData() throws {
+        let queue = try DatabaseQueue()
+        let migrator = Schema.makeMigrator()
+        try migrator.migrate(queue, upTo: "v17.playEventUID")
+
+        let machine = "50acfe994de74f8998deb9fc43e6262e"
+        let legacy = "plex-https://192-168-68-71.\(machine).plex.direct:32400"
+        let canonical = "plex-\(machine)"
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO server (id, kind, name, baseURL, userID, clientIdentifier, musicSectionID)
+                VALUES
+                  (?, 'plex', 'Brandoland', ?, NULL, 'client', '1'),
+                  (?, 'plex', 'Brandoland', ?, NULL, 'client', NULL)
+                """, arguments: [
+                    legacy, "https://192-168-68-71.\(machine).plex.direct:32400",
+                    canonical, "https://192-168-68-71.\(machine).plex.direct:32400",
+                ])
+            try db.execute(sql: """
+                INSERT INTO serverCapabilities (
+                    serverId, backend, supportsTranscoding, supportsOriginalFileDownload,
+                    supportsFavorites, supportsLyrics, supportsSyncedLyrics,
+                    supportsNormalizationGain, supportsProgressReporting, hasPlexPass,
+                    detectedAt, supportsRatings, serverProduct, isOpenSubsonic
+                ) VALUES (?, 'plex', 1, 1, 0, 1, 1, 0, 1, NULL, 1, 1, NULL, 0)
+                """, arguments: [legacy])
+            try db.execute(sql: """
+                INSERT INTO artist (serverId, remoteId, name, sortName, albumCount, isFavorite, genres)
+                VALUES (?, 'artist-1', 'Artist 1', 'Artist 1', 1, 0, '[]'),
+                       (?, 'artist-2', 'Artist 2', 'Artist 2', 1, 0, '[]')
+                """, arguments: [legacy, legacy])
+            try db.execute(sql: """
+                INSERT INTO album (serverId, remoteId, title, sortTitle, artistName, artistRemoteId, trackCount, isFavorite, genres, albumGroupKey)
+                VALUES (?, 'album-1', 'Album 1', 'Album 1', 'Artist 1', 'artist-1', 2, 0, '[]', 'album-1'),
+                       (?, 'album-2', 'Album 2', 'Album 2', 'Artist 2', 'artist-2', 1, 0, '[]', 'album-2')
+                """, arguments: [legacy, legacy])
+            try db.execute(sql: """
+                INSERT INTO track (serverId, remoteId, title, sortTitle, albumTitle, albumRemoteId, artistName, artistRemoteId, duration, isFavorite, genres)
+                VALUES (?, 'track-1', 'Track 1', 'Track 1', 'Album 1', 'album-1', 'Artist 1', 'artist-1', 1, 0, '[]'),
+                       (?, 'track-2', 'Track 2', 'Track 2', 'Album 1', 'album-1', 'Artist 1', 'artist-1', 1, 0, '[]'),
+                       (?, 'track-3', 'Track 3', 'Track 3', 'Album 2', 'album-2', 'Artist 2', 'artist-2', 1, 0, '[]')
+                """, arguments: [legacy, legacy, legacy])
+            let trackId = try Int64.fetchOne(db, sql: "SELECT id FROM track WHERE remoteId = 'track-1'")!
+            try db.execute(sql: """
+                INSERT INTO playlist (serverId, remoteId, title, trackCount, isSmart)
+                VALUES (?, 'playlist-1', 'Playlist', 1, 0)
+                """, arguments: [legacy])
+            let playlistId = try Int64.fetchOne(db, sql: "SELECT id FROM playlist WHERE remoteId = 'playlist-1'")!
+            try db.execute(sql: "INSERT INTO playlistItem (playlistId, trackRemoteId, position) VALUES (?, 'track-1', 1)", arguments: [playlistId])
+            try db.execute(sql: "INSERT INTO download (trackId, state, sizeBytes, requestedAt) VALUES (?, 'complete', 10, 1)", arguments: [trackId])
+            try db.execute(sql: """
+                INSERT INTO play_event (track_ref, kind, created_at, event_uid)
+                VALUES (?, 'completed', 1, 'event-1'), (?, 'started', 2, 'event-2')
+                """, arguments: ["\(legacy):track-1", "\(legacy):track-2"])
+            try db.execute(sql: """
+                INSERT INTO track_features (track_ref, genres, tags, updated_at)
+                VALUES (?, '[]', '[]', 1), (?, '[]', '[]', 1)
+                """, arguments: ["\(legacy):track-1", "\(legacy):track-2"])
+            try db.execute(sql: "INSERT INTO recommendation_set (id, title, kind, generated_at) VALUES ('set-1', 'Set', 'daily_mix', 1)")
+            try db.execute(sql: """
+                INSERT INTO recommendation_item (set_id, track_ref, rank, score, in_library)
+                VALUES ('set-1', ?, 1, 1, 1), ('set-1', ?, 2, 1, 1)
+                """, arguments: ["\(legacy):track-1", "\(legacy):track-2"])
+            try db.execute(sql: """
+                INSERT INTO favorite_outbox (serverId, remoteId, itemType, kind, value, createdAt)
+                VALUES (?, 'track-1', 'track', 'rating', 5, 1)
+                """, arguments: [legacy])
+            try db.execute(sql: "INSERT INTO suppressed_ref (serverId, scope, ref, createdAt) VALUES (?, 'artist', 'artist-2', 1)", arguments: [legacy])
+            try db.execute(sql: "INSERT INTO catalogSyncRun (serverId, sourceFingerprint, inProgress, updatedAt) VALUES (?, 'fp', 1, 1)", arguments: [legacy])
+            try db.execute(sql: """
+                INSERT INTO catalogSyncProgress (serverId, phase, committedOffset, reportedTotal, completed, updatedAt)
+                VALUES (?, 'tracks', 3, 3, 1, 1)
+                """, arguments: [legacy])
+        }
+
+        let countTables = [
+            "artist", "album", "track", "playlist", "playlistItem", "download",
+            "serverCapabilities", "play_event", "track_features",
+            "recommendation_item", "favorite_outbox", "suppressed_ref",
+            "catalogSyncRun", "catalogSyncProgress",
+        ]
+        let before = try tableCounts(queue, countTables)
+
+        try migrator.migrate(queue)
+
+        let after = try tableCounts(queue, countTables)
+        XCTAssertEqual(after, before)
+        try queue.read { db in
+            XCTAssertEqual(try String.fetchAll(db, sql: "SELECT id FROM server ORDER BY id"), [canonical])
+            for table in ["artist", "album", "track", "playlist", "favorite_outbox", "suppressed_ref", "serverCapabilities", "catalogSyncRun", "catalogSyncProgress"] {
+                XCTAssertEqual(try String.fetchAll(db, sql: "SELECT DISTINCT serverId FROM \(table)"), [canonical], table)
+            }
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track WHERE serverId = ?", arguments: [canonical]), 3)
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM play_event WHERE track_ref LIKE ?", arguments: ["\(canonical):%"]), 2)
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM track_features WHERE track_ref LIKE ?", arguments: ["\(canonical):%"]), 2)
+            XCTAssertEqual(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM recommendation_item WHERE track_ref LIKE ?", arguments: ["\(canonical):%"]), 2)
+        }
+    }
+
+    func testRuntimePlexRepairMergesRelayHydratedLegacyState() async throws {
+        let database = try MusicDatabase.inMemory()
+        let machine = "50acfe994de74f8998deb9fc43e6262e"
+        let legacy = "plex-https://192-168-68-71.\(machine).plex.direct:32400"
+        let canonical = "plex-\(machine)"
+        let baseURL = "https://192-168-68-71.\(machine).plex.direct:32400"
+        let legacyScope = CatalogSnapshotScope(
+            backend: .plex,
+            serverID: legacy,
+            accountID: "owner",
+            libraryIDs: ["*"])
+        let canonicalScope = CatalogSnapshotScope(
+            backend: .plex,
+            serverID: canonical,
+            accountID: "owner",
+            libraryIDs: ["3"])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+
+        try await database.write { db in
+            try db.execute(sql: """
+                INSERT INTO server (
+                    id, kind, name, baseURL, userID,
+                    clientIdentifier, musicSectionID
+                ) VALUES
+                    (?, 'plex', 'Brandoland', ?, NULL, 'phone', NULL),
+                    (?, 'plex', 'Brandoland', ?, NULL, 'desktop', '3')
+                """, arguments: [legacy, baseURL, canonical, baseURL])
+            try db.execute(sql: """
+                INSERT INTO track (
+                    serverId, remoteId, title, sortTitle, artistName,
+                    duration, isFavorite, genres, rating
+                ) VALUES
+                    (?, '17283', 'Your Blood', 'Your Blood', 'AURORA',
+                        1, 0, '[]', 4.5),
+                    (?, '17283', 'Your Blood', 'Your Blood', 'AURORA',
+                        1, 0, '[]', 5)
+                """, arguments: [legacy, canonical])
+            try db.execute(sql: """
+                INSERT INTO favorite_outbox (
+                    serverId, remoteId, itemType, kind, value,
+                    createdAt, isPending, sourceDeviceID
+                ) VALUES (?, '17283', 'track', 'rating', 4.5, 1, 0, 'phone')
+                """, arguments: [legacy])
+            try db.execute(
+                sql: "INSERT INTO catalogScope (serverId, scope) VALUES (?, ?), (?, ?)",
+                arguments: [
+                    legacy,
+                    String(decoding: try encoder.encode(legacyScope), as: UTF8.self),
+                    canonical,
+                    String(decoding: try encoder.encode(canonicalScope), as: UTF8.self),
+                ])
+        }
+
+        try await CatalogSnapshotDatabase(database)
+            .repairPlexServerIdentities()
+
+        try await database.read { db in
+            XCTAssertEqual(
+                try String.fetchAll(
+                    db,
+                    sql: "SELECT id FROM server ORDER BY id"),
+                [canonical])
+            XCTAssertEqual(
+                try Double.fetchOne(
+                    db,
+                    sql: """
+                        SELECT rating FROM track
+                        WHERE serverId = ? AND remoteId = '17283'
+                        """,
+                    arguments: [canonical]),
+                4.5)
+            XCTAssertEqual(
+                try String.fetchOne(
+                    db,
+                    sql: "SELECT serverId FROM favorite_outbox"),
+                canonical)
+            let scopeText = try XCTUnwrap(String.fetchOne(
+                db,
+                sql: "SELECT scope FROM catalogScope WHERE serverId = ?",
+                arguments: [canonical]))
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    CatalogSnapshotScope.self,
+                    from: Data(scopeText.utf8)),
+                CatalogSnapshotScope(
+                    backend: .plex,
+                    serverID: canonical,
+                    accountID: "owner",
+                    libraryIDs: ["*"]))
+        }
+    }
+
+    private func tableCounts(_ queue: DatabaseQueue, _ tables: [String]) throws -> [String: Int] {
+        try queue.read { db in
+            var counts: [String: Int] = [:]
+            for table in tables {
+                counts[table] = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table)") ?? 0
+            }
+            return counts
+        }
     }
 
     func testCatalogSyncStoreRejectsStaleChangedAndDeliberatelyRestartedRuns() async throws {
@@ -150,6 +353,29 @@ final class SchemaAndWriteTests: XCTestCase {
         XCTAssertFalse(deliberateResume)
         let deliberateCheckpoint = try await store.checkpoint(serverId: server.id, phase: "tracks")
         XCTAssertNil(deliberateCheckpoint)
+    }
+
+    func testCatalogSyncStoreExposesOnlyACompletedRunTimestamp() async throws {
+        let database = try MusicDatabase.inMemory()
+        let writer = CatalogWriter(database)
+        let store = CatalogSyncStore(database)
+        let server = makeServer()
+        try await writer.saveServer(server)
+        let started = Date(timeIntervalSince1970: 10_000)
+        let finished = started.addingTimeInterval(42)
+
+        _ = try await store.beginRun(
+            serverId: server.id,
+            sourceFingerprint: "source",
+            resumeIfPossible: false,
+            maximumAge: 60,
+            now: started)
+        let duringRun = try await store.completedRunAt(serverId: server.id)
+        XCTAssertNil(duringRun)
+
+        try await store.finishRun(serverId: server.id, now: finished)
+        let completed = try await store.completedRunAt(serverId: server.id)
+        XCTAssertEqual(completed, finished)
     }
 
     func testUpsertAndReadBack() async throws {
@@ -1001,4 +1227,66 @@ final class JellyfinArtworkRepairMigrationTests: XCTestCase {
 func XCTUnwrapAsync<T>(_ expression: @autoclosure () async throws -> T?, file: StaticString = #filePath, line: UInt = #line) async throws -> T {
     let value = try await expression()
     return try XCTUnwrap(value, file: file, line: line)
+}
+
+final class PlaybackSettingsStoreTests: XCTestCase {
+    func testLoadReturnsDefaultsWhenNothingStored() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded, .defaults)
+    }
+
+    func testSaveThenLoadRoundTripsEveryField() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        let settings = PlaybackSettings(equalizerEnabled: true,
+                                        equalizer: EqualizerPreset.vocal.settings,
+                                        replayGainMode: .album,
+                                        replayGainPreampDB: 3.5)
+        let returned = try await store.save(settings)
+        XCTAssertEqual(returned, settings)
+        let reloaded = try await store.load()
+        XCTAssertEqual(reloaded, settings)
+    }
+
+    func testSaveIsASingleRowUpsertNotAnAppend() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        _ = try await store.save(PlaybackSettings(replayGainMode: .off))
+        _ = try await store.save(PlaybackSettings(replayGainMode: .album))
+        let rowCount = try await db.read { database in
+            try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM playback_settings") ?? -1
+        }
+        XCTAssertEqual(rowCount, 1, "settings are one row, replaced in place")
+        let reloaded = try await store.load()
+        XCTAssertEqual(reloaded.replayGainMode, .album, "the newest write wins")
+    }
+
+    func testSaveNormalizesBeforePersisting() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        // Build an out-of-range value; save must persist the clamped form so a
+        // later reader — on any platform — never sees an invalid setting.
+        let returned = try await store.save(
+            PlaybackSettings(equalizer: EqualizerSettings(gains: Array(repeating: 99, count: 10)),
+                             replayGainPreampDB: 99))
+        XCTAssertTrue(returned.equalizer.gains.allSatisfy { $0 == EqualizerSettings.gainRange.upperBound })
+        XCTAssertEqual(returned.replayGainPreampDB, PlaybackSettings.preampRange.upperBound)
+        let reloaded = try await store.load()
+        XCTAssertEqual(reloaded, returned)
+    }
+
+    func testCorruptEqualizerBlobDegradesToFlatRatherThanThrowing() async throws {
+        let db = try MusicDatabase.inMemory()
+        let store = PlaybackSettingsStore(db)
+        _ = try await store.save(.defaults)
+        // Simulate a tampered/rolled-back row: overwrite the EQ JSON with garbage.
+        try await db.write { database in
+            try database.execute(sql: "UPDATE playback_settings SET equalizer = ? WHERE id = 1",
+                                 arguments: ["not json"])
+        }
+        let reloaded = try await store.load()
+        XCTAssertTrue(reloaded.equalizer.isFlat, "a corrupt curve must read as flat, not crash")
+    }
 }

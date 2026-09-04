@@ -97,15 +97,82 @@ public struct PlexAuthenticator: Sendable {
     /// publicly by plex.tv (no token), so it can be handed straight to an image
     /// loader.
     public func accountAvatarURL(accountToken: String) async throws -> URL? {
-        let authedClient = client.withDefaultHeaders(["X-Plex-Token": accountToken])
-        let user = try await authedClient.send(Endpoint(path: "api/v2/user"), as: PlexAccountUser.self)
-        guard let thumb = user.thumb, !thumb.isEmpty else { return nil }
-        return URL(string: thumb)
+        try await accountProfile(accountToken: accountToken).avatarURL
     }
 
-    /// Discover the account's servers and flatten them into candidate
-    /// connections (local first, relay last). Each carries its own
-    /// server-scoped access token.
+    /// The plex.tv account identity. This is account-level (not server-level), so
+    /// it needs the PIN-flow account token; a per-server token is not accepted.
+    public func accountProfile(accountToken: String) async throws -> SignedInAccount {
+        let authedClient = client.withDefaultHeaders(["X-Plex-Token": accountToken])
+        let user = try await authedClient.send(Endpoint(path: "api/v2/user"), as: PlexAccountUser.self)
+        let username = user.username.nonEmpty ?? user.email.nonEmpty
+        let displayName = user.title.nonEmpty ?? username
+        return SignedInAccount(
+            displayName: displayName,
+            username: username,
+            avatarURL: user.thumb.nonEmpty.flatMap(URL.init(string:))
+        )
+    }
+
+    // MARK: Plex Home profiles
+
+    public func homeUsers(accountToken: String) async throws -> [PlexHomeUser] {
+        let authedClient = client.withDefaultHeaders([
+            "X-Plex-Token": accountToken,
+        ])
+        let response = try await authedClient.send(
+            Endpoint(path: "api/v2/home/users"),
+            as: PlexHomeUsersResponse.self)
+        return response.users.compactMap { user in
+            guard let id = user.uuid ?? user.id.map(String.init) else {
+                return nil
+            }
+            return PlexHomeUser(
+                id: id,
+                name: user.title.nonEmpty
+                    ?? user.username.nonEmpty
+                    ?? "Plex User",
+                requiresPIN: user.protected
+                    ?? user.hasPassword
+                    ?? false,
+                isAdmin: user.admin ?? false,
+                isRestricted: user.restricted ?? false,
+                avatarURL: user.thumb.nonEmpty.flatMap(URL.init(string:)))
+        }
+    }
+
+    /// Return the token belonging to the selected profile.
+    ///
+    /// The owner already holds the account token. Every other Home user gets a
+    /// switched token, with a PIN supplied only for protected profiles. The PIN
+    /// is never returned or stored.
+    public func token(
+        for user: PlexHomeUser,
+        accountToken: String,
+        pin: String? = nil
+    ) async throws -> String {
+        if user.isAdmin { return accountToken }
+        let authedClient = client.withDefaultHeaders([
+            "X-Plex-Token": accountToken,
+        ])
+        let response = try await authedClient.send(
+            Endpoint(
+                method: .post,
+                path: "api/v2/home/users/\(user.id)/switch",
+                query: pin.flatMap { $0.isEmpty ? nil : [
+                    URLQueryItem(name: "pin", value: $0),
+                ] } ?? []),
+            as: PlexHomeSwitchResponse.self)
+        guard let switched = response.authToken.nonEmpty
+                ?? response.authenticationToken.nonEmpty else {
+            throw MozzError.unauthorized
+        }
+        return switched
+    }
+
+    /// Discover the account's servers. Plex returns resources (servers), each
+    /// with several connection addresses; keep one reachable address per machine
+    /// id rather than registering every address as a separate server.
     public func discoverConnections(accountToken: String) async throws -> [PlexResourceConnection] {
         let authedClient = client.withDefaultHeaders(["X-Plex-Token": accountToken])
         let resources = try await authedClient.send(
@@ -118,18 +185,25 @@ public struct PlexAuthenticator: Sendable {
         var connections: [PlexResourceConnection] = []
         for resource in resources where (resource.provides ?? "").contains("server") {
             guard let accessToken = resource.accessToken else { continue }
+            let machineIdentifier = resource.clientIdentifier.nonEmpty
+            var candidates: [PlexResourceConnection] = []
             for dto in resource.connections ?? [] {
                 guard let uriString = dto.uri, let uri = URL(string: uriString) else { continue }
-                connections.append(PlexResourceConnection(
+                candidates.append(PlexResourceConnection(
                     serverName: resource.name ?? "Plex",
-                    clientIdentifier: resource.clientIdentifier ?? "",
+                    clientIdentifier: machineIdentifier ?? clientIdentifier,
+                    serverMachineIdentifier: machineIdentifier,
                     uri: uri,
                     isLocal: dto.local ?? false,
                     isRelay: dto.relay ?? false,
                     accessToken: accessToken
                 ))
             }
+            if let chosen = await bestReachableConnection(candidates) {
+                connections.append(chosen)
+            }
         }
+
         return connections.sorted(by: Self.preferLocal)
     }
 
@@ -157,7 +231,8 @@ public struct PlexAuthenticator: Sendable {
         for connection in connections {
             if await answers(connection) { return connection }
         }
-        return nil
+
+        return connections.first
     }
 
     /// One tight-timeout `identity` request — the cheapest thing a Plex server
@@ -217,13 +292,16 @@ public struct PlexAuthenticator: Sendable {
 
     /// One-call convenience: discover connections, pick one, and produce the
     /// session to persist. The UI can instead call the steps individually.
-    public func completeLogin(accountToken: String) async throws -> AuthenticatedSession {
+    public func completeLogin(
+        accountToken: String,
+        plexUserID: String? = nil
+    ) async throws -> AuthenticatedSession {
         let connections = try await discoverConnections(accountToken: accountToken)
         // Prefer a server that has music (the account may have several servers).
         guard let chosen = await firstMusicConnection(connections) else {
             throw MozzError.notFound
         }
-        return session(from: chosen, accountToken: accountToken)
+        return session(from: chosen, accountToken: accountToken, plexUserID: plexUserID)
     }
 
     /// Re-resolve the working address of a server the app is ALREADY signed in
@@ -278,17 +356,52 @@ public struct PlexAuthenticator: Sendable {
         return session(from: chosen, accountToken: accountToken)
     }
 
-    private func session(from chosen: PlexResourceConnection, accountToken: String) -> AuthenticatedSession {
+    private func session(from chosen: PlexResourceConnection, accountToken: String,
+                         plexUserID: String? = nil) -> AuthenticatedSession {
         AuthenticatedSession(
             kind: .plex,
             baseURL: chosen.uri,
             token: chosen.accessToken,
-            userID: nil,
+            userID: plexUserID,
             serverName: chosen.serverName,
             clientIdentifier: clientIdentifier,
-            accountToken: accountToken,
-            machineIdentifier: chosen.clientIdentifier.isEmpty ? nil : chosen.clientIdentifier
+            serverMachineIdentifier: chosen.serverMachineIdentifier,
+            accountToken: accountToken
         )
+    }
+
+    private func bestReachableConnection(
+        _ connections: [PlexResourceConnection]
+    ) async -> PlexResourceConnection? {
+        let preferred = connections.sorted(by: Self.preferLocal)
+        guard !preferred.isEmpty else { return nil }
+        var reachable = Array(repeating: false, count: preferred.count)
+
+        await withTaskGroup(of: (Int, Bool).self) { group in
+            for (index, connection) in preferred.enumerated() {
+                group.addTask { [clientInfo, clientIdentifier, probeTransport] in
+                    let probe = HTTPClient(
+                        baseURL: connection.uri,
+                        transport: probeTransport,
+                        defaultHeaders: PlexHeaders.common(
+                            clientInfo: clientInfo,
+                            clientIdentifier: clientIdentifier,
+                            token: connection.accessToken
+                        ),
+                        retryPolicy: .none
+                    )
+                    return (index, (try? await probe.send(Endpoint(path: "identity"))) != nil)
+                }
+            }
+            for await (index, ok) in group {
+                reachable[index] = ok
+            }
+        }
+
+        if let index = reachable.firstIndex(of: true) {
+            return preferred[index]
+        }
+        return preferred.first
     }
 
     private static func preferLocal(_ lhs: PlexResourceConnection, _ rhs: PlexResourceConnection) -> Bool {
@@ -297,5 +410,12 @@ public struct PlexAuthenticator: Sendable {
             return connection.isLocal ? 0 : 1
         }
         return rank(lhs) < rank(rhs)
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var nonEmpty: String? {
+        guard let value = self, !value.isEmpty else { return nil }
+        return value
     }
 }

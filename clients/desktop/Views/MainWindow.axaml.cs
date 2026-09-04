@@ -1,6 +1,10 @@
+using System.Linq;
+using Avalonia;
+using Avalonia.VisualTree;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 
@@ -8,9 +12,162 @@ namespace Mozz.Desktop.Views;
 
 public partial class MainWindow : Window
 {
+    private DesktopLayoutTier _layoutTier = DesktopLayoutTier.Expanded;
+    private bool _compactNavigationOpen;
+
     public MainWindow()
     {
         InitializeComponent();
+        Opened += (_, _) => ApplyLayoutForWidth(Bounds.Width);
+    }
+
+    /// <summary>
+    /// Moves the one settings control tree into a native window.
+    /// </summary>
+    public Control TakeSettingsSurface()
+    {
+        SettingsParkingLot.Children.Remove(SettingsSurface);
+        return SettingsSurface;
+    }
+
+    /// <summary>
+    /// Returns settings to its hidden parking place after the native window
+    /// closes, ready to be opened again without rebuilding its controls.
+    /// </summary>
+    public void ReturnSettingsSurface(Control surface)
+    {
+        if (surface.Parent is Panel parent)
+        {
+            parent.Children.Remove(surface);
+        }
+        SettingsParkingLot.Children.Add(surface);
+    }
+
+    private void OnWindowResized(object? sender, SizeChangedEventArgs e)
+    {
+        ApplyLayoutForWidth(e.NewSize.Width);
+    }
+
+    private void ApplyLayoutForWidth(double width)
+    {
+        var tier = DesktopLayout.TierForWindowWidth(width);
+        ApplyLayoutTier(tier);
+    }
+
+    private void ApplyLayoutTier(DesktopLayoutTier tier)
+    {
+        _layoutTier = tier;
+
+        Classes.Set("expanded", tier == DesktopLayoutTier.Expanded);
+        Classes.Set("medium", tier == DesktopLayoutTier.Medium);
+        Classes.Set("compact", tier == DesktopLayoutTier.Compact);
+
+        var sidebarInFlow = tier != DesktopLayoutTier.Compact;
+        SidebarPane.IsVisible = sidebarInFlow;
+        MainContentGrid.ColumnDefinitions[0].Width = tier switch
+        {
+            DesktopLayoutTier.Expanded => new GridLength(DesktopLayout.ExpandedSidebarWidth),
+            DesktopLayoutTier.Medium => new GridLength(DesktopLayout.MediumSidebarWidth),
+            _ => new GridLength(0)
+        };
+
+        CompactNavigationButton.IsVisible = tier == DesktopLayoutTier.Compact;
+        if (tier != DesktopLayoutTier.Compact) _compactNavigationOpen = false;
+        CompactNavigationLayer.IsVisible = tier == DesktopLayoutTier.Compact && _compactNavigationOpen;
+
+        // The medium rail keeps navigation one click away while giving the
+        // content pane back roughly one album column. Compact removes the rail
+        // entirely because a permanent strip at that width forces detail pages
+        // and track rows to choose between clipping and uselessly narrow text.
+        var iconOnly = tier == DesktopLayoutTier.Medium;
+        foreach (var control in IconOnlySidebarText()) control.IsVisible = !iconOnly;
+        SidebarInterior.Margin = iconOnly ? new Thickness(8, 18, 8, 14) : new Thickness(14, 18, 14, 14);
+        SidebarHeader.HorizontalAlignment = iconOnly ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+        foreach (var button in SidebarNavigationButtons())
+        {
+            button.Padding = iconOnly ? new Thickness(11, 9) : new Thickness(12, 9);
+            button.HorizontalContentAlignment = iconOnly ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        }
+
+        ApplyNowPlayingPageLayout(tier);
+        ApplyTransportLayout(tier);
+    }
+
+    private void ApplyNowPlayingPageLayout(DesktopLayoutTier tier)
+    {
+        var compact = tier == DesktopLayoutTier.Compact;
+
+        // The hero is one centred column at every width now, so there is no
+        // reflow left to do for it: the cover, the title and the transport are
+        // already stacked, and the Viewbox shrinks the cover rather than letting
+        // the row overflow. Only the lower half still has two columns to fold.
+        // Queue and lyrics share one slot beside the hero, so there is no
+        // two-column lower half left to fold. At compact width the panel would
+        // leave the hero nothing, so it steps aside entirely.
+        NowPlayingLowerGrid.IsVisible = !compact;
+        NowPlayingLowerGrid.Width = tier == DesktopLayoutTier.Expanded ? 380 : 320;
+    }
+
+    private void ApplyTransportLayout(DesktopLayoutTier tier)
+    {
+        var expanded = tier == DesktopLayoutTier.Expanded;
+        var compact = tier == DesktopLayoutTier.Compact;
+
+        BottomTransportGrid.ColumnDefinitions = expanded
+            ? new ColumnDefinitions("*,Auto,*")
+            : new ColumnDefinitions("*,Auto,0");
+        // The cover sets the height: it fills the pill less an even inset on
+        // every side, and the transport plus the scrubber sit alongside it.
+        BottomTransportBar.Height = compact ? 84 : 96;
+        BottomVolumeControls.IsVisible = expanded;
+
+        // Shuffle, repeat and volume are useful, but they are secondary. When the
+        // bar narrows, preserving the track identity and the play/skip cluster
+        // avoids the failure mode where the player is still visible but cannot
+        // actually be driven.
+        BottomShuffleButton.IsVisible = expanded;
+        BottomRepeatButton.IsVisible = expanded;
+        BottomScrubber.IsVisible = !compact;
+        BottomScrubber.Width = expanded ? 400 : 280;
+        NowPlayingSummaryText.MaxWidth = expanded ? 270 : compact ? 160 : 260;
+    }
+
+    private Control[] IconOnlySidebarText() =>
+    [
+        SidebarTitle,
+        SidebarSearch,
+        SidebarLibraryCard,
+        LblHome,
+        LblSongs,
+        LblAlbums,
+        LblArtists,
+        LblGenres,
+        LblPlaylists,
+        SidebarProfileText
+    ];
+
+    private Button[] SidebarNavigationButtons() =>
+    [
+        NavHome,
+        NavSongs,
+        NavAlbums,
+        NavArtists,
+        NavGenres,
+        NavPlaylists,
+        NavSettings
+    ];
+
+    private void OnCompactNavigationButtonClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_layoutTier != DesktopLayoutTier.Compact) return;
+        _compactNavigationOpen = true;
+        CompactNavigationLayer.IsVisible = true;
+    }
+
+    private void OnCompactNavigationCloseClicked(object? sender, RoutedEventArgs e)
+    {
+        _compactNavigationOpen = false;
+        CompactNavigationLayer.IsVisible = false;
     }
 
     // Double-clicking a row starts playback. Kept in code-behind because it is a
@@ -45,16 +202,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnQueueRowActivated(object? sender, TappedEventArgs e)
-    {
-        if (DataContext is MainViewModel vm &&
-            sender is ListBox { SelectedItem: QueueRow row } &&
-            vm.PlayQueueRowCommand.CanExecute(row))
-        {
-            vm.PlayQueueRowCommand.Execute(row);
-        }
-    }
-
     private void OnDetailRowActivated(object? sender, TappedEventArgs e)
     {
         if (DataContext is not MainViewModel vm || sender is not ListBox { SelectedItem: { } item }) return;
@@ -67,6 +214,37 @@ public partial class MainWindow : Window
             case PlaylistTrackItemRow { Track: var track } when vm.PlayPlaylistTrackCommand.CanExecute(track):
                 vm.PlayPlaylistTrackCommand.Execute(track);
                 break;
+        }
+    }
+
+    private void OnSearchRowActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || sender is not ListBox { SelectedItem: { } item }) return;
+
+        switch (item)
+        {
+            case SearchTrackRow { Track: var track } when vm.PlayTrackCommand.CanExecute(track):
+                vm.PlayTrackCommand.Execute(track);
+                break;
+            case SearchAlbumRow { Album: var album } when vm.OpenAlbumCommand.CanExecute(album):
+                vm.OpenAlbumCommand.Execute(album);
+                break;
+            case SearchArtistRow { Artist: var artist } when vm.OpenArtistCommand.CanExecute(artist):
+                vm.OpenArtistCommand.Execute(artist);
+                break;
+            case SearchPlaylistRow { Playlist: var playlist } when vm.OpenPlaylistCommand.CanExecute(playlist):
+                vm.OpenPlaylistCommand.Execute(playlist);
+                break;
+        }
+    }
+
+    private void OnQueueRowActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm &&
+            sender is ListBox { SelectedItem: QueueItemRow row } &&
+            vm.JumpToQueueItemCommand.CanExecute(row))
+        {
+            vm.JumpToQueueItemCommand.Execute(row);
         }
     }
 
@@ -91,11 +269,22 @@ public partial class MainWindow : Window
     ///
     /// Safe to fire often — <see cref="MainViewModel.LoadMoreAsync"/> ignores a
     /// call while one is in flight or once the end has been reached.
+    ///
+    /// The handler is attached in XAML as <c>ScrollViewer.ScrollChanged</c> on
+    /// the ListBox, and ScrollChanged is a bubbling routed event, so `sender` is
+    /// the ListBox the handler was registered on — never the ScrollViewer that
+    /// raised it. Testing `sender is ScrollViewer` therefore returned early on
+    /// every scroll, and no list ever loaded a second page: the library simply
+    /// stopped at 200 rows with nothing to indicate why. The ScrollViewer comes
+    /// from the event's source instead.
     /// </summary>
     private void OnListScrolled(object? sender, ScrollChangedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        if (sender is not ScrollViewer viewer) return;
+
+        var viewer = e.Source as ScrollViewer
+                     ?? (sender as Visual)?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (viewer is null) return;
 
         var remaining = viewer.Extent.Height - viewer.Offset.Y - viewer.Viewport.Height;
         if (remaining <= viewer.Viewport.Height) _ = vm.LoadMoreAsync();

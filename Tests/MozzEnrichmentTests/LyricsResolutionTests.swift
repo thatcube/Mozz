@@ -258,4 +258,80 @@ final class LyricsResolutionTests: XCTestCase {
         XCTAssertNotNil(negative)
         XCTAssertNil(negative ?? Lyrics(lines: []))
     }
+
+    // MARK: Cache-only read (the not-fetched vs absent distinction)
+    //
+    // `cached(track:backend:)` is the pure, network-free read that `resolve`
+    // cannot be: `resolve` always ends by asking a source, so it can only ever
+    // answer present-or-negative and never "nobody has looked yet". These prove
+    // the missing third state is drawn — and drawn without touching the network.
+
+    /// Fresh, isolated caches so a test never sees another's entries or the
+    /// process-wide `.shared`/`.offline` stores.
+    private func isolatedService() throws -> (LyricsService, memo: LyricsMemoCache, disk: LyricsDiskCache, offline: LyricsDiskCache) {
+        let diskDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let offlineDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: diskDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: offlineDir, withIntermediateDirectories: true)
+        let memo = LyricsMemoCache(limit: 16)
+        let disk = LyricsDiskCache(directory: diskDir)
+        let offline = LyricsDiskCache(directory: offlineDir)
+        let service = LyricsService(
+            memo: memo, disk: disk, offline: offline,
+            lrclibBackoff: NetworkBackoff(), serverBackoff: NetworkBackoff())
+        return (service, memo, disk, offline)
+    }
+
+    private func track(_ id: String = "trk", title: String = "Ordinary Song") -> Track {
+        Track(id: id, title: title, artistName: "An Artist")
+    }
+
+    func testCachedReadsMissWhenNothingIsCached() async throws {
+        let (service, _, _, _) = try isolatedService()
+        let result = await service.cached(track: track(), backend: nil)
+        XCTAssertEqual(result, .miss, "an untouched track is not-fetched, not absent")
+    }
+
+    func testCachedReturnsMemoedPositive() async throws {
+        let (service, memo, _, _) = try isolatedService()
+        let lyrics = Lyrics(lines: [LyricLine(text: "la la la")])
+        await memo.set(lyrics, for: LyricsCacheKey.make(trackID: "trk", connectionID: nil))
+        let result = await service.cached(track: track(), backend: nil)
+        XCTAssertEqual(result, .hit(lyrics))
+    }
+
+    func testCachedReturnsOfflinePositive() async throws {
+        let (service, _, _, offline) = try isolatedService()
+        let lyrics = Lyrics(lines: [LyricLine(text: "downloaded words", start: 1)])
+        await offline.store(lyrics, for: LyricsCacheKey.make(trackID: "trk", connectionID: nil))
+        let result = await service.cached(track: track(), backend: nil)
+        XCTAssertEqual(result, .hit(lyrics))
+    }
+
+    /// The load-bearing case: a persisted negative reads back as `hit(nil)` —
+    /// "we asked and there are none" — NOT as a miss.
+    func testCachedReturnsPersistedNegativeAsAuthoritativeHitNil() async throws {
+        let (service, _, disk, _) = try isolatedService()
+        await disk.store(nil, for: LyricsCacheKey.make(trackID: "trk", connectionID: nil))
+        let result = await service.cached(track: track(), backend: nil)
+        XCTAssertEqual(result, .hit(nil), "a persisted negative is absent, not not-fetched")
+    }
+
+    /// The title heuristic is a pure, offline decision, so a cache-only read may
+    /// answer it as an authoritative negative rather than forcing a resolve.
+    func testCachedTreatsExplicitInstrumentalTitleAsAuthoritativeNegative() async throws {
+        let (service, _, _, _) = try isolatedService()
+        let result = await service.cached(
+            track: track(title: "Nocturne (Instrumental)"), backend: nil)
+        XCTAssertEqual(result, .hit(nil))
+    }
+
+    /// A cache-only read must not persist anything — a second read of an
+    /// unresolved track is still a miss, never a fabricated negative.
+    func testCachedDoesNotPersistOnMiss() async throws {
+        let (service, _, _, _) = try isolatedService()
+        _ = await service.cached(track: track(), backend: nil)
+        let again = await service.cached(track: track(), backend: nil)
+        XCTAssertEqual(again, .miss)
+    }
 }

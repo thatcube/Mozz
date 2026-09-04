@@ -579,17 +579,29 @@ public struct JellyfinBackend: MusicBackend {
     /// auth, hence the `api_key` — the URL is loaded by a plain image loader that
     /// carries no headers, so it must not be logged.
     public func userAvatarURL(size: Int) async -> URL? {
-        guard let me = try? await client.send(Endpoint(path: "Users/Me"), as: JFUser.self),
-              let tag = me.PrimaryImageTag, !tag.isEmpty,
-              let id = me.Id ?? connection.userID, !id.isEmpty
-        else { return nil }
-        return mediaURL(path: "Users/\(id)/Images/Primary", query: [
+        await signedInAccount(size: size).avatarURL
+    }
+
+    public func signedInAccount(size: Int) async -> SignedInAccount {
+        guard let me = try? await client.send(Endpoint(path: "Users/Me"), as: JFUser.self) else {
+            let username = connection.userID.nonEmpty
+            return SignedInAccount(displayName: username, username: username)
+        }
+        let username = me.Name.nonEmpty ?? connection.userID.nonEmpty
+        let avatarURL: URL?
+        if let tag = me.PrimaryImageTag.nonEmpty,
+           let id = (me.Id ?? connection.userID).nonEmpty {
+            avatarURL = mediaURL(path: "Users/\(id)/Images/Primary", query: [
             URLQueryItem(name: "maxWidth", value: "\(size)"),
             URLQueryItem(name: "maxHeight", value: "\(size)"),
             URLQueryItem(name: "quality", value: "90"),
             URLQueryItem(name: "tag", value: tag),
             URLQueryItem(name: "api_key", value: token),
-        ])
+            ])
+        } else {
+            avatarURL = nil
+        }
+        return SignedInAccount(displayName: username, username: username, avatarURL: avatarURL)
     }
 
     // MARK: Writes
@@ -730,5 +742,12 @@ public struct JellyfinBackend: MusicBackend {
         ) else { return nil }
         components.queryItems = query
         return components.url
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var nonEmpty: String? {
+        guard let value = self, !value.isEmpty else { return nil }
+        return value
     }
 }

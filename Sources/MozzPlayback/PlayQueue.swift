@@ -175,6 +175,16 @@ public struct PlayQueue: Sendable, Equatable, Codable {
         refreshWrapCache()
     }
 
+    public mutating func updateTrack(
+        id: String,
+        _ update: (inout Track) -> Void
+    ) {
+        guard let index = tracks.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        update(&tracks[index])
+    }
+
     /// Replace the queue with an **explicit, already-realized playback order**.
     ///
     /// Exists for cross-device continuity (ADR-0010). Every other loading path

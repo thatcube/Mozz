@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Brandoland",
+    "clientIdentifier": "50acfe994de74f8998deb9fc43e6262e",
+    "provides": "server",
+    "accessToken": "server-token-brandoland",
+    "connections": [
+      {
+        "uri": "https://172-18-0-1.50acfe994de74f8998deb9fc43e6262e.plex.direct:32400",
+        "address": "172.18.0.1",
+        "port": 32400,
+        "protocol": "https",
+        "local": true,
+        "relay": false
+      },
+      {
+        "uri": "https://192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct:32400",
+        "address": "192.168.68.71",
+        "port": 32400,
+        "protocol": "https",
+        "local": true,
+        "relay": false
+      },
+      {
+        "uri": "https://relay.plex.direct:443",
+        "address": "relay.plex.direct",
+        "port": 443,
+        "protocol": "https",
+        "local": false,
+        "relay": true
+      }
+    ]
+  }
+]

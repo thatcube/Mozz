@@ -1,0 +1,85 @@
+{
+  "cases" : [
+    {
+      "expected" : "MOZZ1:AgIAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eH6ChoqOkpaanqKmqq6ytrq8",
+      "input" : {
+        "nonce" : "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "publicKey" : "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      },
+      "name" : "qr-payload-canonical",
+      "note" : "field order, unpadded base64url, and the MOZZ1: prefix"
+    },
+    {
+      "expected" : "9bbda9707d90dfc4c3ef3f87e109f2bd8836a93a83bb6a114283e68e5f968c19",
+      "input" : {
+        "nonceA" : "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+      },
+      "name" : "commit-binding",
+      "note" : "the commitment covers the label AND the nonce, not the nonce alone"
+    },
+    {
+      "expected" : "9d740986a69d2463ad8ffd3f08e5cdc29562abe0eb690cbaad219ff4d8ab56d8",
+      "input" : {
+        "joinerDeviceID" : "11111111-1111-1111-1111-111111111111",
+        "joinerName" : "Brandon's iPhone",
+        "joinerPublicKey" : "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "memberDeviceID" : "22222222-2222-2222-2222-222222222222",
+        "memberName" : "Gaming PC",
+        "memberPublicKey" : "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "nonceA" : "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "nonceB" : "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "name" : "transcript-order",
+      "note" : "fixed field order; every field fixed-width so none can be confused for its neighbour"
+    },
+    {
+      "expected" : "a7761aad8dd7fda16df9f7a2557e9a20043b4c370c755a369ab86d7dba7d613e",
+      "input" : {
+        "joinerDeviceID" : "11111111-1111-1111-1111-111111111111",
+        "joinerName" : "Brandon's iPhone",
+        "joinerPublicKey" : "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "memberDeviceID" : "22222222-2222-2222-2222-222222222222",
+        "memberName" : "Gaming PC",
+        "memberPublicKey" : "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "nonceA" : "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "nonceB" : "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "name" : "transcript-swapped",
+      "note" : "swapping joiner and member must change the hash, or the transcript does not bind who is who"
+    },
+    {
+      "expected" : "576794",
+      "input" : {
+        "sharedSecret" : "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+        "transcriptHash" : "e8056e60ec831bb6e46088f21faf821a0410298e56111c9c4f4eed7076635c1b"
+      },
+      "name" : "sas-digits-basic",
+      "note" : "the ordinary derivation"
+    },
+    {
+      "expected" : "181282",
+      "input" : {
+        "sharedSecret" : "0000000000000103111111111111111111111111111111111111111111111111",
+        "transcriptHash" : "e8056e60ec831bb6e46088f21faf821a0410298e56111c9c4f4eed7076635c1b"
+      },
+      "name" : "sas-digits-leading-zeros",
+      "note" : "000042 must not render as 42"
+    },
+    {
+      "expected" : "000255",
+      "input" : {
+        "stream" : "ffffffff000000ff000000000000000000000000000000000000000000000000"
+      },
+      "name" : "sas-digits-rejection",
+      "note" : "first word is above the limit and MUST be discarded; reducing it gives 967295 and passes every other case"
+    },
+    {
+      "expected" : "6d6f7a7a2f706169722f76322f6368616e6e656c00e8056e60ec831bb6e46088f21faf821a0410298e56111c9c4f4eed7076635c1b",
+      "input" : {
+        "transcriptHash" : "e8056e60ec831bb6e46088f21faf821a0410298e56111c9c4f4eed7076635c1b"
+      },
+      "name" : "channel-info-binding",
+      "note" : "info binds the transcript, so a seal cannot be replayed into another ceremony"
+    }
+  ]
+}

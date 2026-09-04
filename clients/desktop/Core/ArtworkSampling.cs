@@ -99,7 +99,8 @@ public static class ArtworkSampling
             startPoint: new RelativePoint(0, 0, RelativeUnit.Relative),
             endPoint: new RelativePoint(0, 1, RelativeUnit.Relative));
 
-    private static Color ToColor(ArtworkTone tone) => Color.FromRgb(
+    /// <summary>One tone as a colour, for callers that want a single hue.</summary>
+    public static Color ToColor(ArtworkTone tone) => Color.FromRgb(
         Channel(tone.Red), Channel(tone.Green), Channel(tone.Blue));
 
     private static byte Channel(double value) =>

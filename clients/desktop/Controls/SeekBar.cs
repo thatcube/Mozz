@@ -116,6 +116,23 @@ public sealed class SeekBar : Control
     public static readonly StyledProperty<double> LabelFontSizeProperty =
         AvaloniaProperty.Register<SeekBar, double>(nameof(LabelFontSize), 11.0);
 
+    /// <summary>
+    /// Where the two time labels go relative to the bar.
+    ///
+    /// The phone stacks them underneath, which is right when the bar is the
+    /// widest thing on a tall screen. In a transport dock the same arrangement
+    /// makes the control three rows deep and strands the times at the pill's
+    /// edge, so there they sit on either side of the bar instead.
+    /// </summary>
+    public enum LabelPlace
+    {
+        Below,
+        Inline,
+    }
+
+    public static readonly StyledProperty<LabelPlace> LabelPlacementProperty =
+        AvaloniaProperty.Register<SeekBar, LabelPlace>(nameof(LabelPlacement));
+
     public static readonly StyledProperty<double> LabelSpacingProperty =
         AvaloniaProperty.Register<SeekBar, double>(nameof(LabelSpacing), 8.0);
 
@@ -144,7 +161,8 @@ public sealed class SeekBar : Control
             RestHeightProperty, ActiveHeightProperty, ShowLabelsProperty,
             LabelFontSizeProperty, BarActivationProperty, LabelActivationProperty);
         AffectsMeasure<SeekBar>(
-            ActiveHeightProperty, ShowLabelsProperty, LabelFontSizeProperty, LabelSpacingProperty);
+            ActiveHeightProperty, ShowLabelsProperty, LabelFontSizeProperty,
+            LabelSpacingProperty, LabelPlacementProperty);
         FocusableProperty.OverrideDefaultValue<SeekBar>(true);
     }
 
@@ -238,6 +256,12 @@ public sealed class SeekBar : Control
         set => SetValue(LabelFontSizeProperty, value);
     }
 
+    public LabelPlace LabelPlacement
+    {
+        get => GetValue(LabelPlacementProperty);
+        set => SetValue(LabelPlacementProperty, value);
+    }
+
     public double LabelSpacing
     {
         get => GetValue(LabelSpacingProperty);
@@ -305,7 +329,37 @@ public sealed class SeekBar : Control
 
     private double LabelHeight => ShowLabels ? Math.Ceiling(LabelFontSize * ScrubLabelScale * 1.35) : 0;
 
-    private double TotalHeight => BandHeight + (ShowLabels ? LabelSpacing + LabelHeight : 0);
+    private bool LabelsInline => ShowLabels && LabelPlacement == LabelPlace.Inline;
+
+    private double TotalHeight => LabelsInline
+        ? Math.Max(BandHeight, LabelHeight)
+        : BandHeight + (ShowLabels ? LabelSpacing + LabelHeight : 0);
+
+    /// <summary>
+    /// Width reserved for one inline time label. Measured from the widest shape
+    /// a clock takes at this size — "-00:00" — rather than from the current
+    /// value, so the bar does not resize as the digits tick over.
+    /// </summary>
+    private double InlineLabelWidth
+    {
+        get
+        {
+            if (!LabelsInline) return 0;
+            var typeface = new Typeface(InterFont, FontStyle.Normal, FontWeight.SemiBold);
+            var digit = DigitWidth(typeface, LabelFontSize);
+            return MonoWidth("\u2212" + FormatClock(Math.Max(Duration, 0)), typeface, LabelFontSize, digit)
+                   * ScrubLabelScale;
+        }
+    }
+
+    /// <summary>The bar's own span, once the inline labels have taken their room.</summary>
+    private (double X, double Width) BarSpan(double width)
+    {
+        if (!LabelsInline) return (0, width);
+        var reserved = InlineLabelWidth + LabelSpacing;
+        var span = Math.Max(width - reserved * 2, 0);
+        return (reserved, span);
+    }
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -317,13 +371,20 @@ public sealed class SeekBar : Control
 
     private bool IsInBand(Point point)
     {
+        var (barX, barWidth) = BarSpan(Bounds.Width);
         var band = BandHeight;
-        return point.Y >= -HitSlop && point.Y <= band + HitSlop;
+        var top = (TotalHeight - band) / 2;
+        if (point.Y < top - HitSlop || point.Y > top + band + HitSlop) return false;
+        // Inline labels are text beside the bar, not part of it: dragging from a
+        // timestamp should do nothing.
+        return point.X >= barX - HitSlop && point.X <= barX + barWidth + HitSlop;
     }
 
     private double TimeAt(double x)
     {
-        var width = Bounds.Width;
+        var (barX, barWidth) = BarSpan(Bounds.Width);
+        x -= barX;
+        var width = barWidth;
         if (width <= 0) return 0;
         var fraction = Math.Clamp(x / width, 0, 1);
         var duration = Duration;
@@ -507,11 +568,12 @@ public sealed class SeekBar : Control
         var barT = Math.Clamp(BarActivation, 0, 1);
         var labelT = Math.Clamp(LabelActivation, 0, 1);
 
+        var (barX, barWidth) = BarSpan(width);
         var height = Lerp(RestHeight, ActiveHeight, barT);
-        var top = (BandHeight - height) / 2;
+        var top = (TotalHeight - BandHeight) / 2 + (BandHeight - height) / 2;
         var radius = height / 2;
 
-        var rail = new Rect(0, top, width, height);
+        var rail = new Rect(barX, top, barWidth, height);
         context.DrawRectangle(
             Tinted(tint, Lerp(RestTrackOpacity, ActiveTrackOpacity, barT)),
             null, new RoundedRect(rail, radius));
@@ -519,10 +581,10 @@ public sealed class SeekBar : Control
         // The fill is never narrower than it is tall: a capsule shorter than its
         // own corner radius degenerates into a lens, so at 0% the bar would show
         // a squashed sliver rather than nothing at all.
-        var filled = Math.Clamp(width * Progress, 0, width);
+        var filled = Math.Clamp(barWidth * Progress, 0, barWidth);
         if (filled > 0)
         {
-            var fill = new Rect(0, top, Math.Max(filled, height), height);
+            var fill = new Rect(barX, top, Math.Max(filled, height), height);
             context.DrawRectangle(
                 Tinted(tint, Lerp(RestFillOpacity, ActiveFillOpacity, Math.Max(labelT, barT * 0.5))),
                 null, new RoundedRect(fill, radius));
@@ -544,12 +606,26 @@ public sealed class SeekBar : Control
         var size = LabelFontSize;
         var digit = DigitWidth(typeface, size);
         var scale = Lerp(1, ScrubLabelScale, labelT);
-        var baseline = BandHeight + LabelSpacing;
-
         var elapsed = FormatClock(current);
         // U+2212 MINUS SIGN, not a hyphen: it is the width of a digit, so the
         // remaining label does not jog left when the leading "−" appears.
         var left = "−" + FormatClock(remaining);
+
+        if (LabelsInline)
+        {
+            // Beside the bar, on its centre line, pinned to the control's own
+            // edges so the pair frames the bar rather than drifting with the
+            // time's width.
+            var (barX, barWidth) = BarSpan(width);
+            var band = (TotalHeight - LabelHeight) / 2;
+            DrawScaled(context, elapsed, typeface, size, brush, digit,
+                       anchorX: barX - LabelSpacing, bandTop: band, scale: scale, rightAligned: true);
+            DrawScaled(context, left, typeface, size, brush, digit,
+                       anchorX: barX + barWidth + LabelSpacing, bandTop: band, scale: scale, rightAligned: false);
+            return;
+        }
+
+        var baseline = BandHeight + LabelSpacing;
 
         // Each label scales away from the edge it is pinned to, so the pair
         // grows outward from the bar's ends rather than drifting inward, and

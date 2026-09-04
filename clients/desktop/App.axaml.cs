@@ -1,10 +1,10 @@
-using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 using Mozz.Desktop.Views;
 
@@ -21,13 +21,36 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            var viewModel = new MainViewModel();
+            viewModel.SettingsRequested += (_, _) => ShowSettingsWindow();
+            viewModel.SettingsCloseRequested += (_, _) => _settingsWindow?.Close();
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainViewModel(),
+                DataContext = viewModel,
             };
+            _ = OfferCircleSetupWhenReadyAsync(viewModel);
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    /// <summary>
+    /// A desktop with no circle advertises during first-run setup, just like a
+    /// phone. This makes setup order irrelevant across macOS, Windows and Linux:
+    /// whichever device is new waits; whichever already has the circle opens
+    /// Devices and admits it.
+    /// </summary>
+    private async Task OfferCircleSetupWhenReadyAsync(MainViewModel viewModel)
+    {
+        await viewModel.Initialization;
+        if (!PairingService.HasCircle)
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                viewModel.SelectSettingsCategoryCommand.Execute(SettingsCategory.Devices);
+                _ = viewModel.OpenSettingsCommand.ExecuteAsync(null);
+            });
+        }
     }
 
     /// <summary>
@@ -37,13 +60,7 @@ public partial class App : Application
     /// </summary>
     private void OnAboutMozz(object? sender, System.EventArgs e)
     {
-        var version = typeof(App).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? typeof(App).Assembly.GetName().Version?.ToString()
-            ?? "unknown";
-        // Strip the "+<commit sha>" the SDK appends to an informational version.
-        var plus = version.IndexOf('+');
-        if (plus > 0) version = version[..plus];
+        var version = AppVersion.FromAssembly(typeof(App).Assembly);
 
         var window = new Window
         {

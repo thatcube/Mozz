@@ -1,17 +1,21 @@
 using Mozz.Desktop.Audio;
-using Mozz.Desktop.Audio.Decoding;
 using Xunit;
 
 namespace Mozz.Desktop.Tests;
 
 /// <summary>
-/// Covers the two halves of the "cannot play music" fix: finding ffmpeg when a
-/// GUI-launched app has a minimal PATH, and turning a silent decode failure into
-/// an honest, credential-free message the listener can act on.
+/// Covers <see cref="AudioDiagnostics"/>: turning a decode or open failure into
+/// an honest, credential-free line a listener can act on, and never letting a
+/// token reach a status bar or a log.
 ///
-/// None of these spawn ffmpeg — the locator is probed with an injected
-/// filesystem and the pipeline is driven with a fake decoder — so the run stays
-/// deterministic and cross-platform on CI.
+/// The audio engine now decodes in Rust rather than by spawning ffmpeg, so the
+/// old "find ffmpeg on a minimal PATH" locator and the managed-pipeline
+/// end-to-end tests are gone with it. The redaction and message-shaping rules
+/// tested here still matter: <see cref="Native.RustAudioEngine"/> routes its
+/// open-failure messages through <see cref="AudioDiagnostics.DescribeOpenFailure"/>,
+/// which redacts exactly as these tests require. The ffmpeg-stderr summarisers
+/// are retained on <see cref="AudioDiagnostics"/> and exercised here too; they
+/// are no longer wired to a live subprocess in the desktop app.
 /// </summary>
 public class FfmpegDiagnosticsTests
 {
@@ -59,12 +63,11 @@ public class FfmpegDiagnosticsTests
         Assert.Equal(url, AudioDiagnostics.Redact(url));
     }
 
-    // --- Summarising ffmpeg's stderr into one readable, token-free line ---
+    // --- Summarising a failure's stderr into one readable, token-free line ---
 
     [Fact]
     public void SummariseFfmpeg_TurnsACertFailureIntoPlainWords_WithoutTheToken()
     {
-        // The shape ffmpeg 9 actually emits for a self-signed / unverifiable cert.
         var stderr =
             "[tls @ 0x72cc34000] error: certificate verify failed\n" +
             $"[https @ 0x600001] Failed to open https://host/file.m4a?X-Plex-Token=SECRETVALUE\n" +
@@ -124,128 +127,5 @@ public class FfmpegDiagnosticsTests
         // Reason leads, so a status bar that truncates keeps the actionable part.
         Assert.StartsWith("FFmpeg could not be started", msg);
         Assert.DoesNotContain("jMSwEeko5ragiHRKbtSECRET", msg);
-    }
-
-    // --- The locator: the actual root-cause fix ---
-
-    [Fact]
-    public void Candidates_IncludeHomebrewBin_OnMac_SoAMinimalGuiPathStillFindsFfmpeg()
-    {
-        var candidates = FfmpegLocator.Candidates("/Apps/Mozz.app/Contents/MacOS", isWindows: false).ToList();
-        Assert.Contains("/opt/homebrew/bin/ffmpeg", candidates);
-        Assert.Contains("/usr/local/bin/ffmpeg", candidates);
-        // The copy shipped beside the app is tried before anything on the system.
-        Assert.Equal("/Apps/Mozz.app/Contents/MacOS/ffmpeg", candidates[0]);
-    }
-
-    [Fact]
-    public void Resolve_PrefersAnExistingWellKnownPath_OverTheBareName()
-    {
-        var resolved = FfmpegLocator.Resolve(
-            "/Apps/Mozz.app/Contents/MacOS", isWindows: false, mozzOverride: null,
-            exists: p => p == "/opt/homebrew/bin/ffmpeg");
-
-        Assert.Equal("/opt/homebrew/bin/ffmpeg", resolved);
-    }
-
-    [Fact]
-    public void Candidates_DoNotDependOnTheHostSeparator()
-    {
-        // The regression this pins: the candidates were built with Path.Combine,
-        // so the Unix list came back punctuated with backslashes when the suite
-        // ran on Windows — "/opt/homebrew/bin\\ffmpeg" — and the macOS ordering
-        // tests failed on a Windows runner while passing on a Mac. The whole
-        // point of passing `isWindows` in is that both platforms' behaviour can
-        // be checked from either, so the output must not vary with the host.
-        var unix = FfmpegLocator.Candidates("/Applications/Mozz.app/Contents/MacOS", false).ToArray();
-        Assert.All(unix, p => Assert.DoesNotContain('\\', p));
-        Assert.All(unix, p => Assert.StartsWith("/", p));
-
-        var win = FfmpegLocator.Candidates(@"C:\Program Files\Mozz", true).ToArray();
-        Assert.All(win, p => Assert.DoesNotContain('/', p));
-        Assert.All(win, p => Assert.EndsWith("ffmpeg.exe", p));
-    }
-
-    [Fact]
-    public void Resolve_FallsBackToTheBareName_WhenNothingConcreteExists()
-    {
-        Assert.Equal("ffmpeg", FfmpegLocator.Resolve("/app", false, null, _ => false));
-        Assert.Equal("ffmpeg.exe", FfmpegLocator.Resolve(@"C:\app", true, null, _ => false));
-    }
-
-    [Fact]
-    public void Resolve_HonoursAnExplicitOverride_EvenIfItDoesNotExist()
-    {
-        // A wrong MOZZ_FFMPEG should surface as a named error, not be silently ignored.
-        var resolved = FfmpegLocator.Resolve("/app", false, "/custom/ffmpeg", _ => false);
-        Assert.Equal("/custom/ffmpeg", resolved);
-    }
-
-    // --- End to end: a failing decoder now reaches the listener ---
-
-    [Fact]
-    public void PcmPipeline_SurfacesADecoderFailure_AsAnError_InsteadOfSilentEnd()
-    {
-        const int rate = 48000, ch = 2;
-        const string reason = "the server’s TLS certificate could not be verified (ffmpeg exit 251)";
-
-        using var pipe = new PcmPipeline(rate, ch, ringSeconds: 2.0);
-        string? reported = null;
-        using var errored = new ManualResetEventSlim(false);
-        pipe.Error += m => { reported = m; errored.Set(); };
-
-        pipe.LoadCurrent(new FailingDecoder(rate, ch, reason), new AudioSource("mem://bad"), "bad");
-
-        // Render to drive the pump, then WAIT — the two are different things.
-        //
-        // `Error` is delivered on the pipeline's notifier thread, not from
-        // `Render`. A spin loop counts iterations rather than time, and with a
-        // decoder that fails immediately there is no audio to render, so 100,000
-        // iterations burn through in microseconds — quite possibly before the
-        // notifier thread is scheduled at all. That passes on an idle machine
-        // and fails on a loaded CI runner, which is exactly what it did.
-        var buf = new float[512 * ch];
-        PipelinePump.RenderUntilOrFail(pipe, buf, errored,
-            "a decoder that failed should raise Error, not end silently");
-        Assert.Equal(reason, reported);
-    }
-
-    [Fact]
-    public void PcmPipeline_DoesNotCryWolf_OnAnHonestEndOfTrack()
-    {
-        const int rate = 48000, ch = 2, frames = 4800;
-        var dec = new WavPcmDecoder(
-            new MemoryStream(WavTestSignal.SineFloat(rate, ch, 0, frames, 440.0)), rate, ch);
-
-        using var pipe = new PcmPipeline(rate, ch, ringSeconds: 2.0);
-        int errors = 0;
-        using var ended = new ManualResetEventSlim(false);
-        pipe.Error += _ => Interlocked.Increment(ref errors);
-        pipe.PlaybackEnded += () => ended.Set();
-
-        pipe.LoadCurrent(dec, new AudioSource("mem://ok"), "ok");
-
-        var buf = new float[512 * ch];
-        PipelinePump.RenderUntilOrFail(pipe, buf, ended, "the track should have played to its end");
-
-        Thread.Sleep(50); // now let any stray notification drain
-        Assert.Equal(0, errors);
-    }
-
-    /// <summary>
-    /// A decoder that produces no audio and reports a failure — the shape of an
-    /// ffmpeg process that died on a bad certificate before writing a frame.
-    /// </summary>
-    private sealed class FailingDecoder(int rate, int channels, string reason)
-        : IPcmDecoder, IDecoderDiagnostics
-    {
-        public int SampleRate => rate;
-        public int Channels => channels;
-        public TimeSpan? Duration => null;
-        public bool CanSeek => false;
-        public int ReadFrames(Span<float> destination, int frameCount) => 0;
-        public void Seek(TimeSpan position) { }
-        public bool TryGetFailure(out string r) { r = reason; return true; }
-        public void Dispose() { }
     }
 }

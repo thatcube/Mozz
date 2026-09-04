@@ -36,6 +36,7 @@ OUT="clients/desktop/Assets/Icons.axaml"
 ICONS="
 arrows-shuffle      Shuffle
 chevron-left        ChevronLeft
+chevron-up          ChevronUp
 player-skip-back    SkipBack
 player-play         Play
 player-pause        Pause

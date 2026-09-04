@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace Mozz.Desktop.Core;
@@ -43,6 +44,25 @@ public sealed record Album(
     [property: JsonPropertyName("isSingleOrEP")]
     bool? IsSingleOrEp = null);
 
+/// <summary>
+/// One channel of the player's backdrop, 0…1 sRGB, exactly as
+/// <c>MozzCore.ArtworkPalette.Tone</c> emits it.
+/// </summary>
+public sealed record ArtworkTone(
+    [property: JsonPropertyName("red")] double Red,
+    [property: JsonPropertyName("green")] double Green,
+    [property: JsonPropertyName("blue")] double Blue);
+
+/// <summary>
+/// The backdrop, top to bottom: the middle band is the artwork's dominant
+/// colour and covers most of the view, the two accents are gentle bands at the
+/// edges.
+/// </summary>
+public sealed record ArtworkTones(
+    [property: JsonPropertyName("top")] ArtworkTone Top,
+    [property: JsonPropertyName("middle")] ArtworkTone Middle,
+    [property: JsonPropertyName("bottom")] ArtworkTone Bottom);
+
 public sealed record Track(
     long Id,
     string RemoteId,
@@ -56,27 +76,16 @@ public sealed record Track(
     double DurationSeconds,
     string? ArtworkKey,
     bool IsFavorite,
-    /// <summary>
-    /// The star rating, where the backend keeps one. Carried alongside
-    /// <see cref="IsFavorite"/> because on a ratings backend (Plex) that flag is
-    /// always false and this is what "liked" actually means — see IsLiked.
-    /// </summary>
+    double? NormalizationGainDB = null,
+    // The core carries a rating as a Double because half-stars are real: a
+    // library can hold 0.5 through 5.0 in half steps. Declaring this int? made
+    // System.Text.Json refuse the whole response — not just the field, and not
+    // just for halves, since it will not read 4.0 into an int either. One rated
+    // track in a page was enough to blank the screen.
     double? Rating = null,
-    /// <summary>Codec and bitrate as the server reported them.</summary>
-    string? Codec = null,
-    int? BitrateKbps = null,
-    double? NormalizationGainDB = null)
+    bool FavoritePending = false,
+    bool RatingPending = false)
 {
-    /// <summary>
-    /// Whether this counts as liked, by the same rule every Mozz client uses:
-    /// a boolean favourite, or four stars and up. Matches LikePolicy in the core.
-    /// </summary>
-    public bool IsLiked => IsFavorite || (Rating ?? 0) >= 4.0;
-
-    /// <summary>A short format badge — "FLAC", "AAC" — or null when unreported.</summary>
-    public string? Format =>
-        string.IsNullOrWhiteSpace(Codec) ? null : Codec!.ToUpperInvariant();
-
     /// <summary>m:ss, the form every music player uses.</summary>
     public string Duration
     {
@@ -89,6 +98,70 @@ public sealed record Track(
                 : $"{span.Minutes}:{span.Seconds:00}";
         }
     }
+
+    public string FavoriteLabel => IsFavorite
+        ? (FavoritePending ? "Liked, waiting to sync" : "Liked")
+        : (FavoritePending ? "Unliked, waiting to sync" : "Like");
+
+    /// <summary>
+    /// "4/5" or "4.5/5" — a whole rating should not read as "4.0/5".
+    /// </summary>
+    public string RatingText => Rating is > 0
+        ? $"{Rating.Value.ToString("0.#", CultureInfo.InvariantCulture)}/5"
+        : "Not rated";
+}
+
+public sealed record FavoriteMutationResult(
+    string ServerId,
+    string RemoteId,
+    string ItemType,
+    string Kind,
+    double? Value,
+    bool Liked,
+    bool Queued,
+    bool Synced);
+
+public sealed record RatingMutationResult(
+    string ServerId,
+    string RemoteId,
+    string ItemType,
+    string Kind,
+    double? Value,
+    bool? Liked,
+    bool Queued,
+    bool Synced);
+
+public sealed record PlaybackReportResult(bool Reported);
+
+public sealed record LyricsPayload(
+    string Status,
+    bool StaySilent,
+    int? ActiveLineIndex,
+    LyricsDocument? Lyrics);
+
+public sealed record LyricsDocument(
+    string? Source,
+    string? SourceDisplayName,
+    bool IsSynced,
+    IReadOnlyList<LyricLine> Lines);
+
+public sealed record LyricLine(string Text, double? StartSeconds);
+
+public sealed record SyncPhaseDetail(
+    string Phase,
+    string Label,
+    string State,
+    int Synced,
+    int? Total,
+    bool IsComplete);
+
+public static class FavoriteStateProjector
+{
+    public static Track Optimistic(Track track, bool liked) =>
+        track with { IsFavorite = liked, FavoritePending = true };
+
+    public static Track Reconciled(Track track, FavoriteMutationResult result) =>
+        track with { IsFavorite = result.Liked, FavoritePending = !result.Synced };
 }
 
 public sealed record Playlist(
@@ -108,17 +181,13 @@ public sealed record LibraryCounts(
 public sealed record SuppressedRef(
     [property: JsonPropertyName("scope")] string Scope,
     [property: JsonPropertyName("ref")] string Ref,
-    [property: JsonPropertyName("createdAt")] double CreatedAt,
-    /// <summary>The track title or artist name, resolved by the core.</summary>
-    [property: JsonPropertyName("title")] string? Title = null,
-    /// <summary>The artist name, for a track. Null for an artist.</summary>
-    [property: JsonPropertyName("subtitle")] string? Subtitle = null,
-    [property: JsonPropertyName("artworkKey")] string? ArtworkKey = null);
+    [property: JsonPropertyName("createdAt")] double CreatedAt);
 
 public sealed record SearchResults(
     IReadOnlyList<Artist> Artists,
     IReadOnlyList<Album> Albums,
-    IReadOnlyList<Track> Tracks);
+    IReadOnlyList<Track> Tracks,
+    IReadOnlyList<Playlist>? Playlists = null);
 
 public sealed record AlbumReleaseKind(
     string Kind,
@@ -178,6 +247,19 @@ public sealed record CoreRequest(
     [JsonPropertyName("pixels")] public string? Pixels { get; init; }
     [JsonPropertyName("width")] public int? Width { get; init; }
     [JsonPropertyName("height")] public int? Height { get; init; }
+    [JsonPropertyName("liked")] public bool? Liked { get; init; }
+    [JsonPropertyName("flush")] public bool? Flush { get; init; }
+    [JsonPropertyName("rating")] public double? Rating { get; init; }
+    [JsonPropertyName("state")] public string? State { get; init; }
+    [JsonPropertyName("positionSeconds")] public double? PositionSeconds { get; init; }
+    [JsonPropertyName("useLRCLIB")] public bool? UseLRCLIB { get; init; }
+
+    [JsonPropertyName("playbackRunID")] public string? PlaybackRunID { get; init; }
+    [JsonPropertyName("cursorSequence")] public ulong? CursorSequence { get; init; }
+    [JsonPropertyName("capturedAtMS")] public long? CapturedAtMS { get; init; }
+    [JsonPropertyName("currentRemoteID")] public string? CurrentRemoteID { get; init; }
+    [JsonPropertyName("currentAbsoluteIndex")] public int? CurrentAbsoluteIndex { get; init; }
+    [JsonPropertyName("queue")] public ContinuityQueueInput? Queue { get; init; }
 }
 
 /// <summary>
@@ -186,23 +268,85 @@ public sealed record CoreRequest(
 /// total for these listings, and counting rows would be wrong the moment a
 /// background sync added one.
 /// </summary>
-/// <summary>
-/// One channel of the artwork backdrop, 0…1 sRGB, exactly as
-/// <c>MozzCore.ArtworkPalette.Tone</c> emits it.
-/// </summary>
-public sealed record ArtworkTone(
-    [property: JsonPropertyName("red")] double Red,
-    [property: JsonPropertyName("green")] double Green,
-    [property: JsonPropertyName("blue")] double Blue);
-
-/// <summary>
-/// The player's backdrop, top to bottom: the middle band is the artwork's
-/// dominant colour and covers most of the view, the two accents are gentle
-/// bands at the edges.
-/// </summary>
-public sealed record ArtworkTones(
-    [property: JsonPropertyName("top")] ArtworkTone Top,
-    [property: JsonPropertyName("middle")] ArtworkTone Middle,
-    [property: JsonPropertyName("bottom")] ArtworkTone Bottom);
-
 public sealed record Page<T>(T? Rows, string? NextCursor);
+
+public sealed record ContinuityDescriptor(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("sourceID")] string? SourceID = null,
+    [property: JsonPropertyName("sourceRevision")] string? SourceRevision = null);
+
+public sealed record ContinuityItemInput(
+    [property: JsonPropertyName("remoteID")] string RemoteID,
+    [property: JsonPropertyName("backend")] string Backend,
+    [property: JsonPropertyName("serverID")] string ServerID,
+    [property: JsonPropertyName("accountID")] string AccountID,
+    [property: JsonPropertyName("baseOrdinal")] int BaseOrdinal,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("artist")] string Artist,
+    [property: JsonPropertyName("durationMS")] long DurationMS,
+    [property: JsonPropertyName("artworkKey")] string? ArtworkKey);
+
+public sealed record ContinuityQueueInput(
+    [property: JsonPropertyName("descriptor")] ContinuityDescriptor Descriptor,
+    [property: JsonPropertyName("items")] IReadOnlyList<ContinuityItemInput> Items,
+    [property: JsonPropertyName("repeatMode")] string RepeatMode,
+    [property: JsonPropertyName("isShuffled")] bool IsShuffled,
+    [property: JsonPropertyName("totalCount")] int TotalCount,
+    [property: JsonPropertyName("startAbsoluteIndex")] int? StartAbsoluteIndex = null,
+    [property: JsonPropertyName("windowStartAbsoluteIndex")] int? WindowStartAbsoluteIndex = null,
+    [property: JsonPropertyName("isTruncated")] bool? IsTruncated = null);
+
+public sealed record ContinuityHash(
+    [property: JsonPropertyName("queueHash")] string QueueHash,
+    [property: JsonPropertyName("canonicalByteCount")] int CanonicalByteCount,
+    [property: JsonPropertyName("canonicalBytesHex")] string CanonicalBytesHex);
+
+public sealed record ContinuitySaveResult(
+    [property: JsonPropertyName("saved")] bool Saved,
+    [property: JsonPropertyName("queueHash")] string? QueueHash);
+
+public sealed record ContinuityFingerprint(
+    [property: JsonPropertyName("backend")] string Backend,
+    [property: JsonPropertyName("serverID")] string ServerID,
+    [property: JsonPropertyName("accountID")] string AccountID);
+
+public sealed record ContinuityTrackLocator(
+    [property: JsonPropertyName("server")] ContinuityFingerprint Server,
+    [property: JsonPropertyName("remoteID")] string RemoteID);
+
+public sealed record ContinuityCursor(
+    [property: JsonPropertyName("playbackRunID")] string PlaybackRunID,
+    [property: JsonPropertyName("deviceID")] string DeviceID,
+    [property: JsonPropertyName("deviceName")] string DeviceName,
+    [property: JsonPropertyName("deviceKind")] string? DeviceKind,
+    [property: JsonPropertyName("cursorSequence")] ulong CursorSequence,
+    [property: JsonPropertyName("capturedAtMS")] long CapturedAtMS,
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("current")] ContinuityTrackLocator Current,
+    [property: JsonPropertyName("currentAbsoluteIndex")] int CurrentAbsoluteIndex,
+    [property: JsonPropertyName("positionMS")] long PositionMS,
+    [property: JsonPropertyName("queueHash")] string? QueueHash);
+
+public sealed record ContinuityItem(
+    [property: JsonPropertyName("locator")] ContinuityTrackLocator Locator,
+    [property: JsonPropertyName("baseOrdinal")] int BaseOrdinal,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("artist")] string Artist,
+    [property: JsonPropertyName("durationMS")] long DurationMS,
+    [property: JsonPropertyName("artworkKey")] string? ArtworkKey);
+
+public sealed record ContinuityQueue(
+    [property: JsonPropertyName("queueHash")] string QueueHash,
+    [property: JsonPropertyName("descriptor")] ContinuityDescriptor Descriptor,
+    [property: JsonPropertyName("items")] IReadOnlyList<ContinuityItem> Items,
+    [property: JsonPropertyName("startAbsoluteIndex")] int StartAbsoluteIndex,
+    [property: JsonPropertyName("totalCount")] int TotalCount,
+    [property: JsonPropertyName("isTruncated")] bool IsTruncated,
+    [property: JsonPropertyName("repeatMode")] string RepeatMode,
+    [property: JsonPropertyName("isShuffled")] bool IsShuffled);
+
+public sealed record ContinuitySnapshot(
+    [property: JsonPropertyName("cursor")] ContinuityCursor Cursor,
+    [property: JsonPropertyName("queue")] ContinuityQueue? Queue,
+    [property: JsonPropertyName("isQueueMissing")] bool IsQueueMissing,
+    [property: JsonPropertyName("hydratedTracks")] IReadOnlyList<Track> HydratedTracks);

@@ -3,6 +3,14 @@ import Foundation
 /// Tunables for open metadata enrichment (ADR-0007). Constructed once at the
 /// composition root and shared across the enrichment machinery.
 public struct EnrichmentConfig: Sendable {
+    /// The default ListenBrainz similar-recordings algorithm. Named once here so
+    /// the app's config default and the Facade's `similarTracks` command read and
+    /// stamp similarity with the *same* string: `similar_recording` rows are keyed
+    /// by (source, algorithm), so a reader using a different algorithm silently
+    /// matches nothing — which reads as "no similar tracks" rather than an error.
+    public static let defaultListenBrainzAlgorithm =
+        "session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30"
+
     /// Descriptive `User-Agent` — REQUIRED by MusicBrainz, must identify the app
     /// and a contact (e.g. `"Mozz/2026.7.6.2 ( https://github.com/thatcube/Mozz )"`).
     public var userAgent: String
@@ -54,7 +62,7 @@ public struct EnrichmentConfig: Sendable {
         maxResolvePerPass: Int = 5000,
         minScore: Int = 90,
         durationToleranceMs: Double = 10_000,
-        listenBrainzAlgorithm: String = "session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30",
+        listenBrainzAlgorithm: String = EnrichmentConfig.defaultListenBrainzAlgorithm,
         listenBrainzMinInterval: TimeInterval = 0.5,
         canonicalPerRunBudget: Int = 200,
         similarityPerRunBudget: Int = 150,

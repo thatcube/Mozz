@@ -215,6 +215,40 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertNotNil(named["t"])
     }
 
+    // MARK: Account
+
+    func testAccountReturnsSignedInIdentityAndExplicitNullAvatar() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+        let serverId = try attachSubsonic(handle)
+
+        let response = try call(handle, [
+            "cmd": "account", "serverId": serverId, "size": 120,
+        ])
+        XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
+        XCTAssertEqual(response["cmd"] as? String, "account")
+        let payload = try XCTUnwrap(response["payload"] as? [String: Any])
+        XCTAssertEqual(Set(payload.keys), ["avatarURL", "displayName", "username"])
+        XCTAssertEqual(payload["displayName"] as? String, "brandon")
+        XCTAssertEqual(payload["username"] as? String, "brandon")
+        XCTAssertTrue(payload["avatarURL"] is NSNull, "Subsonic has no real account photo")
+    }
+
+    func testAccountWithoutAttachIsAClearError() throws {
+        let path = try makeLibrary()
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "account", "serverId": "missing"])
+        XCTAssertEqual(response["ok"] as? Bool, false)
+        XCTAssertTrue(try XCTUnwrap(response["error"] as? String).contains("attached"))
+    }
+
+    func testAccountCommandIsAdvertised() {
+        XCTAssertTrue(mozzSessionCommands.contains("account"))
+    }
+
     // MARK: Sync lifecycle
 
     func testSyncWithoutAttachIsAClearError() throws {
@@ -239,6 +273,7 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertEqual(payload["running"] as? Bool, false)
         XCTAssertEqual(payload["finished"] as? Bool, false)
         XCTAssertEqual(payload["itemsSynced"] as? Int, 0)
+        XCTAssertTrue(try XCTUnwrap(payload["details"] as? [[String: Any]]).isEmpty)
     }
 
     /// A sync against an unreachable host must land in `finished` + `error`
@@ -352,7 +387,8 @@ final class MozzSessionServerTests: XCTestCase {
         XCTAssertEqual(connectId, attachId)
     }
 
-    /// Only Subsonic scopes by username. Folding a Jellyfin or Plex user id into
+    /// Only Subsonic scopes by username. Plex scopes by machine id when the
+    /// resources API supplies it; folding a Jellyfin or Plex user id into
     /// the id would silently orphan every catalog row the iOS app has written,
     /// because iOS derives those without one.
     func testOnlySubsonicScopesTheServerIdByUser() {
@@ -367,8 +403,16 @@ final class MozzSessionServerTests: XCTestCase {
             kind: .plex,
             baseURL: URL(string: "https://plex.example.com")!,
             token: "t", userID: "12345",
+            serverName: "Plex", clientIdentifier: "c",
+            serverMachineIdentifier: "machine-1"))
+        XCTAssertEqual(plex.serverId, "plex-machine-1")
+
+        let legacyPlex = wire(AuthenticatedSession(
+            kind: .plex,
+            baseURL: URL(string: "https://plex.example.com")!,
+            token: "t", userID: "12345",
             serverName: "Plex", clientIdentifier: "c"))
-        XCTAssertEqual(plex.serverId, "plex-https://plex.example.com")
+        XCTAssertEqual(legacyPlex.serverId, "plex-https://plex.example.com")
     }
 
     /// A Subsonic server with two accounts is two libraries, and they must not
@@ -418,6 +462,49 @@ final class MozzSessionServerTests: XCTestCase {
 
         XCTAssertEqual(ids.count, 500)
         XCTAssertEqual(Set(ids).count, 500, "a track came back on two pages")
+    }
+
+    /// The same walk for albums, which is not redundant with the track walk
+    /// above and should have existed all along.
+    ///
+    /// Albums are the one listing keyed on `albumGroupKey`, which `AlbumGrouping`
+    /// builds by joining two parts with U+001F — the character `PageCursor` also
+    /// used as its own separator. So an album cursor came back split into two
+    /// keys, the seek clause was built for one key while its arguments were
+    /// bound for two, and SQLite rejected the statement outright. Every client
+    /// that carries a cursor as text failed on the second page of albums.
+    ///
+    /// The track walk could never have caught it: tracks are keyed on
+    /// `sortTitle`/`title`, which contain no separator. A listing was tested and
+    /// a different listing was broken.
+    func testAlbumCursorPagingWalksTheWholeListingThroughTheABI() async throws {
+        let path = try makeLibrary()
+        let serverId = SyntheticCatalog.defaultServerID
+        let db = try MusicDatabase.open(at: URL(fileURLWithPath: path))
+        try await SyntheticCatalog(db).generate(
+            serverId: serverId, size: .init(artists: 20, albums: 40, tracks: 500))
+
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        var remoteIds: [String] = []
+        var cursor: String?
+        var pages = 0
+        repeat {
+            var request: [String: Any] = ["cmd": "albums", "serverId": serverId, "limit": 7]
+            if let cursor { request["cursor"] = cursor }
+            let response = try call(handle, request)
+            XCTAssertEqual(response["ok"] as? Bool, true, "page \(pages) failed: \(response)")
+            let rows = try XCTUnwrap(response["payload"] as? [[String: Any]])
+            remoteIds.append(contentsOf: rows.compactMap { $0["remoteId"] as? String })
+            cursor = response["nextCursor"] as? String
+            pages += 1
+            XCTAssertLessThan(pages, 50, "paging did not terminate")
+        } while cursor != nil
+
+        XCTAssertGreaterThan(pages, 1, "the catalog produced a single page, so nothing was paged")
+        XCTAssertFalse(remoteIds.isEmpty)
+        XCTAssertEqual(Set(remoteIds).count, remoteIds.count, "an album came back on two pages")
     }
 
     /// A mangled cursor restarts the listing rather than failing. It can only

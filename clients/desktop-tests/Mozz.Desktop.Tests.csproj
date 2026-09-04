@@ -23,10 +23,33 @@
   -->
   <ItemGroup>
     <Compile Include="..\desktop\Core\SecretStore.cs" />
+    <Compile Include="..\desktop\Core\PairingWire.cs" />
+    <Compile Include="..\desktop\Core\PairingLink.cs" />
+    <Compile Include="..\desktop\Core\PairingDiscovery.cs" />
+    <Compile Include="..\desktop\Core\PairingHost.cs" />
+    <Compile Include="..\desktop\Core\CircleRoster.cs" />
+    <Compile Include="..\desktop\Core\ServerSyncJournal.cs" />
+    <!-- The generated command client. Included here for the same reason as
+         everything else in this list: the wire-fixture conformance test has to
+         check the SAME generated code the app ships, not a copy. -->
+    <Compile Include="..\desktop\Generated\**\*.cs" />
     <Compile Include="..\desktop\Core\MozzCore.cs" />
+    <Compile Include="..\desktop\Core\ArtworkUnavailableException.cs" />
+    <Compile Include="..\desktop\Core\FailureReporter.cs" />
+    <Compile Include="..\desktop\Core\RetrySchedule.cs" />
+    <Compile Include="..\desktop\Core\DiskBudget.cs" />
     <Compile Include="..\desktop\Core\MozzServer.cs" />
+    <Compile Include="..\desktop\Core\Downloads\DownloadModels.cs" />
+    <Compile Include="..\desktop\Core\Downloads\ICoreInvoker.cs" />
+    <Compile Include="..\desktop\Core\Downloads\IDownloadCommands.cs" />
+    <Compile Include="..\desktop\Core\Downloads\DownloadCommands.cs" />
+    <Compile Include="..\desktop\Core\Downloads\DownloadLayout.cs" />
+    <Compile Include="..\desktop\Core\Downloads\DownloadService.cs" />
+    <Compile Include="..\desktop\Core\PlaybackSettingsCommands.cs" />
     <Compile Include="..\desktop\Core\Models.cs" />
     <Compile Include="..\desktop\Core\AppPreferences.cs" />
+    <Compile Include="..\desktop\Core\MozzTheme.cs" />
+    <Compile Include="..\desktop\Core\AppVersion.cs" />
     <Compile Include="..\desktop\Core\DesktopEqualizer.cs" />
     <Compile Include="..\desktop\Core\LibrarySelectionState.cs" />
     <Compile Include="..\desktop\Core\PlayHistoryRecorder.cs" />
@@ -35,28 +58,39 @@
     <Compile Include="..\desktop\ViewModels\GridRows.cs" />
     <Compile Include="..\desktop\ViewModels\HomeMixes.cs" />
     <Compile Include="..\desktop\ViewModels\LibraryNavigation.cs" />
+    <Compile Include="..\desktop\ViewModels\DetailRows.cs" />
     <Compile Include="..\desktop\ViewModels\MediaDetailFormatting.cs" />
+    <Compile Include="..\desktop\ViewModels\DownloadRows.cs" />
+    <Compile Include="..\desktop\ViewModels\PlaybackQueue.cs" />
+    <Compile Include="..\desktop\ViewModels\ContinuityPresentation.cs" />
+    <Compile Include="..\desktop\ViewModels\SearchPresentation.cs" />
+    <Compile Include="..\desktop\ViewModels\GenrePresentation.cs" />
+    <Compile Include="..\desktop\ViewModels\SettingsModels.cs" />
     <Compile Include="..\desktop\Core\ArtworkCache.cs" />
     <Compile Include="..\desktop\Core\ArtworkBinder.cs" />
   </ItemGroup>
 
   <!--
-    The audio engine's pure-managed core is compiled in directly too, for the
-    same reason: it lets the DSP, ring buffer, WAV decoder and gapless pipeline
-    be tested headlessly, and because these files are platform-neutral BCL-only
-    code the tests then run unchanged on the Windows CI leg — which is the only
-    place the sample pipeline gets exercised off macOS before a user does.
+    The audio engine's pure-managed code is compiled in directly too, for the
+    same reason: it lets the byte-stream sources (file and HTTP) be tested
+    headlessly, and because these files are platform-neutral BCL-only code the
+    tests then run unchanged on the Windows CI leg.
 
-    MiniAudioEngine.cs is excluded on purpose: it is the one file that binds the
-    native Hexa.NET.MiniAudio device, and nothing under test needs a sound card.
-    Excluding it keeps the native package out of the headless run entirely.
+    Audio\Native\** is excluded on purpose: those files P/Invoke the Rust
+    engine's shared library (libmozz_audio_ffi), and nothing under test needs a
+    sound card or the dylib. Excluding them keeps the native dependency out of
+    the headless run entirely — the streaming layer beneath them is what the
+    tests exercise, and it is pure managed code.
   -->
   <ItemGroup>
-    <Compile Include="..\desktop\Audio\**\*.cs" Exclude="..\desktop\Audio\MiniAudioEngine.cs" />
+    <Compile Include="..\desktop\Audio\**\*.cs" Exclude="..\desktop\Audio\Native\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Google.Protobuf" Version="3.33.1" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>

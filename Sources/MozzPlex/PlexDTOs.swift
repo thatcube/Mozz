@@ -113,17 +113,43 @@ struct PlexPinResponse: Decodable {
 
 struct PlexResource: Decodable {
     let name: String?
+    /// Plex server machine id. The resource is the server; its `connections`
+    /// are alternate addresses for that same machine.
     let clientIdentifier: String?
     let provides: String?
     let accessToken: String?
     let connections: [PlexConnectionDTO]?
 }
 
-/// The signed-in plex.tv account. Only the avatar is read; `thumb` is an
-/// absolute plex.tv URL (with a `?c=` cache-buster that changes when the user
-/// swaps their photo, so the URL is re-fetched rather than cached forever).
+/// The signed-in plex.tv account. `thumb` is an absolute plex.tv URL (with a
+/// `?c=` cache-buster that changes when the user swaps their photo, so the URL
+/// is re-fetched rather than cached forever).
 struct PlexAccountUser: Decodable {
+    let username: String?
+    let title: String?
+    let email: String?
     let thumb: String?
+}
+
+struct PlexHomeUsersResponse: Decodable {
+    let users: [PlexHomeUserDTO]
+}
+
+struct PlexHomeUserDTO: Decodable {
+    let id: Int?
+    let uuid: String?
+    let title: String?
+    let username: String?
+    let admin: Bool?
+    let restricted: Bool?
+    let protected: Bool?
+    let hasPassword: Bool?
+    let thumb: String?
+}
+
+struct PlexHomeSwitchResponse: Decodable {
+    let authToken: String?
+    let authenticationToken: String?
 }
 
 struct PlexConnectionDTO: Decodable {

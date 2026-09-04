@@ -38,7 +38,7 @@ public final class HistoryCoordinator: ObservableObject {
     /// batch.
     static let minimumInterval: TimeInterval = 30 * 60
 
-    private var store: (any HistoryStore)?
+    private var stores: [any HistoryStore] = []
     private var database: MusicDatabase?
     private var deviceID = ""
     private var deviceName = ""
@@ -65,19 +65,32 @@ public final class HistoryCoordinator: ObservableObject {
 
     // MARK: Lifecycle
 
-    /// Point the coordinator at a signed-in server, or clear it on sign-out.
+    /// Point the coordinator at every available relay, or clear it on sign-out.
     public func activate(
-        store: (any HistoryStore)?,
+        stores: [any HistoryStore],
         database: MusicDatabase?,
         deviceID: String,
         deviceName: String
     ) {
-        self.store = store
+        self.stores = stores
         self.database = database
         self.deviceID = deviceID
         self.deviceName = deviceName
         lastSyncedAt = nil
         hasBackfilled = false
+    }
+
+    /// Add a relay that became available after activation (for example after
+    /// provisioning a newly-created circle). The local log remains the source
+    /// of truth; this only adds another path for it to travel.
+    public func addStore(_ store: any HistoryStore) {
+        stores.append(store)
+        lastSyncedAt = nil
+    }
+
+    public func setStores(_ stores: [any HistoryStore]) {
+        self.stores = stores
+        lastSyncedAt = nil
     }
 
     /// Sync if enough time has passed. Safe to call often.
@@ -129,19 +142,19 @@ public final class HistoryCoordinator: ObservableObject {
             hasBackfilled = true
         }
 
-        if let store {
+        if !stores.isEmpty {
             let since = now.addingTimeInterval(-Double(HistoryMerge.defaultWindowDays) * 86_400)
             // Take in first, then publish. A device that has been away should not
             // overwrite its slot before it has seen what happened while it was
             // gone — and importing first means this batch is written from a log
             // that already reflects the others.
-            await importRemote(sync: sync, store: store, since: since)
-            await publishLocal(sync: sync, store: store, since: since, now: now)
+            await importRemote(sync: sync, stores: stores, since: since)
+            await publishLocal(sync: sync, stores: stores, since: since, now: now)
         }
 
         // Always. The year in review is built from local events, so it works on
         // every backend whether or not anything can be relayed.
-        await refreshRollup(store: store, now: now)
+        await refreshRollup(stores: stores, now: now)
 
         lastSyncedAt = now
     }
@@ -150,10 +163,19 @@ public final class HistoryCoordinator: ObservableObject {
 
     private func importRemote(
         sync: HistorySyncStore,
-        store: any HistoryStore,
+        stores: [any HistoryStore],
         since: Date
     ) async {
-        guard let batches = try? await store.loadBatches(), !batches.isEmpty else { return }
+        var newestByDevice: [String: HistoryBatch] = [:]
+        for store in stores {
+            guard let batches = try? await store.loadBatches() else { continue }
+            for batch in batches
+            where batch.writtenAtMS > (newestByDevice[batch.deviceID]?.writtenAtMS ?? .min) {
+                newestByDevice[batch.deviceID] = batch
+            }
+        }
+        let batches = Array(newestByDevice.values)
+        guard !batches.isEmpty else { return }
         guard let known = try? await sync.knownUIDs(since: since) else { return }
 
         let fresh = HistoryMerge.newEvents(
@@ -167,7 +189,7 @@ public final class HistoryCoordinator: ObservableObject {
 
     private func publishLocal(
         sync: HistorySyncStore,
-        store: any HistoryStore,
+        stores: [any HistoryStore],
         since: Date,
         now: Date
     ) async {
@@ -179,7 +201,8 @@ public final class HistoryCoordinator: ObservableObject {
         let windowed = HistoryMerge.window(
             events: events,
             now: now,
-            maximumBytes: store.maximumBatchBytes
+            maximumBytes: stores.map(\.maximumBatchBytes).min()
+                ?? HistoryExchangeStore.defaultMaximumBatchBytes
         )
         // An empty window is still worth publishing once: it tells other devices
         // this one exists and is current, which is what keeps its slot from
@@ -191,7 +214,9 @@ public final class HistoryCoordinator: ObservableObject {
             windowStartMS: windowed.windowStartMS,
             events: windowed.events
         )
-        try? await store.save(batch)
+        for store in stores {
+            try? await store.save(batch)
+        }
     }
 
     /// Rebuild this device's rollup for the current year, and relay it if there
@@ -200,7 +225,7 @@ public final class HistoryCoordinator: ObservableObject {
     /// The build is unconditional: a year in review is assembled from the local
     /// log, so it works identically on every backend. Publishing is what a relay
     /// adds, and its absence costs other devices' contributions — not the review.
-    private func refreshRollup(store: (any HistoryStore)?, now: Date) async {
+    private func refreshRollup(stores: [any HistoryStore], now: Date) async {
         guard let database else { return }
         let year = HistoryRollupBuilder.utcCalendar.component(.year, from: now)
         guard let rollup = try? await HistoryRollupBuilder(database).build(
@@ -209,7 +234,9 @@ public final class HistoryCoordinator: ObservableObject {
             now: now
         ) else { return }
         currentYear = rollup
-        try? await store?.save(rollup)
+        for store in stores {
+            try? await store.save(rollup)
+        }
     }
 
     // MARK: Year in review
@@ -226,7 +253,18 @@ public final class HistoryCoordinator: ObservableObject {
     /// reason a year in review is available on every backend rather than only
     /// where a server happens to offer somewhere to write.
     public func yearInReview(_ year: Int) async -> HistoryRollup? {
-        let published = (try? await store?.loadRollups(year: year)) ?? []
+        var newestByDevice: [String: HistoryRollup] = [:]
+        for store in stores {
+            guard let rollups = try? await store.loadRollups(year: year) else {
+                continue
+            }
+            for rollup in rollups
+            where rollup.updatedAtMS
+                > (newestByDevice[rollup.deviceID]?.updatedAtMS ?? .min) {
+                newestByDevice[rollup.deviceID] = rollup
+            }
+        }
+        let published = Array(newestByDevice.values)
         if let merged = HistoryRollupMerge.merged(published) { return merged }
         guard let database else { return nil }
         return try? await HistoryRollupBuilder(database).build(year: year, deviceID: deviceID)

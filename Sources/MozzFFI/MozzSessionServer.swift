@@ -1,7 +1,6 @@
 import Foundation
 import MozzCore
 import MozzDatabase
-import MozzEnrichment
 import MozzJellyfin
 import MozzPlex
 import MozzSubsonic
@@ -58,10 +57,8 @@ struct WireSession: Encodable {
     var userID: String?
     var serverName: String
     var clientIdentifier: String
+    var serverMachineIdentifier: String?
     var accountToken: String?
-    /// The server's own machine identifier — the thing that stays constant when
-    /// its address changes. Persist it: it is what `plexResolve` matches on.
-    var machineIdentifier: String?
 }
 
 struct WirePinSession: Encodable {
@@ -75,58 +72,31 @@ struct WirePinSession: Encodable {
     var linkURL: String?
 }
 
+struct WirePlexAccountToken: Encodable {
+    var accountToken: String?
+}
+
+struct WirePlexHomeUser: Encodable {
+    var id: String
+    var name: String
+    var requiresPIN: Bool
+    var isAdmin: Bool
+    var isRestricted: Bool
+    var avatarURL: String?
+}
+
+struct WirePlexSwitchedToken: Encodable {
+    var accountToken: String
+}
+
 struct WireStream: Encodable {
     var url: String
     var isTranscoded: Bool
     var sessionID: String?
 }
 
-struct WireLyricLine: Encodable {
-    var text: String
-    /// Seconds from the start of the track; absent for unsynced lyrics.
-    var start: TimeInterval?
-}
-
-struct WireLyrics: Encodable {
-    var lines: [WireLyricLine]
-    var isSynced: Bool
-    var source: String?
-    var staySilent: Bool
-}
-
 struct WireURL: Encodable {
     var url: String?
-}
-
-struct WireLike: Encodable {
-    var liked: Bool
-}
-
-/// What a server can do, so a client can ask instead of branching on its name.
-///
-/// The like control is the reason this crosses the boundary: Jellyfin has a
-/// heart, Plex has five stars, Subsonic has both. A client that guessed from the
-/// backend's name would be wrong the first time a server grew a feature.
-struct WireCapabilities: Encodable {
-    var backend: String
-    var serverVersion: String?
-    var supportsFavorites: Bool
-    var supportsRatings: Bool
-    var supportsLyrics: Bool
-    var supportsTranscoding: Bool
-    var supportsOriginalFileDownload: Bool
-}
-
-private func wire(_ c: ServerCapabilities) -> WireCapabilities {
-    WireCapabilities(
-        backend: c.backend.rawValue,
-        serverVersion: c.serverVersion,
-        supportsFavorites: c.supportsFavorites,
-        supportsRatings: c.supportsRatings,
-        supportsLyrics: c.supportsLyrics,
-        supportsTranscoding: c.supportsTranscoding,
-        supportsOriginalFileDownload: c.supportsOriginalFileDownload
-    )
 }
 
 struct WireSyncStart: Encodable {
@@ -138,13 +108,24 @@ struct WireSyncStatus: Encodable {
     var running: Bool
     var finished: Bool
     var phase: String?
+    var phaseLabel: String?
     var itemsSynced: Int
     var total: Int?
+    var details: [WireSyncPhaseDetail]
     var error: String?
     var artists: Int?
     var albums: Int?
     var tracks: Int?
     var playlists: Int?
+}
+
+struct WireSyncPhaseDetail: Encodable {
+    var phase: String
+    var label: String
+    var state: String
+    var synced: Int
+    var total: Int?
+    var isComplete: Bool
 }
 
 struct WireLibrary: Encodable {
@@ -161,9 +142,10 @@ final class SyncBox: @unchecked Sendable {
     private let lock = NSLock()
     private var running = false
     private var finished = false
-    private var phase: String?
+    private var phase: SyncProgress.Phase?
     private var itemsSynced = 0
     private var total: Int?
+    private var details: [SyncProgress.PhaseDetail] = []
     private var failure: String?
     private var counts: (artists: Int, albums: Int, tracks: Int, playlists: Int)?
 
@@ -177,16 +159,18 @@ final class SyncBox: @unchecked Sendable {
         phase = nil
         itemsSynced = 0
         total = nil
+        details = []
         failure = nil
         counts = nil
         return true
     }
 
-    func report(phase: String, itemsSynced: Int, total: Int?) {
+    func report(_ progress: SyncProgress) {
         lock.lock(); defer { lock.unlock() }
-        self.phase = phase
-        self.itemsSynced = itemsSynced
-        self.total = total
+        self.phase = progress.phase
+        self.itemsSynced = progress.itemsSynced
+        self.total = progress.totalCount
+        self.details = progress.details
     }
 
     func succeed(artists: Int, albums: Int, tracks: Int, playlists: Int) {
@@ -206,12 +190,30 @@ final class SyncBox: @unchecked Sendable {
     func status() -> WireSyncStatus {
         lock.lock(); defer { lock.unlock() }
         return WireSyncStatus(
-            running: running, finished: finished, phase: phase,
-            itemsSynced: itemsSynced, total: total, error: failure,
+            running: running, finished: finished, phase: phase?.rawValue,
+            phaseLabel: phase?.label, itemsSynced: itemsSynced, total: total,
+            details: details.map(wireSyncPhaseDetail), error: failure,
             artists: counts?.artists, albums: counts?.albums,
             tracks: counts?.tracks, playlists: counts?.playlists
         )
     }
+}
+
+private func wireSyncPhaseDetail(_ detail: SyncProgress.PhaseDetail) -> WireSyncPhaseDetail {
+    let state: String
+    switch detail.state {
+    case .pending: state = "pending"
+    case .syncing: state = "syncing"
+    case .done: state = "done"
+    }
+    return WireSyncPhaseDetail(
+        phase: detail.phase.rawValue,
+        label: detail.phase.label,
+        state: state,
+        synced: detail.synced,
+        total: detail.total,
+        isComplete: detail.isComplete
+    )
 }
 
 /// Backends and their sync boxes, keyed by server id.
@@ -219,12 +221,6 @@ final class BackendTable: @unchecked Sendable {
     private let lock = NSLock()
     private var backends: [String: any MusicBackend] = [:]
     private var syncs: [String: SyncBox] = [:]
-    /// Capabilities, remembered per server.
-    ///
-    /// `detectCapabilities()` is a network call on every backend, so it cannot
-    /// run on the path of something as small as a like. Fetched once on first
-    /// need and kept for the life of the session.
-    private var caps: [String: ServerCapabilities] = [:]
 
     func set(_ backend: any MusicBackend, for id: String) {
         lock.lock(); defer { lock.unlock() }
@@ -246,95 +242,6 @@ final class BackendTable: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return Array(backends.keys)
     }
-
-    func capabilities(_ id: String) -> ServerCapabilities? {
-        lock.lock(); defer { lock.unlock() }
-        return caps[id]
-    }
-
-    func setCapabilities(_ value: ServerCapabilities, for id: String) {
-        lock.lock(); defer { lock.unlock() }
-        caps[id] = value
-    }
-}
-
-/// A backend's capabilities, fetched once per session and remembered.
-private func resolveCapabilities(
-    _ backend: any MusicBackend,
-    _ session: SessionContext
-) async throws -> ServerCapabilities {
-    let id = backend.connection.id
-    if let cached = session.backends.capabilities(id) { return cached }
-    let detected = try await backend.detectCapabilities()
-    session.backends.setCapabilities(detected, for: id)
-    return detected
-}
-
-/// Apply a like or rating: local row first, then the server.
-///
-/// Offline-first, matching what the iOS app does rather than inventing a second
-/// policy. The local database is the source of truth a client reads back, so it
-/// is written immediately and the change is queued in the outbox; the server
-/// write is attempted right away and simply stays queued if it fails. That is
-/// what makes a like survive a tunnel.
-private func applyLike(
-    _ request: ServerRequest,
-    _ session: SessionContext,
-    _ backend: any MusicBackend,
-    remoteId: String,
-    value: FavoriteChange.Value
-) async throws -> String {
-    let serverId = backend.connection.id
-    let itemType = request.itemType.flatMap(CatalogItemType.init(rawValue:)) ?? .track
-    let favorites = FavoritesStore(session.database)
-
-    let wasLiked = (try? await favorites.isLiked(serverId: serverId, remoteId: remoteId)) ?? false
-    let change = FavoriteChange(
-        serverId: serverId, remoteId: remoteId, itemType: itemType, value: value)
-    let nowLiked = try await favorites.applyLocally(change)
-
-    // A like is a recommender signal, not just a flag, so the transition is
-    // recorded the same way iOS records it. Only when the client has identified
-    // itself: a like must never fail because a device had no name to give.
-    if nowLiked != wasLiked, let deviceID = request.deviceID ?? request.deviceId, !deviceID.isEmpty {
-        _ = try? await HistoryExchangeStore(session.database).recordLocalPlayEvent(
-            PlayEvent(trackID: remoteId, kind: nowLiked ? .liked : .unliked),
-            serverId: serverId,
-            deviceID: deviceID
-        )
-    }
-
-    await flushFavorites(session, backend)
-    return session.success(request, WireLike(liked: nowLiked))
-}
-
-/// Replay queued like/rating writes, dropping each one that lands.
-///
-/// A failure breaks the loop rather than skipping: the usual cause is the server
-/// being unreachable, and the rest of the queue will fail the same way. They stay
-/// queued for the next attempt.
-private func flushFavorites(_ session: SessionContext, _ backend: any MusicBackend) async {
-    let serverId = backend.connection.id
-    let favorites = FavoritesStore(session.database)
-    let pending = (try? await favorites.pending(serverId: serverId)) ?? []
-    for op in pending {
-        let type = CatalogItemType(rawValue: op.itemType) ?? .track
-        do {
-            if op.kind == "favorite" {
-                try await backend.setFavorite((op.value ?? 0) >= 0.5, itemID: op.remoteId, type: type)
-            } else {
-                try await backend.setRating(op.value, itemID: op.remoteId, type: type)
-            }
-            // Compare-and-delete: if the user re-toggled while this (slow) write
-            // was in flight, its createdAt changed and this no-ops, leaving the
-            // newer intent queued.
-            if let id = op.id {
-                _ = try await favorites.removePending(id: id, ifUnchangedSince: op.createdAt)
-            }
-        } catch {
-            break
-        }
-    }
 }
 
 // MARK: - Identity
@@ -344,11 +251,18 @@ private func flushFavorites(_ session: SessionContext, _ backend: any MusicBacke
 /// This has to agree byte for byte across clients: it is the key every catalog
 /// row is scoped by, so a desktop client that derived it differently would mirror
 /// the same server into a second, parallel library.
-func mozzServerId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
-    if kind == .subsonic, let username, !username.isEmpty {
-        return "\(kind.rawValue)-\(username.lowercased())-\(baseURL.absoluteString)"
-    }
-    return "\(kind.rawValue)-\(baseURL.absoluteString)"
+func mozzServerId(
+    kind: BackendKind,
+    baseURL: URL,
+    username: String? = nil,
+    serverMachineIdentifier: String? = nil
+) -> String {
+    ServerIdentity.id(
+        kind: kind,
+        baseURL: baseURL,
+        username: username,
+        serverMachineIdentifier: serverMachineIdentifier
+    )
 }
 
 private func clientInfo() -> ClientInfo {
@@ -407,29 +321,76 @@ func dispatchServerCommand(
         let authenticated = try await auth.completeLogin(accountToken: accountToken)
         return session.success(request, wire(authenticated))
 
-    case "plexResolve":
-        // The repair for a pinned address that has stopped answering. See
-        // ADR-0017: Plex gives a server several addresses, sign-in picks one,
-        // and when that one dies the app looks broken rather than disconnected.
-        //
-        // The server id is NOT re-derived. The caller passes the id it already
-        // holds and gets it back unchanged, because the catalogue, the likes and
-        // the play history are keyed on it — repointing the address must not
-        // orphan them.
-        guard let accountToken = request.accountToken, !accountToken.isEmpty else {
-            return session.failure(request, "plexResolve needs the Plex accountToken")
+    case "plexPinToken":
+        guard let pinId = request.pinId, let code = request.code else {
+            return session.failure(request, "plexPinToken needs pinId and code")
         }
-        let resolver = PlexAuthenticator(
+        let auth = PlexAuthenticator(
             clientInfo: clientInfo(),
-            clientIdentifier: request.clientIdentifier ?? fallbackClientIdentifier())
-        let resolved = try await resolver.resolveConnection(
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let token = try await auth.checkPin(id: pinId, code: code)
+        return session.success(
+            request,
+            WirePlexAccountToken(accountToken: token))
+
+    case "plexHomeUsers":
+        guard let accountToken = request.accountToken else {
+            return session.failure(
+                request, "plexHomeUsers needs accountToken")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let users = try await auth.homeUsers(accountToken: accountToken)
+        return session.success(request, users.map {
+            WirePlexHomeUser(
+                id: $0.id,
+                name: $0.name,
+                requiresPIN: $0.requiresPIN,
+                isAdmin: $0.isAdmin,
+                isRestricted: $0.isRestricted,
+                avatarURL: $0.avatarURL?.absoluteString)
+        })
+
+    case "plexHomeSwitch":
+        guard let accountToken = request.accountToken,
+              let homeUserID = request.homeUserID else {
+            return session.failure(
+                request,
+                "plexHomeSwitch needs accountToken and homeUserID")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let user = PlexHomeUser(
+            id: homeUserID,
+            name: "",
+            requiresPIN: request.profilePIN != nil,
+            isAdmin: false)
+        let switched = try await auth.token(
+            for: user,
             accountToken: accountToken,
-            machineIdentifier: request.machineIdentifier,
-            serverName: request.serverName
-        )
-        var wired = wire(resolved)
-        if let existing = request.serverId, !existing.isEmpty { wired.serverId = existing }
-        return session.success(request, wired)
+            pin: request.profilePIN)
+        return session.success(
+            request,
+            WirePlexSwitchedToken(accountToken: switched))
+
+    case "plexCompleteLogin":
+        guard let accountToken = request.accountToken else {
+            return session.failure(
+                request, "plexCompleteLogin needs accountToken")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let authenticated = try await auth.completeLogin(
+            accountToken: accountToken,
+            plexUserID: request.homeUserID)
+        return session.success(request, wire(authenticated))
 
     // MARK: Attach / mirror
 
@@ -437,6 +398,14 @@ func dispatchServerCommand(
         let backend = try makeBackend(request)
         session.backends.set(backend, for: backend.connection.id)
         try await CatalogWriter(session.database).saveServer(backend.connection)
+        if let scope = CatalogSnapshotScope(
+            connection: backend.connection,
+            libraryIDs: request.allMusicLibraries == true
+                ? ["*"]
+                : request.musicSectionIDs) {
+            _ = try await CatalogSnapshotDatabase(session.database)
+                .prepare(scope: scope)
+        }
         return session.success(request, ["serverId": backend.connection.id])
 
     case "libraries":
@@ -445,6 +414,17 @@ func dispatchServerCommand(
         }
         let libraries = try await backend.fetchLibraries()
         return session.success(request, libraries.map { WireLibrary(id: $0.id, name: $0.name) })
+
+    case "account":
+        guard let backend = try requireBackend(request, session) else {
+            return session.failure(request, "account needs an attached serverId")
+        }
+        let account = await backend.signedInAccount(size: request.size ?? 120)
+        return session.success(request, WireAccount(
+            displayName: account.displayName,
+            username: account.username,
+            avatarURL: account.avatarURL?.absoluteString
+        ))
 
     case "sync":
         return try startSync(request, session)
@@ -474,79 +454,6 @@ func dispatchServerCommand(
             isTranscoded: source.isTranscoded,
             sessionID: source.sessionID
         ))
-
-    case "lyrics":
-        guard let remoteId = request.remoteId, let serverId = request.serverId else {
-            return session.failure(request, "lyrics needs remoteId and serverId")
-        }
-        guard let record = try await session.repository.track(
-            serverId: serverId, remoteId: remoteId
-        ) else {
-            return session.failure(request, "no track \(remoteId)")
-        }
-        // The backend is deliberately optional. A server that carries no lyrics
-        // for this track — or one that is not attached at the moment — still gets
-        // the LRCLIB fallback, which is where most lyrics come from anyway.
-        let lyricsBackend = try requireBackend(request, session)
-        let resolution = await LyricsService().resolve(
-            track: record.toDomain(),
-            backend: lyricsBackend,
-            context: .visible,
-            useLRCLIB: request.useLRCLIB ?? true,
-            userInitiated: true
-        )
-        return session.success(request, WireLyrics(
-            lines: (resolution.lyrics?.lines ?? []).map {
-                WireLyricLine(text: $0.text, start: $0.start)
-            },
-            isSynced: resolution.lyrics?.isSynced ?? false,
-            source: resolution.lyrics?.source?.rawValue,
-            // Distinguishes "this track has no lyrics" from "we could not find
-            // out" — the client must stay quiet for the second rather than
-            // asserting a negative it cannot support.
-            staySilent: resolution.staySilent
-        ))
-
-    case "capabilities":
-        guard let backend = try requireBackend(request, session) else {
-            return session.failure(request, "capabilities needs an attached serverId")
-        }
-        let caps = try await resolveCapabilities(backend, session)
-        return session.success(request, wire(caps))
-
-    case "setLiked":
-        guard let backend = try requireBackend(request, session) else {
-            return session.failure(request, "setLiked needs an attached serverId")
-        }
-        guard let remoteId = request.remoteId else {
-            return session.failure(request, "setLiked needs remoteId")
-        }
-        guard let liked = request.liked else {
-            return session.failure(request, "setLiked needs liked")
-        }
-        let caps = try await resolveCapabilities(backend, session)
-        // The one control every backend can express, in each one's own terms: a
-        // boolean favourite where there is one, and the "I really like this"
-        // star where there is not. `LikePolicy` owns both halves of that
-        // translation so a like means the same thing on every client.
-        let value: FavoriteChange.Value = caps.supportsFavorites
-            ? .favorite(liked)
-            : .rating(liked ? LikePolicy.likeStars : nil)
-        return try await applyLike(request, session, backend, remoteId: remoteId, value: value)
-
-    case "setRating":
-        guard let backend = try requireBackend(request, session) else {
-            return session.failure(request, "setRating needs an attached serverId")
-        }
-        guard let remoteId = request.remoteId else {
-            return session.failure(request, "setRating needs remoteId")
-        }
-        let caps = try await resolveCapabilities(backend, session)
-        guard caps.supportsRatings else {
-            return session.failure(request, "this server has no ratings — use setLiked")
-        }
-        return try await applyLike(
-            request, session, backend, remoteId: remoteId, value: .rating(request.stars))
 
     case "artworkURL":
         guard let backend = try requireBackend(request, session) else {
@@ -624,7 +531,8 @@ func wire(_ authenticated: AuthenticatedSession) -> WireSession {
         serverId: mozzServerId(
             kind: authenticated.kind,
             baseURL: authenticated.baseURL,
-            username: authenticated.kind == .subsonic ? authenticated.userID : nil
+            username: authenticated.kind == .subsonic ? authenticated.userID : nil,
+            serverMachineIdentifier: authenticated.serverMachineIdentifier
         ),
         kind: authenticated.kind.rawValue,
         baseURL: authenticated.baseURL.absoluteString,
@@ -632,8 +540,8 @@ func wire(_ authenticated: AuthenticatedSession) -> WireSession {
         userID: authenticated.userID,
         serverName: authenticated.serverName,
         clientIdentifier: authenticated.clientIdentifier,
-        accountToken: authenticated.accountToken,
-        machineIdentifier: authenticated.machineIdentifier
+        serverMachineIdentifier: authenticated.serverMachineIdentifier,
+        accountToken: authenticated.accountToken
     )
 }
 
@@ -650,33 +558,37 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
         throw MozzError.unsupported("attach needs token")
     }
     let identifier = request.clientIdentifier ?? fallbackClientIdentifier()
-    // An account may keep its identity across a change of address. Plex hands out
-    // several candidate addresses for one server — local, remote, relay — and
-    // which of them works depends on the network the phone is on right now. The
-    // catalogue, the likes and the play history are all keyed on this id, so
-    // deriving it from whichever address happened to answer means moving between
-    // Wi-Fi and cellular can orphan the library. When the caller already knows the
-    // account's id, that is the identity; the derived one is only for an account
-    // being met for the first time.
+    let requestedSectionIDs = Array(Set(
+        (request.musicSectionIDs ?? request.musicSectionID.map { [$0] } ?? [])
+            .filter { !$0.isEmpty }
+    )).sorted()
     var connection = ServerConnection(
-        id: request.serverId ?? mozzServerId(kind: kind, baseURL: baseURL, username: request.username),
+        id: ServerIdentity.id(
+            kind: kind,
+            baseURL: baseURL,
+            username: request.username,
+            serverMachineIdentifier: request.serverMachineIdentifier
+        ),
         kind: kind,
         name: request.serverName ?? kind.rawValue.capitalized,
         baseURL: baseURL,
-        userID: request.userID,
+        userID: request.userID ?? (kind == .subsonic ? request.username : nil),
         clientIdentifier: identifier
     )
-    connection.musicSectionID = request.musicSectionID
+    connection.musicSectionID = requestedSectionIDs.first
 
     switch kind {
     case .jellyfin:
         return JellyfinBackend(
             connection: connection, token: token, clientInfo: clientInfo(),
-            musicLibraryId: request.musicSectionID)
+            musicLibraryId: requestedSectionIDs.first)
     case .plex:
         return PlexBackend(
             connection: connection, token: token, clientInfo: clientInfo(),
-            musicSectionIDs: request.musicSectionID.map { [$0] })
+            musicSectionIDs: requestedSectionIDs.isEmpty
+                ? nil
+                : requestedSectionIDs,
+            accountToken: request.accountToken)
     case .subsonic:
         guard let credential = SubsonicCredential.decode(token) else {
             throw MozzError.unsupported("subsonic attach needs an encoded credential as token")
@@ -721,11 +633,7 @@ private func startSync(_ request: ServerRequest, _ session: SessionContext) thro
         let engine = LibrarySyncEngine(backend: backend, database: database)
         do {
             let summary = try await engine.sync(plan: .full, startMode: .resumeIfPossible) { progress in
-                box.report(
-                    phase: progress.phase.rawValue,
-                    itemsSynced: progress.itemsSynced,
-                    total: progress.totalCount
-                )
+                box.report(progress)
             }
             box.succeed(
                 artists: summary.artists, albums: summary.albums,

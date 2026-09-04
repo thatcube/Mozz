@@ -14,6 +14,8 @@ import BackgroundTasks
 import MozzAnalysis
 import MozzRecommend
 import MozzEnrichment
+import MozzPairing
+import MozzRelay
 import MozzSync
 import MozzPlex
 import MozzJellyfin
@@ -32,6 +34,9 @@ import Intents
 /// Failures while activating the screenshot fixture. Its own category so a
 /// headless capture run can be diagnosed from the simulator log.
 private let screenshotLog = Logger(subsystem: "com.thatcube.Mozz", category: "screenshots")
+private let playbackSettingsLog = Logger(
+    subsystem: "com.thatcube.Mozz",
+    category: "playback-settings")
 
 /// A resolver whose delegate can be swapped at runtime. The ``PlaybackEngine``
 /// is created once at launch, but the active server (and therefore the offline/
@@ -100,6 +105,12 @@ public final class AppEnvironment: ObservableObject {
     /// Cross-device listening history — the log behind the taste profile, which
     /// no backend records (skips and partial plays exist only locally).
     public let history = HistoryCoordinator()
+    private var serverHistoryStores: [any HistoryStore] = []
+    private var relayHistoryChannelID: String?
+    private var relayHistoryExpiresAtMS: Int64?
+    private var relayHistoryStore: RelayHistoryStore?
+    private var lastRelayStateSyncAt: Date?
+    private var isConfiguringRelayHistory = false
     public let playEvents: PlayEventStore
     /// On-device recommendation engine ("Mozz Weekly"); computes + persists sets
     /// off-main so the Home shelf reads instantly and offline.
@@ -127,8 +138,11 @@ public final class AppEnvironment: ObservableObject {
     public static let equalizerEnabledKey = "mozz.equalizerEnabled"
     /// UserDefaults key for the persisted EQ curve (JSON `EqualizerSettings`).
     public static let equalizerSettingsKey = "mozz.equalizerSettings"
+    public static let replayGainModeKey = "mozz.replayGainMode"
+    public static let replayGainPreampKey = "mozz.replayGainPreampDB"
     /// Debounces EQ persistence so a slider drag doesn't hammer UserDefaults.
     private var equalizerPersistTask: Task<Void, Never>?
+    private var replayGainMode: MozzCore.ReplayGainMode = .track
     /// Offline-first like/rating writes (local DB + queued server write-back).
     public let favorites: FavoritesStore
     public let credentials: any CredentialStore
@@ -357,6 +371,7 @@ public final class AppEnvironment: ObservableObject {
         do {
             try await activate(saved)
             restoreLastPlaybackSession()
+            syncHistoryIfDue()
         } catch {
             // Only a server that REJECTS the credential is grounds for throwing
             // it away. Anything else — no network yet at cold launch, a server
@@ -430,6 +445,7 @@ public final class AppEnvironment: ObservableObject {
             guard generation == self.activationGeneration else { return }
             self.setupError = nil
             self.isSettingUp = false
+            self.syncHistoryIfDue(forceRelayState: true)
         }
     }
 
@@ -438,9 +454,11 @@ public final class AppEnvironment: ObservableObject {
         let stored = StoredSession(
             kind: session.kind, baseURL: session.baseURL, token: session.token,
             userID: session.userID, serverName: session.serverName,
-            clientIdentifier: session.clientIdentifier, musicSectionID: nil,
-            accountToken: session.accountToken, selectedMusicSectionIDs: nil,
-            machineIdentifier: session.machineIdentifier
+            clientIdentifier: session.clientIdentifier,
+            serverMachineIdentifier: session.serverMachineIdentifier,
+            musicSectionID: session.musicSectionID,
+            accountToken: session.accountToken,
+            selectedMusicSectionIDs: session.selectedMusicSectionIDs
         )
         // Persist before activation so buildBackend's Plex section resolution can
         // load + update it. On failure/cancel we CLEAR it, so a half-saved session
@@ -466,6 +484,7 @@ public final class AppEnvironment: ObservableObject {
             guard generation == activationGeneration else { return }  // superseded
             setupError = nil
             isSettingUp = false                 // success → enter the app
+            syncHistoryIfDue(forceRelayState: true)
         } catch is CancellationError {
             // Don't clobber a newer activation's freshly-saved session/state.
             guard generation == activationGeneration else { return }
@@ -488,7 +507,13 @@ public final class AppEnvironment: ObservableObject {
     /// into the app while the full sync continues under the persistent bar.
     private func gateInitialSync() async {
         guard let serverId = active?.connection.id else { return }
-        let existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        await prepareCatalogScopeForActiveServer()
+        var existing = (try? await repository.trackCount(serverId: serverId)) ?? 0
+        if existing == 0 {
+            await hydrateCatalogFromCircleIfAvailable()
+            existing = (try? await repository.trackCount(
+                serverId: serverId)) ?? 0
+        }
         if existing > 0 {
             // Re-login to a server we already have a catalog for: don't block —
             // enter instantly on the cached library, but kick off a background
@@ -564,6 +589,11 @@ public final class AppEnvironment: ObservableObject {
         }
         var stored = stored
         var (connection, backend) = try await buildBackend(from: stored)
+        if stored.kind == .plex {
+            try await CatalogSnapshotDatabase(database)
+                .repairPlexServerIdentities()
+        }
+        try await CatalogWriter(database).saveServer(connection)
 
         // Prefer live detection; if the server is unreachable (offline launch),
         // keep the last-known capabilities rather than clobbering them with
@@ -612,6 +642,14 @@ public final class AppEnvironment: ObservableObject {
             invalidateRadio()
         }
         active = ActiveServer(connection: connection, backend: backend, capabilities: capabilities)
+        if let stored = SessionPersistence.load(credentials) {
+            ServerSyncJournal.upsert(
+                stored,
+                serverID: connection.id,
+                in: credentials,
+                resolvedMusicSectionIDs:
+                    (backend as? PlexBackend)?.musicSectionIDs)
+        }
         // Point cross-device continuity (ADR-0010) at the new server and read
         // back whatever another device left behind.
         activateContinuity(backend: backend, capabilities: capabilities)
@@ -778,6 +816,7 @@ public final class AppEnvironment: ObservableObject {
     public func setEqualizerEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: Self.equalizerEnabledKey)
         playback.setEqualizerEnabled(enabled)
+        persistPlaybackSettings()
     }
 
     /// Apply a new EQ curve immediately (live, glitch-free while playing) and
@@ -785,13 +824,21 @@ public final class AppEnvironment: ObservableObject {
     /// UserDefaults on every frame.
     public func updateEqualizerSettings(_ settings: EqualizerSettings) {
         playback.updateEqualizer(settings)
-        equalizerPersistTask?.cancel()
-        equalizerPersistTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled, let self else { return }
-            if let data = try? JSONEncoder().encode(settings) {
-                UserDefaults.standard.set(data, forKey: Self.equalizerSettingsKey)
-            }
+        persistPlaybackSettings()
+    }
+
+    public func setNormalizationEnabled(_ enabled: Bool) {
+        let changed = playback.normalizationEnabled != enabled
+        UserDefaults.standard.set(
+            enabled,
+            forKey: "mozz.normalizationEnabled")
+        playback.normalizationEnabled = enabled
+        if changed {
+            replayGainMode = enabled ? .track : .off
+            UserDefaults.standard.set(
+                replayGainMode.rawValue,
+                forKey: Self.replayGainModeKey)
+            persistPlaybackSettings()
         }
     }
 
@@ -809,9 +856,100 @@ public final class AppEnvironment: ObservableObject {
         // Default OFF when unset — EQ is opt-in and playback is byte-identical
         // to before EQ existed until the user turns it on.
         playback.equalizer.isEnabled = UserDefaults.standard.bool(forKey: Self.equalizerEnabledKey)
+        let normalization = UserDefaults.standard.object(
+            forKey: "mozz.normalizationEnabled") as? Bool ?? true
+        playback.normalizationEnabled = normalization
+        let storedMode = MozzCore.ReplayGainMode.parse(
+            UserDefaults.standard.string(
+                forKey: Self.replayGainModeKey))
+        replayGainMode = normalization
+            ? (storedMode == .off ? .track : storedMode)
+            : .off
+        playback.normalizationPreampDB = UserDefaults.standard.object(
+            forKey: Self.replayGainPreampKey) as? Double ?? 0
+    }
+
+    private var currentPlaybackSettings: PlaybackSettings {
+        PlaybackSettings(
+            equalizerEnabled: playback.equalizerEnabled,
+            equalizer: playback.equalizerSettings,
+            replayGainMode: replayGainMode,
+            replayGainPreampDB: playback.normalizationPreampDB)
+    }
+
+    private func persistPlaybackSettings() {
+        equalizerPersistTask?.cancel()
+        equalizerPersistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, let self else { return }
+            UserDefaults.standard.set(
+                self.playback.equalizerEnabled,
+                forKey: Self.equalizerEnabledKey)
+            UserDefaults.standard.set(
+                self.playback.normalizationEnabled,
+                forKey: "mozz.normalizationEnabled")
+            UserDefaults.standard.set(
+                self.replayGainMode.rawValue,
+                forKey: Self.replayGainModeKey)
+            UserDefaults.standard.set(
+                self.playback.normalizationPreampDB,
+                forKey: Self.replayGainPreampKey)
+            if let data = try? JSONEncoder().encode(
+                self.playback.equalizerSettings) {
+                UserDefaults.standard.set(
+                    data,
+                    forKey: Self.equalizerSettingsKey)
+            }
+            await self.savePlaybackSettings()
+        }
+    }
+
+    private func savePlaybackSettings() async {
+        do {
+            _ = try await PlaybackSettingsStore(database).save(
+                currentPlaybackSettings)
+            syncHistoryIfDue(forceRelayState: true)
+        } catch {
+            // Playback already reflects the edit. A later edit or relay pass
+            // retries persistence without interrupting the listener.
+            playbackSettingsLog.error(
+                "could not persist playback settings: \(error.localizedDescription)")
+        }
+    }
+
+    private func applySyncedPlaybackSettings(_ settings: PlaybackSettings) {
+        replayGainMode = settings.replayGainMode
+        let normalization = settings.replayGainMode != .off
+        playback.normalizationEnabled = normalization
+        playback.normalizationPreampDB = settings.replayGainPreampDB
+        playback.setEqualizerEnabled(settings.equalizerEnabled)
+        playback.updateEqualizer(settings.equalizer)
+        UserDefaults.standard.set(
+            normalization,
+            forKey: "mozz.normalizationEnabled")
+        UserDefaults.standard.set(
+            settings.equalizerEnabled,
+            forKey: Self.equalizerEnabledKey)
+        UserDefaults.standard.set(
+            settings.replayGainMode.rawValue,
+            forKey: Self.replayGainModeKey)
+        UserDefaults.standard.set(
+            settings.replayGainPreampDB,
+            forKey: Self.replayGainPreampKey)
+        if let data = try? JSONEncoder().encode(settings.equalizer) {
+            UserDefaults.standard.set(
+                data,
+                forKey: Self.equalizerSettingsKey)
+        }
     }
 
     public func signOut() {
+        if let connection = active?.connection {
+            ServerSyncJournal.tombstone(
+                serverID: connection.id,
+                kind: connection.kind,
+                in: credentials)
+        }
         activationTask?.cancel()
         // A parked library choice belongs to the account being left.
         libraryChoice = []
@@ -1120,6 +1258,7 @@ public final class AppEnvironment: ObservableObject {
         // activation didn't (self-healing), so a plain "Sync Now" recovers without
         // a re-login — and surfaces a clear error if the server has no music.
         try await ensurePlexMusicSection()
+        await prepareCatalogScopeForActiveServer()
         guard let active else { throw MozzError.unsupported("No active server") }
         // Catalog sync uses a bulk-timeout backend (a single large page can take
         // ~60s to generate on a slow self-hosted server). See LibrarySyncEngine
@@ -1172,6 +1311,9 @@ public final class AppEnvironment: ObservableObject {
             await enrichment.enrich(serverId: active.connection.id)
             // Playlist and artist names have just changed; teach Siri the new ones.
             await refreshSiriMediaContext()
+            Task { @MainActor in
+                await self.publishCatalogToCircleIfPossible()
+            }
         }
         return summary
     }
@@ -1435,12 +1577,23 @@ public final class AppEnvironment: ObservableObject {
     /// server write-back that flushes now if online.
     private func applyFavorite(_ change: FavoriteChange, wasLiked: Bool) async {
         let nowLiked = (try? await favorites.applyLocally(change)) ?? change.isLiked
+        switch change.value {
+        case .favorite(let value):
+            playback.updateFavoriteMetadata(
+                trackID: change.remoteId,
+                isFavorite: value)
+        case .rating(let value):
+            playback.updateFavoriteMetadata(
+                trackID: change.remoteId,
+                rating: .some(value))
+        }
         if nowLiked != wasLiked {
             try? await playEvents.append(
                 PlayEvent(trackID: change.remoteId, kind: nowLiked ? .liked : .unliked),
                 serverId: change.serverId)
         }
         await flushFavoriteOutbox()
+        syncHistoryIfDue(forceRelayState: true)
     }
 
     /// Replay queued like/rating writes to the server, removing each on success.
@@ -1804,7 +1957,7 @@ public final class AppEnvironment: ObservableObject {
         updated.serverId = serverId
         updated.baseURL = resolved.baseURL
         updated.token = resolved.token
-        updated.machineIdentifier = resolved.machineIdentifier ?? stored.machineIdentifier
+        updated.serverMachineIdentifier = resolved.serverMachineIdentifier ?? stored.serverMachineIdentifier
         return updated
     }
 
@@ -1861,7 +2014,11 @@ public final class AppEnvironment: ObservableObject {
             return (connection, backend)
         case .plex:
             var connection = ServerConnection(
-                id: frozenServerId(stored, derived: Self.serverId(kind: .plex, baseURL: stored.baseURL)),
+                id: Self.serverId(
+                    kind: .plex,
+                    baseURL: stored.baseURL,
+                    serverMachineIdentifier: stored.serverMachineIdentifier
+                ),
                 kind: .plex, name: stored.serverName, baseURL: stored.baseURL,
                 userID: stored.userID, clientIdentifier: clientIdentifier,
                 musicSectionID: stored.musicSectionID
@@ -1974,17 +2131,21 @@ public final class AppEnvironment: ObservableObject {
         // buys asynchrony where a real KV store happens to exist. A nil store
         // here costs other devices' contributions, never the feature: the
         // coordinator still maintains the local log and builds the year.
-        var historyStore: (any HistoryStore)?
+        var historyStores: [any HistoryStore] = []
         if let jellyfin = backend as? JellyfinBackend {
-            historyStore = jellyfin.makeHistoryStore()
+            historyStores.append(jellyfin.makeHistoryStore())
         }
+        serverHistoryStores = historyStores
         history.activate(
-            store: historyStore,
+            stores: historyStores,
             database: database,
             deviceID: Self.continuityDeviceID(from: clientIdentifier),
             deviceName: Self.localDeviceName
         )
-        Task { @MainActor in await self.history.syncIfDue() }
+        Task { @MainActor in
+            await self.configureRelayHistoryIfNeeded()
+            await self.history.syncIfDue()
+        }
         Task { @MainActor in
             await self.continuity.reconcile(
                 isPlayingLocally: self.playback.snapshot.status == .playing
@@ -2009,8 +2170,339 @@ public final class AppEnvironment: ObservableObject {
     ///
     /// Called on the same foreground hook as continuity, but rate-limited inside
     /// the coordinator: a resume point goes stale in seconds, a play does not.
-    public func syncHistoryIfDue() {
-        Task { @MainActor in await self.history.syncIfDue() }
+    public func syncHistoryIfDue(forceRelayState: Bool = false) {
+        Task { @MainActor in
+            await self.configureRelayHistoryIfNeeded(
+                forceRelayState: forceRelayState)
+            await self.history.syncIfDue()
+        }
+    }
+
+    /// Provision or renew the universal relay and add it alongside any
+    /// server-specific availability path.
+    ///
+    /// Failures degrade to local/Jellyfin history exactly as before. Playback,
+    /// setup, and the local durable log never wait on first-party infrastructure.
+    private func configureRelayHistoryIfNeeded(
+        forceRelayState: Bool = false
+    ) async {
+        guard !isConfiguringRelayHistory else { return }
+        guard UserDefaults.standard.object(
+            forKey: RelayBootstrapper.enabledKey) as? Bool ?? true else {
+            history.setStores(serverHistoryStores)
+            relayHistoryChannelID = nil
+            relayHistoryExpiresAtMS = nil
+            relayHistoryStore = nil
+            lastRelayStateSyncAt = nil
+            return
+        }
+        guard let circle = try? CircleStore.live.load() else { return }
+        if relayHistoryChannelID == circle.channelId,
+           let expiry = relayHistoryExpiresAtMS,
+           !RelayBootstrapper.expiresSoon(expiry),
+           let relayHistoryStore {
+            await syncRelayStateIfDue(
+                through: relayHistoryStore,
+                force: forceRelayState)
+            return
+        }
+
+        isConfiguringRelayHistory = true
+        defer { isConfiguringRelayHistory = false }
+        do {
+            let configured = try await RelayBootstrapper.historyStore(
+                circle: circle,
+                circleStore: .live,
+                localDeviceID: Self.continuityDeviceID(
+                    from: clientIdentifier))
+            history.setStores(serverHistoryStores + [configured.store])
+            relayHistoryStore = configured.store
+            await syncRelayStateIfDue(
+                through: configured.store,
+                force: true)
+            relayHistoryChannelID = circle.channelId
+            relayHistoryExpiresAtMS = configured.expiresAtMS
+        } catch {
+            // Background availability only. The local log remains authoritative
+            // and the next foreground/scheduled pass tries again.
+        }
+    }
+
+    /// Fetch server credentials after a circle arrives on a device that has
+    /// never signed in. Called during first-run and after an ambient join.
+    public func bootstrapServerFromCircleIfNeeded() async {
+        guard active == nil, SessionPersistence.load(credentials) == nil else {
+            return
+        }
+        guard let circle = try? CircleStore.live.load() else { return }
+        do {
+            let configured = try await RelayBootstrapper.historyStore(
+                circle: circle,
+                circleStore: .live,
+                localDeviceID: Self.continuityDeviceID(
+                    from: clientIdentifier))
+            let snapshots = try await configured.store.loadServerSnapshots()
+            let merged = RelayHistoryStore.mergedServerRecords(snapshots)
+            ServerSyncJournal.merge(merged, into: credentials)
+            guard let record = merged
+                .filter({ !$0.isRemoved })
+                .max(by: { $0.mutationAtMS < $1.mutationAtMS }),
+                  let stored = Self.storedSession(
+                      from: record,
+                      clientIdentifier: clientIdentifier) else {
+                return
+            }
+            activate(session: AuthenticatedSession(
+                kind: stored.kind,
+                baseURL: stored.baseURL,
+                token: stored.token,
+                userID: stored.userID,
+                serverName: stored.serverName,
+                clientIdentifier: clientIdentifier,
+                serverMachineIdentifier: stored.serverMachineIdentifier,
+                accountToken: stored.accountToken,
+                musicSectionID: stored.musicSectionID,
+                selectedMusicSectionIDs: stored.selectedMusicSectionIDs))
+        } catch {
+            // Setup remains available. The next foreground or Devices visit
+            // retries after the Worker/network is available.
+        }
+    }
+
+    private func syncServerConnections(
+        through relay: RelayHistoryStore,
+        localDeviceID: String
+    ) async {
+        let local = ServerSyncJournal.records(in: credentials)
+        let snapshot = RelayServerSnapshot(
+            deviceID: localDeviceID,
+            writtenAtMS: local.map(\.mutationAtMS).max() ?? 0,
+            servers: local)
+        try? await relay.save(snapshot)
+        guard let snapshots = try? await relay.loadServerSnapshots() else {
+            return
+        }
+        ServerSyncJournal.merge(
+            RelayHistoryStore.mergedServerRecords(snapshots),
+            into: credentials)
+    }
+
+    private func syncRelayStateIfDue(
+        through relay: RelayHistoryStore,
+        force: Bool,
+        now: Date = Date()
+    ) async {
+        if !force, let lastRelayStateSyncAt,
+           now.timeIntervalSince(lastRelayStateSyncAt) < 30 * 60 {
+            return
+        }
+        lastRelayStateSyncAt = now
+        await syncServerConnections(
+            through: relay,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier))
+        await syncCatalog(through: relay)
+        await syncMembership(through: relay)
+        if let active,
+           let stored = SessionPersistence.load(credentials),
+           let scope = CatalogSnapshotScope(
+               connection: active.connection,
+               libraryIDs: Self.catalogScopeLibraryIDs(
+                   stored: stored,
+                   backend: active.backend)),
+           (try? await FavoritesRelayCoordinator(
+               database: database,
+               relay: relay,
+               localDeviceID: Self.continuityDeviceID(
+                   from: clientIdentifier)
+           ).sync(scope: scope)) ?? 0 > 0 {
+            await flushFavoriteOutbox()
+        }
+        let playbackSettings = try? await PlaybackSettingsRelayCoordinator(
+            database: database,
+            relay: relay,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier)
+        ).sync(seed: currentPlaybackSettings)
+        if playbackSettings?.changedLocally == true,
+           let settings = playbackSettings?.stored.settings {
+            applySyncedPlaybackSettings(settings)
+        }
+    }
+
+    /// Warm an empty database from the newest complete circle snapshot before
+    /// starting the normal authoritative server refresh.
+    private func hydrateCatalogFromCircleIfAvailable() async {
+        guard UserDefaults.standard.object(
+            forKey: RelayBootstrapper.enabledKey) as? Bool ?? true,
+              let circle = try? CircleStore.live.load(),
+              // A newly joined device receives the existing capability in the
+              // pairing seal. Do not make first-time setup wait on provisioning
+              // when no snapshot can exist yet.
+              !circle.relayKey.isEmpty else {
+            return
+        }
+        guard let configured = try? await RelayBootstrapper.historyStore(
+            circle: circle,
+            circleStore: .live,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier)) else {
+            return
+        }
+        await syncCatalog(through: configured.store, publish: false)
+    }
+
+    private func publishCatalogToCircleIfPossible() async {
+        guard UserDefaults.standard.object(
+            forKey: RelayBootstrapper.enabledKey) as? Bool ?? true,
+              let circle = try? CircleStore.live.load(),
+              !circle.relayKey.isEmpty else {
+            return
+        }
+        if relayHistoryChannelID == circle.channelId,
+           let relayHistoryStore {
+            await syncCatalog(
+                through: relayHistoryStore,
+                hydrate: false)
+            return
+        }
+        await configureRelayHistoryIfNeeded(forceRelayState: true)
+    }
+
+    private func syncCatalog(
+        through relay: RelayHistoryStore,
+        hydrate: Bool = true,
+        publish: Bool = true
+    ) async {
+        guard let active,
+              let stored = SessionPersistence.load(credentials),
+              let scope = CatalogSnapshotScope(
+                connection: active.connection,
+                libraryIDs: Self.catalogScopeLibraryIDs(
+                    stored: stored,
+                    backend: active.backend)) else {
+            return
+        }
+
+        let catalog = CatalogRelayCoordinator(
+            database: database,
+            relay: relay,
+            localDeviceID: Self.continuityDeviceID(
+                from: clientIdentifier))
+        if hydrate,
+           let result = try? await catalog.hydrateIfEmpty(scope: scope),
+           result.status == .imported {
+            return
+        }
+        if publish {
+            _ = try? await catalog.publishLatestComplete(scope: scope)
+        }
+    }
+
+    private func syncMembership(through relay: RelayHistoryStore) async {
+        let deviceID = Self.continuityDeviceID(from: clientIdentifier)
+        let local = ((try? CircleStore.live.members()) ?? [])
+            .filter { !$0.isSelf || $0.id == deviceID }
+            .map {
+                RelayMemberRecord(
+                    id: $0.id,
+                    name: $0.name,
+                    joinedAtMS: Int64($0.joinedAt.timeIntervalSince1970 * 1_000))
+            }
+        var records = local.filter { $0.id != deviceID }
+        records.append(RelayMemberRecord(
+            id: deviceID,
+            name: PairingController.deviceName,
+            joinedAtMS: local.first(where: { $0.id == deviceID })?.joinedAtMS
+                ?? Int64(Date().timeIntervalSince1970 * 1_000)))
+        try? await relay.save(RelayMembershipSnapshot(
+            deviceID: deviceID, records: records))
+        guard let snapshots = try? await relay.loadMembershipSnapshots() else { return }
+        let members = RelayHistoryStore.mergedMembership(snapshots)
+            .filter { !$0.isRemoved }
+            .map {
+                CircleMember(
+                    id: $0.id, name: $0.name,
+                    joinedAt: Date(timeIntervalSince1970:
+                        Double($0.joinedAtMS) / 1_000),
+                    isSelf: $0.id == deviceID)
+            }
+        try? CircleStore.live.replaceMembers(members)
+    }
+
+    public func leaveSyncedDevices() async {
+        let store = CircleStore.live
+        guard let circle = try? store.load() else { return }
+        let deviceID = Self.continuityDeviceID(from: clientIdentifier)
+        if let configured = try? await RelayBootstrapper.historyStore(
+            circle: circle, circleStore: store, localDeviceID: deviceID) {
+            var records = RelayHistoryStore.mergedMembership(
+                (try? await configured.store.loadMembershipSnapshots()) ?? [])
+            records.removeAll { $0.id == deviceID }
+            let now = Int64(Date().timeIntervalSince1970 * 1_000)
+            records.append(RelayMemberRecord(
+                id: deviceID, name: PairingController.deviceName,
+                joinedAtMS: now, removedAtMS: now))
+            try? await configured.store.save(RelayMembershipSnapshot(
+                deviceID: deviceID, records: records))
+        }
+        try? store.clear()
+        relayHistoryStore = nil
+        relayHistoryChannelID = nil
+        relayHistoryExpiresAtMS = nil
+    }
+
+    private func prepareCatalogScopeForActiveServer() async {
+        guard let active,
+              let stored = SessionPersistence.load(credentials),
+              let scope = CatalogSnapshotScope(
+                connection: active.connection,
+                libraryIDs: Self.catalogScopeLibraryIDs(
+                    stored: stored,
+                    backend: active.backend)) else {
+            return
+        }
+        _ = try? await CatalogSnapshotDatabase(database)
+            .prepare(scope: scope)
+    }
+
+    private static func catalogScopeLibraryIDs(
+        stored: StoredSession,
+        backend: any MusicBackend
+    ) -> [String] {
+        if stored.kind == .plex, stored.selectedMusicSectionIDs == nil {
+            return ["*"]
+        }
+        return stored.selectedMusicSectionIDs
+            ?? (backend as? PlexBackend)?.musicSectionIDs
+            ?? stored.musicSectionID.map { [$0] }
+            ?? []
+    }
+
+    private static func storedSession(
+        from record: RelayServerRecord,
+        clientIdentifier: String
+    ) -> StoredSession? {
+        guard !record.isRemoved,
+              let kind = BackendKind(rawValue: record.kind),
+              let baseURL = record.baseURL.flatMap(URL.init(string:)),
+              let token = record.token,
+              let serverName = record.name else {
+            return nil
+        }
+        return StoredSession(
+            kind: kind,
+            baseURL: baseURL,
+            token: token,
+            userID: record.userID,
+            serverName: serverName,
+            clientIdentifier: clientIdentifier,
+            serverMachineIdentifier: record.serverMachineIdentifier,
+            musicSectionID: record.musicSectionIDs?.first,
+            accountToken: record.accountToken,
+            selectedMusicSectionIDs: record.allMusicLibraries == true
+                ? nil
+                : record.musicSectionIDs)
     }
 
     /// Flush any pending checkpoint — the app may not run again.
@@ -2584,14 +3076,20 @@ public final class AppEnvironment: ObservableObject {
 
     // MARK: Helpers
 
-    /// A stable per-server identity. For Subsonic we fold in the normalized
-    /// username so two accounts on the *same* server don't collide (spec item 9);
-    /// Plex/Jellyfin keep the historical `kind-baseURL` form.
-    public static func serverId(kind: BackendKind, baseURL: URL, username: String? = nil) -> String {
-        if kind == .subsonic, let username, !username.isEmpty {
-            return "\(kind.rawValue)-\(username.lowercased())-\(baseURL.absoluteString)"
-        }
-        return "\(kind.rawValue)-\(baseURL.absoluteString)"
+    /// A stable per-server identity, delegated to the shared core so every
+    /// platform scopes rows the same way.
+    public static func serverId(
+        kind: BackendKind,
+        baseURL: URL,
+        username: String? = nil,
+        serverMachineIdentifier: String? = nil
+    ) -> String {
+        ServerIdentity.id(
+            kind: kind,
+            baseURL: baseURL,
+            username: username,
+            serverMachineIdentifier: serverMachineIdentifier
+        )
     }
 
     static func demoClipURL() throws -> URL {

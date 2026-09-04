@@ -1,0 +1,21 @@
+# The engine forbids unsafe code, which the C ABI cannot. Rather than weaken
+# that to `deny` and sprinkle allows - which would let unsafe drift back into
+# the DSP unnoticed - the boundary lives in its own crate. Everything that
+# decides how music sounds stays provably free of unsafe; only the few hundred
+# lines that talk to C are allowed any.
+[workspace]
+members = ["ffi"]
+
+[package]
+name = "mozz_audio"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+cpal = "0.18.2"
+symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "flac", "alac", "vorbis", "wav"] }

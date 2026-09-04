@@ -117,9 +117,16 @@ targets:
           NSAllowsLocalNetworking: true
         # iOS 14+ requires a purpose string before touching the local network
         # (LAN server discovery / direct-play from a home server).
-        NSLocalNetworkUsageDescription: "Mozz connects to Plex and Jellyfin media servers on your local network."
+        NSLocalNetworkUsageDescription: "Mozz connects to Plex and Jellyfin media servers on your local network, and finds your other Mozz devices when you pair them."
         NSBonjourServices:
           - _jellyfin._tcp
+          # Pairing discovery. Advertising a service that is NOT listed here
+          # fails silently in TestFlight and App Store builds while working
+          # perfectly in local ones, so this line is the difference between
+          # pairing working for us and working for everybody.
+          - _mozz._tcp
+        # Scanning the pairing code is the only thing Mozz uses the camera for.
+        NSCameraUsageDescription: "Mozz uses the camera to scan the pairing code shown on your other device."
         # Custom URL scheme for deep links (mozz://album/<id>, mozz://tab/library,
         # …). Widget tiles and shared links open the app straight to a screen.
         CFBundleURLTypes:

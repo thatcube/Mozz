@@ -80,6 +80,7 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
 
     private readonly int _capacity;
     private readonly string? _diskDirectory;
+    private readonly DiskBudget? _pruner;
     private readonly Func<ArtworkRef, CancellationToken, Task<byte[]?>> _fetch;
     private readonly Func<byte[], T?> _decode;
 
@@ -101,18 +102,28 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
     /// Where to persist encoded bytes across restarts, or null for memory-only
     /// (which is what the cache tests use to force re-fetches).
     /// </param>
+    /// <param name="diskByteLimit">
+    /// How much the on-disk cache may occupy before the least recently used
+    /// files are deleted. This had no bound at all until covers were found
+    /// accumulating without limit; a large library would fill a disk given
+    /// enough browsing.
+    /// </param>
     public ArtworkCache(
         Func<ArtworkRef, CancellationToken, Task<byte[]?>> fetch,
         Func<byte[], T?> decode,
         int memoryCapacity = 384,
         int maxConcurrency = 6,
-        string? diskDirectory = null)
+        string? diskDirectory = null,
+        long diskByteLimit = 256L * 1024 * 1024)
     {
         _fetch = fetch;
         _decode = decode;
         _capacity = Math.Max(1, memoryCapacity);
         _concurrency = new SemaphoreSlim(Math.Max(1, maxConcurrency));
         _diskDirectory = diskDirectory;
+        _pruner = diskDirectory is null
+            ? null
+            : new DiskBudget(diskDirectory, diskByteLimit);
 
         if (_diskDirectory is not null)
         {
@@ -181,6 +192,7 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
                     bytes = await File.ReadAllBytesAsync(path, _life.Token).ConfigureAwait(false);
                     fromDisk = bytes.Length > 0;
                     if (!fromDisk) bytes = null;
+                    else TouchDisk(path);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { bytes = null; } // unreadable cache file: fall through to the network
@@ -227,11 +239,32 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
             lock (_gate) _inflight.Remove(key);
             return null;
         }
+        catch (ArtworkUnavailableException)
+        {
+            // "Not right now" — a server still attaching, a timeout, a server
+            // that is briefly unreachable. None of that is evidence the cover is
+            // missing, and the negative set is never emptied, so recording it
+            // here would hide that cover until the app restarts.
+            lock (_gate) _inflight.Remove(key);
+            return null;
+        }
         catch
         {
             Fail(key);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Forget every remembered failure, so the next request for each tries again.
+    ///
+    /// Called when a server attaches. Anything that failed before there was a
+    /// backend to ask deserves a second chance, and without this the covers only
+    /// reappear for tiles that happen to be re-rendered.
+    /// </summary>
+    public void ForgetFailures()
+    {
+        lock (_gate) _negative.Clear();
     }
 
     private void Touch(LinkedListNode<Node> node)
@@ -287,7 +320,18 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
         return Path.Combine(_diskDirectory, hash + ".img");
     }
 
-    private static void TryWriteDisk(string path, byte[] bytes)
+    /// <summary>
+    /// Refresh a cached file's timestamp on a hit, so modification time can
+    /// stand in for recency without an index that would add a write to every
+    /// read. Cheap enough to do while scrolling; iOS does the same.
+    /// </summary>
+    private static void TouchDisk(string path)
+    {
+        try { File.SetLastWriteTimeUtc(path, DateTime.UtcNow); }
+        catch { /* best effort; a stale timestamp only makes it evict sooner */ }
+    }
+
+    private void TryWriteDisk(string path, byte[] bytes)
     {
         try
         {
@@ -301,7 +345,12 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
         {
             // A cover that failed to cache to disk is not worth surfacing; it will
             // simply be fetched again next session.
+            return;
         }
+
+        // Prune after writing rather than on a timer, so the budget is enforced
+        // exactly when it can be exceeded and never while the app sits idle.
+        _pruner?.Enforce();
     }
 
     private static void TryDeleteDisk(string path)

@@ -1,0 +1,121 @@
+name: Audio engine
+
+# The shared audio engine, which is the one place a platform is NOT allowed to
+# decide anything for itself.
+#
+# WHY THIS EXISTS SEPARATELY
+#
+# Audio is currently written twice — Swift over AVFoundation on Apple platforms,
+# C# over FFmpeg on the desktop — so ReplayGain and the biquad equaliser have two
+# independent implementations that nothing forces to agree. They already do not:
+# above +12.04 dB of total gain, the Swift side clamps and the C# side does not,
+# so the same file plays measurably louder on a PC than on a phone. Neither test
+# suite could ever have caught that, because each only sees its own half.
+#
+# This crate is the replacement, and it is not linked into any shipping build
+# yet. That makes CI the only thing standing between it and rot: an unbuilt crate
+# with passing tests nobody runs is indistinguishable from a broken one.
+#
+# See ADR-0015 for why this is Rust rather than C, C++ or Swift, and note the
+# `-D warnings` below — the property the language was chosen for is that "no
+# allocation on the audio thread" is checkable rather than merely intended, and a
+# tolerated warning is the first step to losing that.
+
+on:
+  push:
+    paths:
+      - "audio/**"
+      - ".github/workflows/audio-engine.yml"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: audio-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: audio
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The crate pins no toolchain version on purpose: it has no dependencies
+      # and uses no unstable features, so tracking stable is a way of finding out
+      # early if that ever stops being true.
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          cargo --version
+          rustc --version
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            audio/target
+          key: audio-${{ runner.os }}-${{ hashFiles('audio/Cargo.lock') }}
+          restore-keys: audio-${{ runner.os }}-
+
+      # cpal reaches Linux audio through ALSA, and alsa-sys is a binding to a
+      # library that has to exist before it will build:
+      #
+      #     failed to run custom build command for `alsa-sys`
+      #
+      # The crate had no system dependencies when this workflow was written -
+      # the comment above still says so - and acquired one the moment it grew a
+      # real output device. Nothing here can build until it is installed.
+      - name: ALSA headers
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev
+
+      - name: Test
+        run: cargo test --workspace --all-features
+
+      # Warnings are errors here rather than advisory. The crate exists to remove
+      # a class of silent divergence, and a warning nobody reads is how the next
+      # one arrives.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.29.4 --locked
+
+      # The header is generated, so a committed copy that has drifted from the
+      # Rust it describes is a build failure rather than something a user finds.
+      # A mismatched signature is not a compile error on either side - it is a
+      # corrupted argument at run time, inside an audio callback, on whichever
+      # platform happened to link the stale copy.
+      - name: C header matches the Rust
+        run: ../tools/generate-audio-header.sh --check
+
+      # Linking is the only thing that proves the boundary is usable rather than
+      # merely well-formed. cbindgen will emit a header for a crate whose
+      # staticlib does not build, and a Rust test will pass while exporting a
+      # symbol C cannot name.
+      - name: C ABI links and runs
+        run: ../tools/run-audio-abi-test.sh
+
+      # The engine has to reach every platform Mozz targets, and a crate that
+      # only ever builds on the machine that wrote it proves nothing about that.
+      # Checking a Windows and an Android triple compiles is cheap here and
+      # catches an accidental platform assumption at the point it is introduced
+      # rather than months later when someone first tries to ship it.
+      - name: Cross-compile check
+        run: |
+          rustup target add x86_64-pc-windows-msvc aarch64-linux-android
+          cargo check --workspace --target x86_64-pc-windows-msvc
+          cargo check --workspace --target aarch64-linux-android

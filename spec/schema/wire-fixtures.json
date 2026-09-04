@@ -1,0 +1,67 @@
+{
+  "_comment": [
+    "Golden wire fixtures for the generated command clients.",
+    "",
+    "Every client that speaks the command surface must agree on these exact",
+    "bytes. The bytes were produced by protoc itself (protoc --encode), not by",
+    "any one client, so no language is the privileged definition of the wire",
+    "format - each is checked against a neutral third party.",
+    "",
+    "Follows the pattern of spec/continuity/queue-hash-fixtures.json: one file,",
+    "read by every platform's test suite. A client that drifts fails here rather",
+    "than in production on the platform nobody was testing.",
+    "",
+    "To add a case: write the message in protobuf text format and run",
+    "  protoc --proto_path=schema --encode=mozz.v1.Request \\",
+    "    schema/mozz/v1/library.proto < case.txt | base64"
+  ],
+  "cases": [
+    {
+      "name": "artist-request",
+      "why": "Both fields are required. The old hand-written facade checked this at runtime with 'guard let remoteId, let serverId else { fail }'; here it is the shape of the message.",
+      "type": "mozz.v1.Request",
+      "base64": "CCpiJQoLcGxleC1hMWIyYzMSFi9saWJyYXJ5L21ldGFkYXRhLzk5ODc=",
+      "expect": {
+        "id": 42,
+        "command": "artist",
+        "serverId": "plex-a1b2c3",
+        "remoteId": "/library/metadata/9987"
+      }
+    },
+    {
+      "name": "albums-request-paged",
+      "why": "A cursor is opaque to clients - they hand back whatever the previous page gave them. This pins that it survives a round trip unaltered.",
+      "type": "mozz.v1.Request",
+      "base64": "CAdaIAoLamVsbHlmaW4tNzcSDgoMZXlKdklqb3lNREI5GMgB",
+      "expect": {
+        "id": 7,
+        "command": "albums",
+        "serverId": "jellyfin-77",
+        "afterToken": "eyJvIjoyMDB9",
+        "limit": 200
+      }
+    },
+    {
+      "name": "failure-response",
+      "why": "Failure is a variant of the result, not a side channel, so a client cannot forget to handle it.",
+      "type": "mozz.v1.Response",
+      "base64": "CCoSKgooYXJ0aXN0IG5vdCBmb3VuZDogL2xpYnJhcnkvbWV0YWRhdGEvOTk4Nw==",
+      "expect": {
+        "id": 42,
+        "result": "failure",
+        "message": "artist not found: /library/metadata/9987"
+      }
+    },
+    {
+      "name": "library-changed-event",
+      "why": "Events are pushed from the core unprompted, for an active subscription. If this stops decoding, live updates break silently rather than loudly.",
+      "type": "mozz.v1.Event",
+      "base64": "CgIIA1IOCgVhbGJ1bQoFdHJhY2s=",
+      "expect": {
+        "token": 3,
+        "payload": "libraryChanged",
+        "changedEntities": ["album", "track"]
+      }
+    }
+  ]
+}

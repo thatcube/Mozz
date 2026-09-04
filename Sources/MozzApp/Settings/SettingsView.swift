@@ -132,6 +132,14 @@ struct SettingsView: View {
 
                     Section {
                         NavigationLink {
+                            PairingView()
+                        } label: {
+                            Label("Sync", mozz: "iphone.and.arrow.forward")
+                        }
+                    }
+
+                    Section {
+                        NavigationLink {
                             AppearanceSettingsView()
                         } label: {
                             Label("Appearance", mozz: "paintpalette")
@@ -190,7 +198,7 @@ struct SettingsView: View {
             }
             .onAppear { env.playback.normalizationEnabled = normalizationEnabled }
             .onChange(of: normalizationEnabled) { _, enabled in
-                env.playback.normalizationEnabled = enabled
+                env.setNormalizationEnabled(enabled)
             }
             .task {
                 // Only Jellyfin/Subsonic need probing — Plex has its own row and

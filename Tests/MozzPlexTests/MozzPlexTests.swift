@@ -313,13 +313,99 @@ final class PlexAuthTests: XCTestCase {
         XCTAssertEqual(token, "plex-account-token")
     }
 
+    func testHomeUsersExposeProfileIdentityAndPINRequirements() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/home/users", fixture: "plex_home_users"),
+        ])
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo,
+            clientIdentifier: "cid",
+            transport: transport,
+            probeTransport: transport)
+
+        let users = try await auth.homeUsers(accountToken: "owner-token")
+
+        XCTAssertEqual(users.count, 2)
+        XCTAssertEqual(users[0].id, "owner-uuid")
+        XCTAssertTrue(users[0].isAdmin)
+        XCTAssertFalse(users[0].requiresPIN)
+        XCTAssertEqual(users[1].id, "managed-uuid")
+        XCTAssertTrue(users[1].isRestricted)
+        XCTAssertTrue(users[1].requiresPIN)
+        XCTAssertEqual(users[1].name, "Music Room")
+    }
+
+    func testManagedUserSwitchSendsPINAndReturnsOnlyTheSwitchedToken() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/home/users/managed-uuid/switch", fixture: "plex_home_switch"),
+        ])
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo,
+            clientIdentifier: "cid",
+            transport: transport,
+            probeTransport: transport)
+        let user = PlexHomeUser(
+            id: "managed-uuid",
+            name: "Music Room",
+            requiresPIN: true,
+            isRestricted: true)
+
+        let token = try await auth.token(
+            for: user,
+            accountToken: "owner-token",
+            pin: "2468")
+
+        XCTAssertEqual(token, "managed-user-token")
+        let request = try XCTUnwrap(transport.lastRequest)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(request.url?.absoluteString.contains("pin=2468") == true)
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "X-Plex-Token"),
+            "owner-token")
+    }
+
+    func testOwnerSelectionDoesNotMakeANetworkSwitchOrReplaceTheToken() async throws {
+        let transport = PlexFixtureTransport([])
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo,
+            clientIdentifier: "cid",
+            transport: transport,
+            probeTransport: transport)
+        let owner = PlexHomeUser(
+            id: "owner-uuid",
+            name: "Brandon",
+            requiresPIN: false,
+            isAdmin: true)
+
+        let token = try await auth.token(
+            for: owner,
+            accountToken: "owner-token")
+
+        XCTAssertEqual(token, "owner-token")
+        XCTAssertNil(transport.lastRequest)
+    }
+
     func testDiscoverConnectionsSortsLocalFirst() async throws {
         let connections = try await makeAuthenticator().discoverConnections(accountToken: "acct")
-        XCTAssertEqual(connections.count, 2, "player-only resource is filtered out")
+        XCTAssertEqual(connections.count, 1, "one Plex resource is one server even when it advertises several connections")
         XCTAssertTrue(connections[0].isLocal)
         XCTAssertFalse(connections[0].isRelay)
-        XCTAssertTrue(connections[1].isRelay)
         XCTAssertEqual(connections[0].accessToken, "server-token-1")
+        XCTAssertEqual(connections[0].serverMachineIdentifier, "machine-1")
+    }
+
+    func testDiscoverConnectionsKeepsReachableAddressForOneMachine() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
+            .init(contains: "192-168-68-71", fixture: "plex_identity"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+
+        let connections = try await auth.discoverConnections(accountToken: "acct")
+
+        XCTAssertEqual(connections.count, 1)
+        XCTAssertEqual(connections.first?.serverMachineIdentifier, "50acfe994de74f8998deb9fc43e6262e")
+        XCTAssertEqual(connections.first?.uri.host, "192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct")
     }
 
     func testCompleteLoginPicksReachableConnection() async throws {
@@ -327,6 +413,7 @@ final class PlexAuthTests: XCTestCase {
         XCTAssertEqual(session.kind, .plex)
         XCTAssertEqual(session.token, "server-token-1")
         XCTAssertEqual(session.serverName, "Home Plex")
+        XCTAssertEqual(session.serverMachineIdentifier, "machine-1")
         XCTAssertTrue(session.baseURL.absoluteString.contains("plex.direct"))
     }
 

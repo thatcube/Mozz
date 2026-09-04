@@ -11,16 +11,14 @@ public sealed class AppPreferences
     public const string EnrichmentEnabledKey = "mozz.enrichmentEnabled";
     public const string EqualizerEnabledKey = "mozz.equalizerEnabled";
     public const string EqualizerSettingsKey = "mozz.equalizerSettings";
+    public const string ReplayGainModeKey = "mozz.replayGainMode";
+    public const string ReplayGainPreampKey = "mozz.replayGainPreampDB";
     public const string LyricsOnlineLookupKey = "mozz.lyricsOnlineLookup";
     public const string LyricsOfflineCaptureKey = "mozz.lyricsOfflineCapture";
-    public const string AppearanceKey = "mozz.appearance";
-    public const string DarkStyleKey = "mozz.darkStyle";
+    public const string AppearanceKey = MozzTheme.AppearanceStorageKey;
+    public const string DarkStyleKey = MozzTheme.DarkStyleStorageKey;
     public const string DeviceIdKey = "mozz.deviceID";
-    public const string VolumeKey = "mozz.volume";
-    public const string ShuffleKey = "mozz.shuffle";
-    public const string RepeatModeKey = "mozz.repeatMode";
-    /// <summary>Which server the stored Home mixes were generated from.</summary>
-    public const string HomeMixServerKey = "mozz.homeMixServer";
+    public const string DeviceSyncEnabledKey = "mozz.deviceSyncEnabled";
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -63,10 +61,10 @@ public sealed class AppPreferences
         lock (_gate)
         {
             return _values.TryGetValue(key, out var value)
-                   && value.ValueKind == JsonValueKind.Number
-                   && value.TryGetDouble(out var number)
-                ? number
-                : defaultValue;
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out var number)
+                    ? number
+                    : defaultValue;
         }
     }
 

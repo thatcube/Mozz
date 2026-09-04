@@ -1,3 +1,5 @@
+using Google.Protobuf;
+using Mozz.V1;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -16,7 +18,7 @@ namespace Mozz.Desktop.Core;
 /// so adding a capability is a new request here and a new case in Swift — with
 /// no P/Invoke declaration to keep in step across two toolchains.
 /// </summary>
-public sealed partial class MozzCore : IDisposable
+public sealed partial class MozzCore : IDisposable, Downloads.ICoreInvoker
 {
     // SwiftPM emits MozzFFI.dll on Windows, libMozzFFI.dylib on macOS and
     // libMozzFFI.so on Linux. .NET's probing adds the prefix and extension, so
@@ -34,6 +36,21 @@ public sealed partial class MozzCore : IDisposable
 
     [LibraryImport(Library)]
     private static partial void mozz_ffi_free_string(nint pointer);
+
+    // The schema-described command surface, which needs its own pair because
+    // protobuf cannot travel as a C string: encoded messages contain 0x00
+    // freely and a string ends at the first one. Not theoretical here — a
+    // `libraries` request encodes as 08 03 52 00, so the simplest command in
+    // the schema would arrive truncated. Length in, length out instead.
+    [LibraryImport(Library)]
+    private static unsafe partial byte* mozz_session_invoke(
+        long handle, byte* request, int requestLength, int* responseLength);
+
+    // Deliberately not mozz_ffi_free_string: that releases a null-terminated
+    // CChar buffer, this releases raw bytes. Freeing either through the other
+    // is undefined, so the two stay visibly separate.
+    [LibraryImport(Library)]
+    private static unsafe partial void mozz_session_free_bytes(byte* pointer);
 
     private long _handle;
     private bool _disposed;
@@ -131,6 +148,70 @@ public sealed partial class MozzCore : IDisposable
     /// </summary>
     public Task<T?> CallAsync<T>(object request, CancellationToken token = default)
         => Task.Run(() => Call<T>(request), token);
+
+    /// <summary>
+    /// Send one schema-described command and get its response back.
+    ///
+    /// The typed counterpart to <see cref="Call{T}"/>: the request and response
+    /// are generated from <c>schema/</c>, so a command this build does not know
+    /// about cannot be constructed, and a field cannot quietly change shape
+    /// underneath the caller. That is the whole point — the four parity bugs
+    /// this replaces were all a capability existing in the core with nothing on
+    /// this side able to see it.
+    ///
+    /// Failures arrive as a <c>Failure</c> variant of the response rather than
+    /// as a thrown error from Swift, because a thrown error across a C ABI is a
+    /// crash. This translates that variant into an exception so callers here can
+    /// use the same try/catch they already do.
+    /// </summary>
+    public Response Invoke(Request request)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_handle <= 0)
+        {
+            throw new InvalidOperationException("No library is open");
+        }
+
+        var bytes = request.ToByteArray();
+        var response = InvokeRaw(bytes);
+
+        if (response.ResultCase == Response.ResultOneofCase.Failure)
+        {
+            throw new MozzCoreException(response.Failure.Message);
+        }
+
+        return response;
+    }
+
+    public Task<Response> InvokeAsync(Request request, CancellationToken token = default)
+        => Task.Run(() => Invoke(request), token);
+
+    private unsafe Response InvokeRaw(byte[] request)
+    {
+        int length;
+        byte* responsePtr;
+
+        fixed (byte* requestPtr = request)
+        {
+            responsePtr = mozz_session_invoke(_handle, requestPtr, request.Length, &length);
+        }
+
+        if (responsePtr is null)
+        {
+            throw new InvalidOperationException("The core returned nothing");
+        }
+
+        try
+        {
+            // Copy before releasing: the span points at Swift's allocation, and
+            // the parsed message must not outlive it.
+            return Response.Parser.ParseFrom(new ReadOnlySpan<byte>(responsePtr, length));
+        }
+        finally
+        {
+            mozz_session_free_bytes(responsePtr);
+        }
+    }
 
     /// <summary>
     /// A listing plus where to resume it. The cursor rides the envelope rather

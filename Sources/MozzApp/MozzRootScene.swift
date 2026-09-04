@@ -25,6 +25,7 @@ public struct MozzRootScene: Scene {
                     // start from the car, this awaits that same work instead of
                     // repeating it.
                     await SharedEnvironment.start()
+                    await env.bootstrapServerFromCircleIfNeeded()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Returning to the foreground resumes the enrichment crawl so an
@@ -68,6 +69,11 @@ struct RootView: View {
     /// Observed so the elevation tokens rebuild the instant Dim↔Black changes;
     /// the flavour is not a trait, so nothing else would notice.
     @AppStorage(Color.MozzDarkStyle.storageKey) private var darkStyleRaw = Color.MozzDarkStyle.default.rawValue
+    @StateObject private var ambientJoin = AmbientJoinController()
+
+    private var isInSetup: Bool {
+        env.isSettingUp || env.active == nil
+    }
 
     var body: some View {
         Group {
@@ -86,9 +92,42 @@ struct RootView: View {
             }
         }
         .preferredColorScheme((Color.MozzAppearance(rawValue: appearanceRaw) ?? .system).colorScheme)
+        .environmentObject(ambientJoin)
         .animation(.default, value: env.active == nil)
         .animation(.default, value: env.isRestoring)
         .animation(.default, value: env.isSettingUp)
+        .onAppear {
+            ambientJoin.setSetupActive(isInSetup)
+        }
+        .onChange(of: isInSetup) { _, enabled in
+            ambientJoin.setSetupActive(enabled)
+        }
+        .onChange(of: ambientJoin.completedCircleID) { _, circleID in
+            guard circleID != nil else { return }
+            Task { @MainActor in
+                await env.bootstrapServerFromCircleIfNeeded()
+            }
+        }
+        .alert(
+            "Sync this device?",
+            isPresented: Binding(
+                get: {
+                    ambientJoin.request != nil
+                        && !ambientJoin.isDevicesScreenActive
+                },
+                // The buttons below own the answer. SwiftUI is allowed to set
+                // presentation false before invoking a button action; treating
+                // that setter as "No" races the explicit Add tap and can make
+                // acceptance lose nondeterministically.
+                set: { _ in }
+            ),
+            presenting: ambientJoin.request
+        ) { _ in
+            Button("Add Device") { ambientJoin.answer(true) }
+            Button("Not Now", role: .cancel) { ambientJoin.answer(false) }
+        } message: { request in
+            Text(request.confirmationMessage)
+        }
         .onOpenURL { url in
             env.handle(url: url)
         }

@@ -19,7 +19,20 @@ import Foundation
 /// The key is computed identically at album upsert and in the backfill
 /// migration, so on-disk rows and freshly-synced rows always agree.
 enum AlbumGrouping {
-    /// Unit-separator: cannot appear in titles/ids, so the parts never collide.
+    /// Unit-separator: it cannot appear in a title or an id, so the two parts
+    /// of a key never collide with each other.
+    ///
+    /// It does, however, appear in the **result**. An `albumGroupKey` contains
+    /// a U+001F, so anything that later takes a group key and joins it with
+    /// something else must not reach for this character too. Page cursors did
+    /// exactly that — `PageCursor.token` used U+001F as its own separator — and
+    /// an album cursor came back split into two keys, so the seek clause was
+    /// built for one key while its arguments were bound for two and SQLite
+    /// rejected the statement. Paging albums failed on the second page for
+    /// every client that carries a cursor as text.
+    ///
+    /// The lesson is not "pick a rarer character". It is that a serialiser
+    /// should not depend on what its input happens not to contain.
     private static let separator = "\u{1F}"
 
     static func key(artistRemoteId: String?, artistName: String, sortTitle: String) -> String {

@@ -44,6 +44,7 @@ export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
 export PATH="$DOTNET_ROOT:$PATH"
 # ~/.nuget is root-owned on this machine.
 export NUGET_PACKAGES="${NUGET_PACKAGES:-$HOME/Development/.nuget-packages}"
+eval "$(tools/version-info.py --format shell)"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -63,6 +64,11 @@ rm -rf "$STAGE"
 dotnet publish clients/desktop/Mozz.Desktop.csproj \
   -c Release -r "$RID" --self-contained true \
   -p:UseAppHost=true \
+  -p:MozzMarketingVersion="$MOZZ_RESOLVED_MARKETING_VERSION" \
+  -p:MozzBuildNumber="$MOZZ_RESOLVED_BUILD_NUMBER" \
+  -p:MozzDisplayVersion="$MOZZ_RESOLVED_DISPLAY_VERSION" \
+  -p:MozzAssemblyVersion="$MOZZ_RESOLVED_ASSEMBLY_VERSION" \
+  -p:MozzFileVersion="$MOZZ_RESOLVED_FILE_VERSION" \
   -o "$STAGE" \
   --nologo -v quiet
 cp .build/release/libMozzFFI.dylib "$STAGE/"
@@ -91,10 +97,6 @@ else
   echo "  (no source icon at $SOURCE_ICON — bundle will use the generic one)"
 fi
 
-# CalVer, matching the iOS app's scheme.
-VERSION="$(date +%Y.%-m.%-d)"
-BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
-
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,10 +108,29 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Mozz.Desktop</string>
   <key>CFBundleIconFile</key><string>Mozz</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>$BUILD</string>
+  <key>CFBundleShortVersionString</key><string>$MOZZ_RESOLVED_MARKETING_VERSION</string>
+  <key>CFBundleVersion</key><string>$MOZZ_RESOLVED_BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Mozz plays from a server the user runs, which is almost always on the
+       local network. Since macOS 15 an app must declare why it needs local
+       network access before the system will even offer the permission prompt;
+       without this key the request is refused silently and every LAN
+       connection fails as EHOSTUNREACH, which surfaces as "No route to host"
+       from .NET while curl on the same machine succeeds.
+
+       That is exactly what happened when this bundle was first signed with a
+       real certificate: the signing identity changed, macOS treated it as a
+       new app, the previously granted permission no longer applied, and album
+       art and profile pictures stopped loading with nothing in the UI to say
+       why. Streaming kept working only because decoding happens in a separate
+       FFmpeg process with its own grant. -->
+  <key>NSLocalNetworkUsageDescription</key><string>Mozz connects to your media server to stream music and download album art. Your server is usually on your local network.</string>
+  <!-- This script is the local developer bundler. Marking its bundles lets the
+       credential store avoid legacy Keychain ACL prompts that only happen
+       because this binary is rebuilt constantly. Release/notarised bundles are
+       not produced here and therefore keep using the Keychain. -->
+  <key>MozzLocalDevelopmentBuild</key><true/>
   <!-- Without this the process is a background agent: no Dock icon, no menu
        bar, and the window cannot be brought to the front. -->
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
@@ -158,13 +179,35 @@ codesign "${SIGN[@]}" --deep "$APP" 2>/dev/null \
   || echo "  (codesign reported an issue; the app may still run)"
 
 SIZE="$(du -sh "$APP" | cut -f1)"
-echo "✓ $APP ($SIZE) — version $VERSION build $BUILD"
+echo "✓ $APP ($SIZE) — version $MOZZ_RESOLVED_DISPLAY_VERSION"
 
 if [ "$RUN" = "1" ]; then
+  # Launch from /Applications, never from the build directory.
+  #
+  # macOS shows the local network permission prompt for an app in a normal
+  # install location. Run the same signed bundle out of a worktree's build/
+  # folder and no prompt ever appears: connections to a LAN server just fail
+  # with EHOSTUNREACH, the app never appears in the Local Network settings list,
+  # and there is nothing to switch on. Meanwhile curl, nc and the child ffmpeg
+  # process all reach the server fine - so music plays and album art silently
+  # does not, which is a hard thing to read as a permissions problem.
+  #
+  # Once the prompt is answered the grant follows the signing identity rather
+  # than the path, so build/ works afterwards too. This copy exists to get the
+  # prompt asked in the first place, which is the part that only happens once
+  # and only from here.
+  INSTALLED="/Applications/$(basename "$APP")"
+  # Braced deliberately: bash 3.2 under some locales swallows the following
+  # multibyte character into the variable name, so `$INSTALLED…` looks up a
+  # variable that does not exist and `set -u` aborts the install.
+  echo "▸ Installing to ${INSTALLED}…"
+  rm -rf "$INSTALLED"
+  cp -R "$APP" "$INSTALLED"
+
   echo "▸ Launching…"
   if [ -n "$LIBRARY" ]; then
-    MOZZ_LIBRARY="$LIBRARY" open -n "$APP"
+    MOZZ_LIBRARY="$LIBRARY" open -n "$INSTALLED"
   else
-    open -n "$APP"
+    open -n "$INSTALLED"
   fi
 fi

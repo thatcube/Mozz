@@ -4,11 +4,37 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- LibraryImport (the source-generated P/Invoke) emits unsafe marshalling code. -->
+    <!-- The audio interop uses unsafe C# directly: raw byte* spans in the
+         stream callbacks and delegate* unmanaged function pointers for the
+         engine's read/seek/close trampolines. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>Assets\mozz.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+
+  <Target Name="ComputeMozzVersion" BeforeTargets="GetAssemblyVersion">
+    <PropertyGroup>
+      <MozzPythonExecutable Condition="'$(MozzPythonExecutable)' == '' and '$(OS)' == 'Windows_NT'">python</MozzPythonExecutable>
+      <MozzPythonExecutable Condition="'$(MozzPythonExecutable)' == ''">python3</MozzPythonExecutable>
+      <MozzVersionScript>$(MSBuildThisFileDirectory)../../tools/version-info.py</MozzVersionScript>
+    </PropertyGroup>
+    <Exec Command="&quot;$(MozzPythonExecutable)&quot; &quot;$(MozzVersionScript)&quot; --format msbuild-lines" ConsoleToMSBuild="true" StandardOutputImportance="Low" Condition="'$(MozzMarketingVersion)' == '' or '$(MozzBuildNumber)' == '' or '$(MozzDisplayVersion)' == '' or '$(MozzAssemblyVersion)' == '' or '$(MozzFileVersion)' == ''">
+      <Output TaskParameter="ConsoleOutput" ItemName="_MozzVersionLine" />
+    </Exec>
+    <PropertyGroup>
+      <_MozzVersionOutput>@(_MozzVersionLine, '|')</_MozzVersionOutput>
+      <MozzMarketingVersion Condition="'$(MozzMarketingVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzMarketingVersion=([^|]+)').Groups[1].Value)</MozzMarketingVersion>
+      <MozzBuildNumber Condition="'$(MozzBuildNumber)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzBuildNumber=([^|]+)').Groups[1].Value)</MozzBuildNumber>
+      <MozzDisplayVersion Condition="'$(MozzDisplayVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzDisplayVersion=([^|]+)').Groups[1].Value)</MozzDisplayVersion>
+      <MozzAssemblyVersion Condition="'$(MozzAssemblyVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzAssemblyVersion=([^|]+)').Groups[1].Value)</MozzAssemblyVersion>
+      <MozzFileVersion Condition="'$(MozzFileVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Match('$(_MozzVersionOutput)', 'MozzFileVersion=([^|]+)').Groups[1].Value)</MozzFileVersion>
+      <Version>$(MozzMarketingVersion)</Version>
+      <AssemblyVersion>$(MozzAssemblyVersion)</AssemblyVersion>
+      <FileVersion>$(MozzFileVersion)</FileVersion>
+      <InformationalVersion>$(MozzDisplayVersion)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 
   <ItemGroup>
     <Folder Include="Models\" />
@@ -28,10 +54,43 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <!-- miniaudio (MIT / public-domain) as the cross-platform output device.
-         Ships prebuilt natives for win-x64/arm64/x86, osx-x64/arm64 and
-         linux-x64/arm64, so the audio device works on every target with no
-         extra toolchain. Decode and HTTP go through the system FFmpeg binary. -->
-    <PackageReference Include="Hexa.NET.MiniAudio" Version="1.0.1" />
+    <!-- The runtime behind the generated command client. The command surface is
+         described once in schema/ and the Swift and C# clients are generated
+         from it, so a capability the schema does not declare cannot be reached
+         from either. Generated sources are committed rather than built, so
+         protoc is not a prerequisite on any of the four desktop CI targets —
+         see tools/generate-schema.sh and ADR-0016. -->
+    <PackageReference Include="Google.Protobuf" Version="3.33.1" />
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
   </ItemGroup>
+
+  <!-- The audio engine itself is Rust (audio/), reached by P/Invoke. Build its
+       shared library and drop it next to the app so the loader finds it: the
+       C# side is only a shell and the first Play throws DllNotFoundException
+       without it. AfterTargets="Build" covers `dotnet run`; AfterTargets=
+       "Publish" covers the packaged app (build-macos-app.sh copies the publish
+       folder wholesale into Mozz.app/Contents/MacOS, so the dylib rides along).
+       Decode, the device, the DSP and HTTP now all live in Rust, which is why
+       the miniaudio package and the FFmpeg subprocess are gone. -->
+  <PropertyGroup>
+    <MozzAudioDir>$(MSBuildThisFileDirectory)../../audio</MozzAudioDir>
+    <MozzAudioLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libmozz_audio_ffi.dylib</MozzAudioLibName>
+    <MozzAudioLibName Condition="$([MSBuild]::IsOSPlatform('Linux'))">libmozz_audio_ffi.so</MozzAudioLibName>
+    <MozzAudioLibName Condition="$([MSBuild]::IsOSPlatform('Windows'))">mozz_audio_ffi.dll</MozzAudioLibName>
+    <MozzAudioLibPath>$(MozzAudioDir)/target/release/$(MozzAudioLibName)</MozzAudioLibPath>
+  </PropertyGroup>
+
+  <Target Name="BuildMozzAudioNative" BeforeTargets="Build;Publish">
+    <Exec Condition="!$([MSBuild]::IsOSPlatform('Windows'))" Command="bash &quot;$(MSBuildThisFileDirectory)../../tools/build-audio-cdylib.sh&quot; --release" />
+    <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))" Command="cargo build --release -p mozz_audio_ffi" WorkingDirectory="$(MozzAudioDir)" />
+  </Target>
+
+  <Target Name="CopyMozzAudioNativeToOutput" AfterTargets="Build" Condition="Exists('$(MozzAudioLibPath)')">
+    <Copy SourceFiles="$(MozzAudioLibPath)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyMozzAudioNativeToPublish" AfterTargets="Publish" Condition="Exists('$(MozzAudioLibPath)')">
+    <Copy SourceFiles="$(MozzAudioLibPath)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
