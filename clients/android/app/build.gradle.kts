@@ -23,6 +23,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    androidResources {
+        // The analyzer's weights are read as a file, not as a stream, and an
+        // asset only has a file descriptor when it is stored uncompressed.
+        // They are half-precision floats, so compression buys almost nothing
+        // and costs a decompression pass on first run.
+        noCompress += "bin"
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

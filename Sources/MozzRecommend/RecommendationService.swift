@@ -498,7 +498,13 @@ public actor RecommendationService {
                 serverId: serverId, genres: taste.topGenres(12), artistIds: taste.topArtists(20),
                 notPlayedSince: notPlayedSince, excludingArtistIds: suppressedArtists,
                 limit: 2000, enrich: enrich)
-            scored = [await contentScorer(for: serverId).score(candidates: pool, taste: taste)]
+            let content = await contentScorer(for: serverId).score(candidates: pool, taste: taste)
+            // Blended rather than substituted: the blender normalizes each
+            // source on its own scale, so a library with three analysed tracks
+            // contributes three tracks' worth of opinion instead of skewing the
+            // whole shelf.
+            let sonic = await sonicTasteSource(serverId: serverId, pool: pool, since: lookback)
+            scored = sonic.isEmpty ? [content] : [content, sonic]
             title = "Mozz Weekly"
         }
 
@@ -516,6 +522,62 @@ public actor RecommendationService {
         }
         try await store.saveRecommendationSet(set, items: items)
         return set
+    }
+
+    /// Tracks that sound like what this listener actually plays.
+    ///
+    /// The point of analysing a library is better recommendations, and the
+    /// places people look for recommendations are the mixes and the weekly —
+    /// not radio, which is where the acoustic tier landed first because it was
+    /// the obvious consumer. This is that same tier, aggregated over a taste
+    /// rather than a single seed.
+    ///
+    /// Each of the listener's most-played tracks votes for its own acoustic
+    /// neighbours, weighted by how much it is played, and the votes are summed.
+    /// A track that several favourites all sound like scores higher than one
+    /// that resembles a single favourite closely — which is the difference
+    /// between a taste and a track.
+    ///
+    /// Empty is a perfectly good answer. A library that has not been analysed
+    /// yet, or a listener whose favourites are all acoustic outliers, gets
+    /// nothing from this and the content scorer carries the mix alone.
+    func sonicTasteSource(serverId: ServerID, pool: [TrackCandidate],
+                          seedLimit: Int = 12, since: Double) async -> [ScoredCandidate] {
+        // `try?` flattens the optional the store returns, so one unwrap covers
+        // both "the read failed" and "nothing has been analysed".
+        guard let engine = try? await store.dominantSonicEngine(serverId: serverId) else { return [] }
+        guard let seeds = try? await store.mostPlayedCandidates(
+            serverId: serverId, since: since, limit: seedLimit), !seeds.isEmpty else { return [] }
+
+        // Only tracks the caller is willing to recommend: the pool already
+        // excludes the recently played, the suppressed, and other libraries.
+        let eligible = Dictionary(pool.map { ($0.remoteId, $0) }, uniquingKeysWith: { a, _ in a })
+        guard !eligible.isEmpty else { return [] }
+
+        var totals: [String: Double] = [:]
+        var best: [String: (weight: Double, seed: String)] = [:]
+        for (index, seed) in seeds.enumerated() {
+            // Rank-weighted: the most played track counts about twice what the
+            // twelfth does. Play counts themselves are too spiky — one album on
+            // repeat would drown out a year of listening.
+            let weight = 1.0 / (1.0 + Double(index) * 0.1)
+            let matches = (try? await localSonicMatches(seedRemoteId: seed.remoteId, serverId: serverId,
+                                                        engine: engine, limit: 40)) ?? []
+            for match in matches {
+                guard eligible[match.trackID] != nil else { continue }
+                let contribution = match.similarity * weight
+                totals[match.trackID, default: 0] += contribution
+                if contribution > (best[match.trackID]?.weight ?? 0) {
+                    best[match.trackID] = (contribution, seed.title)
+                }
+            }
+        }
+
+        return totals.compactMap { remoteId, score in
+            guard let candidate = eligible[remoteId] else { return nil }
+            return ScoredCandidate(candidate: candidate, score: score, source: "sonic",
+                                   reason: best[remoteId].map { "Sounds like \($0.seed)" })
+        }
     }
 
     // MARK: - Read-back for the UI (precomputed → instant + offline)
@@ -585,10 +647,11 @@ public actor RecommendationService {
         let superPool = try await store.candidateTracks(
             serverId: serverId, genres: taste.topGenres(20), artistIds: taste.topArtists(30),
             notPlayedSince: includeFamiliar, excludingArtistIds: suppressedArtists, limit: 3000, enrich: enrich)
+        let superSonic = await sonicTasteSource(serverId: serverId, pool: superPool, since: lookback)
         if let ranked = ranked(superPool, taste: taste, scorer: scorer,
                                config: .init(limit: 60, explorationJitter: 0.12, maxPerArtist: 5, maxPerAlbum: 3),
                                excludingRefs: suppressedRefs, excludingArtists: suppressedArtists,
-                               rng: &rng) {
+                               extra: superSonic, rng: &rng) {
             try await save(id: "supermix", title: "Supermix", kind: Self.kindSupermix, items: ranked)
         }
 
@@ -695,10 +758,12 @@ public actor RecommendationService {
     /// Content-score a pool and blend it; nil if the result is too thin to ship.
     private func ranked(_ pool: [TrackCandidate], taste: TasteProfile, scorer: ContentRecommender,
                         config: Blender.Config, excludingRefs: Set<String> = [],
-                        excludingArtists: Set<String> = [], rng: inout SeededGenerator) -> [ScoredCandidate]? {
+                        excludingArtists: Set<String> = [], extra: [ScoredCandidate] = [],
+                        rng: inout SeededGenerator) -> [ScoredCandidate]? {
         guard pool.count >= Self.minTracks else { return nil }
         let scored = scorer.score(candidates: pool, taste: taste)
-        let blended = blender.blend(sources: [scored], config: config,
+        let sources = extra.isEmpty ? [scored] : [scored, extra]
+        let blended = blender.blend(sources: sources, config: config,
                                     excluding: excludingRefs, excludingArtists: excludingArtists, using: &rng)
         return blended.count >= Self.minTracks ? blended : nil
     }

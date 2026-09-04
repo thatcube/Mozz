@@ -273,6 +273,28 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// Which analyzer's vectors this library actually holds.
+    ///
+    /// The recommender does not know which engine the background pass is
+    /// running — that depends on whether the host could supply model weights,
+    /// which is a question about a platform's resource layout. Asking the data
+    /// avoids threading that answer through every call, and picking the engine
+    /// with the most rows is right during the changeover, when a library holds
+    /// some of each.
+    public func dominantSonicEngine(serverId: ServerID) async throws -> String? {
+        try await database.read { db in
+            try String.fetchOne(db, sql: """
+                SELECT tf.feature_source
+                FROM track_features tf
+                JOIN track ON \(Self.refExpr) = tf.track_ref
+                WHERE track.serverId = ? AND tf.embedding IS NOT NULL AND tf.feature_source IS NOT NULL
+                GROUP BY tf.feature_source
+                ORDER BY COUNT(*) DESC
+                LIMIT 1
+                """, arguments: [serverId])
+        }
+    }
+
     /// How much of a server's catalogue this engine has analyzed.
     public func sonicAnalysisProgress(serverId: ServerID, engine: String) async throws -> (analyzed: Int, total: Int) {
         try await database.read { db in

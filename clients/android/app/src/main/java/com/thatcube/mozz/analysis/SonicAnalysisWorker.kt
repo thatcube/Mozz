@@ -28,9 +28,10 @@ import java.util.concurrent.TimeUnit
  * busy. A ten-minute execution window is no obstacle to work that is designed
  * to be interrupted — [doWork] simply returns and the next window continues.
  *
- * Periodic at the minimum interval, so a plugged-in phone chews through a
- * library over a night or two of ordinary charging without anybody deciding to
- * let it.
+ * Periodic at the minimum interval, and each firing works one bounded shift
+ * before yielding, so a plugged-in phone chews through a library over a night
+ * or two of ordinary charging without anybody deciding to let it — and without
+ * spending the timeout quota that would make its background work unreliable.
  */
 class SonicAnalysisWorker(
     context: Context,
@@ -54,25 +55,47 @@ class SonicAnalysisWorker(
             return Result.retry()
         }
 
-        // Hold the worker open while the pass runs, because returning would end
-        // the process's claim on the CPU. `isStopped` goes true when a
-        // constraint lapses or the window closes; cancelling then is what keeps
-        // a pulled charger from costing someone their battery.
-        while (!isStopped) {
+        // Hold the worker open while the pass runs — returning would end the
+        // process's claim on the CPU — but only for a bounded stretch.
+        //
+        // WorkManager kills a job at around ten minutes, and Android counts
+        // those kills: a device that had been analysing for a while showed 17
+        // timeouts against a quota of 3, which puts the whole app in a
+        // restricted bucket and makes every future job harder to schedule. The
+        // work is resumable by design, so the right shape is a short shift
+        // followed by a clean exit and a fresh job later, not one job that
+        // tries to finish a library.
+        val deadline = System.currentTimeMillis() + SHIFT_MS
+        while (!isStopped && System.currentTimeMillis() < deadline) {
             delay(POLL_MS)
-            val progress = runCatching { server.sonicProgress(account.serverId, SonicWeights.path(applicationContext)) }.getOrNull() ?: continue
+            val progress = runCatching {
+                server.sonicProgress(account.serverId, SonicWeights.path(applicationContext))
+            }.getOrNull() ?: continue
             if (!progress.running) {
                 Log.i(TAG, "analysis idle at ${progress.analyzed}/${progress.total}")
                 return Result.success()
             }
         }
+        // Stop cleanly whether the shift ended or a constraint lapsed. Vectors
+        // already written stay written; the next job picks up from them.
         runCatching { server.cancelSonics() }
+        Log.i(TAG, if (isStopped) "stopped by the system" else "shift over, yielding")
         return Result.success()
     }
 
     companion object {
         private const val TAG = "MozzSonic"
         private const val POLL_MS = 10_000L
+
+        /**
+         * How long one shift lasts.
+         *
+         * Comfortably inside the roughly ten minutes WorkManager allows, so the
+         * job ends on its own terms rather than being killed — a killed job
+         * counts against a quota that, once spent, makes the app's background
+         * work unreliable for a day.
+         */
+        private const val SHIFT_MS = 8 * 60 * 1000L
         private const val WORK_NAME = "mozz.sonic-analysis"
 
         /**

@@ -25,8 +25,13 @@ object SonicWeights {
     fun path(context: Context): String? {
         val target = File(context.filesDir, ASSET)
         return runCatching {
-            val expected = context.assets.openFd(ASSET).use { it.length }
-            if (!target.exists() || target.length() != expected) {
+            // `openFd` works only on assets stored uncompressed, which the build
+            // arranges (see `noCompress` in build.gradle.kts). If that ever
+            // stops being true the size check is skipped rather than the
+            // weights being abandoned — a stale copy is worth catching, but not
+            // at the cost of no weights at all.
+            val expected = runCatching { context.assets.openFd(ASSET).use { it.length } }.getOrNull()
+            if (!target.exists() || (expected != null && target.length() != expected)) {
                 context.assets.open(ASSET).use { input ->
                     target.outputStream().use { output -> input.copyTo(output) }
                 }

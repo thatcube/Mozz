@@ -84,6 +84,7 @@ final class SonicBenchmarkTests: XCTestCase {
         var learnedVectors: [[Float]] = []
         var labels: [String] = []
         var names: [String] = []
+        var fileByName: [String: URL] = [:]
         var byVariant: [[[Float]]] = Array(repeating: [], count: analyzers.count)
 
         let labelDirs = try FileManager.default.contentsOfDirectory(
@@ -118,7 +119,9 @@ final class SonicBenchmarkTests: XCTestCase {
                     learnedVector = f.values
                 }
                 labels.append(dir.lastPathComponent)
-                names.append(file.deletingPathExtension().lastPathComponent)
+                let name = file.deletingPathExtension().lastPathComponent
+                names.append(name)
+                fileByName[name] = file
                 for (i, f) in features.enumerated() { byVariant[i].append(f!.values) }
                 if let learnedVector { learnedVectors.append(learnedVector) }
             }
@@ -182,6 +185,39 @@ final class SonicBenchmarkTests: XCTestCase {
             if precision > best.score { best = (name, precision) }
             perVariantByLabel[name] = byLabel.mapValues { Double($0.hits) / Double($0.total) }
         }
+        // How much quality does each patch buy? Twelve costs 66 hours on a
+        // Pixel; the answer decides whether that is necessary.
+        if let learned, let sweep = ProcessInfo.processInfo.environment["MOZZ_PATCH_SWEEP"] {
+            let limits = sweep.split(separator: ",").compactMap { Int($0) }
+            print("\n  patches   top-3    1-NN")
+            for limit in limits {
+                var vectors: [[Float]] = []
+                for name in names {
+                    guard let file = fileByName[name],
+                          let data = try? Data(contentsOf: file),
+                          let decoded = MP3Decoder.decode(data) else { continue }
+                    let prepared = AudioPreparation.prepare(decoded, sampleRate: VGGishFrontEnd.sampleRate)
+                    let window = SonicAnalysisService.window(prepared,
+                                                             sampleRate: VGGishFrontEnd.sampleRate,
+                                                             trimLeadIn: false)
+                    guard let f = learned.analyze(window, patchLimit: limit) else { continue }
+                    vectors.append(f.values)
+                }
+                guard vectors.count == labels.count else { continue }
+                let corpus = SonicCorpusStats(vectors)
+                let space = vectors.map { corpus.normalize($0) }
+                var hits = 0, nearest = 0
+                for i in space.indices {
+                    let ranked = space.indices.filter { $0 != i }
+                        .sorted { dot(space[i], space[$0]) > dot(space[i], space[$1]) }
+                    if ranked.prefix(3).contains(where: { labels[$0] == labels[i] }) { hits += 1 }
+                    if let first = ranked.first, labels[first] == labels[i] { nearest += 1 }
+                }
+                print(String(format: "  %7d  %5.1f%%  %5.1f%%", limit,
+                             Double(hits) / n * 100, Double(nearest) / n * 100))
+            }
+        }
+
         if learned != nil, learnedVectors.count == labels.count {
             let corpus = SonicCorpusStats(learnedVectors)
             let space = learnedVectors.map { corpus.normalize($0) }
