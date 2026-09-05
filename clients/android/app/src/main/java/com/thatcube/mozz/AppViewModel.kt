@@ -159,8 +159,15 @@ class AppViewModel(
     private fun verifyReachable(account: ServerAccount) = viewModelScope.launch {
         // `libraries` is a real request to the server (Plex answers it from
         // library/sections), so it fails exactly when the address is dead.
-        if (runCatching { server.libraries(account.serverId) }.isSuccess) return@launch
-        val repointed = runCatching { server.repointAccount(account) }.getOrNull() ?: return@launch
+        val repointed = if (runCatching { server.libraries(account.serverId) }.isSuccess) {
+            // It answers — but answering is not the same as being the right
+            // address. A phone that fell back to its server's public address
+            // keeps it for as long as it works, sending every byte of audio out
+            // of the house and back while the server sits on the same wifi.
+            runCatching { server.preferLocalAddress(account) }.getOrNull()
+        } else {
+            runCatching { server.repointAccount(account) }.getOrNull()
+        } ?: return@launch
         if (_state.value is AppState.Ready) _state.value = AppState.Ready(repointed)
     }
 

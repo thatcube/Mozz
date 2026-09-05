@@ -368,6 +368,8 @@ data class StreamSource(
  */
 @Serializable
 internal data class SessionPayload(
+    /** What the core chose between, for the log. Absent on older cores. */
+    val consideredHosts: String? = null,
     val serverId: String = "",
     val kind: String = "",
     val baseURL: String = "",

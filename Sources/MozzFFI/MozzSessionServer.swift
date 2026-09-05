@@ -50,6 +50,9 @@ import MozzSync
 // MARK: - Wire models
 
 struct WireSession: Encodable {
+    /// The addresses this resolution chose between, and which server each
+    /// claimed to be. Diagnostic only, and only as long as it earns its keep.
+    var consideredHosts: String?
     var serverId: String
     var kind: String
     var baseURL: String
@@ -411,7 +414,16 @@ func dispatchServerCommand(
                 accountToken: accountToken,
                 machineIdentifier: request.serverMachineIdentifier,
                 serverName: request.serverName)
-            return session.success(request, wire(resolved))
+            var payload = wire(resolved)
+            // What the choice was made from, in a form a shell can log.
+            // "It picked a remote address" is not answerable without knowing
+            // what it was choosing between, and every attempt to work that out
+            // from the outside has been guesswork.
+            payload.consideredHosts = (try? await auth.discoverConnections(
+                accountToken: accountToken))?
+                .map { "\($0.uri.host ?? "?")\($0.isLocal ? "(local)" : "")/\($0.clientIdentifier.prefix(8))" }
+                .joined(separator: " ")
+            return session.success(request, payload)
         } catch {
             // "serverUnreachable" on its own names a symptom and nothing else -
             // it cannot distinguish an account that advertises no addresses

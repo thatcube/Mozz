@@ -221,7 +221,11 @@ class MozzServer(
      * that answered, or the address already being the right one. A null is not a
      * failure worth surfacing: it means "still the best we know of".
      */
-    suspend fun repointAccount(account: ServerAccount): ServerAccount? {
+    suspend fun repointAccount(
+        account: ServerAccount,
+        /** Given the resolved address, whether it is worth moving to. */
+        accept: (String) -> Boolean = { true },
+    ): ServerAccount? {
         if (account.kind != BackendKind.PLEX) return null
         val accountToken = secrets.get(plexAccountKey(account.serverId))
             ?.takeIf { it.isNotEmpty() }
@@ -250,6 +254,9 @@ class MozzServer(
             Log.w(TAG, "repoint: plexResolve gave nothing", resolved.exceptionOrNull())
             return null
         }
+        session.consideredHosts?.takeIf { it.isNotEmpty() }?.let {
+            Log.i(TAG, "repoint: considered $it")
+        }
         if (session.baseURL.isEmpty() || session.token.isEmpty()) {
             Log.w(TAG, "repoint: resolved session has no address or no token")
             return null
@@ -258,6 +265,7 @@ class MozzServer(
             Log.i(TAG, "repoint: already on the best address we know of (${account.baseUrl})")
             return null
         }
+        if (!accept(session.baseURL)) return null
         Log.i(TAG, "repoint: ${account.baseUrl} -> ${session.baseURL}")
 
         val updated = account.copy(
@@ -268,6 +276,61 @@ class MozzServer(
         saveAccount(updated)
         attach(updated)
         return updated
+    }
+
+    /**
+     * Move to a nearer address when one exists, even though the current one
+     * works.
+     *
+     * Repointing only ever ran when a sync had already failed, which fixes a
+     * broken library and never improves a working one. A phone that fell back
+     * to its server's public address keeps using it for as long as it keeps
+     * answering — every byte of audio leaving the house and coming back, and
+     * the server transcoding for a "remote" listener who is sitting in the next
+     * room.
+     *
+     * Returns the updated account, or null when there was nothing better —
+     * which is the common case and not worth reporting.
+     */
+    suspend fun preferLocalAddress(account: ServerAccount): ServerAccount? {
+        if (account.kind != BackendKind.PLEX) return null
+        if (isLocalAddress(account.baseUrl)) return null
+        // Only a genuinely nearer address is worth moving to. Without this
+        // condition the account is rewritten on every launch, because a server
+        // reachable from outside usually has several public addresses and any
+        // of them differs from the one stored — so "did it change?" is true
+        // forever and the library flaps between addresses that are all equally
+        // far away.
+        return repointAccount(account) { isLocalAddress(it) }
+    }
+
+    /**
+     * Whether an address is on the listener's own network.
+     *
+     * Read out of the hostname, because that is where Plex puts it: a
+     * `plex.direct` name spells its address in its first label, so
+     * `192-168-68-71.<hash>.plex.direct` is a private address and
+     * `96-126-104-168.<hash>.plex.direct` is not. A plain host or an address
+     * we cannot read counts as non-local, which at worst costs one wasted
+     * lookup.
+     */
+    internal fun isLocalAddress(baseUrl: String): Boolean {
+        val host = runCatching { java.net.URI(baseUrl).host }.getOrNull() ?: return false
+        val label = host.substringBefore('.')
+        val octets = label.split('-').mapNotNull { it.toIntOrNull() }
+        val address = if (octets.size == 4 && octets.all { it in 0..255 }) {
+            octets
+        } else {
+            host.split('.').mapNotNull { it.toIntOrNull() }.takeIf {
+                it.size == 4 && it.all { octet -> octet in 0..255 }
+            } ?: return false
+        }
+        val (a, b) = address[0] to address[1]
+        return a == 10 ||
+            (a == 172 && b in 16..31) ||
+            (a == 192 && b == 168) ||
+            (a == 169 && b == 254) ||
+            a == 127
     }
 
     suspend fun libraries(serverId: String): List<MusicLibrary> =
