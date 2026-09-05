@@ -238,9 +238,13 @@ the BPM the network has no opinion about.
 - **Wider and more mainstream evaluation audio.** FMA and MagnaTagATune are both
   CC-licensed catalogues that skew obscure. The strongest signal so far came
   from a real library of mainstream music, which is also the smallest sample.
-- **Cross-device vector sync.** Every device analyses independently. This was
-  blocked on the relay in ADR-0012 and the pairing in ADR-0013; both now exist
-  on main, so it may be much closer than it was.
+- ~~**Cross-device vector sync.**~~ Built. Vectors travel through the ADR-0012
+  relay as chunks of the same shape the catalog uses, under an object key of
+  their own, and both directions run on every relay sync. They merge rather
+  than replace, every device's index is read rather than only the newest, and
+  an existing vector is never overwritten. Covered by tests; **not yet
+  exercised across two real devices**, which is the part I would want to see
+  before trusting it.
 - **What a station does with an outlier seed.** See above: detecting "nothing
   here is like this" needs something other than the similarity score, which is
   relative by construction. Candidates: comparing a seed's best match against
@@ -295,23 +299,29 @@ that are one-sided.
 
 **Known missing, in rough priority order:**
 
-1. **Android has no radio UI at all.** The engine and the FFI command exist;
-   the surface does not. The device that does the most analysing cannot hear
-   the result.
-2. **Radio's orchestration is duplicated.** The tier blending lives in the
-   core, but candidate gathering, the seen-set and the refill loop live in
-   `AppEnvironment`, and the FFI has its own partial copy. That divergence has
-   already produced one shipped bug (the collaborative tier missing from every
-   non-Apple client). Worth pushing a `RadioStation` down into the core before
-   writing the Kotlin, or the same thing happens a third time.
-3. **Three Android call sites** still speak this branch's pre-merge command
-   names (`setLiked`, `plexResolve`, `capabilities`) rather than main's.
-4. **Cross-device vector sync.** Every device analyses independently. Main now
-   has `MozzRelay` and `MozzPairing`, which is what this was blocked on, so it
-   may now be straightforward — that is a guess, not an assessment.
-5. **Tempo has octave errors.** Measured 54 BPM for a track that is ~108.
-   One dimension of fifty-three, so it barely moves the ranking, but it is
-   wrong and cheap to fold into a 60–160 band.
+1. ~~**Android has no radio UI at all.**~~ It has one now: "Start Radio" in the
+   row menu, driving the core's station, with the queue topping itself up as it
+   runs low. Compiled, installed and launched on the Pixel; **nobody has tapped
+   it**, so what is verified is that the core answers, not that the experience
+   is any good.
+2. ~~**Radio's orchestration is duplicated.**~~ `RadioStation` now owns the
+   seed, the seen-set and the tier gathering in the core, and all three shells
+   drive it - including iOS, which had the original copy. What stays in each
+   shell is deciding when it is safe to replace what is playing, which is a
+   genuinely different question and needs things the core has no business
+   knowing.
+3. ~~**Three Android call sites**~~ fixed — `setLiked` became `setFavorite`,
+   and `plexResolve` and `capabilities` are now real commands rather than ones
+   Android invented. A guard script fails the build if that drifts again.
+4. ~~**Cross-device vector sync.**~~ Built, as above. Untried on two real
+   devices.
+5. ~~**Tempo has octave errors.**~~ Fixed, though differently than suggested
+   here: not a 60-160 band, which would have mislabelled anything genuinely
+   outside it, but a harmonic check. A beat at T always produces a peak at 2T
+   and a beat at 2T produces nothing at T, so the faster reading is preferred
+   whenever it explains the envelope nearly as well. Eleven synthetic tempos,
+   three of which used to halve, are now within 2%. Real music with an
+   off-beat snare is a harder case and remains unmeasured.
 
 **If I were picking up this work cold**, I would not re-run the model bake-off
 — that ground is covered in `docs/research/sonic-model-landscape.md`, including
