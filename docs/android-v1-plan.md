@@ -26,7 +26,7 @@ are core capabilities already; they are later phases, not rewrites.
 | Layout | Adaptive from day one | Fold is the primary device; iPad/foldable-iPhone is a parallel iOS track |
 | Distribution | Play Store, automated via fastlane `supply` | Same tool the iOS release already uses |
 | Package name | `com.brando.mozz` | Permanent once uploaded; appears in the Play Store URL and nowhere else users look |
-| Networking | The core keeps its own HTTP. No Kotlin networking code | Settled by measurement — [ADR-0015](../../docs/adr/ADR-0015-android-networking.md) |
+| Networking | The core keeps its own HTTP. No Kotlin networking code | Settled by measurement — [ADR-0015](adr/ADR-0015-android-networking.md) |
 
 ## The networking question, settled
 
@@ -34,7 +34,7 @@ are core capabilities already; they are later phases, not rewrites.
 it, and reads Android's own trust store. HTTPS works from the core on device —
 four real hosts, TLS, a 2 MB body. So the Kotlin layer never touches HTTP, and
 nothing is vendored. Written up in
-[ADR-0015](../../docs/adr/ADR-0015-android-networking.md), including the
+[ADR-0015](adr/ADR-0015-android-networking.md), including the
 first-run false negative that nearly sent this the other way.
 
 One gap it opens: Foundation's curl trusts the **system** CA store only, so a
@@ -142,9 +142,11 @@ thinking with Android but none of the code. It gets its own plan.
   iOS DSP, or whether miniaudio comes over from desktop
 - Pairing, continuity and history sync — proven on Android by the spike, unbuilt
 - Android Auto, widgets, Wear
-- **Stripping the payload.** The debug APK is ~180 MB for one ABI, almost all of
-  it unstripped Swift runtime. It has to come down long before anyone installs
-  it: strip the `.so`s, and check what `android.bundle` splits can do with them.
+- **Stripping the payload.** The debug APK is ~277 MB for one ABI, almost all of
+  it unstripped Swift runtime and — since the Facade started reaching the audio
+  engine — a Rust decoder stack Android never calls, because Media3 does the
+  playing. It has to come down long before anyone installs it: strip the
+  `.so`s, and check what `android.bundle` splits can do with them.
   (swift-testing and XCTest are already gone — they were being staged into the
   APK by a wildcard copy, and nothing in the shipped graph needed them.)
 - **Artwork.** Coil is chosen but unwired; `artworkURL` is ready in the core.
