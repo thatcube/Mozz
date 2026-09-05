@@ -136,6 +136,35 @@ public enum PlexGDMParser {
     }
 }
 
+/// Whether an address is on the listener's own network.
+///
+/// Read out of the hostname, because that is where Plex puts it: a
+/// `plex.direct` name spells its address in its first label, so
+/// `192-168-68-71.<hash>.plex.direct` is private and
+/// `96-126-104-168.<hash>.plex.direct` is not. A plain hostname, or one this
+/// cannot read, counts as remote — which at worst costs a lookup that finds
+/// nothing better.
+public enum PlexAddress {
+    public static func isLocal(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        let label = host.split(separator: ".").first.map(String.init) ?? host
+        let octets = label.split(separator: "-").compactMap { UInt8($0) }
+        let address: [UInt8]
+        if octets.count == 4 {
+            address = octets
+        } else {
+            let plain = host.split(separator: ".").compactMap { UInt8($0) }
+            guard plain.count == 4 else { return false }
+            address = plain
+        }
+        switch (address[0], address[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        default: return false
+        }
+    }
+}
+
 /// Asks the local network which Plex servers are on it.
 public protocol PlexLocallyDiscovering: Sendable {
     func discover(timeout: TimeInterval) async -> [PlexLocalServer]

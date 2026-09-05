@@ -173,3 +173,43 @@ private struct StubDiscovery: PlexLocallyDiscovering {
     init(_ servers: [PlexLocalServer]) { self.servers = servers }
     func discover(timeout: TimeInterval) async -> [PlexLocalServer] { servers }
 }
+
+/// Telling a nearby address from a distant one.
+///
+/// The judgement behind "should this device move closer": a phone that fell
+/// back to its server's public address should notice when the LAN one becomes
+/// reachable again, and must not mistake one public address for another and
+/// rewrite itself on every launch.
+final class PlexAddressTests: XCTestCase {
+    private func url(_ string: String) -> URL { URL(string: string)! }
+
+    func testAPlexDirectNameSpellsItsAddress() {
+        XCTAssertTrue(PlexAddress.isLocal(
+            url("https://192-168-68-71.50acfe99.plex.direct:32400")))
+        XCTAssertFalse(PlexAddress.isLocal(
+            url("https://96-126-104-168.50acfe99.plex.direct:8443")),
+            "a relay is not the local network")
+    }
+
+    func testEveryPrivateRangeCounts() {
+        for host in ["10-0-0-1", "172-16-0-1", "172-31-255-1", "192-168-1-1", "169-254-0-1"] {
+            XCTAssertTrue(PlexAddress.isLocal(url("https://\(host).h.plex.direct:32400")), host)
+        }
+        // 172.32 is outside the private block, and the boundary is exactly
+        // where a hand-written check tends to be wrong.
+        XCTAssertFalse(PlexAddress.isLocal(url("https://172-32-0-1.h.plex.direct:32400")))
+        XCTAssertFalse(PlexAddress.isLocal(url("https://172-15-0-1.h.plex.direct:32400")))
+    }
+
+    func testAPlainAddressIsReadDirectly() {
+        XCTAssertTrue(PlexAddress.isLocal(url("http://192.168.1.50:32400")))
+        XCTAssertFalse(PlexAddress.isLocal(url("https://plex.example.com:32400")))
+    }
+
+    func testWhatCannotBeReadCountsAsRemote() {
+        // At worst that costs a lookup which finds nothing better; the reverse
+        // would pin someone to an address that is not actually near them.
+        XCTAssertFalse(PlexAddress.isLocal(url("https://truenas.collie-matrix.ts.net")))
+        XCTAssertFalse(PlexAddress.isLocal(url("https://999-1-1-1.h.plex.direct:32400")))
+    }
+}

@@ -1188,6 +1188,10 @@ public final class AppEnvironment: ObservableObject {
                     // before awaiting so a thrown page fetch preserves its cursor.
                     shouldResume = true
                     _ = try await runSync(plan: .full, startMode: startMode, progress: emitProgress)
+                    // Asked after the library is on screen rather than before:
+                    // it costs a round trip, and a working address is worth
+                    // improving but never worth delaying a launch for.
+                    Task { [weak self] in await self?.preferLocalConnection() }
                     break   // success
                 } catch is CancellationError {
                     break   // user cancelled — leave the partial catalog
@@ -1972,6 +1976,33 @@ public final class AppEnvironment: ObservableObject {
     public func repointActiveConnection() async -> Bool {
         guard let current = active, let stored = SessionPersistence.load(credentials) else { return false }
         guard let repointed = await repointedPlexSession(stored, keeping: current.connection.id) else { return false }
+        SessionPersistence.save(repointed, to: credentials)
+        guard let (connection, backend) = try? await buildBackend(from: repointed) else { return false }
+        try? await CatalogWriter(database).saveServer(connection)
+        finishActivation(connection: connection, backend: backend, capabilities: current.capabilities)
+        return true
+    }
+
+    /// Move to a nearer address when one exists, even though the current one
+    /// works.
+    ///
+    /// Repointing only ever ran after something had already failed, which
+    /// repairs a broken library and never improves a working one. A phone that
+    /// fell back to its server's public address keeps it for as long as it
+    /// keeps answering — every byte of audio leaving the house and coming back,
+    /// and the server transcoding for a "remote" listener in the next room.
+    ///
+    /// Only a genuinely local candidate is adopted. Without that condition the
+    /// session is rewritten on every launch: a server reachable from outside
+    /// usually has several public addresses, any of them differs from the one
+    /// stored, so "did it change?" would be true forever.
+    @discardableResult
+    public func preferLocalConnection() async -> Bool {
+        guard let current = active, current.connection.kind == .plex,
+              !PlexAddress.isLocal(current.connection.baseURL),
+              let stored = SessionPersistence.load(credentials),
+              let repointed = await repointedPlexSession(stored, keeping: current.connection.id),
+              PlexAddress.isLocal(repointed.baseURL) else { return false }
         SessionPersistence.save(repointed, to: credentials)
         guard let (connection, backend) = try? await buildBackend(from: repointed) else { return false }
         try? await CatalogWriter(database).saveServer(connection)
