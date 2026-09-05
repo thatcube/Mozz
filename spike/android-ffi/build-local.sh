@@ -126,6 +126,42 @@ else
     echo "SQLite: cached at $SQLITE_ROOT"
 fi
 
+# --- The audio engine ------------------------------------------------------
+#
+# ADR-0016 puts one engine behind the Facade, and MozzCommands imports it, so
+# `--product MozzFFI` reaches MozzAudioEngine whether or not this shell plays a
+# note through it. Off Apple the engine is a plain staticlib rather than an
+# XCFramework; MOZZ_AUDIO_FFI_SYSTEM_LIBRARY tells the manifest to expect that,
+# because the host it is evaluated on is a Mac and cannot work it out alone.
+say "Cross-compiling the audio engine for ${ARCH}"
+command -v cargo >/dev/null || { echo "cargo not on PATH (rustup not installed?)" >&2; exit 1; }
+RUST_TARGET="$NDK_LIB_TRIPLE"
+rustup target list --installed | grep -qx "$RUST_TARGET" \
+    || { echo "rust target $RUST_TARGET missing — run: rustup target add $RUST_TARGET" >&2; exit 1; }
+
+# The API level belongs in the linker's name, not in a flag. cpal links
+# libaaudio, which the NDK sysroot only carries from API 26 up, so a lower
+# `-clang` wrapper fails at link with `unable to find library -laaudio`.
+export CARGO_TARGET_"$(echo "$RUST_TARGET" | tr 'a-z-' 'A-Z_')"_LINKER="$NDK_BIN/${CLANG_TRIPLE}-clang"
+export CC_"$(echo "$RUST_TARGET" | tr '-' '_')"="$NDK_BIN/${CLANG_TRIPLE}-clang"
+export AR_"$(echo "$RUST_TARGET" | tr '-' '_')"="$NDK_BIN/llvm-ar"
+cargo build --release --manifest-path audio/Cargo.toml \
+    --target "$RUST_TARGET" -p mozz_audio_ffi
+
+AUDIO_LIB_DIR="$REPO_ROOT/audio/target/$RUST_TARGET/release"
+[ -f "$AUDIO_LIB_DIR/libmozz_audio_ffi.a" ] \
+    || { echo "the engine built, but libmozz_audio_ffi.a was not where it was expected" >&2; exit 1; }
+echo "libmozz_audio_ffi.a at $AUDIO_LIB_DIR ($(du -h "$AUDIO_LIB_DIR/libmozz_audio_ffi.a" | cut -f1))"
+
+# cargo emits a .so beside the .a. A search path holding both lets the linker
+# prefer the shared one, which links cleanly and then fails to load on the
+# phone for want of an rpath — so the staticlib gets a directory of its own.
+AUDIO_STATIC_DIR="$REPO_ROOT/.build/android-audio-$RUST_TARGET"
+mkdir -p "$AUDIO_STATIC_DIR"
+cp "$AUDIO_LIB_DIR/libmozz_audio_ffi.a" "$AUDIO_STATIC_DIR/"
+
+export MOZZ_AUDIO_FFI_SYSTEM_LIBRARY=1
+
 # --- The core --------------------------------------------------------------
 #
 # The nested `swift_static-<arch>/android` search path is not optional: the SDK
@@ -141,7 +177,9 @@ fi
 say "Cross-compiling libMozzFFI.so for ${ARCH}"
 swift build -c release --swift-sdk "$SDK_TRIPLE" --static-swift-stdlib \
     -Xcc -I"$SQLITE_ROOT/include" \
+    -Xcc -I"$REPO_ROOT/audio/ffi/include" \
     -Xlinker -L"$SQLITE_ROOT/lib" \
+    -Xlinker -L"$AUDIO_STATIC_DIR" \
     -Xlinker -L"$STATIC_LIBS" \
     -Xlinker -soname -Xlinker libMozzFFI.so \
     --product MozzFFI

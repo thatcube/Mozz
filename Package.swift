@@ -1,4 +1,5 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
 
 // MARK: - MozzKit — Candidate B (offline-first, normalized local DB as source of truth)
@@ -49,7 +50,14 @@ let audioEngineLinkage: [LinkerSetting] = [
     // only: cargo emits a .so/.dll beside it for the C# shell to P/Invoke, and
     // a search path containing both lets the linker pick the shared one, which
     // builds cleanly and then fails to load for want of an rpath.
-    .linkedLibrary("mozz_audio_ffi", .when(platforms: [.windows, .linux])),
+    .linkedLibrary("mozz_audio_ffi", .when(platforms: [.windows, .linux, .android])),
+    // cpal reaches Android audio through AAudio, which is why the app's
+    // minSdk of 28 is also the floor for this library: libaaudio.so first
+    // appears in the NDK sysroot at API 26, and linking below that fails as
+    // `unable to find library -laaudio`.
+    .linkedLibrary("aaudio", .when(platforms: [.android])),
+    .linkedLibrary("android", .when(platforms: [.android])),
+    .linkedLibrary("log", .when(platforms: [.android])),
     // cpal reaches Linux audio through ALSA. On MSVC a staticlib carries its
     // own `/DEFAULTLIB:` directives, but ELF has no such mechanism: the symbols
     // are simply undefined until whoever links last names the library.
@@ -74,9 +82,21 @@ let audioEngineLinkage: [LinkerSetting] = [
 // condition is on the HOST that evaluates this manifest, which is what makes
 // it correct for cross-compilation too — an iOS build runs on a Mac and takes
 // the XCFramework; an Android build runs on Linux and takes the staticlib.
+//
+// The host is *almost* the right question. It is wrong in exactly one case:
+// Android is cross-compiled from this Mac, so `os(macOS)` is true while the
+// thing being built cannot open an XCFramework. That failed as
+// `no such module 'MozzAudioFFI'` while compiling MozzAudioEngine, which
+// names neither the container nor the platform. The Android build says so
+// explicitly rather than leaving the manifest to infer it.
+let audioFFIPrefersSystemLibrary =
+    ProcessInfo.processInfo.environment["MOZZ_AUDIO_FFI_SYSTEM_LIBRARY"] == "1"
+
 #if os(macOS)
-let audioFFITarget: Target = .binaryTarget(
-    name: "MozzAudioFFI", path: "audio/target/MozzAudioFFI.xcframework")
+let audioFFITarget: Target = audioFFIPrefersSystemLibrary
+    ? .systemLibrary(name: "MozzAudioFFI", path: "audio/ffi/module")
+    : .binaryTarget(
+        name: "MozzAudioFFI", path: "audio/target/MozzAudioFFI.xcframework")
 #else
 let audioFFITarget: Target = .systemLibrary(
     name: "MozzAudioFFI", path: "audio/ffi/module")
