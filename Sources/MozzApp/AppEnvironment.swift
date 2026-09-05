@@ -2801,110 +2801,139 @@ public final class AppEnvironment: ObservableObject {
     /// Persist the engine's listening-history events into the on-device
     // MARK: Radio / Instant Mix
 
-    /// The seed of the currently-playing station, if any. Drives the endless
-    /// queue-extension hook.
-    private var activeRadioSeed: RadioSeed?
-    /// Track ids already surfaced by the current station, so successive batches
-    /// don't immediately repeat.
-    private var radioSeenIDs: Set<String> = []
-    /// Bumped on every `startRadio` *intent*, so a newer start supersedes an
-    /// older still-fetching one (last tap wins).
+    /// The station itself lives in the core.
+    ///
+    /// ``RadioStation`` owns the seed, everything already played, and the three
+    /// tiers that decide what comes next. That used to be two hundred lines
+    /// here, which meant the answer to "what plays after this?" existed on
+    /// exactly one platform.
+    ///
+    /// What stays in the app is the half that is genuinely the app's: deciding
+    /// when it is safe to replace what is playing.
+    private lazy var station: RadioStation = makeStation()
+
+    /// Bumped on every start *intent*, so a newer tap supersedes an older
+    /// still-fetching one (last tap wins).
+    ///
+    /// Deliberately separate from the station's own generation counter. That
+    /// one protects the station's state from a late batch; this one protects
+    /// the transport from a late *install* — the user may have started an album
+    /// in the seconds a station took to fetch, and replacing that is worse than
+    /// no station at all.
     private var radioIntent = 0
     /// Bumped only when a station is actually installed. The engine's extend
-    /// closure captures this, so a superseded/failed `startRadio` (which never
-    /// installs) can't strand a running station, and an in-flight extend can't
-    /// pollute a newer station's state.
+    /// closure captures this, so a superseded or failed start can't strand a
+    /// running station, and an in-flight extend can't pollute a newer one.
     private var activeStationID = 0
+
+    /// The two tiers the core cannot reach on its own.
+    ///
+    /// The iOS app is the only shell that has both: a live backend that may
+    /// have analyzed the library itself, and a ListenBrainz-enriched database.
+    /// The Facade has the first and the desktop neither, and each missing one
+    /// degrades to "this tier contributes nothing" rather than to an error.
+    private func makeStation() -> RadioStation {
+        let recommendations = self.recommendations
+        let enrichmentStore = self.enrichmentStore
+        let algorithm = self.enrichmentAlgorithm
+        let sonicAnalysis = self.sonicAnalysis
+        let enrichmentKey = Self.enrichmentEnabledKey
+
+        return RadioStation(
+            recommendations: recommendations,
+            sources: RadioStation.Sources(
+                serverSonicMatches: { [weak self] remoteId, serverId, limit in
+                    // A network call, unlike the tier below it: this analysis
+                    // lives on the server, not in our database. Which server is
+                    // attached can change while a station runs, so it is read
+                    // now rather than captured.
+                    guard let active = await self?.activeBackend(for: serverId),
+                          active.capabilities.supportsSonicSimilarity
+                    else { return [] }
+                    return (try? await active.backend.sonicallySimilarTracks(
+                        to: remoteId, limit: limit)) ?? []
+                },
+                collaborativeMatches: { seed, serverId, excluding, limit in
+                    // Network-free: a DB read of similarity already fetched.
+                    // The toggle is respected for reads too, so turning
+                    // enrichment off gives genre-and-acoustic radio rather than
+                    // radio built from stale rows.
+                    let enabled = UserDefaults.standard
+                        .object(forKey: enrichmentKey) as? Bool ?? true
+                    guard enabled, let ref = seed.seedTrackRef,
+                          let canonical = try? await enrichmentStore
+                            .seedMbid(forTrackRef: ref)?.canonical
+                    else { return [] }
+                    return (try? await enrichmentStore.similarOwnedTracks(
+                        seedCanonicalMbids: [canonical], algorithm: algorithm,
+                        serverId: serverId, excludingRemoteIds: excluding,
+                        limit: limit)) ?? []
+                },
+                sonicEngine: { sonicAnalysis.engine }
+            )
+        )
+    }
+
+    /// The attached backend, but only if it is still the one the caller meant.
+    private func activeBackend(for serverId: ServerID) -> ActiveServer? {
+        guard let active, active.connection.id == serverId else { return nil }
+        return active
+    }
 
     /// Start an endless station seeded from a track (its genres + artist).
     public func startRadio(fromTrack track: Track) {
         guard let serverId = active?.connection.id else { return }
-        let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
-        // Seed-first: resolve + canonicalize + fetch the seed's ListenBrainz
-        // similarity in the background so radio leads with it (this or the next
-        // batch, as resolution completes). Cancel-and-replace on re-seed.
-        seedPrepTask?.cancel()
-        let enrichment = self.enrichment
-        let durationMs = track.duration > 0 ? track.duration * 1000 : nil
-        seedPrepTask = Task {
-            _ = await enrichment.prepareSeedSimilarity(
-                trackRef: ref, artistName: track.artistName, title: track.title,
-                durationMs: durationMs, artistMBID: track.artistMbid)
+        prepareSeedSimilarity(for: track, serverId: serverId)
+        let intent = claimIntent()
+        let epoch = playback.transportEpoch
+        Task { [weak self] in
+            guard let self else { return }
+            let ids = await self.station.start(
+                fromTrack: RadioTrackSeed(
+                    remoteId: track.id, title: track.title,
+                    genres: track.genres, artistId: track.artistID),
+                serverId: serverId, limit: 30)
+            await self.installStation(ids, leadTrack: track, serverId: serverId,
+                                      intent: intent, epoch: epoch)
         }
-        startRadio(seed: RadioSeed(title: track.title, genres: track.genres,
-                                   artistIds: [track.artistID].compactMap { $0 }, seedTrackRef: ref),
-                   initialExcluding: [track.id], leadTrack: track)
     }
 
-    /// Start an endless station seeded from an artist. When enrichment is on, the
-    /// seed genres are resolved to the artist's CANONICAL (normalized + mb_tags-
-    /// merged) genres — symmetric with the candidate pool — which requires an async
-    /// DB read; the caller-provided `genres` are the fallback. To keep last-tap-wins
-    /// across that await, this reserves `radioIntent` synchronously (in tap order)
-    /// and bails if a newer start supersedes it before the seed resolves. With
-    /// enrichment off it forwards synchronously with the caller genres — byte-
-    /// identical to pre-B4.5.
+    /// Start an endless station seeded from an artist.
+    ///
+    /// The caller's genres are a fallback: the core derives the seed from the
+    /// artist's own tracks, which is the vocabulary the candidate pool is
+    /// scored in.
     public func startRadio(artistRemoteId: String, name: String, genres: [String]) {
-        let enrichmentOn = UserDefaults.standard.object(forKey: Self.enrichmentEnabledKey) as? Bool ?? true
-        guard enrichmentOn, let serverId = active?.connection.id else {
-            startRadio(seed: RadioSeed(title: name, genres: genres, artistIds: [artistRemoteId]))
-            return
-        }
-        // Reserve this tap's intent NOW so a later start still wins even though we
-        // must first resolve the enriched seed genres asynchronously.
-        radioIntent += 1
-        let intent = radioIntent
-        let recommendations = self.recommendations
+        guard let serverId = active?.connection.id else { return }
+        let intent = claimIntent()
+        let epoch = playback.transportEpoch
         Task { [weak self] in
-            let enriched = await recommendations.artistSeedGenres(artistId: artistRemoteId, serverId: serverId)
-            guard let self, intent == self.radioIntent else { return }  // superseded by a newer start
-            self.startRadio(seed: RadioSeed(title: name, genres: enriched.isEmpty ? genres : enriched,
-                                            artistIds: [artistRemoteId]))
+            guard let self else { return }
+            let ids = await self.station.start(
+                fromArtist: artistRemoteId, serverId: serverId,
+                name: name, genres: genres, limit: 30)
+            await self.installStation(ids, leadTrack: nil, serverId: serverId,
+                                      intent: intent, epoch: epoch)
         }
     }
 
     /// Load an initial station batch and keep the queue topped up as it plays.
+    ///
     /// When seeded from a specific track, `leadTrack` is that track — it plays
-    /// FIRST and the generated batch (which excludes it) follows, so "start radio
-    /// from this song" begins with the song itself. Bails if superseded by a newer
-    /// start, if the user changed playback (via a direct play/shuffle/stop) while
-    /// the batch was fetching, or if the server changed — so a slow fetch can never
-    /// hijack newer playback.
-    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = [], leadTrack: Track? = nil) {
+    /// FIRST and the batch (which excludes it) follows, so "start radio from
+    /// this song" begins with the song itself.
+    public func startRadio(seed: RadioSeed, initialExcluding: Set<String> = [],
+                           leadTrack: Track? = nil) {
         guard let serverId = active?.connection.id else { return }
-        radioIntent += 1
-        let intent = radioIntent
+        let intent = claimIntent()
         let epoch = playback.transportEpoch
         Task { [weak self] in
             guard let self else { return }
-            let sonic = await self.sonicCandidates(for: seed, serverId: serverId, limit: 30)
-            let similar = await self.similarCandidates(for: seed, serverId: serverId,
-                                                       excluding: initialExcluding, limit: 30)
-            let ids = (try? await self.recommendations.radioBatch(
-                seed: seed, serverId: serverId, limit: 30, excluding: initialExcluding,
-                sonic: sonic, similar: similar)) ?? []
-            let batch = (try? await self.repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
-            // The seed track leads; the batch (which excluded it) follows — so the
-            // station starts with the song the user chose. Drop it from the batch
-            // defensively in case it slipped through.
-            let tracks: [Track]
-            if let leadTrack {
-                tracks = [leadTrack] + batch.filter { $0.id != leadTrack.id }
-            } else {
-                tracks = batch
-            }
-            // Superseded, playback changed under us, server switched, or empty.
-            guard intent == self.radioIntent,
-                  epoch == self.playback.transportEpoch,
-                  serverId == self.active?.connection.id,
-                  !tracks.isEmpty else { return }
-            self.activeStationID += 1
-            let station = self.activeStationID
-            self.activeRadioSeed = seed
-            self.radioSeenIDs = initialExcluding.union(tracks.map(\.id))
-            self.playback.startStation(tracks) { [weak self] in
-                await self?.nextRadioBatch(station: station) ?? []
-            }
+            let ids = await self.station.start(
+                seed: seed, serverId: serverId,
+                excluding: initialExcluding, limit: 30)
+            await self.installStation(ids, leadTrack: leadTrack, serverId: serverId,
+                                      intent: intent, epoch: epoch)
         }
     }
 
@@ -2912,13 +2941,43 @@ public final class AppEnvironment: ObservableObject {
     /// without disturbing what is playing right now.
     ///
     /// Siri is asked for one specific song far more often than the app's own UI
-    /// is — "play <song> on Mozz" — and on a speaker in another room a queue that
-    /// falls silent after three minutes is a poor answer. Unlike
+    /// is — "play <song> on Mozz" — and on a speaker in another room a queue
+    /// that falls silent after three minutes is a poor answer. Unlike
     /// ``startRadio(fromTrack:)``, which fetches a batch and then replaces the
     /// queue with it, this starts nothing: the song is already playing, and the
     /// station simply forms behind it.
     public func continueStation(fromTrack track: Track) {
         guard let serverId = active?.connection.id else { return }
+        let ref = prepareSeedSimilarity(for: track, serverId: serverId)
+        // Installed synchronously — there's no batch to fetch first — so this
+        // only has to claim the counters rather than re-check them.
+        _ = claimIntent()
+        activeStationID += 1
+        let stationID = activeStationID
+        let seed = RadioSeed(title: track.title, genres: track.genres,
+                             artistIds: [track.artistID].compactMap { $0 },
+                             seedTrackRef: ref)
+        Task { [station] in
+            await station.adopt(seed: seed, serverId: serverId, playing: track.id)
+        }
+        playback.continueAsStation { [weak self] in
+            await self?.nextRadioBatch(station: stationID) ?? []
+        }
+    }
+
+    /// Reserve this tap's place in line, synchronously and in tap order, before
+    /// anything is awaited.
+    private func claimIntent() -> Int {
+        radioIntent += 1
+        return radioIntent
+    }
+
+    /// Resolve, canonicalize and fetch the seed's ListenBrainz similarity in the
+    /// background, so radio leads with it (this batch or the next, as
+    /// resolution completes). Cancel-and-replace on re-seed. Returns the
+    /// durable track ref it warmed.
+    @discardableResult
+    private func prepareSeedSimilarity(for track: Track, serverId: ServerID) -> String {
         let ref = PlayEventStore.trackRef(serverId: serverId, remoteId: track.id)
         seedPrepTask?.cancel()
         let enrichment = self.enrichment
@@ -2928,99 +2987,63 @@ public final class AppEnvironment: ObservableObject {
                 trackRef: ref, artistName: track.artistName, title: track.title,
                 durationMs: durationMs, artistMBID: track.artistMbid)
         }
-        // Installed synchronously — there's no batch to fetch first — so this only
-        // has to claim the counters rather than re-check them against a newer
-        // start the way the fetching path must.
-        radioIntent += 1
+        return ref
+    }
+
+    /// Realize a station's opening ids into playable tracks and hand them to the
+    /// engine — unless something newer has happened in the meantime.
+    ///
+    /// Bails if superseded by a newer start, if the user changed playback (a
+    /// direct play, shuffle or stop) while the batch was fetching, or if the
+    /// server changed. A slow fetch can never hijack newer playback.
+    private func installStation(_ ids: [String], leadTrack: Track?,
+                                serverId: ServerID, intent: Int, epoch: Int) async {
+        let batch = (try? await repository.tracksForPlayback(
+            remoteIds: ids, serverId: serverId)) ?? []
+        // The seed track leads; the batch (which excluded it) follows. Dropped
+        // from the batch defensively in case it slipped through.
+        let tracks: [Track]
+        if let leadTrack {
+            tracks = [leadTrack] + batch.filter { $0.id != leadTrack.id }
+        } else {
+            tracks = batch
+        }
+        guard intent == radioIntent, epoch == playback.transportEpoch,
+              serverId == active?.connection.id, !tracks.isEmpty else {
+            // A newer start will overwrite the core's station on its own. Every
+            // other reason to bail leaves one installed that nothing is
+            // playing, so it has to be told.
+            if intent == radioIntent { await station.stop() }
+            return
+        }
         activeStationID += 1
-        let station = activeStationID
-        activeRadioSeed = RadioSeed(title: track.title, genres: track.genres,
-                                    artistIds: [track.artistID].compactMap { $0 },
-                                    seedTrackRef: ref)
-        radioSeenIDs = [track.id]
-        playback.continueAsStation { [weak self] in
-            await self?.nextRadioBatch(station: station) ?? []
+        let stationID = activeStationID
+        playback.startStation(tracks) { [weak self] in
+            await self?.nextRadioBatch(station: stationID) ?? []
         }
     }
 
-    /// Fetch the next station batch, excluding tracks already surfaced this
-    /// session. Bails (without mutating state) if this station is no longer the
-    /// active one.
-    private func nextRadioBatch(station: Int) async -> [Track] {
-        guard station == activeStationID, let seed = activeRadioSeed,
+    /// Fetch the next station batch. Bails (without mutating state) if this
+    /// station is no longer the active one.
+    private func nextRadioBatch(station stationID: Int) async -> [Track] {
+        guard stationID == activeStationID,
               let serverId = active?.connection.id else { return [] }
-        let sonic = await sonicCandidates(for: seed, serverId: serverId, limit: 20)
-        let similar = await similarCandidates(for: seed, serverId: serverId,
-                                              excluding: radioSeenIDs, limit: 20)
-        let ids = (try? await recommendations.radioBatch(
-            seed: seed, serverId: serverId, limit: 20, excluding: radioSeenIDs,
-            sonic: sonic, similar: similar)) ?? []
-        let tracks = (try? await repository.tracksForPlayback(remoteIds: ids, serverId: serverId)) ?? []
-        guard station == activeStationID else { return [] }
-        radioSeenIDs.formUnion(tracks.map(\.id))
+        let ids = await station.next(limit: 20)
+        let tracks = (try? await repository.tracksForPlayback(
+            remoteIds: ids, serverId: serverId)) ?? []
+        guard stationID == activeStationID else { return [] }
         return tracks
     }
 
-    /// The seed's acoustically-similar owned tracks, when the server has analyzed
-    /// its own library and will say so.
-    ///
-    /// A network call, unlike the ListenBrainz tier below it — the analysis lives
-    /// on the server, not in this database. Failure is silent and empty: a
-    /// station falls to the next tier rather than not starting.
-    private func sonicCandidates(for seed: RadioSeed, serverId: ServerID,
-                                 limit: Int) async -> [ScoredOwnedTrack] {
-        guard let backend = active, let ref = seed.seedTrackRef else { return [] }
-        let prefix = "\(serverId):"
-        let seedTrackId = ref.hasPrefix(prefix) ? String(ref.dropFirst(prefix.count)) : ref
-        // Overfetch for the same reason the ListenBrainz tier does: the per-artist
-        // cap throws away an analyzer's album-mates, and a pool trimmed to `limit`
-        // first arrives short.
-        var matches: [SonicMatch] = []
-        if backend.capabilities.supportsSonicSimilarity {
-            matches = (try? await backend.backend.sonicallySimilarTracks(
-                to: seedTrackId, limit: limit * 3)) ?? []
-        }
-        if matches.isEmpty {
-            // Nothing analyzed it for us, which is the ordinary case. Fall
-            // through to what this device heard for itself.
-            matches = (try? await recommendations.localSonicMatches(
-                seedRemoteId: seedTrackId, serverId: serverId,
-                // Whichever engine the runner is actually writing. Searching
-                // the other one finds nothing at all, silently.
-                engine: sonicAnalysis.engine, limit: limit * 3)) ?? []
-        }
-        guard !matches.isEmpty else { return [] }
-        return (try? await recommendations.ownedSonicTracks(matches, serverId: serverId)) ?? []
-    }
-
-    /// The seed's ListenBrainz-similar owned tracks for the radio precedence tier,
-    /// or `[]` (artist-only seed, unresolved MBID, disabled, or no similarity data)
-    /// — in which case radio falls back to the genre engine. Network-free DB read.
-    private func similarCandidates(for seed: RadioSeed, serverId: ServerID,
-                                   excluding: Set<String>, limit: Int) async -> [ScoredOwnedTrack] {
-        // Respect the on/off toggle for reads too (disabled → genre-only radio).
-        let enabled = UserDefaults.standard.object(forKey: Self.enrichmentEnabledKey) as? Bool ?? true
-        guard enabled, let ref = seed.seedTrackRef,
-              let canonical = try? await enrichmentStore.seedMbid(forTrackRef: ref)?.canonical
-        else { return [] }
-        // Overfetch: the tier-1 per-artist cap discards artist-heavy excess, so a
-        // pool of just `limit` can underfill and hand slots to genre. Pull a wider
-        // pool and let the blender cap it down.
-        let pool = min(max(limit * 5, 50), 250)
-        return (try? await enrichmentStore.similarOwnedTracks(
-            seedCanonicalMbids: [canonical], algorithm: enrichmentAlgorithm,
-            serverId: serverId, excludingRemoteIds: excluding, limit: pool)) ?? []
-    }
-
     /// Forget any active radio session (e.g. on sign-out). The engine's own
-    /// `stop()`/`play()` already bumps its transport epoch; this clears the app
-    /// seed/seen so a late fetch can't resurrect a signed-out account's station.
+    /// `stop()`/`play()` already bumps its transport epoch; this clears the
+    /// core's seed so a late fetch can't resurrect a signed-out account's
+    /// station.
     private func invalidateRadio() {
         activeStationID += 1
-        activeRadioSeed = nil
-        radioSeenIDs = []
         seedPrepTask?.cancel()
         seedPrepTask = nil
+        Task { [station] in await station.stop() }
     }
 
     /// `play_event` log, tagged with the active server (to form the durable
