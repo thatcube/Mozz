@@ -7,7 +7,19 @@ import MozzNetworking
 /// Fixture-serving transport (same idea as the Jellyfin tests): first route
 /// whose match string is contained in the request URL wins.
 final class PlexFixtureTransport: HTTPTransport, @unchecked Sendable {
-    struct Route { let contains: String; let fixture: String }
+    struct Route {
+        let contains: String
+        let fixture: String
+        /// Seconds to stall before answering, so a test can make one address
+        /// slower than another without a real network.
+        let delay: Double
+
+        init(contains: String, fixture: String, delay: Double = 0) {
+            self.contains = contains
+            self.fixture = fixture
+            self.delay = delay
+        }
+    }
 
     private let routes: [Route]
     private let lock = NSLock()
@@ -30,6 +42,9 @@ final class PlexFixtureTransport: HTTPTransport, @unchecked Sendable {
             let data = try? Data(contentsOf: url)
         else {
             return (Data(), HTTPURLResponse(url: fallbackURL, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+        }
+        if route.delay > 0 {
+            try await Task.sleep(nanoseconds: UInt64(route.delay * 1_000_000_000))
         }
         return (data, HTTPURLResponse(url: fallbackURL, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
@@ -435,6 +450,28 @@ final class PlexAuthTests: XCTestCase {
 
         XCTAssertEqual(session.baseURL.host, "192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct",
                        "the one address that answered")
+    }
+
+    /// Two addresses both work — take the one that is actually better.
+    ///
+    /// The old code took the first answer in tier order, so which of two
+    /// working local addresses got used was decided by whichever plex.tv
+    /// happened to list first. The Docker bridge address is listed first here
+    /// and answers slowly; the LAN one answers at once.
+    func testAmongWorkingAddressesTheFasterOneWins() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
+            .init(contains: "172-18-0-1", fixture: "plex_identity", delay: 0.30),
+            .init(contains: "192-168-68-71", fixture: "plex_identity"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+
+        let session = try await auth.resolveConnection(
+            accountToken: "acct",
+            machineIdentifier: "50acfe994de74f8998deb9fc43e6262e")
+
+        XCTAssertEqual(session.baseURL.host, "192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct",
+                       "both answered; latency decides")
     }
 
     /// And when genuinely none of them answers, say so rather than handing back

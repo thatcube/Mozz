@@ -224,37 +224,95 @@ public struct PlexAuthenticator: Sendable {
     /// the truth, because a guess would overwrite a stored address with a worse
     /// one.
     private func firstAnswering(
-        _ connections: [PlexResourceConnection]
+        _ connections: [PlexResourceConnection],
+        expecting machineIdentifier: String? = nil
     ) async -> PlexResourceConnection? {
         guard !connections.isEmpty else { return nil }
-        // Probed together, answered in preference order. Sequentially, a dead
-        // LAN address costs its full timeout before the working one is even
-        // tried, and a server advertises several.
-        var reachable = [Bool](repeating: false, count: connections.count)
-        await withTaskGroup(of: (Int, Bool).self) { group in
-            for (index, connection) in connections.enumerated() {
-                group.addTask { (index, await self.answers(connection)) }
+        // Probed together. Sequentially, a dead LAN address costs its full
+        // timeout before the working one is even tried, and a server advertises
+        // several.
+        var probed: [ProbedConnection] = []
+        await withTaskGroup(of: ProbedConnection?.self) { group in
+            for connection in connections {
+                group.addTask { await self.probe(connection) }
             }
-            for await (index, ok) in group { reachable[index] = ok }
+            for await result in group {
+                if let result { probed.append(result) }
+            }
         }
+
         // Nil, not `connections.first`. Returning an address this just proved
         // does not answer is how a library gets pinned to one that never works
         // again: `resolveConnection` reads nil as "none of these", and with a
         // fallback here that guard could never fire, so re-resolution kept
         // handing back the dead address and the caller kept believing it.
-        return reachable.firstIndex(of: true).map { connections[$0] }
+        let trimmed = machineIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wanted = (trimmed?.isEmpty == false) ? trimmed : nil
+        return probed.min { lhs, rhs in
+            Self.order(lhs, wanting: wanted) < Self.order(rhs, wanting: wanted)
+        }?.connection
+    }
+
+    /// How good an answered address is, best first.
+    ///
+    /// Identity before speed: an address that says it is the server we asked
+    /// for beats a fast one that says it is something else, and a mismatch is
+    /// only *demoted* rather than rejected — plex.tv's own id for a resource
+    /// and the id a server reports for itself are not always the same string,
+    /// and refusing on that would lock people out of servers that work.
+    ///
+    /// Then local before remote before relay, because that is the order of how
+    /// much of the listener's bandwidth the audio has to cross — a relay in
+    /// particular is throttled by Plex and will not carry a big file.
+    ///
+    /// Then measured latency, which is the part the old code had no way to
+    /// consider: it took the first answer in tier order, so two working local
+    /// addresses were decided by whichever plex.tv happened to list first.
+    private static func order(
+        _ probed: ProbedConnection, wanting machineIdentifier: String?
+    ) -> (Int, Int, Double) {
+        var identity = 0
+        if let machineIdentifier,
+           let reported = probed.machineIdentifier, !reported.isEmpty {
+            identity = reported == machineIdentifier ? 0 : 1
+        }
+        return (identity, rank(probed.connection), probed.seconds)
     }
 
     /// One tight-timeout `identity` request — the cheapest thing a Plex server
     /// will answer, and it needs no library to exist.
     private func answers(_ connection: PlexResourceConnection) async -> Bool {
-        let probe = HTTPClient(
+        await probe(connection) != nil
+    }
+
+    /// What one probe learned: that the address answered, how quickly, and
+    /// which server was on the other end.
+    private struct ProbedConnection {
+        let connection: PlexResourceConnection
+        let machineIdentifier: String?
+        let seconds: Double
+    }
+
+    /// Ask an address who it is, and time how long it took to say so.
+    ///
+    /// The body is read rather than discarded because "something answered" is
+    /// weaker than it sounds: a captive portal answers, and so does a different
+    /// Plex server that happens to be at an address this account once used.
+    private func probe(_ connection: PlexResourceConnection) async -> ProbedConnection? {
+        let client = HTTPClient(
             baseURL: connection.uri,
             transport: probeTransport,
             defaultHeaders: PlexHeaders.common(clientInfo: clientInfo, clientIdentifier: clientIdentifier, token: connection.accessToken),
             retryPolicy: .none
         )
-        return (try? await probe.send(Endpoint(path: "identity"))) != nil
+        let started = Date()
+        guard let response = try? await client.send(
+            Endpoint(path: "identity"), as: PlexContainerResponse.self) else { return nil }
+        return ProbedConnection(
+            connection: connection,
+            machineIdentifier: response.MediaContainer.machineIdentifier,
+            seconds: Date().timeIntervalSince(started))
     }
 
     /// Probe candidates in preference order and return the first whose SERVER has
@@ -357,7 +415,10 @@ public struct PlexAuthenticator: Sendable {
         // the right move is to keep what we have and try again later, not to
         // repoint at a guess.
         if !candidates.isEmpty {
-            guard let chosen = await firstAnswering(candidates) else { throw MozzError.serverUnreachable }
+            guard let chosen = await firstAnswering(
+                candidates, expecting: machineIdentifier) else {
+                throw MozzError.serverUnreachable
+            }
             return session(from: chosen, accountToken: accountToken)
         }
         guard let chosen = await firstMusicConnection(all), await answers(chosen) else {
@@ -381,11 +442,14 @@ public struct PlexAuthenticator: Sendable {
     }
 
     private static func preferLocal(_ lhs: PlexResourceConnection, _ rhs: PlexResourceConnection) -> Bool {
-        func rank(_ connection: PlexResourceConnection) -> Int {
-            if connection.isRelay { return 2 }
-            return connection.isLocal ? 0 : 1
-        }
-        return rank(lhs) < rank(rhs)
+        rank(lhs) < rank(rhs)
+    }
+
+    /// Local, then remote, then relay. Plex throttles its relay hard enough
+    /// that a lossless file will not stream over it.
+    private static func rank(_ connection: PlexResourceConnection) -> Int {
+        if connection.isRelay { return 2 }
+        return connection.isLocal ? 0 : 1
     }
 }
 
