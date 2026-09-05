@@ -39,6 +39,11 @@ public struct CatalogRelayHydration: Sendable, Equatable {
 /// background. Publication happens only after a complete full sync.
 public actor CatalogRelayCoordinator {
     private static let pageSize = 1_000
+    /// Vectors are heavier per row than catalog entities - a few hundred floats
+    /// each - so they move in smaller pages. The chunk splitter would recover
+    /// from a page that turned out too large, but only by uploading the oversized
+    /// attempt's work twice.
+    private static let featurePageSize = 250
 
     private let database: MusicDatabase
     private let snapshots: CatalogSnapshotDatabase
@@ -267,6 +272,89 @@ public actor CatalogRelayCoordinator {
         }
     }
 
+    // MARK: Analyzed vectors
+    //
+    // Analysis costs a phone an evening - sixteen hours for ten thousand tracks
+    // on the numbers in ADR-0018 - and produces an answer that is identical
+    // wherever it runs. Both engines are deliberately free of every platform
+    // framework for exactly this reason: a vector computed on a Pixel belongs in
+    // the same index as the same track computed on an iPhone. Without this, the
+    // second device repeats sixteen hours of work to arrive at bytes the first
+    // one already has.
+    //
+    // Unlike the catalog these merge rather than replace, and every device's
+    // index is read rather than only the newest. Two devices' vectors are both
+    // true at once: a phone that analysed the jazz and a tablet that got through
+    // the rest each hold half the answer.
+
+    /// Publish this device's analyzed vectors for the rest of the circle.
+    ///
+    /// Returns nil when there is nothing analyzed yet, which is the ordinary
+    /// state of a library on its first evening.
+    @discardableResult
+    public func publishFeatures(
+        scope: CatalogSnapshotScope,
+        writtenAtMS: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
+    ) async throws -> RelayCatalogSnapshotIndex? {
+        try Self.validate(scope)
+        let store = RecommendationStore(database)
+        let scopeID = try RelayHistoryStore.catalogScopeID(scope)
+        var references: [RelayCatalogChunkReference] = []
+        var after: String?
+        while true {
+            let page = try await store.sonicFeaturePage(
+                serverId: scope.serverID, after: after, limit: Self.featurePageSize)
+            guard !page.isEmpty else { break }
+            references += try await save(
+                CatalogSnapshotChunk(
+                    sourceDeviceID: localDeviceID,
+                    scopeID: scopeID,
+                    features: page),
+                scope: scope)
+            after = page.last?.trackRef
+            if page.count < Self.featurePageSize { break }
+        }
+        guard !references.isEmpty else { return nil }
+
+        let index = RelayCatalogSnapshotIndex(
+            sourceDeviceID: localDeviceID,
+            scope: scope,
+            writtenAtMS: writtenAtMS,
+            counts: references.reduce(CatalogSnapshotCounts()) { $0 + $1.counts },
+            chunks: references)
+        try await relay.saveFeatureSnapshot(index)
+        return index
+    }
+
+    /// Take in every other device's analyzed vectors.
+    ///
+    /// Returns how many rows were actually new here. Zero is a perfectly good
+    /// answer and the usual one once the circle has settled.
+    ///
+    /// This device's own index is skipped: reading back what we published costs
+    /// a download to learn nothing. A snapshot that fails to load is skipped
+    /// rather than fatal - a partial import is strictly better than none, since
+    /// what is missing is only work this device would have done anyway.
+    @discardableResult
+    public func hydrateFeatures(
+        scope: CatalogSnapshotScope,
+        now: Double = Date().timeIntervalSince1970
+    ) async throws -> Int {
+        try Self.validate(scope)
+        let store = RecommendationStore(database)
+        var imported = 0
+        for snapshot in try await relay.featureSnapshots(scope: scope) {
+            guard snapshot.sourceDeviceID != localDeviceID else { continue }
+            for reference in snapshot.chunks where reference.kind == .features {
+                guard let chunk = try? await relay.loadCatalogChunk(
+                    reference, from: snapshot) else { continue }
+                imported += try await store.importSonicFeatures(
+                    chunk.features, at: now)
+            }
+        }
+        return imported
+    }
+
     private static func split(
         _ chunk: CatalogSnapshotChunk
     ) -> (CatalogSnapshotChunk, CatalogSnapshotChunk) {
@@ -315,6 +403,17 @@ public actor CatalogRelayCoordinator {
                     sourceDeviceID: chunk.sourceDeviceID,
                     scopeID: chunk.scopeID,
                     playlists: Array(chunk.playlists[middle...])))
+        case .features:
+            let middle = chunk.features.count / 2
+            return (
+                CatalogSnapshotChunk(
+                    sourceDeviceID: chunk.sourceDeviceID,
+                    scopeID: chunk.scopeID,
+                    features: Array(chunk.features[..<middle])),
+                CatalogSnapshotChunk(
+                    sourceDeviceID: chunk.sourceDeviceID,
+                    scopeID: chunk.scopeID,
+                    features: Array(chunk.features[middle...])))
         case .playlistItems:
             if chunk.playlistItems.count > 1 {
                 let middle = chunk.playlistItems.count / 2

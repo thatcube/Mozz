@@ -2389,13 +2389,25 @@ public final class AppEnvironment: ObservableObject {
             relay: relay,
             localDeviceID: Self.continuityDeviceID(
                 from: clientIdentifier))
-        if hydrate,
-           let result = try? await catalog.hydrateIfEmpty(scope: scope),
-           result.status == .imported {
-            return
+        var catalogArrived = false
+        if hydrate, let result = try? await catalog.hydrateIfEmpty(scope: scope) {
+            catalogArrived = result.status == .imported
         }
-        if publish {
+        if !catalogArrived, publish {
             _ = try? await catalog.publishLatestComplete(scope: scope)
+        }
+
+        // Vectors move in both directions every time, and unconditionally.
+        //
+        // Unlike the catalog they merge rather than replace, so there is no
+        // hydrate-only-when-empty rule to respect: two devices' analyses are
+        // both true at once. And this is worth doing on exactly the run that
+        // just imported a catalog, because a device with nothing analysed is
+        // the one facing sixteen hours of work to arrive at bytes another
+        // device already has.
+        _ = try? await catalog.hydrateFeatures(scope: scope)
+        if publish {
+            _ = try? await catalog.publishFeatures(scope: scope)
         }
     }
 

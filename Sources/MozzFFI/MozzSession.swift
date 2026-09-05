@@ -469,6 +469,11 @@ private struct WireRelayCatalogSync: Encodable {
     var counts: CatalogSnapshotCounts
     var published: Bool
     var importedFavorites: Int
+    /// Vectors another device analyzed that this one did not have. Every one of
+    /// these is a track this device now never has to analyze.
+    var importedFeatures: Int
+    /// Vectors this device offered to the rest of the circle.
+    var publishedFeatures: Int
     var relayKey: String
     var expiresAtMS: Int64
 }
@@ -1711,6 +1716,14 @@ private func dispatch(
             published = try await catalog.publishLatestComplete(
                 scope: scope) != nil
         }
+
+        // Analyzed vectors, both ways and unconditionally: they merge rather
+        // than replace, and the run that just imported a catalog is exactly the
+        // one facing an evening of analysis to arrive at bytes another device
+        // in the circle already has.
+        let importedFeatures = (try? await catalog.hydrateFeatures(scope: scope)) ?? 0
+        let publishedFeatures = ((try? await catalog.publishFeatures(
+            scope: scope))??.counts.features) ?? 0
         return sessionSuccess(request, WireRelayCatalogSync(
             status: {
                 switch hydration.status {
@@ -1722,6 +1735,8 @@ private func dispatch(
             counts: hydration.counts,
             published: published,
             importedFavorites: importedFavorites,
+            importedFeatures: importedFeatures,
+            publishedFeatures: publishedFeatures,
             relayKey: try configuration.encoded()
                 .base64EncodedString(),
             expiresAtMS: configuration.expiresAtMS))

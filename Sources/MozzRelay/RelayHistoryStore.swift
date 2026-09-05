@@ -862,6 +862,69 @@ public actor RelayHistoryStore: HistoryStore {
             writtenAtMS: snapshot.writtenAtMS)
     }
 
+    /// Publish the index of a device's analyzed vectors.
+    ///
+    /// A separate object key from the catalog's, deliberately. The catalog is a
+    /// cache of what the server said and is replaced wholesale; vectors are
+    /// what a device spent an evening computing, they merge, and losing them
+    /// costs hours rather than one sync. Keeping them apart also means a device
+    /// that predates this never looks for the key and so never meets a chunk
+    /// kind it cannot decode.
+    public func saveFeatureSnapshot(
+        _ snapshot: RelayCatalogSnapshotIndex
+    ) async throws {
+        let scopeID = try Self.catalogScopeID(snapshot.scope)
+        try validateCatalogSnapshot(
+            snapshot,
+            expectedDeviceID: localDeviceID,
+            expectedScopeID: scopeID)
+        try await save(
+            snapshot,
+            objectKey: "features:\(scopeID)",
+            pathPrefix: "\(devicePrefix)\(localDeviceID)/catalog/\(epoch)/" +
+                "\(scopeID)/features-index",
+            maximumBytes: Self.maximumPlaintextBytes,
+            writtenAtMS: snapshot.writtenAtMS)
+    }
+
+    /// Every device's published vector index for this scope, newest first.
+    ///
+    /// Every device, not the newest one: unlike a catalog, two devices' vectors
+    /// are both true at once. A phone that analysed the jazz and a tablet that
+    /// analysed the rest each hold half the answer, and taking only the newer
+    /// index would throw the other half away.
+    public func featureSnapshots(
+        scope: CatalogSnapshotScope
+    ) async throws -> [RelayCatalogSnapshotIndex] {
+        let scopeID = try Self.catalogScopeID(scope)
+        let objectKey = "features:\(scopeID)"
+        var found: [RelayCatalogSnapshotIndex] = []
+        for (manifestPath, manifest) in try await manifests() {
+            guard let entry = manifest.objects[objectKey] else { continue }
+            try validate(
+                entry: entry,
+                manifestPath: manifestPath,
+                manifest: manifest)
+            guard let plaintext = try await readPlaintext(path: entry.path) else {
+                continue
+            }
+            try validate(plaintext: plaintext, against: entry)
+            let candidate = try JSONDecoder().decode(
+                RelayCatalogSnapshotIndex.self,
+                from: plaintext)
+            try validateCatalogSnapshot(
+                candidate,
+                expectedDeviceID: manifest.deviceID,
+                expectedScopeID: scopeID)
+            guard candidate.scope == scope else {
+                throw RelayStoreError.invalidCatalogSnapshot(
+                    "scope hash does not match the encrypted scope")
+            }
+            found.append(candidate)
+        }
+        return found.sorted { $0.writtenAtMS > $1.writtenAtMS }
+    }
+
     /// Select the newest whole snapshot for an exact server/account/library
     /// scope. Catalogs are caches, not mergeable event logs: combining entities
     /// from two points in time can resurrect items deleted on the server.
@@ -1258,6 +1321,7 @@ public actor RelayHistoryStore: HistoryStore {
             !chunk.tracks.isEmpty,
             !chunk.playlists.isEmpty,
             !chunk.playlistItems.isEmpty,
+            !chunk.features.isEmpty,
         ].filter { $0 }.count
         let kindMatches =
             (chunk.kind == .artists && !chunk.artists.isEmpty)
@@ -1266,6 +1330,11 @@ public actor RelayHistoryStore: HistoryStore {
             || (chunk.kind == .playlists && !chunk.playlists.isEmpty)
             || (chunk.kind == .playlistItems
                 && !chunk.playlistItems.isEmpty)
+            || (chunk.kind == .features && !chunk.features.isEmpty)
+        let featuresAreValid = chunk.features.allSatisfy {
+            !$0.trackRef.isEmpty && !$0.engine.isEmpty && !$0.vector.isEmpty
+                && $0.vector.allSatisfy { $0.isFinite }
+        }
         let playlistItemsAreValid = chunk.playlistItems.allSatisfy {
             !$0.playlistRemoteID.isEmpty
                 && $0.startPosition >= 0
@@ -1277,6 +1346,7 @@ public actor RelayHistoryStore: HistoryStore {
               populatedKinds == 1,
               kindMatches,
               playlistItemsAreValid,
+              featuresAreValid,
               chunk.recordCount > 0 else {
             throw RelayStoreError.invalidCatalogSnapshot(
                 "catalog chunk shape is invalid")

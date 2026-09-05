@@ -123,6 +123,92 @@ public struct RecommendationStore: Sendable {
         }
     }
 
+    /// A page of this device's analyzed vectors, for publishing to the other
+    /// devices in the circle.
+    ///
+    /// Ordered by `track_ref` and resumed by it, so a library too large to hold
+    /// in memory still moves in one pass. Only rows that actually have a vector:
+    /// `track_features` also holds MBIDs and tags for tracks nothing has
+    /// analyzed.
+    public func sonicFeaturePage(
+        serverId: ServerID, after: String?, limit: Int
+    ) async throws -> [SonicFeatureSnapshotRow] {
+        try await database.read { db in
+            let prefix = "\(serverId):"
+            var sql = """
+                SELECT tf.track_ref AS track_ref, tf.embedding AS embedding,
+                       tf.feature_source AS engine, tf.bpm AS bpm
+                FROM track_features tf
+                WHERE tf.track_ref LIKE ? ESCAPE '\\'
+                  AND tf.embedding IS NOT NULL
+                  AND tf.feature_source IS NOT NULL
+                """
+            var args: [DatabaseValueConvertible?] = [
+                prefix.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "%", with: "\\%")
+                    .replacingOccurrences(of: "_", with: "\\_") + "%"
+            ]
+            if let after {
+                sql += "\n  AND tf.track_ref > ?"
+                args.append(after)
+            }
+            sql += "\nORDER BY tf.track_ref\nLIMIT ?"
+            args.append(limit)
+            return try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+                .compactMap { row -> SonicFeatureSnapshotRow? in
+                    guard let ref: String = row["track_ref"],
+                          let engine: String = row["engine"],
+                          let data: Data = row["embedding"],
+                          let vector = SonicEmbeddingCodec.unpack(data),
+                          !vector.isEmpty else { return nil }
+                    return SonicFeatureSnapshotRow(
+                        trackRef: ref, engine: engine, vector: vector,
+                        bpm: row["bpm"])
+                }
+        }
+    }
+
+    /// Write vectors another device analyzed, without disturbing any this one
+    /// already has.
+    ///
+    /// Never overwrites an existing embedding. Two devices running the same
+    /// engine produce the same vector, so replacing one gains nothing; two
+    /// running *different* engines produce coordinates in unrelated spaces, and
+    /// picking a winner per row is how a library ends up with half its index in
+    /// each space. Whichever engine got there first keeps the row, and a real
+    /// engine upgrade is still what re-analysis is for.
+    ///
+    /// Returns how many rows were actually new.
+    @discardableResult
+    public func importSonicFeatures(
+        _ rows: [SonicFeatureSnapshotRow], at now: Double
+    ) async throws -> Int {
+        guard !rows.isEmpty else { return 0 }
+        return try await database.write { db in
+            var written = 0
+            for row in rows {
+                guard !row.trackRef.isEmpty, !row.engine.isEmpty,
+                      !row.vector.isEmpty else { continue }
+                try db.execute(sql: """
+                    INSERT INTO track_features
+                        (track_ref, embedding, embedding_dim, feature_source, bpm, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(track_ref) DO UPDATE SET
+                        embedding = excluded.embedding,
+                        embedding_dim = excluded.embedding_dim,
+                        feature_source = excluded.feature_source,
+                        bpm = COALESCE(track_features.bpm, excluded.bpm),
+                        updated_at = excluded.updated_at
+                    WHERE track_features.embedding IS NULL
+                    """, arguments: [row.trackRef,
+                                     SonicEmbeddingCodec.pack(row.vector),
+                                     row.vector.count, row.engine, row.bpm, now])
+                written += db.changesCount
+            }
+            return written
+        }
+    }
+
     /// Every analyzed vector for one server, as (remoteId, vector).
     ///
     /// Loaded whole rather than searched in SQL: SQLite has no vector index, the

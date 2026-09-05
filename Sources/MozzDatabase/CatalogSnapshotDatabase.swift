@@ -194,6 +194,13 @@ public struct CatalogSnapshotDatabase: Sendable {
                     trackRemoteIds: page.trackRemoteIDs,
                     serverId: serverID)
             }
+        case .features:
+            // Deliberately nothing. Vectors travel in their own snapshot and
+            // are imported by their own path, because they merge rather than
+            // replace: the catalog is a cache of what the server says and is
+            // rebuilt wholesale, while a vector is something a device spent an
+            // evening computing and nothing else can regenerate cheaply.
+            break
         }
     }
 
