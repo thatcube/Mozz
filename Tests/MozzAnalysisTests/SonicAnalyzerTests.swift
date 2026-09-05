@@ -102,6 +102,26 @@ final class SonicAnalyzerTests: XCTestCase {
 
     // MARK: Rhythm
 
+    /// The octave sweep.
+    ///
+    /// Autocorrelation cannot tell a beat from its own half-speed, and before
+    /// the harmonic check three of these eleven came back at exactly half:
+    /// 100, 160 and 175. The other eight were already right, which is what
+    /// made it look like an occasional oddity rather than a systematic one.
+    ///
+    /// Synthetic clicks, so this proves the correction and not much about real
+    /// music - a track whose snare lands on the off-beat is a harder case than
+    /// anything here.
+    func testTempoDoesNotHalveTheBeatItFinds() throws {
+        for bpm in [60.0, 72, 84, 90, 100, 108, 120, 128, 140, 160, 175] {
+            let measured = try XCTUnwrap(
+                analyzer.tempo(of: Signal.pulse(bpm: bpm, seconds: 12)),
+                "no tempo at all for a clean \(bpm) BPM pulse")
+            XCTAssertEqual(measured / bpm, 1.0, accuracy: 0.03,
+                           "\(bpm) BPM measured as \(measured)")
+        }
+    }
+
     func testTempoFindsThePulseOrAMusicalMultipleOfIt() throws {
         let features = try XCTUnwrap(analyzer.analyze(Signal.pulse(bpm: 120, seconds: 12)))
         let bpm = try XCTUnwrap(features.tempoBPM)

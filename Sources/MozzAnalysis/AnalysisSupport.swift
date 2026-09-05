@@ -138,17 +138,68 @@ extension SonicAnalyzer {
         let maxLag = Swift.min(centred.count / 2, Int((60 * frameRate / minBPM).rounded(.up)))
         guard maxLag > minLag else { return nil }
 
+        var scores = [Double](repeating: 0, count: maxLag + 1)
         var bestLag = -1
         var bestScore = 0.0
         for lag in minLag...maxLag {
             var acc = 0.0
             for i in 0..<(centred.count - lag) { acc += centred[i] * centred[i + lag] }
             let score = acc / energy
+            scores[lag] = score
             if score > bestScore { bestScore = score; bestLag = lag }
         }
         // A weak peak is noise correlating with itself. Below this the envelope
         // has no pulse worth reporting.
         guard bestLag > 0, bestScore > 0.05 else { return nil }
-        return 60 * frameRate / Double(bestLag)
+
+        let lag = preferredPulse(from: bestLag, scores: scores, minLag: minLag)
+        return 60 * frameRate / Double(lag)
+    }
+
+    /// Resolve the octave: prefer the fastest lag that still explains the
+    /// envelope nearly as well as the winning one.
+    ///
+    /// Autocorrelation cannot tell a beat from its own half-speed. A pulse at
+    /// period T correlates with itself at 2T and 3T just as truly, and when the
+    /// true period does not land on a whole number of frames, the peak at T
+    /// splits across two lags while the one at 2T does not - so the slower
+    /// multiple wins outright. Measured on clean synthetic pulses, that turned
+    /// 100, 160 and 175 BPM into exactly half of each, while eight other tempos
+    /// in the same sweep came back right.
+    ///
+    /// The asymmetry is what makes this fixable: a beat at T always produces a
+    /// peak at 2T, and a beat at 2T produces nothing at T. So a strong peak at
+    /// half the winning lag means the winner was the harmonic, and the reverse
+    /// reading is never available.
+    ///
+    /// Thirds as well as halves, because a bar of three counted as one beat is
+    /// the same mistake in waltz time.
+    private static func preferredPulse(
+        from bestLag: Int, scores: [Double], minLag: Int
+    ) -> Int {
+        var lag = bestLag
+        // Repeated, not single: 4x errors happen, and each step has to clear
+        // the same bar as the first.
+        while true {
+            guard let faster = fasterPulse(than: lag, scores: scores, minLag: minLag) else {
+                return lag
+            }
+            lag = faster
+        }
+    }
+
+    private static func fasterPulse(
+        than lag: Int, scores: [Double], minLag: Int
+    ) -> Int? {
+        for divisor in [2, 3] {
+            let candidate = lag / divisor
+            guard candidate >= minLag, candidate > 0 else { continue }
+            // Deliberately close to 1: this is asking "is the faster reading
+            // almost as good", not "is it better". A lower bar would turn every
+            // track with a strong off-beat into double time, which is the same
+            // error in the other direction and rather more annoying.
+            if scores[candidate] >= 0.8 * scores[lag] { return candidate }
+        }
+        return nil
     }
 }
