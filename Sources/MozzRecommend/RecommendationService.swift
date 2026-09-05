@@ -202,6 +202,17 @@ public actor RecommendationService {
     ///
     /// `engine` filters the search. Two analyzers' vectors are coordinates in
     /// unrelated spaces, so a search that spanned them would be ranking noise.
+    /// Whichever engine has actually analysed this library, or `nil` when
+    /// nothing has.
+    ///
+    /// Callers need this because an engine name is not a constant: a device
+    /// that analysed its library with the DSP engine and then upgraded holds
+    /// rows under both names, and a search under the wrong one returns nothing
+    /// while looking exactly like a library with no analysis at all.
+    public func analyzedEngine(serverId: ServerID) async -> String? {
+        (try? await store.dominantSonicEngine(serverId: serverId)) ?? nil
+    }
+
     public func localSonicMatches(seedRemoteId: String, serverId: ServerID,
                                   engine: String, limit: Int) async throws -> [SonicMatch] {
         guard limit > 0 else { return [] }
