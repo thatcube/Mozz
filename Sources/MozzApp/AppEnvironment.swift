@@ -785,8 +785,8 @@ public final class AppEnvironment: ObservableObject {
     #endif
 
     /// Why analysis is or isn't running, for Settings to say out loud.
-    public var sonicAnalysisConditions: (powered: Bool, unmetered: Bool) {
-        (sonicConditions.isPowered, sonicConditions.isUnmetered)
+    public var sonicAnalysisConditions: (powered: Bool, unmetered: Bool, allowsBattery: Bool) {
+        (sonicConditions.isPowered, sonicConditions.isUnmetered, sonicConditions.allowsBattery)
     }
 
     /// React to the enrichment on/off switch. Turning it ON resumes the crawl;

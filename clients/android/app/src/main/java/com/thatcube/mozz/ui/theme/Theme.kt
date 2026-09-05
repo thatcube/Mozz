@@ -94,6 +94,7 @@ class MozzSettings(context: Context) {
     private var darkStyleState by mutableStateOf(
         MozzDarkStyle.from(prefs.getString(KEY_DARK_STYLE, null))
     )
+    private var analyseOnBatteryState by mutableStateOf(prefs.getBoolean(KEY_ON_BATTERY, false))
 
     /** Assigning repaints on this frame and persists for the next launch. */
     var appearance: MozzAppearance
@@ -110,10 +111,27 @@ class MozzSettings(context: Context) {
             prefs.edit().putString(KEY_DARK_STYLE, value.stored).apply()
         }
 
+    /**
+     * Whether the listener has said they are happy for analysis to run off a
+     * charger.
+     *
+     * Off by default: a full pass is hours of sustained decoding, and spending
+     * someone's battery on it without asking is not a decision to make for
+     * them. Saying yes does not also lift the Wi-Fi requirement — those are
+     * different costs and only one of them was agreed to.
+     */
+    var analyseOnBattery: Boolean
+        get() = analyseOnBatteryState
+        set(value) {
+            analyseOnBatteryState = value
+            prefs.edit().putBoolean(KEY_ON_BATTERY, value).apply()
+        }
+
     private companion object {
         // The iPhone's UserDefaults keys, character for character.
         const val KEY_APPEARANCE = "mozz.appearance"
         const val KEY_DARK_STYLE = "mozz.darkStyle"
+        const val KEY_ON_BATTERY = "mozz.sonicAnalysisOnBattery"
     }
 }
 

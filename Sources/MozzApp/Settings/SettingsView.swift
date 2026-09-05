@@ -21,6 +21,9 @@ struct SettingsView: View {
     @State private var recCoverage: (total: Int, matched: Int, genreTagged: Int)?
     /// On-device sonic analysis on/off (default on), and how far it has got.
     @AppStorage(SonicAnalysisConditions.enabledKey) private var sonicAnalysisEnabled = true
+    /// Off by default: a full pass is hours of sustained decoding, and spending
+    /// someone's battery on it without asking is not a decision to make for them.
+    @AppStorage(SonicAnalysisConditions.onBatteryKey) private var sonicAnalysisOnBattery = false
     @State private var sonicProgress: SonicAnalysisProgress?
     /// Whether the active server exposes more than one music library, so the
     /// picker is worth offering. Probed once when the screen appears.
@@ -112,8 +115,15 @@ struct SettingsView: View {
                         .onChange(of: sonicAnalysisEnabled) { _, enabled in
                             env.setSonicAnalysisEnabled(enabled)
                         }
-                        Text("Analyses how your songs actually sound, so radio can follow the music rather than the tags. Runs on Wi-Fi while charging, and never leaves this device.")
+                        Text("Analyses how your songs actually sound, so radio can follow the music rather than the tags. Runs on Wi-Fi, and never leaves this device.")
                             .font(.caption).foregroundStyle(.secondary)
+                        if sonicAnalysisEnabled {
+                            Toggle(isOn: $sonicAnalysisOnBattery) {
+                                Label("Analyse on Battery", mozz: "battery.50")
+                            }
+                            Text("Off, analysis waits for a charger. On, it runs on battery too — a whole library is hours of work, so expect it to cost some.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         if sonicAnalysisEnabled, let p = sonicProgress, p.total > 0 {
                             SonicAnalysisRow(progress: p, conditions: env.sonicAnalysisConditions)
                         }
@@ -266,7 +276,7 @@ private struct SonicAnalysisRow: View {
     /// What the device is actually reporting, so a stalled bar names the one
     /// condition that is missing instead of listing all of them and being wrong
     /// about most.
-    let conditions: (powered: Bool, unmetered: Bool)
+    let conditions: (powered: Bool, unmetered: Bool, allowsBattery: Bool)
 
     var body: some View {
         let done = progress.remaining == 0
@@ -305,11 +315,15 @@ private struct SonicAnalysisRow: View {
             return "\(progress.analyzed.formatted()) of \(progress.total.formatted()) songs analysed"
         }
         let togo = "\(progress.remaining.formatted()) songs to go"
-        switch (conditions.powered, conditions.unmetered) {
-        case (false, false): return "Waiting for a charger and Wi-Fi — \(togo)"
-        case (false, true): return "Waiting for a charger — \(togo)"
-        case (true, false): return "Waiting for Wi-Fi — \(togo)"
-        case (true, true): return "Starting — \(togo)"
+        // Never name a condition that is not actually holding it up. Saying
+        // "waiting for a charger" to someone who has just allowed analysis on
+        // battery sends them looking for a cable that would change nothing.
+        let needsPower = !conditions.powered && !conditions.allowsBattery
+        switch (needsPower, conditions.unmetered) {
+        case (true, false): return "Waiting for a charger and Wi-Fi — \(togo)"
+        case (true, true): return "Waiting for a charger — \(togo)"
+        case (false, false): return "Waiting for Wi-Fi — \(togo)"
+        case (false, true): return "Starting — \(togo)"
         }
     }
 }

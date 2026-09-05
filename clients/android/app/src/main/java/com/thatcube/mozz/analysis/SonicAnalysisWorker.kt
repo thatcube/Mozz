@@ -102,17 +102,26 @@ class SonicAnalysisWorker(
          * Register the recurring job. Idempotent — `KEEP` means an existing
          * schedule survives app restarts rather than being reset by each one.
          */
-        fun schedule(context: Context) {
+        fun schedule(context: Context, allowsBattery: Boolean = false) {
             val constraints = Constraints.Builder()
-                .setRequiresCharging(true)
+                .setRequiresCharging(!allowsBattery)
                 .setRequiredNetworkType(NetworkType.UNMETERED)
+                // Kept even when running on battery is allowed. "Analyse on
+                // battery" is permission to spend some of it, not permission to
+                // flatten the phone — and a device that shuts down mid-pass
+                // loses the pass as well as the charge.
                 .setRequiresBatteryNotLow(true)
                 .build()
             val request = PeriodicWorkRequestBuilder<SonicAnalysisWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+                // REPLACE, not KEEP: the constraints are part of the schedule,
+                // so a job registered while analysis was charger-only would
+                // keep waiting for a charger forever after the switch was
+                // turned on.
+                .enqueueUniquePeriodicWork(
+                    WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
         }
 
         /** Stop scheduling it — the Settings switch, once there is one. */

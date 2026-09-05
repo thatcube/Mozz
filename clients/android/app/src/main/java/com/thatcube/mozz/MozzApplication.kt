@@ -42,7 +42,7 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
         // hours, so the scheduler owns this rather than the screen. Constrained
         // to charging + unmetered; idempotent, so this costs nothing on every
         // launch after the first.
-        SonicAnalysisWorker.schedule(this)
+        SonicAnalysisWorker.schedule(this, allowsBattery = settings.analyseOnBattery)
     }
 
     /**
@@ -138,7 +138,12 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
      * any one screen, and driven by the activity's lifecycle.
      */
     val sonicAnalysis: SonicAnalysisController by lazy {
-        SonicAnalysisController(context = this, server = server, scope = MainScope())
+        SonicAnalysisController(
+            context = this,
+            server = server,
+            scope = MainScope(),
+            allowsBattery = { settings.analyseOnBattery },
+        )
     }
 
     val server: MozzServer by lazy {

@@ -20,6 +20,11 @@ import UIKit
 public final class SonicAnalysisConditions: @unchecked Sendable {
     /// UserDefaults key for the Settings switch (default on when unset).
     public static let enabledKey = "mozz.sonicAnalysisEnabled"
+    /// Whether the listener has said they are happy for analysis to run off a
+    /// charger. Off by default: a full pass is hours of sustained decoding, and
+    /// spending someone's battery on it without asking is not a decision to
+    /// make for them. The same key, character for character, on Android.
+    public static let onBatteryKey = "mozz.sonicAnalysisOnBattery"
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.thatcube.mozz.sonic-conditions")
@@ -56,7 +61,17 @@ public final class SonicAnalysisConditions: @unchecked Sendable {
 
     /// The gate the analysis service polls.
     public func isSatisfied() -> Bool {
-        isEnabled && isPowered && isUnmetered
+        isEnabled && (isPowered || allowsBattery) && isUnmetered
+    }
+
+    /// Permission to run on battery, given explicitly.
+    ///
+    /// Deliberately does not also lift the unmetered requirement. They are
+    /// different costs and the listener agreed to one of them: analysis reads
+    /// every track it has not seen, and doing that over a cellular plan is a
+    /// bill rather than a flat battery.
+    public var allowsBattery: Bool {
+        UserDefaults.standard.bool(forKey: Self.onBatteryKey)
     }
 
     /// The Settings switch. Separate from the rest so a screen can say which of

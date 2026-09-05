@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.thatcube.mozz.BuildConfig
 import com.thatcube.mozz.R
+import com.thatcube.mozz.analysis.SonicAnalysisWorker
 import com.thatcube.mozz.analysis.SonicWeights
 import androidx.compose.foundation.lazy.items
 import com.thatcube.mozz.core.MozzLibrary
@@ -163,6 +164,25 @@ fun SettingsPage(
                         "Sharpens radio and mixes using MusicBrainz. Only song and artist names are sent — off means fully offline.",
                         inset,
                     )
+                    val settings = LocalMozzSettings.current
+                    if (settings != null) {
+                        SettingsSwitch(
+                            R.drawable.ic_sparkles, "Analyse on Battery", inset,
+                            checked = settings.analyseOnBattery,
+                        ) { allowed ->
+                            settings.analyseOnBattery = allowed
+                            // The constraints are baked into the scheduled job,
+                            // so a schedule made while this was off would keep
+                            // waiting for a charger no matter what the switch
+                            // says now.
+                            SonicAnalysisWorker.schedule(context, allowsBattery = allowed)
+                        }
+                        SettingsNote(
+                            "Off, listening waits for a charger. On, it runs on battery too — " +
+                                "a whole library is hours of work, so expect it to cost some.",
+                            inset,
+                        )
+                    }
                     val progress = sonic
                     if (progress != null && progress.total > 0) {
                         SonicAnalysisNote(progress, inset)
@@ -516,6 +536,7 @@ private fun SuppressionRow(
  */
 @Composable
 private fun SonicAnalysisNote(progress: SonicProgress, inset: Dp) {
+    val onBattery = LocalMozzSettings.current?.analyseOnBattery == true
     val done = progress.remaining == 0
     Column(modifier = Modifier.padding(horizontal = inset, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -548,6 +569,10 @@ private fun SonicAnalysisNote(progress: SonicProgress, inset: Dp) {
                 progress.analyzed == 0 && progress.lastError != null ->
                     "Nothing analysed yet — ${progress.lastError}."
                 progress.running -> "${progress.analyzed} of ${progress.total} songs analysed."
+                // Never name a condition that is not actually holding it up.
+                // Telling someone who has just allowed analysis on battery to
+                // find a charger sends them after a cable that changes nothing.
+                onBattery -> "Waiting for Wi-Fi — ${progress.remaining} songs to go."
                 else -> "Waiting for a charger and Wi-Fi — ${progress.remaining} songs to go."
             },
             style = MaterialTheme.typography.bodySmall,
@@ -633,6 +658,37 @@ private fun SettingsRow(
                 modifier = Modifier.size(16.dp),
             )
         }
+    }
+}
+
+/**
+ * A switch that actually does something, as opposed to [SettingsToggle], which
+ * is the disabled placeholder for controls whose feature has not landed.
+ */
+@Composable
+private fun SettingsSwitch(
+    icon: Int,
+    title: String,
+    inset: Dp,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

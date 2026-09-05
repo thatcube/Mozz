@@ -44,6 +44,12 @@ class SonicAnalysisController(
     context: Context,
     private val server: MozzServer,
     private val scope: CoroutineScope,
+    /**
+     * Whether the listener has allowed analysis off a charger. Read each time
+     * rather than captured, so flipping the switch takes effect on the next
+     * evaluation instead of the next launch.
+     */
+    private val allowsBattery: () -> Boolean = { false },
 ) {
     private val appContext = context.applicationContext
     private val connectivity =
@@ -136,7 +142,7 @@ class SonicAnalysisController(
         }
     }
 
-    private fun isSatisfied(): Boolean = isCharging() && unmetered
+    private fun isSatisfied(): Boolean = (isCharging() || allowsBattery()) && unmetered
 
     /**
      * Plugged in — not "actively charging".
