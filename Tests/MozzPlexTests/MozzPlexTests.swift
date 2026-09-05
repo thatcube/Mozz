@@ -309,7 +309,7 @@ final class PlexAuthTests: XCTestCase {
     ])
 
     private func makeAuthenticator() -> PlexAuthenticator {
-        PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "client-uuid", transport: authTransport, probeTransport: authTransport)
+        PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "client-uuid", transport: authTransport, probeTransport: authTransport, localDiscovery: nil)
     }
 
     func testRequestPin() async throws {
@@ -336,7 +336,7 @@ final class PlexAuthTests: XCTestCase {
             clientInfo: clientInfo,
             clientIdentifier: "cid",
             transport: transport,
-            probeTransport: transport)
+            probeTransport: transport, localDiscovery: nil)
 
         let users = try await auth.homeUsers(accountToken: "owner-token")
 
@@ -358,7 +358,7 @@ final class PlexAuthTests: XCTestCase {
             clientInfo: clientInfo,
             clientIdentifier: "cid",
             transport: transport,
-            probeTransport: transport)
+            probeTransport: transport, localDiscovery: nil)
         let user = PlexHomeUser(
             id: "managed-uuid",
             name: "Music Room",
@@ -385,7 +385,7 @@ final class PlexAuthTests: XCTestCase {
             clientInfo: clientInfo,
             clientIdentifier: "cid",
             transport: transport,
-            probeTransport: transport)
+            probeTransport: transport, localDiscovery: nil)
         let owner = PlexHomeUser(
             id: "owner-uuid",
             name: "Brandon",
@@ -419,7 +419,7 @@ final class PlexAuthTests: XCTestCase {
             .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
             .init(contains: "192-168-68-71", fixture: "plex_identity"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
 
         let connections = try await auth.discoverConnections(accountToken: "acct")
 
@@ -442,7 +442,7 @@ final class PlexAuthTests: XCTestCase {
             .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
             .init(contains: "192-168-68-71", fixture: "plex_identity"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
 
         let session = try await auth.resolveConnection(
             accountToken: "acct",
@@ -464,7 +464,7 @@ final class PlexAuthTests: XCTestCase {
             .init(contains: "172-18-0-1", fixture: "plex_identity", delay: 0.30),
             .init(contains: "192-168-68-71", fixture: "plex_identity"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
 
         let session = try await auth.resolveConnection(
             accountToken: "acct",
@@ -481,7 +481,7 @@ final class PlexAuthTests: XCTestCase {
         let transport = PlexFixtureTransport([
             .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
 
         do {
             _ = try await auth.resolveConnection(
@@ -510,7 +510,7 @@ final class PlexAuthTests: XCTestCase {
             .init(contains: "movies-box", fixture: "plex_sections_movies_only"),
             .init(contains: "music-box", fixture: "plex_sections"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
         let movies = PlexResourceConnection(
             serverName: "The Movies", clientIdentifier: "m1",
             uri: URL(string: "https://movies-box.plex.direct:32400")!,
@@ -532,7 +532,7 @@ final class PlexAuthTests: XCTestCase {
         let transport = PlexFixtureTransport([
             .init(contains: "movies-box", fixture: "plex_sections_movies_only"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
         let movies = PlexResourceConnection(
             serverName: "The Movies", clientIdentifier: "m1",
             uri: URL(string: "https://movies-box.plex.direct:32400")!,
@@ -558,7 +558,7 @@ final class PlexAuthTests: XCTestCase {
             // Sections list for both boxes (has an artist section, key "3").
             .init(contains: "library/sections", fixture: "plex_sections"),
         ])
-        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport, localDiscovery: nil)
         let empty = PlexResourceConnection(
             serverName: "Empty Music", clientIdentifier: "e1",
             uri: URL(string: "https://empty-box.plex.direct:32400")!,

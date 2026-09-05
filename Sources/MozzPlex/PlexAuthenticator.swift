@@ -18,6 +18,9 @@ public struct PlexAuthenticator: Sendable {
     /// unreachable address (e.g. a LAN URI when off-network) is abandoned in a
     /// few seconds instead of blocking discovery on the 12s interactive timeout.
     private let probeTransport: any HTTPTransport
+    /// Asks the network itself which servers are on it. Nil in tests that must
+    /// not touch a socket.
+    private let localDiscovery: (any PlexLocallyDiscovering)?
     private let client: HTTPClient
 
     private static let plexTVBase = URL(string: "https://plex.tv")!
@@ -26,12 +29,14 @@ public struct PlexAuthenticator: Sendable {
         clientInfo: ClientInfo,
         clientIdentifier: String,
         transport: any HTTPTransport = URLSessionTransport(),
-        probeTransport: any HTTPTransport = URLSessionTransport(role: .discovery)
+        probeTransport: any HTTPTransport = URLSessionTransport(role: .discovery),
+        localDiscovery: (any PlexLocallyDiscovering)? = PlexLocalDiscovery()
     ) {
         self.clientInfo = clientInfo
         self.clientIdentifier = clientIdentifier
         self.transport = transport
         self.probeTransport = probeTransport
+        self.localDiscovery = localDiscovery
         self.client = HTTPClient(
             baseURL: Self.plexTVBase,
             transport: transport,
@@ -173,8 +178,22 @@ public struct PlexAuthenticator: Sendable {
     /// Discover the account's servers. Plex returns resources (servers), each
     /// with several connection addresses; keep one reachable address per machine
     /// id rather than registering every address as a separate server.
-    public func discoverConnections(accountToken: String) async throws -> [PlexResourceConnection] {
+    /// Every address the account advertises for every server it owns.
+    ///
+    /// `askingTheNetwork` adds a local sweep, and defaults to off. It is a
+    /// second or two and a few thousand datagrams, and it earns that only when
+    /// the advertised addresses have already failed — which is exactly when
+    /// ``resolveConnection`` turns it on. A server that advertises a usable
+    /// address, which is nearly all of them, should not pay for the ones that
+    /// do not.
+    public func discoverConnections(
+        accountToken: String, askingTheNetwork: Bool = false
+    ) async throws -> [PlexResourceConnection] {
         let authedClient = client.withDefaultHeaders(["X-Plex-Token": accountToken])
+        // Asked concurrently. The network answers in about two seconds and
+        // plex.tv in rather less, and paying for them one after the other would
+        // put the slower of the two in front of every sign-in.
+        async let discoveredLocally = askingTheNetwork ? localServers() : []
         let resources = try await authedClient.send(
             Endpoint(path: "api/v2/resources", query: [
                 URLQueryItem(name: "includeHttps", value: "1"),
@@ -182,6 +201,7 @@ public struct PlexAuthenticator: Sendable {
             ]),
             as: [PlexResource].self
         )
+        let local = await discoveredLocally
         var connections: [PlexResourceConnection] = []
         for resource in resources where (resource.provides ?? "").contains("server") {
             guard let accessToken = resource.accessToken else { continue }
@@ -196,6 +216,30 @@ public struct PlexAuthenticator: Sendable {
                     uri: uri,
                     isLocal: dto.local ?? false,
                     isRelay: dto.relay ?? false,
+                    accessToken: accessToken
+                ))
+            }
+            // What the network said, ahead of what the account claims.
+            //
+            // A server only advertises the addresses it believes it has, and
+            // one inside a Docker bridge network believes it is at its
+            // container address — which nothing outside that host can reach.
+            // plex.tv repeats that belief faithfully. The reply to a local
+            // probe comes FROM the address that actually works, which is the
+            // one piece of information neither the server nor plex.tv has.
+            if let machineIdentifier,
+               let nearby = local.first(where: { $0.machineIdentifier == machineIdentifier }),
+               let uri = PlexGDMParser.localURL(
+                host: nearby.host, port: nearby.port,
+                borrowingCertificateFrom: candidates.map(\.uri)),
+               !candidates.contains(where: { $0.uri == uri }) {
+                candidates.append(PlexResourceConnection(
+                    serverName: resource.name ?? nearby.name,
+                    clientIdentifier: machineIdentifier,
+                    serverMachineIdentifier: machineIdentifier,
+                    uri: uri,
+                    isLocal: true,
+                    isRelay: false,
                     accessToken: accessToken
                 ))
             }
@@ -278,6 +322,15 @@ public struct PlexAuthenticator: Sendable {
             identity = reported == machineIdentifier ? 0 : 1
         }
         return (identity, rank(probed.connection), probed.seconds)
+    }
+
+    /// Servers that answered on this network, or none — a device on cellular,
+    /// a network that blocks broadcast, or simply no server nearby. Never
+    /// throws and never blocks longer than its own timeout: discovery failing
+    /// must cost the advertised addresses nothing.
+    private func localServers() async -> [PlexLocalServer] {
+        guard let localDiscovery else { return [] }
+        return await localDiscovery.discover(timeout: 2)
     }
 
     /// One tight-timeout `identity` request — the cheapest thing a Plex server
@@ -397,34 +450,52 @@ public struct PlexAuthenticator: Sendable {
         machineIdentifier: String? = nil,
         serverName: String? = nil
     ) async throws -> AuthenticatedSession {
-        let all = try await discoverConnections(accountToken: accountToken)
-        guard !all.isEmpty else { throw MozzError.notFound }
-
-        var candidates: [PlexResourceConnection] = []
-        if let machineIdentifier, !machineIdentifier.isEmpty {
-            candidates = all.filter { $0.clientIdentifier == machineIdentifier }
-        }
-        if candidates.isEmpty, let serverName, !serverName.isEmpty {
-            candidates = all.filter { $0.serverName == serverName }
-        }
-
-        // Re-resolution never hands back an address that did not answer. The
-        // caller is about to persist this over a known-good-until-recently one,
-        // and the reason the old address failed might be that the device has no
-        // network at all — in which case every candidate is equally silent and
-        // the right move is to keep what we have and try again later, not to
-        // repoint at a guess.
-        if !candidates.isEmpty {
-            guard let chosen = await firstAnswering(
-                candidates, expecting: machineIdentifier) else {
-                throw MozzError.serverUnreachable
-            }
+        let advertised = try await discoverConnections(accountToken: accountToken)
+        guard !advertised.isEmpty else { throw MozzError.notFound }
+        if let chosen = await choose(
+            from: advertised, machineIdentifier: machineIdentifier, serverName: serverName) {
             return session(from: chosen, accountToken: accountToken)
         }
-        guard let chosen = await firstMusicConnection(all), await answers(chosen) else {
+
+        // Nothing the account advertises answers. Only now is the local sweep
+        // worth its second or two: a server whose advertised local address is
+        // one it cannot actually be reached at — a container's own address,
+        // say — is invisible to plex.tv and obvious to the network it sits on.
+        let withLocal = try await discoverConnections(
+            accountToken: accountToken, askingTheNetwork: true)
+        guard let chosen = await choose(
+            from: withLocal, machineIdentifier: machineIdentifier, serverName: serverName) else {
             throw MozzError.serverUnreachable
         }
         return session(from: chosen, accountToken: accountToken)
+    }
+
+    /// The best address for one server among `connections`, or nil if none of
+    /// them answers.
+    ///
+    /// Matched by machine identifier where there is one, because that — not the
+    /// address — is the server. Falling back to the stored name covers accounts
+    /// linked before the identifier was recorded, and only then does it widen
+    /// to "any server of this account with music on it", which is the same
+    /// choice sign-in makes.
+    private func choose(
+        from connections: [PlexResourceConnection],
+        machineIdentifier: String?,
+        serverName: String?
+    ) async -> PlexResourceConnection? {
+        var candidates: [PlexResourceConnection] = []
+        if let machineIdentifier, !machineIdentifier.isEmpty {
+            candidates = connections.filter { $0.clientIdentifier == machineIdentifier }
+        }
+        if candidates.isEmpty, let serverName, !serverName.isEmpty {
+            candidates = connections.filter { $0.serverName == serverName }
+        }
+        if !candidates.isEmpty {
+            return await firstAnswering(candidates, expecting: machineIdentifier)
+        }
+        guard let chosen = await firstMusicConnection(connections),
+              await answers(chosen) else { return nil }
+        return chosen
     }
 
     private func session(from chosen: PlexResourceConnection, accountToken: String,
