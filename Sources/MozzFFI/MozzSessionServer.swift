@@ -392,6 +392,26 @@ func dispatchServerCommand(
             plexUserID: request.homeUserID)
         return session.success(request, wire(authenticated))
 
+    /// Re-point a linked Plex account at an address that answers.
+    ///
+    /// The iOS client reaches ``PlexAuthenticator/resolveConnection`` directly
+    /// because it is Swift all the way down; Android and the desktop only ever
+    /// speak this envelope, so without a command here a dead address is
+    /// permanent on those platforms. See ADR-0017.
+    case "plexResolve":
+        guard let accountToken = request.accountToken else {
+            return session.failure(request, "plexResolve needs accountToken")
+        }
+        let auth = PlexAuthenticator(
+            clientInfo: clientInfo(),
+            clientIdentifier: request.clientIdentifier
+                ?? fallbackClientIdentifier())
+        let resolved = try await auth.resolveConnection(
+            accountToken: accountToken,
+            machineIdentifier: request.serverMachineIdentifier,
+            serverName: request.serverName)
+        return session.success(request, wire(resolved))
+
     // MARK: Attach / mirror
 
     case "attach":
@@ -414,6 +434,18 @@ func dispatchServerCommand(
         }
         let libraries = try await backend.fetchLibraries()
         return session.success(request, libraries.map { WireLibrary(id: $0.id, name: $0.name) })
+
+    /// What the attached server can actually do.
+    ///
+    /// Worth asking rather than inferring from the backend kind: the like
+    /// control differs per backend — a heart on Jellyfin, a star on Plex, both
+    /// on Subsonic — and a client that guessed would be wrong the first time a
+    /// server grew a feature.
+    case "capabilities":
+        guard let backend = try requireBackend(request, session) else {
+            return session.failure(request, "capabilities needs an attached serverId")
+        }
+        return session.success(request, try await backend.detectCapabilities())
 
     case "account":
         guard let backend = try requireBackend(request, session) else {

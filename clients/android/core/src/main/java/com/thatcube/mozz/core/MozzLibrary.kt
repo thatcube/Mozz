@@ -331,7 +331,7 @@ class MozzLibrary(private val core: MozzCore) {
     ): Boolean =
         core.call<LikePayload>(
             CoreRequest(
-                cmd = "setLiked",
+                cmd = "setFavorite",
                 serverId = serverId,
                 remoteId = remoteId,
                 liked = liked,

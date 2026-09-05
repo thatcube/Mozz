@@ -49,7 +49,7 @@ data class CoreRequest(
     /** Plex's account token — for `plexResolve` only. */
     val accountToken: String? = null,
     /** The Plex **server's** machine identifier, so re-resolution stays on it. */
-    val machineIdentifier: String? = null,
+    @SerialName("serverMachineIdentifier") val machineIdentifier: String? = null,
     val artworkKey: String? = null,
     val size: Int? = null,
     val maxBitrateKbps: Int? = null,
@@ -376,8 +376,16 @@ internal data class SessionPayload(
     val serverName: String = "",
     val clientIdentifier: String = "",
     val accountToken: String? = null,
-    /** The server's own machine identifier — see [ServerAccount.machineIdentifier]. */
-    val machineIdentifier: String? = null,
+    /**
+     * The server's own machine identifier — see [ServerAccount.machineIdentifier].
+     *
+     * The core calls this `serverMachineIdentifier` on the wire, to keep it
+     * unmistakable from the *client* identifier. Named for what it is here and
+     * mapped, rather than renamed, so the two never silently stop matching:
+     * they did once, and every Plex account linked on Android was saved without
+     * one, which quietly disabled re-resolution for those accounts.
+     */
+    @SerialName("serverMachineIdentifier") val machineIdentifier: String? = null,
 )
 
 @Serializable
