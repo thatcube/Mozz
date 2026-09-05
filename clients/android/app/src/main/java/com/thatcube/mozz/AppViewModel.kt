@@ -168,6 +168,13 @@ class AppViewModel(
         _state.value = AppState.Syncing(account.serverName, null)
         var target = account
         runCatching {
+            // Not a plain attach. A Plex account carries no library section
+            // until something resolves one, and syncing without it fails with
+            // "Plex music section not resolved" every time it is retried. The
+            // library picker resolves it at onboarding — but an account whose
+            // onboarding was interrupted reaches here without ever having been
+            // asked, and would then be permanently unsyncable.
+            target = server.attachForSync(target)
             server.sync(target.serverId).collect { status ->
                 _state.value = AppState.Syncing(target.serverName, status)
             }
@@ -177,7 +184,7 @@ class AppViewModel(
             // Ask the account for a working one and run it again — once. A null
             // means there was nothing better to move to, and the original error
             // is the honest one to report.
-            target = server.repointAccount(target) ?: throw error
+            target = server.attachForSync(server.repointAccount(target) ?: throw error)
             server.sync(target.serverId).collect { status ->
                 _state.value = AppState.Syncing(target.serverName, status)
             }
