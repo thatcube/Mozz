@@ -13,6 +13,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlayEventKind
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.core.Track
 import com.thatcube.mozz.ui.ToastAction
 import com.thatcube.mozz.ui.ToastCenter
@@ -71,11 +72,23 @@ class PlayerController(
     private val context: Context,
     private val server: MozzServer,
     private val library: MozzLibrary,
+    private val radio: MozzRadio,
     private val toasts: ToastCenter,
     private val scope: CoroutineScope,
 ) {
     private var controller: MediaController? = null
     private var queue: List<Track> = emptyList()
+
+    /**
+     * Whether what is playing came from a station, and so should keep going
+     * past the end of the queue.
+     *
+     * The seed and everything already played live in the core, not here - see
+     * `RadioStation`. All this remembers is whether to ask for more.
+     */
+    private var stationActive = false
+    /** One top-up at a time: transitions fire faster than a batch comes back. */
+    private var toppingUp = false
 
     /** The retry schedule currently working against a failure, if any. */
     private var retryJob: Job? = null
@@ -164,6 +177,7 @@ class PlayerController(
                     val finished = queue.getOrNull(previousIndex(media))
                     if (finished != null) record(finished, PlayEventKind.COMPLETED)
                 }
+                topUpStation(media)
                 publish(media)
             }
         })
@@ -199,6 +213,10 @@ class PlayerController(
      * through both, so the queue grows around the song without interrupting it.
      */
     fun play(tracks: List<Track>, startIndex: Int) = scope.launch {
+        // Choosing something directly ends the station. Leaving it running
+        // would have the queue sprout songs the listener never asked for,
+        // minutes after they deliberately played an album.
+        endStation()
         connect()
         val media = controller ?: run {
             noteFailure(NO_SESSION)
@@ -467,6 +485,100 @@ class PlayerController(
      * this is a queue edit rather than a new queue — which is the whole
      * difference between "play next" and "play".
      */
+    // MARK: Stations
+
+    /**
+     * Play [track] and keep going with music like it, forever.
+     *
+     * The seed plays first and the batch follows, so "start radio from this
+     * song" begins with the song. Everything about *what* follows - the
+     * acoustic tier, then the crowd, then genre - is decided in the shared
+     * core, which is the only reason this is a dozen lines rather than the two
+     * hundred the iPhone used to carry alone.
+     */
+    fun startRadio(track: Track) = scope.launch {
+        val batch = runCatching {
+            radio.startFromTrack(track.serverId, track.remoteId)
+        }.getOrDefault(emptyList())
+        if (batch.isEmpty()) {
+            // Most often a library nothing has analysed yet, and a station that
+            // silently does nothing reads as a broken button.
+            toasts.show("Not enough here yet to build a station")
+            return@launch
+        }
+        playStation(listOf(track) + batch)
+    }
+
+    /** The artist equivalent: no seed track, so the batch is the whole start. */
+    fun startArtistRadio(serverId: String, artistRemoteId: String) = scope.launch {
+        val batch = runCatching {
+            radio.startFromArtist(serverId, artistRemoteId)
+        }.getOrDefault(emptyList())
+        if (batch.isEmpty()) {
+            toasts.show("Not enough here yet to build a station")
+            return@launch
+        }
+        playStation(batch)
+    }
+
+    /**
+     * Install a station's opening tracks.
+     *
+     * Goes through [play] so a station gets the same treatment a tapped album
+     * does - first track resolved and started on its own, the rest filled in
+     * behind it - and then claims the flag, because `play` clears it.
+     */
+    private suspend fun playStation(tracks: List<Track>) {
+        play(tracks, 0).join()
+        stationActive = true
+    }
+
+    /**
+     * Ask for more when the queue is nearly out.
+     *
+     * The cap is real and deliberate: an endless station appended without limit
+     * is an unbounded list on a phone. At [MAX_QUEUE] the station stops growing
+     * until enough has been played to make room, which at these sizes is hours
+     * away.
+     */
+    private fun topUpStation(player: Player) {
+        if (!stationActive || toppingUp) return
+        if (player.mediaItemCount >= MAX_QUEUE) return
+        val remaining = player.mediaItemCount - player.currentMediaItemIndex - 1
+        if (remaining > STATION_TOP_UP_AT) return
+
+        toppingUp = true
+        scope.launch {
+            try {
+                val more = runCatching { radio.next() }.getOrDefault(emptyList())
+                if (more.isEmpty()) {
+                    // The core has run out of anything new to offer. Asking
+                    // again every transition would be a request per song for
+                    // the rest of the queue.
+                    stationActive = false
+                    return@launch
+                }
+                val media = controller ?: return@launch
+                val resolved = more
+                    .map { it to async(Dispatchers.IO) { mediaItem(it) } }
+                    .mapNotNull { (track, item) -> item.await()?.let { track to it } }
+                if (resolved.isEmpty()) return@launch
+                media.addMediaItems(resolved.map { it.second })
+                queue = queue + resolved.map { it.first }
+                publish(media)
+            } finally {
+                toppingUp = false
+            }
+        }
+    }
+
+    /** Stop asking for more, and tell the core to forget the seed. */
+    private suspend fun endStation() {
+        if (!stationActive) return
+        stationActive = false
+        runCatching { radio.stop() }
+    }
+
     fun playNext(track: Track) = enqueue(track) { player -> player.currentMediaItemIndex + 1 }
 
     /** Put a track at the end of what is already lined up. */
@@ -564,6 +676,13 @@ class PlayerController(
         // fast; 20,000 would not be, and nobody queues their entire collection
         // from a tap.
         const val MAX_QUEUE = 200
+        /**
+         * How few tracks may be left before a station fetches more.
+         *
+         * Five rather than one: a batch is a round trip and a resolve per
+         * track, and arriving after the queue has already run dry is silence.
+         */
+        const val STATION_TOP_UP_AT = 5
         const val POSITION_TICK_MS = 500L
         // Big enough for a lock screen on a tall phone, small enough that a
         // queue's worth of them is not a download.

@@ -10,6 +10,7 @@ import com.thatcube.mozz.analysis.SonicAnalysisController
 import com.thatcube.mozz.analysis.SonicAnalysisWorker
 import com.thatcube.mozz.core.MozzCore
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.SecretStore
 import com.thatcube.mozz.playback.PlayerController
@@ -97,6 +98,16 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
     val library: MozzLibrary by lazy { MozzLibrary(core) }
 
     /**
+     * The endless station.
+     *
+     * Application-scoped because a station outlives the screen it was started
+     * from, and stateless here on purpose: the seed and everything it has
+     * already played live in the core, where every platform reads the same
+     * answer.
+     */
+    val radio: MozzRadio by lazy { MozzRadio(core) }
+
+    /**
      * Where anything in the app says a short thing to the person using it.
      *
      * Application-scoped for the same reason playback is: the thing with news
@@ -115,6 +126,7 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             context = this,
             server = server,
             library = library,
+            radio = radio,
             toasts = toasts,
             scope = MainScope(),
         )

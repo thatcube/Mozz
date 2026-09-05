@@ -129,6 +129,18 @@ public actor RecommendationService {
     /// candidate pool uses, so an artist-seeded station is symmetric with its
     /// candidates (an un-enriched seed vs enriched candidates would recreate the
     /// asymmetric floor drop). Empty when the artist has no local tracks.
+    /// An artist's seed as the recommender sees it: the name to label a station
+    /// with, and the genres its own tracks actually carry.
+    ///
+    /// Derived from the tracks rather than from the `artist` row, because the
+    /// row is optional - a catalog synced tracks-first has every track and no
+    /// artists - and because the genres have to come from the tracks anyway to
+    /// match the vocabulary the candidate pool is scored in.
+    public func artistSeed(artistId: String, serverId: ServerID) async -> (name: String, genres: [String])? {
+        try? await store.seedArtist(
+            remoteId: artistId, serverId: serverId, enrich: isEnrichmentEnabled())
+    }
+
     public func artistSeedGenres(artistId: String, serverId: ServerID) async -> [String] {
         let enrich = isEnrichmentEnabled()
         guard let seed = try? await store.seedArtist(remoteId: artistId, serverId: serverId, enrich: enrich)

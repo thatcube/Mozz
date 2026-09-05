@@ -74,7 +74,8 @@ final class MozzSessionRecommendationTests: XCTestCase {
         let commands = Set(mozzSessionCommands)
         for cmd in [
             "homeMixes", "generateHomeMixes", "mix", "mixTracks", "generateMozzWeekly",
-            "mozzWeeklyTracks", "mozzWeeklyItems", "radioBatch", "suppressTrack",
+            "mozzWeeklyTracks", "mozzWeeklyItems", "radioBatch",
+            "radioStart", "radioNext", "radioStop", "radioState", "suppressTrack",
             "suppressArtist", "unsuppressTrack", "unsuppressArtist", "suppressions",
         ] {
             XCTAssertTrue(commands.contains(cmd), "\(cmd) missing from mozzSessionCommands")
@@ -165,6 +166,99 @@ final class MozzSessionRecommendationTests: XCTestCase {
         XCTAssertFalse(remoteIds.contains("ar1-0"))
         assertWireTrack(tracks[0])
         XCTAssertEqual(tracks[0]["remoteId"] as? String, remoteIds[0])
+    }
+
+    // MARK: Stations
+    //
+    // The stateful half of radio. A shell driving these keeps no seed, no
+    // seen-set and no tier logic of its own, which is the whole reason they
+    // exist - three shells owning that state is three shells that can drift
+    // into playing different music from the same seed.
+
+    func testAStationStartsFromATrackAndKeepsGoing() async throws {
+        let path = try makeLibrary()
+        try await seedLibrary(at: path)
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let started = try call(handle, [
+            "cmd": "radioStart", "serverId": server.id, "remoteId": "ar1-0", "limit": 5,
+        ])
+        XCTAssertEqual(started["ok"] as? Bool, true, "\(started)")
+        let first = try XCTUnwrap(started["payload"] as? [String: Any])
+        let firstIds = try XCTUnwrap(first["remoteIds"] as? [String])
+        let firstTracks = try XCTUnwrap(first["tracks"] as? [[String: Any]])
+        XCTAssertFalse(firstIds.isEmpty)
+        XCTAssertEqual(firstIds.count, firstTracks.count)
+        XCTAssertFalse(firstIds.contains("ar1-0"),
+                       "the shell plays the seed itself; the batch is what follows")
+        assertWireTrack(firstTracks[0])
+
+        // The client says nothing about what it already played: the station
+        // remembers. That is the entire difference from `radioBatch`.
+        let continued = try call(handle, ["cmd": "radioNext", "limit": 5])
+        XCTAssertEqual(continued["ok"] as? Bool, true, "\(continued)")
+        let second = try XCTUnwrap(continued["payload"] as? [String: Any])
+        let secondIds = try XCTUnwrap(second["remoteIds"] as? [String])
+        XCTAssertTrue(Set(firstIds).isDisjoint(with: Set(secondIds)),
+                      "a station that repeats itself is not endless")
+    }
+
+    func testAStationReportsAndForgetsItself() async throws {
+        let path = try makeLibrary()
+        try await seedLibrary(at: path)
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let before = try XCTUnwrap(
+            try call(handle, ["cmd": "radioState"])["payload"] as? [String: Any])
+        XCTAssertEqual(before["active"] as? Bool, false)
+
+        // No `artist` row exists in this fixture on purpose: a catalog synced
+        // tracks-first has tracks and no artists, and a station must still start.
+        let startResponse = try call(handle, [
+            "cmd": "radioStart", "serverId": server.id, "artistRemoteId": "ar1", "limit": 4,
+        ])
+        XCTAssertEqual(startResponse["ok"] as? Bool, true, "\(startResponse)")
+        let during = try XCTUnwrap(
+            try call(handle, ["cmd": "radioState"])["payload"] as? [String: Any])
+        XCTAssertEqual(during["active"] as? Bool, true)
+        XCTAssertEqual(during["title"] as? String, "Nirvana")
+        XCTAssertEqual(during["serverId"] as? String, server.id)
+        XCTAssertEqual(during["surfaced"] as? Int, 4)
+
+        let stopped = try call(handle, ["cmd": "radioStop"])
+        XCTAssertEqual((stopped["payload"] as? [String: Any])?["ok"] as? Bool, true)
+
+        let after = try XCTUnwrap(
+            try call(handle, ["cmd": "radioState"])["payload"] as? [String: Any])
+        XCTAssertEqual(after["active"] as? Bool, false)
+    }
+
+    func testToppingUpWithNoStationIsAnEmptyAnswerNotAnError() async throws {
+        let path = try makeLibrary()
+        try await seedLibrary(at: path)
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        // A shell tops up its queue on a timer; asking when nothing is playing
+        // from a station is routine, not a mistake worth an error.
+        let response = try call(handle, ["cmd": "radioNext", "limit": 5])
+        XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
+        let payload = try XCTUnwrap(response["payload"] as? [String: Any])
+        XCTAssertEqual((payload["remoteIds"] as? [String])?.isEmpty, true)
+    }
+
+    func testStartingAStationFromATrackTheLibraryLacksFails() async throws {
+        let path = try makeLibrary()
+        try await seedLibrary(at: path)
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, [
+            "cmd": "radioStart", "serverId": server.id, "remoteId": "no-such-track",
+        ])
+        XCTAssertEqual(response["ok"] as? Bool, false, "\(response)")
     }
 
     func testSuppressionCommandsRoundTripStableJSON() async throws {

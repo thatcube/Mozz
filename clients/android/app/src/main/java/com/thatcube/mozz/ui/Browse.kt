@@ -235,6 +235,7 @@ class TrackActions(
     private val scope: CoroutineScope,
 ) {
     fun playNext(track: Track) = playback.playNext(track)
+    fun startRadio(track: Track) = playback.startRadio(track)
     fun addToQueue(track: Track) = playback.addToQueue(track)
     fun goToArtist(track: Track) = nav.openArtist(track.serverId, track.artistRemoteId)
     fun goToAlbum(track: Track) = nav.openAlbum(track.serverId, track.albumRemoteId)
@@ -258,8 +259,8 @@ class TrackActions(
 /**
  * The per-row overflow.
  *
- * Same actions as the iPhone's, in the same order, minus the two it has that
- * Android has no machinery for yet: downloads, and starting a station.
+ * Same actions as the iPhone's, in the same order, minus the one it has that
+ * Android has no machinery for yet: downloads.
  */
 @Composable
 private fun TrackMenu(track: Track, actions: TrackActions) {
@@ -302,6 +303,10 @@ private fun TrackMenu(track: Track, actions: TrackActions) {
                 },
             )
             HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Start Radio") },
+                onClick = { actions.startRadio(track); open = false },
+            )
             DropdownMenuItem(
                 text = { Text("Play Next") },
                 onClick = { actions.playNext(track); open = false },

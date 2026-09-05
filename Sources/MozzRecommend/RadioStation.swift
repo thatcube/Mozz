@@ -135,18 +135,20 @@ public actor RadioStation {
 
     /// Start a station from an artist.
     ///
-    /// The caller's genres are a fallback: where the library has been enriched,
-    /// the artist's canonical genres (normalized, `mb_tags`-merged) are the ones
-    /// the candidate pool is scored against, and seeding with the raw tags
-    /// instead compares two different vocabularies.
+    /// `name` and `genres` are only a fallback. The seed is derived from the
+    /// artist's own tracks, because that is the vocabulary the candidate pool
+    /// is scored in - where the library has been enriched those genres are the
+    /// canonical, `mb_tags`-merged ones, and seeding with the raw tags instead
+    /// compares two different vocabularies. It also means a station can start
+    /// from an artist the catalog has tracks for but no `artist` row.
     public func start(
-        fromArtist artistId: String, name: String, genres: [String],
-        serverId: ServerID, limit: Int = 30
+        fromArtist artistId: String, serverId: ServerID,
+        name: String? = nil, genres: [String] = [], limit: Int = 30
     ) async -> [String] {
-        let canonical = await recommendations.artistSeedGenres(
-            artistId: artistId, serverId: serverId)
+        let derived = await recommendations.artistSeed(artistId: artistId, serverId: serverId)
         let seed = RadioSeed(
-            title: name, genres: canonical.isEmpty ? genres : canonical,
+            title: derived?.name.nilIfEmpty ?? name ?? artistId,
+            genres: derived?.genres.isEmpty == false ? derived!.genres : genres,
             artistIds: [artistId])
         return await start(seed: seed, serverId: serverId, limit: limit)
     }
@@ -233,8 +235,14 @@ public actor RadioStation {
     /// Gather each tier's candidates and let ``RecommendationService/radioBatch``
     /// blend them. The order and the per-artist caps live there; this decides
     /// only what each tier is allowed to see.
-    private func batch(
-        seed: RadioSeed, serverId: ServerID, excluding: Set<String>, limit: Int
+    ///
+    /// Public because one batch is also useful without a station behind it: a
+    /// caller that keeps its own seed and its own seen-set — the Facade's
+    /// stateless `radioBatch` command, and any shell that would rather own that
+    /// state — gets the same three tiers without reimplementing them, which is
+    /// the entire point of this type.
+    public func batch(
+        seed: RadioSeed, serverId: ServerID, excluding: Set<String> = [], limit: Int = 20
     ) async -> [String] {
         async let sonic = sonicCandidates(for: seed, serverId: serverId, limit: limit)
         async let similar = sources.collaborativeMatches(
@@ -300,4 +308,9 @@ public struct RadioTrackSeed: Sendable, Equatable {
         self.genres = genres
         self.artistId = artistId
     }
+}
+
+private extension String {
+    /// An empty name is not a name: a station labelled "" reads as a bug.
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

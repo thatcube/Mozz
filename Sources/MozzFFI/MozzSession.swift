@@ -413,6 +413,15 @@ private struct WireRadioBatch: Encodable {
     var tracks: [WireTrack]
 }
 
+struct WireRadioState: Encodable {
+    var active: Bool
+    var title: String?
+    var serverId: String?
+    /// How many tracks this station has handed out since it started, so a shell
+    /// can tell a fresh station from one that has been running all afternoon.
+    var surfaced: Int?
+}
+
 private struct WireAlbumReleaseKind: Encodable {
     var kind: String
     var isSingleOrEP: Bool
@@ -743,6 +752,19 @@ private func wire(_ r: TrackRecord) -> WireTrack {
     )
 }
 
+/// Turn a computed order of remote ids into playable rows, keeping the order.
+///
+/// One query rather than one per id: a station batch is twenty or thirty
+/// tracks, and the per-id loop this replaced spent thirty round trips on the
+/// database for every top-up.
+private func radioPayload(
+    _ remoteIds: [String], serverId: ServerID, repo: LibraryRepository
+) async throws -> WireRadioBatch {
+    guard !remoteIds.isEmpty else { return WireRadioBatch(remoteIds: [], tracks: []) }
+    let rows = try await repo.tracks(forRemoteIds: remoteIds, serverId: serverId)
+    return WireRadioBatch(remoteIds: rows.map(\.remoteId), tracks: rows.map(wire))
+}
+
 private func wire(_ r: PlaylistRecord) -> WirePlaylist {
     WirePlaylist(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
@@ -900,6 +922,8 @@ final class MozzSession: @unchecked Sendable {
     /// model's weights — and only the host knows where those live.
     private var sonicServices: [String: SonicAnalysisService] = [:]
     private let sonicLock = NSLock()
+    private var radioStation: RadioStation?
+    private let radioLock = NSLock()
 
     let backends = BackendTable()
     /// The core's artwork cache. Resolves a reference through whichever backend
@@ -963,6 +987,45 @@ final class MozzSession: @unchecked Sendable {
         return service
     }
 
+    /// The session's radio station, built on first use.
+    ///
+    /// One per session rather than one per request, for the same reason the
+    /// audio engine is: a station that did not outlive a single command could
+    /// not be endless — the next command would find a fresh one with no seed
+    /// and no memory of what it had already played.
+    ///
+    /// Lazy because it wants a closure back onto this session (to name the
+    /// engine a running analysis pass is writing), which `init` cannot hand it.
+    var radio: RadioStation {
+        radioLock.lock()
+        defer { radioLock.unlock() }
+        if let radioStation { return radioStation }
+        let backends = self.backends
+        let station = RadioStation(
+            recommendations: recommendations,
+            sources: RadioStation.Sources(
+                serverSonicMatches: { remoteId, serverId, limit in
+                    guard let backend = backends.backend(serverId) else { return [] }
+                    // A backend that has analyzed nothing takes the protocol's
+                    // default and returns nothing, so there is no capability to
+                    // check first - and checking would cost a round trip per
+                    // batch to learn what an empty answer already says.
+                    return (try? await backend.sonicallySimilarTracks(
+                        to: remoteId, limit: limit)) ?? []
+                },
+                sonicEngine: { [weak self] in
+                    // While a pass is running, follow the engine it is actually
+                    // writing rather than whichever one has the most rows: mid
+                    // upgrade those are different, and the station would search
+                    // the half of the library that is being replaced.
+                    self?.allSonicServices().first?.engine
+                }
+            )
+        )
+        radioStation = station
+        return station
+    }
+
     /// Every service built so far, for commands that must reach whichever one is
     /// running (cancel, progress).
     func allSonicServices() -> [SonicAnalysisService] {
@@ -1015,6 +1078,7 @@ protocol SessionContext: AnyObject {
     var database: MusicDatabase { get }
     var repository: LibraryRepository { get }
     var recommendations: RecommendationService { get }
+    var radio: RadioStation { get }
     func sonicAnalysis(weightsPath: String?) -> SonicAnalysisService
     func allSonicServices() -> [SonicAnalysisService]
     var lyrics: LyricsService { get }
@@ -1853,39 +1917,80 @@ private func dispatch(
                              genres: request.seedGenres ?? [],
                              artistIds: request.seedArtistIds ?? [],
                              seedTrackRef: request.seedTrackRef)
-        // The acoustic tier, which every non-Apple client was going without:
-        // a server that speaks OpenSubsonic's sonicSimilarity answers first,
-        // and otherwise the vectors this device analysed itself.
-        var sonic: [ScoredOwnedTrack] = []
-        if let backend = session.backends.backend(serverId), let seedRef = request.seedTrackRef {
-            let prefix = "\(serverId):"
-            let seedTrackId = seedRef.hasPrefix(prefix)
-                ? String(seedRef.dropFirst(prefix.count))
-                : seedRef
-            var matches = (try? await backend.sonicallySimilarTracks(
-                to: seedTrackId, limit: limit * 3)) ?? []
-            if matches.isEmpty {
-                matches = (try? await session.recommendations.localSonicMatches(
-                    seedRemoteId: seedTrackId, serverId: serverId,
-                    // Whichever engine the runner is writing; searching the
-                    // other one finds nothing at all, silently.
-                    engine: session.sonicAnalysis(weightsPath: request.weightsPath).engine,
-                    limit: limit * 3)) ?? []
-            }
-            sonic = (try? await session.recommendations.ownedSonicTracks(
-                matches, serverId: serverId)) ?? []
+        // One batch, with the caller keeping its own seed and seen-set. The
+        // three tiers themselves live in RadioStation so that this command and
+        // the stateful one below cannot drift into playing different music.
+        let remoteIds = await session.radio.batch(
+            seed: seed, serverId: serverId,
+            excluding: Set(request.excluding ?? []), limit: limit)
+        return sessionSuccess(
+            request,
+            try await radioPayload(remoteIds, serverId: serverId, repo: repo))
+
+    // MARK: Stations
+    //
+    // The stateful half. A shell that drives these keeps no seed, no seen-set
+    // and no tier logic of its own: it asks for a station, plays what comes
+    // back, and asks for more as the queue runs low.
+
+    case "radioStart":
+        guard let serverId else {
+            return sessionFailure(request.id, request.cmd, "radioStart needs serverId")
         }
-        let remoteIds = try await session.recommendations.radioBatch(
-            seed: seed, serverId: serverId, limit: limit,
-            excluding: Set(request.excluding ?? []), sonic: sonic)
-        var tracks: [WireTrack] = []
-        tracks.reserveCapacity(remoteIds.count)
-        for remoteId in remoteIds {
-            if let track = try await repo.track(serverId: serverId, remoteId: remoteId) {
-                tracks.append(wire(track))
+        let ids: [String]
+        if let remoteId = request.remoteId {
+            // Seeded from a track the client names by id alone. The title,
+            // genres and artist come from the catalog here rather than being
+            // passed in, so three shells cannot each assemble a slightly
+            // different seed for the same song.
+            guard let record = try await repo.track(serverId: serverId, remoteId: remoteId) else {
+                return sessionFailure(request.id, request.cmd, "radioStart track not found: \(remoteId)")
             }
+            ids = await session.radio.start(
+                fromTrack: RadioTrackSeed(
+                    remoteId: record.remoteId, title: record.title,
+                    genres: record.genres, artistId: record.artistRemoteId),
+                serverId: serverId, limit: limit)
+        } else if let artistRemoteId = request.artistRemoteId {
+            // No `artist` row is required: the station seeds from the artist's
+            // tracks, which is where the genres have to come from anyway, and a
+            // catalog synced tracks-first has the one and not the other.
+            let artist = try? await repo.artist(serverId: serverId, remoteId: artistRemoteId)
+            ids = await session.radio.start(
+                fromArtist: artistRemoteId, serverId: serverId,
+                name: artist?.name, genres: artist?.genres ?? [], limit: limit)
+            if ids.isEmpty, artist == nil {
+                return sessionFailure(
+                    request.id, request.cmd,
+                    "radioStart found nothing to play for artist: \(artistRemoteId)")
+            }
+        } else {
+            return sessionFailure(request.id, request.cmd, "radioStart needs remoteId or artistRemoteId")
         }
-        return sessionSuccess(request, WireRadioBatch(remoteIds: remoteIds, tracks: tracks))
+        return sessionSuccess(
+            request, try await radioPayload(ids, serverId: serverId, repo: repo))
+
+    case "radioNext":
+        guard let state = await session.radio.state else {
+            // Not a failure: a shell topping up its queue asks routinely, and
+            // "no station is running" is an ordinary answer to that.
+            return sessionSuccess(request, WireRadioBatch(remoteIds: [], tracks: []))
+        }
+        let ids = await session.radio.next(limit: limit)
+        return sessionSuccess(
+            request, try await radioPayload(ids, serverId: state.serverId, repo: repo))
+
+    case "radioStop":
+        await session.radio.stop()
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "radioState":
+        guard let state = await session.radio.state else {
+            return sessionSuccess(request, WireRadioState(active: false))
+        }
+        return sessionSuccess(request, WireRadioState(
+            active: true, title: state.seed.title,
+            serverId: state.serverId, surfaced: state.surfaced))
 
     case "lyrics":
         guard let serverId, let remoteId = request.remoteId else {
@@ -2248,7 +2353,9 @@ let mozzSessionCommands = [
     "relaySyncPlaybackSettings",
     "genres", "genreAlbums", "search", "homeMixes", "generateHomeMixes",
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
-    "mozzWeeklyItems", "radioBatch", "lyrics", "reportPlayback",
+    "mozzWeeklyItems", "radioBatch",
+    "radioStart", "radioNext", "radioStop", "radioState",
+    "lyrics", "reportPlayback",
     "continuityQueueHash", "continuityLoad", "continuitySave",
     "suppressTrack", "suppressArtist",
     "unsuppressTrack", "unsuppressArtist", "suppressions",
