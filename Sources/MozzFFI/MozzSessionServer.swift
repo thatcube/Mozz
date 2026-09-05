@@ -406,11 +406,32 @@ func dispatchServerCommand(
             clientInfo: clientInfo(),
             clientIdentifier: request.clientIdentifier
                 ?? fallbackClientIdentifier())
-        let resolved = try await auth.resolveConnection(
-            accountToken: accountToken,
-            machineIdentifier: request.serverMachineIdentifier,
-            serverName: request.serverName)
-        return session.success(request, wire(resolved))
+        do {
+            let resolved = try await auth.resolveConnection(
+                accountToken: accountToken,
+                machineIdentifier: request.serverMachineIdentifier,
+                serverName: request.serverName)
+            return session.success(request, wire(resolved))
+        } catch {
+            // "serverUnreachable" on its own names a symptom and nothing else -
+            // it cannot distinguish an account that advertises no addresses
+            // from one whose addresses all failed from one whose machine id
+            // stopped matching. Each wants a different fix, and a shell can
+            // only report what it is told.
+            let discovered = (try? await auth.discoverConnections(
+                accountToken: accountToken)) ?? []
+            let wanted = request.serverMachineIdentifier
+            let matching = wanted.map { id in
+                discovered.filter { $0.clientIdentifier == id }.count
+            }
+            return session.failure(request, """
+                plexResolve failed (\(error)): the account advertises \
+                \(discovered.count) connection(s) \
+                \(discovered.map { $0.uri.host ?? "?" }.joined(separator: ", ")); \
+                machine \(wanted ?? "unspecified") matched \
+                \(matching.map(String.init) ?? "n/a") of them
+                """)
+        }
 
     // MARK: Attach / mirror
 

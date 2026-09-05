@@ -387,14 +387,19 @@ final class PlexAuthTests: XCTestCase {
 
     func testDiscoverConnectionsSortsLocalFirst() async throws {
         let connections = try await makeAuthenticator().discoverConnections(accountToken: "acct")
-        XCTAssertEqual(connections.count, 1, "one Plex resource is one server even when it advertises several connections")
         XCTAssertTrue(connections[0].isLocal)
         XCTAssertFalse(connections[0].isRelay)
         XCTAssertEqual(connections[0].accessToken, "server-token-1")
         XCTAssertEqual(connections[0].serverMachineIdentifier, "machine-1")
     }
 
-    func testDiscoverConnectionsKeepsReachableAddressForOneMachine() async throws {
+    /// Discovery reports what the account advertises; it does not choose.
+    ///
+    /// It used to probe here and keep one address per server, and that is what
+    /// made a bad pin permanent: by the time re-resolution went looking for
+    /// somewhere else to go, the alternatives had been thrown away at discovery
+    /// and there was nothing left to try.
+    func testDiscoverConnectionsKeepsEveryAddressAServerAdvertises() async throws {
         let transport = PlexFixtureTransport([
             .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
             .init(contains: "192-168-68-71", fixture: "plex_identity"),
@@ -403,9 +408,52 @@ final class PlexAuthTests: XCTestCase {
 
         let connections = try await auth.discoverConnections(accountToken: "acct")
 
-        XCTAssertEqual(connections.count, 1)
-        XCTAssertEqual(connections.first?.serverMachineIdentifier, "50acfe994de74f8998deb9fc43e6262e")
-        XCTAssertEqual(connections.first?.uri.host, "192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct")
+        XCTAssertEqual(connections.count, 3, "one server, three ways to reach it")
+        XCTAssertEqual(connections.map(\.isRelay), [false, false, true], "relay last")
+        XCTAssertTrue(connections.allSatisfy {
+            $0.serverMachineIdentifier == "50acfe994de74f8998deb9fc43e6262e"
+        })
+    }
+
+    /// The bug this was all found through.
+    ///
+    /// A server advertising a Docker bridge address first, a real LAN address
+    /// second, and a relay third. Only the LAN one answers. Re-resolution has to
+    /// land on it — the app had pinned the Docker address, could not move off
+    /// it, and reported a server that every other Plex client could reach as
+    /// unreachable.
+    func testResolvingMovesOffAnAddressThatNoLongerAnswers() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
+            .init(contains: "192-168-68-71", fixture: "plex_identity"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+
+        let session = try await auth.resolveConnection(
+            accountToken: "acct",
+            machineIdentifier: "50acfe994de74f8998deb9fc43e6262e")
+
+        XCTAssertEqual(session.baseURL.host, "192-168-68-71.50acfe994de74f8998deb9fc43e6262e.plex.direct",
+                       "the one address that answered")
+    }
+
+    /// And when genuinely none of them answers, say so rather than handing back
+    /// the first one as though it were fine — which is what turned a temporary
+    /// outage into a permanent pin.
+    func testResolvingReportsUnreachableWhenNothingAnswers() async throws {
+        let transport = PlexFixtureTransport([
+            .init(contains: "api/v2/resources", fixture: "plex_resources_duplicate_machine"),
+        ])
+        let auth = PlexAuthenticator(clientInfo: clientInfo, clientIdentifier: "cid", transport: transport, probeTransport: transport)
+
+        do {
+            _ = try await auth.resolveConnection(
+                accountToken: "acct",
+                machineIdentifier: "50acfe994de74f8998deb9fc43e6262e")
+            XCTFail("expected serverUnreachable")
+        } catch {
+            XCTAssertEqual(error as? MozzError, .serverUnreachable)
+        }
     }
 
     func testCompleteLoginPicksReachableConnection() async throws {

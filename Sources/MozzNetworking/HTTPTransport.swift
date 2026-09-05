@@ -33,8 +33,15 @@ public struct URLSessionTransport: HTTPTransport {
             config.timeoutIntervalForRequest = 12
             config.timeoutIntervalForResource = 30
         case .discovery:
-            config.timeoutIntervalForRequest = 3
-            config.timeoutIntervalForResource = 5
+            // Tight, but not tighter than a real handshake. A plex.direct
+            // address needs a public DNS lookup, then TCP, then TLS before the
+            // first byte, and on a phone's wifi at ~400ms round trip - measured,
+            // on the network this was found failing on - three seconds does not
+            // cover it. Every candidate then "fails" and the app pins whichever
+            // address merely sorted first, which is how a reachable server ends
+            // up reported as unreachable.
+            config.timeoutIntervalForRequest = 8
+            config.timeoutIntervalForResource = 12
         case .bulk:
             // Self-hosted servers can take a long time to generate a single page
             // of a large library (measured ~60s per 1000-item /Items page on a

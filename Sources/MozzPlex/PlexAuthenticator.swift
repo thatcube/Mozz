@@ -199,12 +199,10 @@ public struct PlexAuthenticator: Sendable {
                     accessToken: accessToken
                 ))
             }
-            if let chosen = await bestReachableConnection(candidates) {
-                connections.append(chosen)
-            }
+            connections.append(contentsOf: candidates.sorted(by: Self.preferLocal))
         }
 
-        return connections.sorted(by: Self.preferLocal)
+        return connections
     }
 
     /// Probe candidates in preference order and return the first that answers,
@@ -228,11 +226,23 @@ public struct PlexAuthenticator: Sendable {
     private func firstAnswering(
         _ connections: [PlexResourceConnection]
     ) async -> PlexResourceConnection? {
-        for connection in connections {
-            if await answers(connection) { return connection }
+        guard !connections.isEmpty else { return nil }
+        // Probed together, answered in preference order. Sequentially, a dead
+        // LAN address costs its full timeout before the working one is even
+        // tried, and a server advertises several.
+        var reachable = [Bool](repeating: false, count: connections.count)
+        await withTaskGroup(of: (Int, Bool).self) { group in
+            for (index, connection) in connections.enumerated() {
+                group.addTask { (index, await self.answers(connection)) }
+            }
+            for await (index, ok) in group { reachable[index] = ok }
         }
-
-        return connections.first
+        // Nil, not `connections.first`. Returning an address this just proved
+        // does not answer is how a library gets pinned to one that never works
+        // again: `resolveConnection` reads nil as "none of these", and with a
+        // fallback here that guard could never fire, so re-resolution kept
+        // handing back the dead address and the caller kept believing it.
+        return reachable.firstIndex(of: true).map { connections[$0] }
     }
 
     /// One tight-timeout `identity` request — the cheapest thing a Plex server
@@ -368,40 +378,6 @@ public struct PlexAuthenticator: Sendable {
             serverMachineIdentifier: chosen.serverMachineIdentifier,
             accountToken: accountToken
         )
-    }
-
-    private func bestReachableConnection(
-        _ connections: [PlexResourceConnection]
-    ) async -> PlexResourceConnection? {
-        let preferred = connections.sorted(by: Self.preferLocal)
-        guard !preferred.isEmpty else { return nil }
-        var reachable = Array(repeating: false, count: preferred.count)
-
-        await withTaskGroup(of: (Int, Bool).self) { group in
-            for (index, connection) in preferred.enumerated() {
-                group.addTask { [clientInfo, clientIdentifier, probeTransport] in
-                    let probe = HTTPClient(
-                        baseURL: connection.uri,
-                        transport: probeTransport,
-                        defaultHeaders: PlexHeaders.common(
-                            clientInfo: clientInfo,
-                            clientIdentifier: clientIdentifier,
-                            token: connection.accessToken
-                        ),
-                        retryPolicy: .none
-                    )
-                    return (index, (try? await probe.send(Endpoint(path: "identity"))) != nil)
-                }
-            }
-            for await (index, ok) in group {
-                reachable[index] = ok
-            }
-        }
-
-        if let index = reachable.firstIndex(of: true) {
-            return preferred[index]
-        }
-        return preferred.first
     }
 
     private static func preferLocal(_ lhs: PlexResourceConnection, _ rhs: PlexResourceConnection) -> Bool {

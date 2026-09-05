@@ -1,5 +1,6 @@
 package com.thatcube.mozz.core
 
+import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -223,9 +224,17 @@ class MozzServer(
     suspend fun repointAccount(account: ServerAccount): ServerAccount? {
         if (account.kind != BackendKind.PLEX) return null
         val accountToken = secrets.get(plexAccountKey(account.serverId))
-            ?.takeIf { it.isNotEmpty() } ?: return null
+            ?.takeIf { it.isNotEmpty() }
+        if (accountToken == null) {
+            // Says which of the five reasons this was. A null here is not a
+            // failure worth showing anyone, but it is the difference between
+            // "your server moved and we found it" and a library that stays
+            // broken, so it should never be silent to whoever is debugging it.
+            Log.w(TAG, "repoint: no Plex account token stored for ${account.serverId}")
+            return null
+        }
 
-        val session: SessionPayload = runCatching {
+        val resolved = runCatching {
             core.call<SessionPayload>(
                 CoreRequest(
                     cmd = "plexResolve",
@@ -236,11 +245,20 @@ class MozzServer(
                     clientIdentifier = account.clientIdentifier,
                 )
             )
-        }.getOrNull() ?: return null
-        if (session.baseURL.isEmpty() || session.token.isEmpty()) return null
-        if (session.baseURL == account.baseUrl && session.token == secrets.get(secretKey(account.serverId))) {
+        }
+        val session: SessionPayload = resolved.getOrNull() ?: run {
+            Log.w(TAG, "repoint: plexResolve gave nothing", resolved.exceptionOrNull())
             return null
         }
+        if (session.baseURL.isEmpty() || session.token.isEmpty()) {
+            Log.w(TAG, "repoint: resolved session has no address or no token")
+            return null
+        }
+        if (session.baseURL == account.baseUrl && session.token == secrets.get(secretKey(account.serverId))) {
+            Log.i(TAG, "repoint: already on the best address we know of (${account.baseUrl})")
+            return null
+        }
+        Log.i(TAG, "repoint: ${account.baseUrl} -> ${session.baseURL}")
 
         val updated = account.copy(
             baseUrl = session.baseURL,
@@ -486,6 +504,8 @@ class MozzServer(
 
     private companion object {
         const val CLIENT_IDENTIFIER = "clientIdentifier"
+        private const val TAG = "Mozz"
+
         fun secretKey(serverId: String) = "token.$serverId"
         fun plexAccountKey(serverId: String) = "plex.account.$serverId"
     }
