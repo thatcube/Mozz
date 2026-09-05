@@ -227,7 +227,32 @@ for so in "$RUNTIME_LIBS"/*.so; do
 done
 cp "$LIBCXX_SHARED" "$STAGE/" 2>/dev/null || true
 cp "$REPO_ROOT/spec/continuity/queue-hash-fixtures.json" "$STAGE/"
+
+# Strip what ships. The payload is ~171 MB unstripped and ~87 MB stripped, and
+# libMozzFFI.so alone goes from 69 MB to 19 MB - almost all of the difference
+# is symbol tables nothing on the phone reads.
+#
+# `--strip-unneeded` keeps the dynamic symbol table, so the C ABI still
+# resolves and CMake still links against the staged library. The unstripped
+# originals stay in .build/<triple>/release, which is where a native crash
+# would be symbolicated from anyway.
+BEFORE="$(du -sk "$STAGE" | cut -f1)"
+for so in "$STAGE"/*.so; do
+    "$NDK_BIN/llvm-strip" --strip-unneeded "$so" 2>/dev/null || true
+done
+AFTER="$(du -sk "$STAGE" | cut -f1)"
+
+# The ABI is checked above on the unstripped library; re-check it here because
+# what the APK carries is this one, and a strip that took too much would
+# otherwise be found on a phone.
+STRIPPED_DEFINED="$("$NDK_BIN/llvm-nm" -D --defined-only "$STAGE/libMozzFFI.so")"
+for s in mozz_session_open mozz_session_call mozz_session_close mozz_ffi_free_string; do
+    [ "$(printf '%s\n' "$STRIPPED_DEFINED" | grep -cE "[[:space:]]${s}\$" || true)" -gt 0 ] \
+        || { echo "stripping removed $s from the shipped library" >&2; exit 1; }
+done
+
 echo "payload: $(ls -1 "$STAGE"/*.so | wc -l | tr -d ' ') shared objects + harness"
+echo "         stripped $((BEFORE / 1024)) MB -> $((AFTER / 1024)) MB"
 echo "         $STAGE"
 echo
 echo "This directory is also the manifest for the APK's jniLibs/${ABI}/."
@@ -242,6 +267,16 @@ DEVICE_COUNT="$(adb devices | awk 'NR>1 && $2=="device"' | wc -l | tr -d ' ')"
 if [ "$DEVICE_COUNT" -eq 0 ]; then
     echo "No device. Plug the phone in, enable USB debugging, accept the prompt," >&2
     echo "and check with: adb devices" >&2
+    exit 1
+fi
+# A running emulator counts as a device, so a Mac with one open fails partway
+# through as `adb: more than one device/emulator` - which names the tool's
+# problem rather than the caller's. adb reads ANDROID_SERIAL itself; all this
+# has to do is say so before twenty minutes of building.
+if [ "$DEVICE_COUNT" -gt 1 ] && [ -z "${ANDROID_SERIAL:-}" ]; then
+    echo "More than one device is attached, so adb cannot tell which to use." >&2
+    echo "Name one and re-run, e.g.:" >&2
+    adb devices | awk -v self="$0" 'NR>1 && $2=="device" { print "  ANDROID_SERIAL=" $1 " " self " --run" }' >&2
     exit 1
 fi
 
