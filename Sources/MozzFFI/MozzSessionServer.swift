@@ -416,6 +416,18 @@ func dispatchServerCommand(
 
     case "attach":
         let backend = try makeBackend(request)
+        // A library filed under an id this server no longer answers to is
+        // invisible: the catalog looks empty and re-syncs, and the analysed
+        // vectors stay stranded under a `track_ref` prefix nothing reads. Moves
+        // it before anything else writes, and does nothing at all unless there
+        // is exactly one such library and nothing already under the new id.
+        if let superseded = ServerIdentityRekey.supersededPlexID(
+            for: backend.connection.id,
+            kind: backend.connection.kind,
+            baseURL: backend.connection.baseURL) {
+            _ = try? await ServerIdentityRekey.apply(
+                in: session.database, from: superseded, to: backend.connection.id)
+        }
         session.backends.set(backend, for: backend.connection.id)
         try await CatalogWriter(session.database).saveServer(backend.connection)
         if let scope = CatalogSnapshotScope(
@@ -594,13 +606,30 @@ private func makeBackend(_ request: ServerRequest) throws -> any MusicBackend {
         (request.musicSectionIDs ?? request.musicSectionID.map { [$0] } ?? [])
             .filter { !$0.isEmpty }
     )).sorted()
+    // The caller's own id wins when it has one.
+    //
+    // A client mints its id once at `connect`, persists it, and keys everything
+    // it owns on it - the catalog rows, the likes, the play history, and the
+    // `track_ref` on every analysed vector. Re-deriving it here from today's
+    // address means the backend is registered under one id and looked up under
+    // another, and the symptom is "needs an attached serverId" from a client
+    // that plainly did attach.
+    //
+    // The derivation stays as the fallback for a caller that has no id yet,
+    // which is `connect` itself. But it cannot be authoritative: for Plex it
+    // reads the machine id out of a `*.plex.direct` hostname, and that
+    // component is the CONNECTION's identifier, not the server's - two
+    // different hex strings for the same machine. A server reachable at a plain
+    // LAN address has neither.
     var connection = ServerConnection(
-        id: ServerIdentity.id(
-            kind: kind,
-            baseURL: baseURL,
-            username: request.username,
-            serverMachineIdentifier: request.serverMachineIdentifier
-        ),
+        id: request.serverId?.isEmpty == false
+            ? request.serverId!
+            : ServerIdentity.id(
+                kind: kind,
+                baseURL: baseURL,
+                username: request.username,
+                serverMachineIdentifier: request.serverMachineIdentifier
+            ),
         kind: kind,
         name: request.serverName ?? kind.rawValue.capitalized,
         baseURL: baseURL,
