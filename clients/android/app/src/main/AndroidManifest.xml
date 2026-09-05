@@ -3,6 +3,19 @@
 
     <!-- Playback continues when Mozz is not on screen, which is the whole point
          of a music player, and that requires a foreground service. -->
+    <!--
+        Reaching a self-hosted server on the listener's own network.
+
+        Android 16 brought in Local Network Protections and by Android 17 they
+        bite: an app holding only INTERNET can talk to the public internet and
+        not to 192.168.x.x. For a Plex or Jellyfin client that is close to
+        fatal, and it fails in the most confusing possible way — the server is
+        reachable from every other app on the phone, ping answers, and only
+        this app is told the address does not work. It quietly falls back to
+        Plex's relay, and the listener wonders why their music stutters on
+        their own wifi.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- The transport notification is the foreground service's notification. -->

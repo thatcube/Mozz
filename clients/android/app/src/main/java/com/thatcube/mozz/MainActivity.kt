@@ -43,6 +43,21 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /**
+     * Reaching a server on the listener's own network.
+     *
+     * Unlike the notification permission, this one is close to the point of the
+     * app. Android 16 brought in Local Network Protections and by Android 17
+     * they bite: without this, the phone can talk to the public internet but
+     * not to 192.168.x.x, so a Plex or Jellyfin server sitting on the same wifi
+     * is unreachable — and the failure is silent and misleading, because every
+     * other app on the phone can reach it and the client quietly falls back to
+     * a relay. Denying it does not break Mozz; it makes it slower and, on a
+     * server with no remote access at all, useless.
+     */
+    private val localNetworkPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -52,6 +67,13 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        // Named as a string rather than through `Manifest.permission`: the
+        // constant only exists in the SDK this shipped in, and compiling
+        // against an older one would fail rather than degrade. Asking for a
+        // permission the platform has never heard of is a no-op.
+        if (checkSelfPermission(LOCAL_NETWORK_PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            localNetworkPermission.launch(LOCAL_NETWORK_PERMISSION)
         }
         val settings = (application as MozzApplication).settings
         // Analysis runs only while the app is on screen (and only on a charger,
@@ -132,4 +154,8 @@ class MainActivity : ComponentActivity() {
             ?: "https://plex.tv/link".toUri()
         startActivity(Intent(Intent.ACTION_VIEW, target))
     }
+    private companion object {
+        const val LOCAL_NETWORK_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK"
+    }
+
 }
