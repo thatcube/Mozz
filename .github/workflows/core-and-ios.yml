@@ -107,6 +107,13 @@ jobs:
       - name: No shell lost a capability
         run: tools/check-parity.sh --check
 
+      # The Android shell reaches the core through a JSON envelope, so the
+      # command name is a string neither compiler checks. Three had drifted
+      # apart unnoticed - the like button, Plex re-resolution, and the
+      # heart-or-star capability probe were all dead on Android.
+      - name: Android is not calling commands the core dropped
+        run: tools/check-ffi-commands.sh --check
+
       - name: Run the test suite
         run: swift test --parallel
 
