@@ -2457,6 +2457,29 @@
                                             <TextBlock Text="Recommendations" Classes="sectionTitle" />
                                             <TextBlock Text="MusicBrainz enrichment needs a desktop FFI command before this can become a real control."
                                                        Classes="secondary" TextWrapping="Wrap" />
+
+                                            <!--
+                                                Analysis on the machine best
+                                                suited to it: already plugged
+                                                in, a real processor, and not
+                                                going anywhere.
+                                            -->
+                                            <TextBlock Text="Listen to My Library" Classes="primary" FontWeight="SemiBold" />
+                                            <TextBlock Text="Analyses how your songs actually sound, so radio can follow the music rather than the tags. Never leaves this device."
+                                                       Classes="secondary" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding SonicAnalysisEngineNote}"
+                                                       Classes="secondary" TextWrapping="Wrap" />
+                                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                                <Button Content="Start Listening" Classes="secondary"
+                                                        IsVisible="{Binding !SonicAnalysisRunning}"
+                                                        Command="{Binding StartSonicAnalysisCommand}" />
+                                                <Button Content="Stop" Classes="secondary"
+                                                        IsVisible="{Binding SonicAnalysisRunning}"
+                                                        Command="{Binding CancelSonicAnalysisCommand}" />
+                                                <TextBlock Classes="secondary" VerticalAlignment="Center"
+                                                           IsVisible="{Binding SonicProgress, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                           Text="{Binding SonicProgress.Analyzed, StringFormat='{}{0} songs analysed'}" />
+                                            </StackPanel>
                                             <TextBlock Text="Not Recommended" Classes="primary" FontWeight="SemiBold" />
                                             <TextBlock Text="Nothing hidden" Classes="secondary" IsVisible="{Binding !HasSuppressions}" />
                                             <ItemsControl ItemsSource="{Binding SuppressedArtists}">

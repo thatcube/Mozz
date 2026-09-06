@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.Text.Json.Serialization;
 
@@ -206,6 +207,18 @@ public sealed record AlbumReleaseKind(
 /// <summary>A command that only reports whether it worked.</summary>
 public sealed record ActionResult(bool Ok);
 
+/// <summary>How far the analyzer has got through a library.</summary>
+public sealed record SonicProgress(
+    int Analyzed,
+    int Total,
+    bool Running,
+    /// <summary>Why the last track that failed, failed.</summary>
+    string? LastError)
+{
+    public int Remaining => Math.Max(0, Total - Analyzed);
+    public double Fraction => Total > 0 ? (double)Analyzed / Total : 0;
+}
+
 public sealed record RadioBatch(
     IReadOnlyList<string> RemoteIds,
     IReadOnlyList<Track> Tracks);
@@ -239,6 +252,8 @@ public sealed record CoreRequest(
     [JsonPropertyName("artistRemoteId")] public string? ArtistRemoteId { get; init; }
     [JsonPropertyName("trackCount")] public int? TrackCount { get; init; }
     [JsonPropertyName("seedTitle")] public string? SeedTitle { get; init; }
+    /// <summary>Where this platform put the learned analyzer's weights, if it ships them.</summary>
+    [JsonPropertyName("weightsPath")] public string? WeightsPath { get; init; }
     [JsonPropertyName("seedGenres")] public IReadOnlyList<string>? SeedGenres { get; init; }
     [JsonPropertyName("seedArtistIds")] public IReadOnlyList<string>? SeedArtistIds { get; init; }
     [JsonPropertyName("seedTrackRef")] public string? SeedTrackRef { get; init; }

@@ -45,6 +45,21 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      The learned analyzer's weights, linked rather than copied. The same 9 MB
+      file already ships as an iOS resource and an Android asset; a third copy
+      in the tree would be three things to keep in step. Linking means the
+      desktop analyses in the SAME space as the phones, which matters more than
+      it sounds: two engines are coordinates in unrelated spaces, so a desktop
+      falling back to the simpler analyzer would fill a shared library with
+      vectors the phones cannot compare against.
+    -->
+    <Content Include="..\..\App\Mozz\Resources\vggish-trunk.bin"
+             Link="vggish-trunk.bin"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
