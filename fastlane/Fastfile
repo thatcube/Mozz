@@ -24,6 +24,7 @@ require "net/http"
 require "uri"
 require "base64"
 require "openssl"
+require File.expand_path("../tools/lib/apple_build_lease", __dir__)
 
 APP_IDENTIFIER = "com.thatcube.Mozz"
 APP_NAME       = "Mozz"
@@ -174,7 +175,9 @@ end
 
 desc "Regenerate the Xcode project from project.yml via XcodeGen"
 lane :generate_project do
-  sh("cd .. && ./tools/generate-project.sh")
+  AppleBuildLease.with_shared("mozz/fastlane/generate-project") do
+    sh("cd .. && ./tools/generate-project.sh")
+  end
 end
 
 desc "One-time TestFlight setup: beta metadata, review contact, public-link group"
@@ -290,93 +293,99 @@ end
 
 desc "Archive a signed App Store .ipa"
 lane :build do
-  # App Store Connect rejects beta-SDK builds and this machine's active toolchain
-  # is the Xcode beta — force a release Xcode before anything compiles.
-  select_release_xcode
+  AppleBuildLease.with_shared("mozz/fastlane/build") do
+    # App Store Connect rejects beta-SDK builds and this machine's active toolchain
+    # is the Xcode beta — force a release Xcode before anything compiles.
+    select_release_xcode
 
-  build_number = next_build_number
-  # Set both BEFORE generating, so generate-project.sh bakes them into the app
-  # and the widget extension together. A widget whose CFBundleVersion disagrees
-  # with its host app is rejected at upload.
-  ENV["MOZZ_BUILD_NUMBER"] = build_number.to_s
-  ENV["MOZZ_MARKETING_VERSION"] = marketing_version
-  UI.message("Build #{build_number} (CFBundleVersion), version #{marketing_version}")
+    build_number = next_build_number
+    # Set both BEFORE generating, so generate-project.sh bakes them into the app
+    # and the widget extension together. A widget whose CFBundleVersion disagrees
+    # with its host app is rejected at upload.
+    ENV["MOZZ_BUILD_NUMBER"] = build_number.to_s
+    ENV["MOZZ_MARKETING_VERSION"] = marketing_version
+    UI.message("Build #{build_number} (CFBundleVersion), version #{marketing_version}")
 
-  generate_project
+    generate_project
 
-  prov_args = "-allowProvisioningUpdates"
-  if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_PATH"]
-    prov_args += " -authenticationKeyPath #{ENV['ASC_KEY_PATH'].shellescape}" \
-                 " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
-                 " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
+    prov_args = "-allowProvisioningUpdates"
+    if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_PATH"]
+      prov_args += " -authenticationKeyPath #{ENV['ASC_KEY_PATH'].shellescape}" \
+                   " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
+                   " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
+    end
+
+    build_app(
+      project: XCODEPROJ,
+      scheme: SCHEME,
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: OUTPUT_DIR,
+      output_name: OUTPUT_NAME,
+      archive_path: ARCHIVE_PATH,
+      clean: true,
+      xcargs: prov_args
+    )
+    build_number
   end
-
-  build_app(
-    project: XCODEPROJ,
-    scheme: SCHEME,
-    configuration: "Release",
-    export_method: "app-store",
-    output_directory: OUTPUT_DIR,
-    output_name: OUTPUT_NAME,
-    archive_path: ARCHIVE_PATH,
-    clean: true,
-    xcargs: prov_args
-  )
-  build_number
 end
 
 desc "Build and upload to TestFlight"
 lane :beta do
-  notes = whats_new
-  if notes.empty?
-    UI.user_error!(
-      "No release notes for the beta. Provide them before running `beta`:\n" \
-      "  • export MOZZ_WHATS_NEW=\"...\"   (inline), or\n" \
-      "  • create WHAT_TO_TEST.txt at the repo root."
+  AppleBuildLease.with_shared("mozz/fastlane/beta") do
+    notes = whats_new
+    if notes.empty?
+      UI.user_error!(
+        "No release notes for the beta. Provide them before running `beta`:\n" \
+        "  • export MOZZ_WHATS_NEW=\"...\"   (inline), or\n" \
+        "  • create WHAT_TO_TEST.txt at the repo root."
+      )
+    end
+
+    build
+
+    # Distribute externally only once the public-link group exists; otherwise this
+    # is an internal-only upload and the lane still succeeds.
+    groups = ASC.request(:get, "/v1/apps/#{ASC.app_id}/betaGroups?limit=200")["data"].to_a
+    external = groups.find { |g| g.dig("attributes", "name") == EXTERNAL_GROUP }
+
+    upload_to_testflight(
+      api_key: asc_api_key,
+      app_identifier: APP_IDENTIFIER,
+      app_platform: "ios",
+      ipa: File.join(OUTPUT_DIR, OUTPUT_NAME),
+      distribute_external: !external.nil?,
+      groups: external.nil? ? nil : [EXTERNAL_GROUP],
+      notify_external_testers: !external.nil?,
+      changelog: notes,
+      submit_beta_review: !external.nil?,
+      skip_waiting_for_build_processing: false
     )
-  end
 
-  build
-
-  # Distribute externally only once the public-link group exists; otherwise this
-  # is an internal-only upload and the lane still succeeds.
-  groups = ASC.request(:get, "/v1/apps/#{ASC.app_id}/betaGroups?limit=200")["data"].to_a
-  external = groups.find { |g| g.dig("attributes", "name") == EXTERNAL_GROUP }
-
-  upload_to_testflight(
-    api_key: asc_api_key,
-    app_identifier: APP_IDENTIFIER,
-    app_platform: "ios",
-    ipa: File.join(OUTPUT_DIR, OUTPUT_NAME),
-    distribute_external: !external.nil?,
-    groups: external.nil? ? nil : [EXTERNAL_GROUP],
-    notify_external_testers: !external.nil?,
-    changelog: notes,
-    submit_beta_review: !external.nil?,
-    skip_waiting_for_build_processing: false
-  )
-
-  if external.nil?
-    UI.important("Uploaded for internal testing only — no #{EXTERNAL_GROUP.inspect} group yet.")
-    UI.important("Run `fastlane bootstrap_testflight --env fastlane` to create it and get a public link.")
-  else
-    testflight_link
+    if external.nil?
+      UI.important("Uploaded for internal testing only — no #{EXTERNAL_GROUP.inspect} group yet.")
+      UI.important("Run `fastlane bootstrap_testflight --env fastlane` to create it and get a public link.")
+    else
+      testflight_link
+    end
   end
 end
 
 desc "Build and upload to the App Store"
 lane :release do
-  build
-  upload_to_app_store(
-    api_key: asc_api_key,
-    app_identifier: APP_IDENTIFIER,
-    platform: "ios",
-    ipa: File.join(OUTPUT_DIR, OUTPUT_NAME),
-    skip_screenshots: true,
-    skip_metadata: true,
-    precheck_include_in_app_purchases: false,
-    submit_for_review: false,
-    force: true
-  )
-  UI.success("Uploaded #{marketing_version} to App Store Connect. Submit for review there.")
+  AppleBuildLease.with_shared("mozz/fastlane/release") do
+    build
+    upload_to_app_store(
+      api_key: asc_api_key,
+      app_identifier: APP_IDENTIFIER,
+      platform: "ios",
+      ipa: File.join(OUTPUT_DIR, OUTPUT_NAME),
+      skip_screenshots: true,
+      skip_metadata: true,
+      precheck_include_in_app_purchases: false,
+      submit_for_review: false,
+      force: true
+    )
+    UI.success("Uploaded #{marketing_version} to App Store Connect. Submit for review there.")
+  end
 end

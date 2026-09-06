@@ -35,6 +35,9 @@ on:
       - "Package.swift"
       - "spec/**"
       - "spike/windows-ffi/**"
+      - "tools/with-apple-build-lease.sh"
+      - "tools/lib/apple-build-lease.sh"
+      - "tools/lib/apple_build_lease.py"
       - ".github/workflows/windows-ffi-spike.yml"
 
 concurrency:
@@ -196,7 +199,9 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Build the FFI shared library
-        run: swift build -c release --product MozzFFI
+        run: >
+          tools/with-apple-build-lease.sh mozz/ci-windows-control-swift --
+          swift build -c release --product MozzFFI
 
       - name: Build the C# harness
         run: dotnet build spike/windows-ffi/Harness/Harness.csproj -c Release -o harness-out

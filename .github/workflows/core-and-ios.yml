@@ -39,6 +39,12 @@ on:
       # what happened when the version scheme moved to a shared derivation.
       - "tools/generate-project.sh"
       - "tools/build-ios.sh"
+      - "tools/with-apple-build-lease.sh"
+      - "tools/lib/apple-build-entrypoint.sh"
+      - "tools/lib/apple-build-lease.sh"
+      - "tools/lib/apple_build_lease.py"
+      - "tools/lib/apple_build_lease.rb"
+      - "tools/tests/test-apple-build-interlock.sh"
       - "tools/version-info.py"
       - ".github/workflows/core-and-ios.yml"
   pull_request:
@@ -56,6 +62,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Apple build interlock fixtures
+        run: tools/tests/test-apple-build-interlock.sh
 
       # macos-26, not macos-15: the app uses the iOS 26 Liquid Glass APIs
       # (`GlassEffectContainer`, `.glassEffect`) behind `#available` guards. Those
@@ -115,7 +124,7 @@ jobs:
         run: tools/check-ffi-commands.sh --check
 
       - name: Run the test suite
-        run: swift test --parallel
+        run: tools/with-apple-build-lease.sh mozz/ci-swift-test -- swift test --parallel
 
       # The generated command clients are committed rather than built, so that
       # protoc is not a prerequisite on any of the four desktop targets. That
@@ -139,7 +148,7 @@ jobs:
       # optimises, and a release-only failure is found here rather than by
       # whichever downstream platform happens to look next.
       - name: Build release
-        run: swift build -c release
+        run: tools/with-apple-build-lease.sh mozz/ci-swift-release -- swift build -c release
 
   ios:
     name: iOS build

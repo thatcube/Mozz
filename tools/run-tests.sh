@@ -10,6 +10,10 @@
 # and every logic layer (backend abstraction, DB/FTS, sync, playback queue,
 # downloads/offline) is macOS-clean and runs without booting a simulator.
 set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/run-tests" "${BASH_SOURCE[0]}" "$@"
+
 cd "$(dirname "$0")/.."
 
 # Append rather than default-assign: the environment may already inject other

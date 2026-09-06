@@ -20,6 +20,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/tools/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint \
+  "mozz/build-audio-xcframework" "${BASH_SOURCE[0]}" "$@"
+
 AUDIO="$ROOT/audio"
 OUT="$AUDIO/target/MozzAudioFFI.xcframework"
 STAGE="$AUDIO/target/xcstage"
