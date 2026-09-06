@@ -35,6 +35,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -192,6 +194,7 @@ internal fun PlayerBody(
         glyph = capabilities?.likeGlyph,
         liked = liked,
         rating = rating,
+        onStartRadio = { playback.startRadio(track) },
         onToggleLike = {
             val next = !liked
             likeOverride = next
@@ -1257,19 +1260,28 @@ private fun StarAndOverflow(likes: LikeControls) {
                 )
             }
         }
-        IconButton(onClick = {}, enabled = false) {
-            Icon(
-                // Vertical here, horizontal on iOS. The one place the two apps
-                // deliberately draw the same control differently: an overflow
-                // menu is one of the few glyphs each platform has actually
-                // taught its users, and they were taught opposite orientations.
-                // Nothing is lost by honouring both — the meaning lives in
-                // "three dots", not in which way they run.
-                painterResource(R.drawable.ic_more_vert),
-                contentDescription = "More (not yet available)",
-                tint = PlayerForegroundMuted.copy(alpha = 0.5f),
-                modifier = Modifier.size(22.dp),
-            )
+        var menuOpen by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(
+                    // Vertical here, horizontal on iOS. The one place the two
+                    // apps deliberately draw the same control differently: an
+                    // overflow menu is one of the few glyphs each platform has
+                    // actually taught its users, and they were taught opposite
+                    // orientations. Nothing is lost by honouring both — the
+                    // meaning lives in "three dots", not in which way they run.
+                    painterResource(R.drawable.ic_more_vert),
+                    contentDescription = "More",
+                    tint = PlayerForegroundMuted,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Start Radio") },
+                    onClick = { menuOpen = false; likes.onStartRadio() },
+                )
+            }
         }
     }
 }
@@ -1981,6 +1993,15 @@ internal data class LikeControls(
     val rating: Double?,
     val onToggleLike: () -> Unit,
     val onSetRating: (Double?) -> Unit,
+    /**
+     * Start a station from this track.
+     *
+     * Carried here because this type is already threaded to all three places
+     * that draw the overflow — the hero, the queue card and the lyrics pane —
+     * and the alternative was the same callback added to three composables that
+     * have no other reason to know about radio.
+     */
+    val onStartRadio: () -> Unit,
 )
 
 /** Four stars and up is a like. Matches `LikePolicy.ratingThreshold` in the core. */
