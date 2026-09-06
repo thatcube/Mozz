@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -41,7 +42,9 @@ import com.thatcube.mozz.R
 import com.thatcube.mozz.core.Album
 import com.thatcube.mozz.core.Artist
 import com.thatcube.mozz.core.HomeMix
+import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.downloads.DownloadWorker
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.Playlist
 import com.thatcube.mozz.core.Track
@@ -231,11 +234,34 @@ val LocalTrackActions = staticCompositionLocalOf<TrackActions?> { null }
 class TrackActions(
     private val library: MozzLibrary,
     private val playback: PlayerController,
+    private val downloads: MozzDownloads,
     private val nav: Navigator,
     private val scope: CoroutineScope,
 ) {
     fun playNext(track: Track) = playback.playNext(track)
     fun startRadio(track: Track) = playback.startRadio(track)
+
+    /**
+     * Keep this track offline, or stop keeping it.
+     *
+     * The record and the file are removed together. Leaving either behind is a
+     * library that lies: an orphaned record shows a download that will not
+     * play, and an orphaned file is storage nobody can find or reclaim.
+     */
+    fun toggleDownload(track: Track, context: android.content.Context, downloaded: Boolean) {
+        scope.launch {
+            if (downloaded) {
+                DownloadWorker.cancel(context, track.serverId, track.remoteId)
+                runCatching { downloads.forget(track.serverId, track.remoteId) }
+                runCatching {
+                    DownloadWorker.fileFor(context, track.serverId, track.remoteId).delete()
+                }
+            } else {
+                runCatching { downloads.enqueue(track.serverId, track.remoteId) }
+                DownloadWorker.enqueue(context, track.serverId, track.remoteId)
+            }
+        }
+    }
     fun addToQueue(track: Track) = playback.addToQueue(track)
     fun goToArtist(track: Track) = nav.openArtist(track.serverId, track.artistRemoteId)
     fun goToAlbum(track: Track) = nav.openAlbum(track.serverId, track.albumRemoteId)
@@ -259,8 +285,7 @@ class TrackActions(
 /**
  * The per-row overflow.
  *
- * Same actions as the iPhone's, in the same order, minus the one it has that
- * Android has no machinery for yet: downloads.
+ * Same actions as the iPhone's, in the same order.
  */
 @Composable
 private fun TrackMenu(track: Track, actions: TrackActions) {
@@ -268,6 +293,18 @@ private fun TrackMenu(track: Track, actions: TrackActions) {
     // Held locally so the row reflects the tap immediately; the write goes to the
     // database first and the server after, so there is nothing to wait for.
     var liked by remember(track.id) { mutableStateOf(track.isLiked) }
+    val context = LocalContext.current
+    // Read from the file rather than the record: the worker renames a .part
+    // into place only once the last byte lands, so a file that exists is one
+    // that plays — and this runs for every row on screen, where a round trip
+    // through the core per row would not.
+    var downloaded by remember(track.id) {
+        mutableStateOf(
+            DownloadWorker.fileFor(context, track.serverId, track.remoteId).let {
+                it.isFile && it.length() > 0
+            }
+        )
+    }
 
     Box {
         Box(
@@ -327,6 +364,17 @@ private fun TrackMenu(track: Track, actions: TrackActions) {
                     onClick = { actions.goToAlbum(track); open = false },
                 )
             }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(if (downloaded) "Remove Download" else "Download") },
+                onClick = {
+                    actions.toggleDownload(track, context, downloaded)
+                    // Flipped here so the menu reflects the tap. The file
+                    // arrives later; the intent is immediate.
+                    downloaded = !downloaded
+                    open = false
+                },
+            )
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("Don't recommend this track") },

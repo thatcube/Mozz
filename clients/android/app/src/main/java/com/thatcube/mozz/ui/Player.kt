@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import com.thatcube.mozz.downloads.DownloadWorker
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -1266,6 +1267,16 @@ private fun StarAndOverflow(likes: LikeControls) {
             }
         }
         var menuOpen by remember { mutableStateOf(false) }
+        val context = LocalContext.current
+        // The file, not the record: the worker renames a .part into place only
+        // once the last byte lands, so a file that exists is one that plays.
+        var downloaded by remember(likes.track.id) {
+            mutableStateOf(
+                DownloadWorker.fileFor(
+                    context, likes.track.serverId, likes.track.remoteId
+                ).let { it.isFile && it.length() > 0 }
+            )
+        }
         Box {
             IconButton(onClick = { menuOpen = true }) {
                 Icon(
@@ -1281,8 +1292,7 @@ private fun StarAndOverflow(likes: LikeControls) {
                     modifier = Modifier.size(22.dp),
                 )
             }
-            // The iPhone's player menu, in its order, minus the one thing
-            // Android has no machinery for yet: downloads.
+            // The iPhone's player menu, in its order.
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 val track = likes.track
                 val actions = likes.actions
@@ -1313,6 +1323,15 @@ private fun StarAndOverflow(likes: LikeControls) {
                         onClick = { menuOpen = false; likes.onCollapse(); actions.goToAlbum(track) },
                     )
                 }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(if (downloaded) "Remove Download" else "Download") },
+                    onClick = {
+                        actions.toggleDownload(track, context, downloaded)
+                        downloaded = !downloaded
+                        menuOpen = false
+                    },
+                )
                 HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Don't recommend this track") },

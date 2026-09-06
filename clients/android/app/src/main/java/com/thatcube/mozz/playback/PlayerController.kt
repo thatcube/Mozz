@@ -14,6 +14,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlayEventKind
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzRadio
+import com.thatcube.mozz.downloads.DownloadWorker
 import com.thatcube.mozz.core.Track
 import com.thatcube.mozz.ui.ToastAction
 import com.thatcube.mozz.ui.ToastCenter
@@ -263,6 +264,18 @@ class PlayerController(
     }
 
     /**
+     * The file on this device for a track, when there is a whole one.
+     *
+     * Existence is the test, deliberately: the worker writes to a `.part` and
+     * renames only once the last byte lands, so a file that is there is a file
+     * that plays. Asking the core for the record instead would be a round trip
+     * per track on a path that runs for every item in a queue.
+     */
+    private fun downloadedFile(track: Track): java.io.File? =
+        DownloadWorker.fileFor(context, track.serverId, track.remoteId)
+            .takeIf { it.isFile && it.length() > 0 }
+
+    /**
      * One track, addressed and described.
      *
      * Returns null when the URL will not resolve, and the caller drops the track
@@ -270,7 +283,12 @@ class PlayerController(
      * reached.
      */
     private suspend fun mediaItem(track: Track): MediaItem? = runCatching {
-        val source = server.stream(track.serverId, track.remoteId)
+        // A downloaded file first, and not only to save bandwidth: it is the
+        // whole of what "offline" means. A download the player ignores is a
+        // progress bar that cost somebody storage and bought them nothing.
+        val local = downloadedFile(track)
+        val uri = local?.toURI()?.toString()
+            ?: server.stream(track.serverId, track.remoteId).url
         // The same artwork the app shows, so the notification, the lock screen
         // and Mozz's own player agree. Without this the system surfaces fall
         // back to whatever art is embedded in the file, which is often absent
@@ -279,7 +297,7 @@ class PlayerController(
             runCatching { server.artworkUrl(track.serverId, key, ARTWORK_SIZE) }.getOrNull()
         }
         MediaItem.Builder()
-            .setUri(source.url)
+            .setUri(uri)
             .setMediaId(track.remoteId)
             .setMediaMetadata(
                 MediaMetadata.Builder()

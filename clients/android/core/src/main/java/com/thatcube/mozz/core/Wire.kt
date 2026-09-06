@@ -52,6 +52,14 @@ data class CoreRequest(
     @SerialName("serverMachineIdentifier") val machineIdentifier: String? = null,
     val artworkKey: String? = null,
     val size: Int? = null,
+
+    // Downloads: this side moves the bytes and reports what it did.
+    val states: List<String>? = null,
+    val receivedBytes: Long? = null,
+    val totalBytes: Long? = null,
+    val localPath: String? = null,
+    val sizeBytes: Long? = null,
+    val reason: String? = null,
     val maxBitrateKbps: Int? = null,
     val useLRCLIB: Boolean? = null,
     /** Which precomputed mix — a home mix or Mozz Weekly — a command is about. */

@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.core.LikeGlyph
+import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.ServerCapabilities
 import com.thatcube.mozz.core.MozzServer
@@ -82,6 +83,7 @@ fun MozzShell(
     library: MozzLibrary,
     server: MozzServer,
     playback: PlayerController,
+    downloads: MozzDownloads,
     toasts: ToastCenter,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
@@ -134,7 +136,7 @@ fun MozzShell(
     // inside TabContent, and the player is a sibling of the tabs rather than a
     // child of them. That is why its overflow menu sat disabled.
     val playerActions = remember(library, playback, nav) {
-        TrackActions(library, playback, nav, scope)
+        TrackActions(library, playback, downloads, nav, scope)
     }
     val density = LocalDensity.current
 
@@ -307,6 +309,7 @@ fun MozzShell(
                     library = library,
                     server = server,
                     playback = playback,
+                    downloads = downloads,
                     wide = wide,
                     bottomReserve = Dock.reserve(
                         hasTrack,
@@ -507,6 +510,7 @@ private fun TabContent(
     library: MozzLibrary,
     server: MozzServer,
     playback: PlayerController,
+    downloads: MozzDownloads,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
@@ -517,7 +521,9 @@ private fun TabContent(
     // default is black, which on this background is a heading that simply is not
     // there. Stated once, here, so no page has to remember it.
     val scope = rememberCoroutineScope()
-    val actions = remember(library, playback, nav) { TrackActions(library, playback, nav, scope) }
+    val actions = remember(library, playback, nav) {
+        TrackActions(library, playback, downloads, nav, scope)
+    }
 
     CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onBackground,

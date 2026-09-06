@@ -10,6 +10,7 @@ import com.thatcube.mozz.analysis.SonicAnalysisController
 import com.thatcube.mozz.analysis.SonicAnalysisWorker
 import com.thatcube.mozz.core.MozzCore
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.SecretStore
@@ -106,6 +107,12 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
      * answer.
      */
     val radio: MozzRadio by lazy { MozzRadio(core) }
+
+    /**
+     * Keeping tracks for offline. The core holds the records; the worker moves
+     * the bytes.
+     */
+    val downloads: MozzDownloads by lazy { MozzDownloads(core) }
 
     /**
      * Where anything in the app says a short thing to the person using it.
