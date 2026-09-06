@@ -79,6 +79,8 @@ internal fun MorphHost(
     server: MozzServer,
     library: MozzLibrary,
     playback: PlayerController,
+    /** The same actions a track row offers, for the player's overflow menu. */
+    actions: TrackActions,
     progress: () -> Float,
     morphAt: (Float, Rect?, Rect?) -> Morph,
     queueProgress: () -> Float,
@@ -240,6 +242,7 @@ internal fun MorphHost(
                 .then(if (expanded) Modifier else Modifier.blockTouches()),
         ) {
             PlayerBody(
+                actions = actions,
                 state = state,
                 server = server,
                 library = library,

@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -129,6 +130,8 @@ internal val PlayerForegroundMuted = Color(0xB3F6F6F6)
  */
 @Composable
 internal fun PlayerBody(
+    /** The same actions a track row offers — see the overflow menu below. */
+    actions: TrackActions,
     state: PlaybackState,
     server: MozzServer,
     library: MozzLibrary,
@@ -194,7 +197,8 @@ internal fun PlayerBody(
         glyph = capabilities?.likeGlyph,
         liked = liked,
         rating = rating,
-        onStartRadio = { playback.startRadio(track) },
+        track = track,
+        actions = actions,
         onToggleLike = {
             val next = !liked
             likeOverride = next
@@ -1276,11 +1280,49 @@ private fun StarAndOverflow(likes: LikeControls) {
                     modifier = Modifier.size(22.dp),
                 )
             }
+            // The iPhone's player menu, in its order, minus the one thing
+            // Android has no machinery for yet: downloads.
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                val track = likes.track
+                val actions = likes.actions
+                DropdownMenuItem(
+                    text = { Text("Play Next") },
+                    onClick = { menuOpen = false; actions.playNext(track) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to Queue") },
+                    onClick = { menuOpen = false; actions.addToQueue(track) },
+                )
                 DropdownMenuItem(
                     text = { Text("Start Radio") },
-                    onClick = { menuOpen = false; likes.onStartRadio() },
+                    onClick = { menuOpen = false; actions.startRadio(track) },
                 )
+                if (track.artistRemoteId != null || track.albumRemoteId != null) {
+                    HorizontalDivider()
+                }
+                if (track.artistRemoteId != null) {
+                    DropdownMenuItem(
+                        text = { Text("Go to Artist") },
+                        onClick = { menuOpen = false; actions.goToArtist(track) },
+                    )
+                }
+                if (track.albumRemoteId != null) {
+                    DropdownMenuItem(
+                        text = { Text("Go to Album") },
+                        onClick = { menuOpen = false; actions.goToAlbum(track) },
+                    )
+                }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Don't recommend this track") },
+                    onClick = { menuOpen = false; actions.suppressTrack(track) },
+                )
+                if (track.artistRemoteId != null) {
+                    DropdownMenuItem(
+                        text = { Text("Don't recommend this artist") },
+                        onClick = { menuOpen = false; actions.suppressArtist(track) },
+                    )
+                }
             }
         }
     }
@@ -1994,14 +2036,15 @@ internal data class LikeControls(
     val onToggleLike: () -> Unit,
     val onSetRating: (Double?) -> Unit,
     /**
-     * Start a station from this track.
+     * The track this is about, and what can be done to it.
      *
      * Carried here because this type is already threaded to all three places
      * that draw the overflow — the hero, the queue card and the lyrics pane —
-     * and the alternative was the same callback added to three composables that
-     * have no other reason to know about radio.
+     * and the alternative was the same two values added to three composables
+     * that have no other reason to know about either.
      */
-    val onStartRadio: () -> Unit,
+    val track: Track,
+    val actions: TrackActions,
 )
 
 /** Four stars and up is a like. Matches `LikePolicy.ratingThreshold` in the core. */

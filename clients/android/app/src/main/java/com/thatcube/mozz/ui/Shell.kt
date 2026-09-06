@@ -129,6 +129,13 @@ fun MozzShell(
         stacks.mapValues { (_, entries) -> Navigator(entries, library, scope) }
     }
     val nav = navigators.getValue(tab)
+    // The player needs the same row actions the lists have, and cannot reach
+    // the CompositionLocal that carries them: `LocalTrackActions` is provided
+    // inside TabContent, and the player is a sibling of the tabs rather than a
+    // child of them. That is why its overflow menu sat disabled.
+    val playerActions = remember(library, playback, nav) {
+        TrackActions(library, playback, nav, scope)
+    }
     val density = LocalDensity.current
 
     // Morph progress: 0 docked, 1 full screen. An Animatable rather than a
@@ -338,6 +345,7 @@ fun MozzShell(
                 server = server,
                 library = library,
                 playback = playback,
+                actions = playerActions,
                 progress = { p.value },
                 morphAt = ::morphAt,
                 queueProgress = { queueDock.value },
