@@ -83,6 +83,7 @@ sealed interface Route {
 
     /** Everything the user has told the app to stop recommending. */
     data object SettingsSuppressions : Route
+    data object SettingsDownloads : Route
 
     /**
      * A settings page that exists in the map before it exists in code. Carries

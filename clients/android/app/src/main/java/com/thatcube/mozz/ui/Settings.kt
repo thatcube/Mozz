@@ -46,6 +46,12 @@ import androidx.core.net.toUri
 import com.thatcube.mozz.BuildConfig
 import com.thatcube.mozz.R
 import com.thatcube.mozz.analysis.SonicAnalysisWorker
+import com.thatcube.mozz.core.MozzDownloads
+import com.thatcube.mozz.core.DownloadRecord
+import com.thatcube.mozz.core.StorageUsage
+import com.thatcube.mozz.downloads.DownloadWorker
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 import com.thatcube.mozz.analysis.SonicWeights
 import androidx.compose.foundation.lazy.items
 import com.thatcube.mozz.core.MozzLibrary
@@ -190,6 +196,15 @@ fun SettingsPage(
                     SettingsRow(
                         R.drawable.ic_more, "Not Recommended", inset,
                         onClick = { nav.open(Route.SettingsSuppressions) },
+                    )
+                }
+            }
+
+            item {
+                SettingsSection("Offline", inset) {
+                    SettingsRow(
+                        R.drawable.ic_download, "Downloads", inset,
+                        onClick = { nav.open(Route.SettingsDownloads) },
                     )
                 }
             }
@@ -418,6 +433,113 @@ fun MusicLibrariesPage(
  * decision you can only reverse in the five seconds after making it is not a
  * decision anyone can make comfortably.
  */
+/**
+ * What this device is keeping offline, and what it costs.
+ *
+ * Reads the records from the core rather than the filesystem, because a record
+ * knows the track's title and a file only knows its own name. The one thing it
+ * asks the filesystem is whether the bytes are actually there: a record can say
+ * "downloaded" while the file has been cleared by the system, and a list that
+ * claims music is available when it is not is worse than one that admits it.
+ */
+@Composable
+fun DownloadsPage(
+    downloads: MozzDownloads,
+    nav: Navigator,
+    bottomReserve: Dp,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var rows by remember { mutableStateOf<List<DownloadRecord>?>(null) }
+    var usage by remember { mutableStateOf<StorageUsage?>(null) }
+
+    suspend fun reload() {
+        rows = runCatching { downloads.list() }.getOrDefault(emptyList())
+        usage = runCatching { downloads.storageUsage() }.getOrNull()
+    }
+    LaunchedEffect(Unit) { reload() }
+
+    ListPage("Downloads", onBack = nav::back) { inset, _ ->
+        val items = rows
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+        ) {
+            usage?.let { used ->
+                item {
+                    SettingsNote(
+                        "${used.trackCount} ${if (used.trackCount == 1) "song" else "songs"} " +
+                            "kept offline — ${formatBytes(used.totalBytes)}.",
+                        inset,
+                    )
+                }
+            }
+            if (items != null && items.isEmpty()) {
+                item {
+                    SettingsNote(
+                        "Nothing downloaded. Keep a song from its menu and it plays without the server.",
+                        inset,
+                    )
+                }
+            }
+            items(items ?: emptyList(), key = { it.trackId }) { record ->
+                DownloadRow(record) {
+                    val serverId = record.serverId ?: return@DownloadRow
+                    val remoteId = record.remoteId ?: return@DownloadRow
+                    scope.launch {
+                        DownloadWorker.cancel(context, serverId, remoteId)
+                        runCatching { downloads.forget(serverId, remoteId) }
+                        runCatching {
+                            DownloadWorker.fileFor(context, serverId, remoteId).delete()
+                        }
+                        reload()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadRow(record: DownloadRecord, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                record.title ?: record.remoteId ?: "Unknown",
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                when {
+                    record.state == "failed" ->
+                        record.errorMessage?.let { "Failed — $it" } ?: "Failed"
+                    record.isDownloaded -> formatBytes(record.sizeBytes)
+                    // A percentage is only honest once something has said how
+                    // big the file is; until then, say it is working.
+                    record.fraction != null ->
+                        "${((record.fraction ?: 0f) * 100).roundToInt()}%"
+                    else -> "Waiting"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onRemove) { Text("Remove") }
+    }
+}
+
+/** Bytes as a person reads them. */
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_000_000_000 -> String.format("%.1f GB", bytes / 1_000_000_000.0)
+    bytes >= 1_000_000 -> String.format("%.0f MB", bytes / 1_000_000.0)
+    bytes >= 1_000 -> String.format("%.0f KB", bytes / 1_000.0)
+    else -> "$bytes B"
+}
+
 @Composable
 fun SuppressionsPage(
     account: ServerAccount,

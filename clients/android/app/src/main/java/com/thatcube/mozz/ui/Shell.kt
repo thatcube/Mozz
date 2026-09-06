@@ -684,6 +684,12 @@ private fun TabContent(
             onResync = onResync,
         )
 
+        Route.SettingsDownloads -> DownloadsPage(
+            downloads = downloads,
+            nav = nav,
+            bottomReserve = bottomReserve,
+        )
+
         Route.SettingsSuppressions -> SuppressionsPage(
             account = account,
             library = library,
