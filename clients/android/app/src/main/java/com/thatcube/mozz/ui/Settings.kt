@@ -50,6 +50,11 @@ import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.DownloadRecord
 import com.thatcube.mozz.core.StorageUsage
 import com.thatcube.mozz.downloads.DownloadWorker
+import com.thatcube.mozz.pairing.PairingCandidate
+import com.thatcube.mozz.pairing.PairingDiscovery
+import com.thatcube.mozz.pairing.PairingService
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextOverflow
 import com.thatcube.mozz.analysis.SonicWeights
@@ -205,6 +210,15 @@ fun SettingsPage(
                     SettingsRow(
                         R.drawable.ic_download, "Downloads", inset,
                         onClick = { nav.open(Route.SettingsDownloads) },
+                    )
+                }
+            }
+
+            item {
+                SettingsSection("Devices", inset) {
+                    SettingsRow(
+                        R.drawable.ic_cast, "Devices", inset,
+                        onClick = { nav.open(Route.SettingsDevices) },
                     )
                 }
             }
@@ -442,6 +456,158 @@ fun MusicLibrariesPage(
  * "downloaded" while the file has been cleared by the system, and a list that
  * claims music is available when it is not is worse than one that admits it.
  */
+/**
+ * Pairing this phone with the user's other devices.
+ *
+ * Two directions, one ceremony (ADR-0013). A phone that is not in a circle
+ * waits to be let into one: it listens and advertises, and an established
+ * device finds it. A phone that *is* in a circle goes looking, and hands the
+ * circle to whatever it finds. Setup order therefore does not matter — phone
+ * first and desktop first are the same exchange with the roles swapped.
+ *
+ * The six digits are shown on the page rather than in a dialog, because
+ * comparing them is the whole ceremony: a person is holding two screens and
+ * reading both, and a dialog that can be dismissed by tapping beside it is the
+ * wrong shape for the one step that must not be waved through.
+ */
+@Composable
+fun DevicesPage(
+    pairing: PairingService,
+    discovery: PairingDiscovery,
+    nav: Navigator,
+    bottomReserve: Dp,
+) {
+    val scope = rememberCoroutineScope()
+    var inCircle by remember { mutableStateOf(pairing.hasCircle) }
+    var candidates by remember { mutableStateOf<List<PairingCandidate>>(emptyList()) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    // Held rather than passed: the ceremony is suspended inside the pump
+    // waiting on this, and the buttons that answer it are drawn from here.
+    var digits by remember { mutableStateOf<String?>(null) }
+    var answer by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+
+    suspend fun confirm(shown: String): Boolean {
+        val pending = CompletableDeferred<Boolean>()
+        digits = shown
+        answer = pending
+        return try {
+            pending.await()
+        } finally {
+            digits = null
+            answer = null
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        // Only a device that already holds a circle has anything to give, so
+        // only it goes looking. A fresh phone browsing would list devices it
+        // could not admit.
+        if (!pairing.hasCircle) return@LaunchedEffect
+        discovery.watch().collectLatest { found ->
+            if (candidates.none { it.host == found.host && it.port == found.port }) {
+                candidates = candidates + found
+            }
+        }
+    }
+
+    ListPage("Devices", onBack = nav::back) { inset, _ ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+        ) {
+            digits?.let { shown ->
+                item {
+                    SettingsSection("Do these match?", inset) {
+                        Text(
+                            shown.chunked(3).joinToString(" "),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = inset, vertical = 10.dp),
+                        )
+                        Row(modifier = Modifier.padding(horizontal = inset)) {
+                            TextButton(onClick = { answer?.complete(true) }) { Text("They match") }
+                            Spacer(Modifier.width(12.dp))
+                            TextButton(onClick = { answer?.complete(false) }) { Text("They don't") }
+                        }
+                    }
+                    SettingsNote(
+                        "The same six digits should be on the other device. If they differ, " +
+                            "say so — nothing is shared until both sides agree.",
+                        inset,
+                    )
+                }
+            }
+
+            status?.let { item { SettingsNote(it, inset) } }
+
+            if (!inCircle) {
+                item {
+                    SettingsSection("This Device", inset) {
+                        SettingsRow(
+                            R.drawable.ic_cast,
+                            if (busy) "Waiting for another device…" else "Add This Device",
+                            inset,
+                            onClick = {
+                                if (busy) return@SettingsRow
+                                busy = true
+                                status = "Open Devices on a phone or computer that already has Mozz."
+                                scope.launch {
+                                    val result = runCatching { pairing.join(::confirm) }
+                                    busy = false
+                                    status = result.fold(
+                                        onSuccess = { peer ->
+                                            inCircle = true
+                                            "Added to ${peer.name ?: "your other devices"}."
+                                        },
+                                        onFailure = { it.message ?: "Pairing did not finish." },
+                                    )
+                                }
+                            },
+                        )
+                    }
+                    SettingsNote(
+                        "This phone is not sharing anything yet. Adding it lets your devices " +
+                            "pass listening history and what they have analysed between them, " +
+                            "without any of it going through a service.",
+                        inset,
+                    )
+                }
+            } else {
+                item {
+                    SettingsSection("Nearby", inset) {}
+                    if (candidates.isEmpty()) {
+                        SettingsNote(
+                            "No devices waiting. On the device you want to add, open Settings › " +
+                                "Devices and tap Add This Device.",
+                            inset,
+                        )
+                    }
+                }
+                items(candidates, key = { "${it.host}:${it.port}" }) { candidate ->
+                    SettingsRow(
+                        R.drawable.ic_cast, candidate.name, inset,
+                        detail = if (busy) null else "Add",
+                        onClick = {
+                            if (busy) return@SettingsRow
+                            busy = true
+                            status = null
+                            scope.launch {
+                                val result = runCatching { pairing.admit(candidate, null, ::confirm) }
+                                busy = false
+                                status = result.fold(
+                                    onSuccess = { peer -> "${peer.name ?: candidate.name} added." },
+                                    onFailure = { it.message ?: "Pairing did not finish." },
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun DownloadsPage(
     downloads: MozzDownloads,

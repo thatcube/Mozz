@@ -13,7 +13,10 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.core.MozzPairing
 import com.thatcube.mozz.core.SecretStore
+import com.thatcube.mozz.pairing.PairingDiscovery
+import com.thatcube.mozz.pairing.PairingService
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.ui.ToastCenter
 import com.thatcube.mozz.ui.theme.MozzSettings
@@ -152,6 +155,25 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             allowsBattery = { settings.analyseOnBattery },
         )
     }
+
+    /**
+     * Pairing this phone with the user's other devices (ADR-0013).
+     *
+     * Application-scoped because a ceremony holds a listening socket and an
+     * mDNS advertisement, and a rotation part-way through one would otherwise
+     * drop both and leave the other device talking to nothing.
+     */
+    val pairing: PairingService by lazy {
+        PairingService(
+            context = this,
+            pairing = MozzPairing(core),
+            secrets = SecretStore(this),
+            deviceId = playback.deviceId,
+            deviceName = android.os.Build.MODEL,
+        )
+    }
+
+    val pairingDiscovery: PairingDiscovery by lazy { PairingDiscovery(this) }
 
     val server: MozzServer by lazy {
         MozzServer(

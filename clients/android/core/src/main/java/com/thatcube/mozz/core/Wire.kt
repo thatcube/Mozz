@@ -94,6 +94,24 @@ data class CoreRequest(
      * Without it the report is accepted and attributed to nothing.
      */
     val contextID: String? = null,
+
+    // Pairing (ADR-0013). The ceremony and the cryptography live in the core;
+    // these carry the frames and the answers a person gives.
+    val pairingId: String? = null,
+    /** `joiner` (asking to be let in) or `member` (holding the circle). */
+    val role: String? = null,
+    /** `qr` or `digits`. */
+    val pairingPath: String? = null,
+    val scannedCode: String? = null,
+    /** One base64 pairing frame, exactly as it came off the socket. */
+    val frame: String? = null,
+    /** Whether the person said the two six-digit codes were the same. */
+    val matched: Boolean? = null,
+    val circle: CircleSecrets? = null,
+    val transcript: String? = null,
+    val joinerPublicKey: String? = null,
+    val encapsulated: String? = null,
+    val ciphertext: String? = null,
 )
 
 /**

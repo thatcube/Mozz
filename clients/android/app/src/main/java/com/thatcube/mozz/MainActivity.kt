@@ -131,6 +131,8 @@ class MainActivity : ComponentActivity() {
                 server = (application as MozzApplication).server,
                 playback = (application as MozzApplication).playback,
                 downloads = (application as MozzApplication).downloads,
+                pairing = (application as MozzApplication).pairing,
+                pairingDiscovery = (application as MozzApplication).pairingDiscovery,
                 toasts = (application as MozzApplication).toasts,
                 onResync = viewModel::resync,
                 onSignOut = viewModel::signOut,

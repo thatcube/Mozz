@@ -85,6 +85,9 @@ sealed interface Route {
     data object SettingsSuppressions : Route
     data object SettingsDownloads : Route
 
+    /** The user's other devices, and pairing this one with them (ADR-0013). */
+    data object SettingsDevices : Route
+
     /**
      * A settings page that exists in the map before it exists in code. Carries
      * its own text so one destination covers every one of them.

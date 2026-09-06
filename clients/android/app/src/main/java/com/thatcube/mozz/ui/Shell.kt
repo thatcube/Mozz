@@ -44,6 +44,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.core.LikeGlyph
 import com.thatcube.mozz.core.MozzDownloads
+import com.thatcube.mozz.pairing.PairingDiscovery
+import com.thatcube.mozz.pairing.PairingService
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.ServerCapabilities
 import com.thatcube.mozz.core.MozzServer
@@ -84,6 +86,8 @@ fun MozzShell(
     server: MozzServer,
     playback: PlayerController,
     downloads: MozzDownloads,
+    pairing: PairingService,
+    pairingDiscovery: PairingDiscovery,
     toasts: ToastCenter,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
@@ -310,6 +314,8 @@ fun MozzShell(
                     server = server,
                     playback = playback,
                     downloads = downloads,
+                    pairing = pairing,
+                    pairingDiscovery = pairingDiscovery,
                     wide = wide,
                     bottomReserve = Dock.reserve(
                         hasTrack,
@@ -511,6 +517,8 @@ private fun TabContent(
     server: MozzServer,
     playback: PlayerController,
     downloads: MozzDownloads,
+    pairing: PairingService,
+    pairingDiscovery: PairingDiscovery,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
@@ -686,6 +694,13 @@ private fun TabContent(
 
         Route.SettingsDownloads -> DownloadsPage(
             downloads = downloads,
+            nav = nav,
+            bottomReserve = bottomReserve,
+        )
+
+        Route.SettingsDevices -> DevicesPage(
+            pairing = pairing,
+            discovery = pairingDiscovery,
             nav = nav,
             bottomReserve = bottomReserve,
         )
