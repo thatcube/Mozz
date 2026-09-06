@@ -324,6 +324,13 @@ private struct WireTrack: Encodable {
     var artistName: String
     var albumTitle: String?
     var albumRemoteId: String?
+    /// Who made it, as a reference.
+    ///
+    /// Its absence here is why no non-Apple client has ever been able to offer
+    /// "go to artist" or "don't recommend this artist": the id was in the
+    /// database and in the domain model and simply never crossed the wire, so
+    /// every shell saw null and hid the controls that depend on it.
+    var artistRemoteId: String?
     var trackNumber: Int?
     var discNumber: Int?
     var durationSeconds: Double
@@ -337,8 +344,13 @@ private struct WireTrack: Encodable {
     /// music player can get wrong.
     var normalizationGainDB: Double?
 
+    // Hand-written, and therefore a place a field can go missing without
+    // anything objecting: adding a property above is not enough, it has to be
+    // named here and written below too. `artistRemoteId` was declared and never
+    // encoded, which is exactly how three platforms lost "go to artist".
     enum CodingKeys: String, CodingKey {
         case id, remoteId, serverId, title, artistName, albumTitle, albumRemoteId
+        case artistRemoteId
         case trackNumber, discNumber, durationSeconds, artworkKey, isFavorite
         case rating, addedAt, normalizationGainDB
     }
@@ -352,6 +364,7 @@ private struct WireTrack: Encodable {
         try container.encode(artistName, forKey: .artistName)
         try container.encodeIfPresent(albumTitle, forKey: .albumTitle)
         try container.encodeIfPresent(albumRemoteId, forKey: .albumRemoteId)
+        try container.encodeIfPresent(artistRemoteId, forKey: .artistRemoteId)
         try container.encodeIfPresent(trackNumber, forKey: .trackNumber)
         try container.encodeIfPresent(discNumber, forKey: .discNumber)
         try container.encode(durationSeconds, forKey: .durationSeconds)
@@ -748,7 +761,8 @@ private func wire(_ r: TrackRecord) -> WireTrack {
     WireTrack(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
         title: r.title, artistName: r.artistName, albumTitle: r.albumTitle,
-        albumRemoteId: r.albumRemoteId, trackNumber: r.trackNumber,
+        albumRemoteId: r.albumRemoteId, artistRemoteId: r.artistRemoteId,
+        trackNumber: r.trackNumber,
         discNumber: r.discNumber, durationSeconds: r.duration,
         artworkKey: r.artworkKey, isFavorite: r.isFavorite,
         rating: r.rating,

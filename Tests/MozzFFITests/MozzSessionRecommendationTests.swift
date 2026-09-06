@@ -299,6 +299,11 @@ final class MozzSessionRecommendationTests: XCTestCase {
         XCTAssertNotNil(track["artistName"] as? String, file: file, line: line)
         if let albumTitle = track["albumTitle"] { XCTAssertTrue(albumTitle is String, file: file, line: line) }
         if let albumRemoteId = track["albumRemoteId"] { XCTAssertTrue(albumRemoteId is String, file: file, line: line) }
+        // Asserted present rather than merely well-typed. This field was absent
+        // from the wire entirely, so every shell but the Apple one saw null and
+        // silently hid "go to artist" and "don't recommend this artist" — a
+        // capability missing from three platforms because of one omitted line.
+        XCTAssertNotNil(track["artistRemoteId"] as? String, file: file, line: line)
         if let trackNumber = track["trackNumber"] { XCTAssertTrue(trackNumber is Int, file: file, line: line) }
         if let discNumber = track["discNumber"] { XCTAssertTrue(discNumber is Int, file: file, line: line) }
         XCTAssertNotNil(track["durationSeconds"] as? Double, file: file, line: line)

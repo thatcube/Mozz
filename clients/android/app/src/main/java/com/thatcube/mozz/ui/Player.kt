@@ -199,6 +199,7 @@ internal fun PlayerBody(
         rating = rating,
         track = track,
         actions = actions,
+        onCollapse = onCollapse,
         onToggleLike = {
             val next = !liked
             likeOverride = next
@@ -1303,13 +1304,13 @@ private fun StarAndOverflow(likes: LikeControls) {
                 if (track.artistRemoteId != null) {
                     DropdownMenuItem(
                         text = { Text("Go to Artist") },
-                        onClick = { menuOpen = false; actions.goToArtist(track) },
+                        onClick = { menuOpen = false; likes.onCollapse(); actions.goToArtist(track) },
                     )
                 }
                 if (track.albumRemoteId != null) {
                     DropdownMenuItem(
                         text = { Text("Go to Album") },
-                        onClick = { menuOpen = false; actions.goToAlbum(track) },
+                        onClick = { menuOpen = false; likes.onCollapse(); actions.goToAlbum(track) },
                     )
                 }
                 HorizontalDivider()
@@ -2045,6 +2046,14 @@ internal data class LikeControls(
      */
     val track: Track,
     val actions: TrackActions,
+    /**
+     * Close the player.
+     *
+     * Navigating from the player's own menu pushes the destination onto the
+     * tab underneath it, which the player is covering — so without this, "go to
+     * album" works perfectly and looks like it does nothing at all.
+     */
+    val onCollapse: () -> Unit,
 )
 
 /** Four stars and up is a like. Matches `LikePolicy.ratingThreshold` in the core. */
