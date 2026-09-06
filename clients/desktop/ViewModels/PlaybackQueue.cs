@@ -50,6 +50,42 @@ public sealed class PlaybackQueue
         _index = _tracks.Count == 0 ? -1 : Math.Clamp(index, 0, _tracks.Count - 1);
     }
 
+    /// <summary>
+    /// Add tracks to the end without disturbing what is playing.
+    ///
+    /// A station grows this way as it runs low. Distinct from <see cref="Start"/>
+    /// because the current index and everything already played must survive:
+    /// restarting the queue with a longer list would jump the listener back to
+    /// its beginning mid-song.
+    /// </summary>
+    public void Append(IReadOnlyList<Track> tracks)
+    {
+        foreach (var track in tracks)
+        {
+            _baseOrdinals.Add(_tracks.Count);
+            _tracks.Add(track);
+        }
+    }
+
+    /// <summary>
+    /// Put a track directly after the one playing.
+    ///
+    /// Appends instead when nothing is playing, because "next" in an empty
+    /// queue means the same thing and refusing would be a button that does
+    /// nothing.
+    /// </summary>
+    public void InsertNext(Track track)
+    {
+        if (_index < 0 || _tracks.Count == 0)
+        {
+            Append([track]);
+            return;
+        }
+        var at = Math.Min(_index + 1, _tracks.Count);
+        _tracks.Insert(at, track);
+        _baseOrdinals.Insert(at, at);
+    }
+
     public int BaseOrdinalAt(int index) =>
         index >= 0 && index < _baseOrdinals.Count ? _baseOrdinals[index] : index;
 

@@ -84,6 +84,16 @@ public sealed record Track(
     // track in a page was enough to blank the screen.
     double? Rating = null,
     bool FavoritePending = false,
+    /// <summary>
+    /// Who made it, as a reference. Absent from this model, and from the wire
+    /// itself, until it turned out that "go to artist" and "don't recommend
+    /// this artist" were impossible on every platform but iOS for want of it.
+    ///
+    /// Last in the list, with a default, so that adding it does not rewrite
+    /// every positional construction of a Track in the app and its tests. The
+    /// wire is matched by name, so position here costs nothing.
+    /// </summary>
+    string? ArtistRemoteId = null,
     bool RatingPending = false)
 {
     /// <summary>m:ss, the form every music player uses.</summary>
@@ -192,6 +202,9 @@ public sealed record SearchResults(
 public sealed record AlbumReleaseKind(
     string Kind,
     [property: JsonPropertyName("isSingleOrEP")] bool IsSingleOrEp);
+
+/// <summary>A command that only reports whether it worked.</summary>
+public sealed record ActionResult(bool Ok);
 
 public sealed record RadioBatch(
     IReadOnlyList<string> RemoteIds,

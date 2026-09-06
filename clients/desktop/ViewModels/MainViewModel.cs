@@ -2278,20 +2278,66 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether what is playing came from a station, and so should keep going
+    /// past the end of the queue.
+    ///
+    /// The seed and everything already played live in the core - see
+    /// RadioStation there. All this remembers is whether to ask for more.
+    /// </summary>
+    private bool _stationActive;
+    /// <summary>One top-up at a time: track changes outrun a round trip.</summary>
+    private bool _toppingUpStation;
+
+    /// <summary>
+    /// Begin an endless station from an artist.
+    ///
+    /// The seed's genres are not sent. The core derives them from the artist's
+    /// own tracks, which is the vocabulary the candidates are scored in -
+    /// passing the row's tags instead compares two different vocabularies and
+    /// quietly narrows the station.
+    /// </summary>
     private async Task<List<Track>> LoadArtistRadioAsync(Artist artist)
     {
         if (string.IsNullOrWhiteSpace(artist.RemoteId)) return [];
+        return await StartStationAsync(new CoreRequest("radioStart")
+        {
+            ServerId = artist.ServerId,
+            ArtistRemoteId = artist.RemoteId,
+            Limit = PageSize,
+        });
+    }
+
+    /// <summary>
+    /// Begin an endless station from a track.
+    ///
+    /// The batch deliberately excludes the seed, so the caller plays the track
+    /// and then this.
+    /// </summary>
+    private async Task<List<Track>> LoadTrackRadioAsync(Track track)
+    {
+        if (string.IsNullOrWhiteSpace(track.RemoteId)) return [];
+        return await StartStationAsync(new CoreRequest("radioStart")
+        {
+            ServerId = track.ServerId,
+            RemoteId = track.RemoteId,
+            Limit = PageSize,
+        });
+    }
+
+    private async Task<List<Track>> StartStationAsync(CoreRequest request)
+    {
         try
         {
-            var batch = await _core.CallAsync<RadioBatch>(new CoreRequest("radioBatch")
+            var batch = await _core.CallAsync<RadioBatch>(request);
+            var tracks = batch?.Tracks.ToList() ?? [];
+            if (tracks.Count == 0)
             {
-                ServerId = artist.ServerId,
-                Limit = PageSize,
-                SeedTitle = $"{artist.Name} Radio",
-                SeedGenres = artist.Genres,
-                SeedArtistIds = [artist.RemoteId],
-            });
-            return batch?.Tracks.ToList() ?? [];
+                // Most often a library nothing has analysed yet, and a station
+                // that silently does nothing reads as a broken button.
+                StatusMessage = "Not enough here yet to build a station.";
+            }
+            return tracks;
         }
         catch (MozzCoreException ex)
         {
@@ -2299,6 +2345,64 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             return [];
         }
     }
+
+    /// <summary>
+    /// Ask for more when the queue is nearly out.
+    ///
+    /// Called wherever the queue advances. Everything about *what* comes next -
+    /// the acoustic tier, then the crowd, then genre - is decided in the shared
+    /// core, so this only has to notice that the end is near and append.
+    /// </summary>
+    private async Task TopUpStationAsync()
+    {
+        if (!_stationActive || _toppingUpStation || _engine is null) return;
+        var remaining = _queue.Tracks.Count - 1 - _queue.CurrentIndex;
+        if (_queue.CurrentIndex < 0 || remaining > StationTopUpAt) return;
+
+        _toppingUpStation = true;
+        try
+        {
+            var batch = await _core.CallAsync<RadioBatch>(
+                new CoreRequest("radioNext") { Limit = StationBatch });
+            var more = batch?.Tracks.ToList() ?? [];
+            if (more.Count == 0)
+            {
+                // The core has run out of anything new to offer. Asking again
+                // on every advance would be a round trip per song for the rest
+                // of the queue.
+                _stationActive = false;
+                return;
+            }
+            _queue.Append(more);
+            RefreshQueueRows();
+        }
+        catch (MozzCoreException)
+        {
+            // A station that cannot extend is a queue that ends, which is worse
+            // than it was but not worth interrupting the music to say.
+        }
+        finally
+        {
+            _toppingUpStation = false;
+        }
+    }
+
+    /// <summary>Stop asking for more, and tell the core to forget the seed.</summary>
+    private async Task EndStationAsync()
+    {
+        if (!_stationActive) return;
+        _stationActive = false;
+        try { await _core.CallAsync<ActionResult>(new CoreRequest("radioStop")); }
+        catch (MozzCoreException) { }
+    }
+
+    /// <summary>
+    /// How few tracks may be left before a station fetches more. Five rather
+    /// than one: a batch is a round trip and a resolve per track, and arriving
+    /// after the queue has run dry is silence.
+    /// </summary>
+    private const int StationTopUpAt = 5;
+    private const int StationBatch = 20;
 
     private void ClearDetailState()
     {
@@ -2631,6 +2735,75 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasLyrics));
     }
 
+    // MARK: The track menu
+    //
+    // The same actions the iPhone and Android offer on a track, which the
+    // desktop had commands for in ones and twos and no way to reach. Downloads
+    // are the one item still missing everywhere but iOS.
+
+    /// <summary>Play this track and keep going with music like it, forever.</summary>
+    [RelayCommand]
+    private async Task StartTrackRadio(Track? track)
+    {
+        if (track is null) return;
+        var batch = await LoadTrackRadioAsync(track);
+        if (batch.Count == 0) return;
+        // The seed plays first and the batch follows, so "start radio from this
+        // song" begins with the song.
+        var opening = new List<Track> { track };
+        opening.AddRange(batch.Where(t => t.RemoteId != track.RemoteId));
+        await StartStationQueueAsync(opening);
+    }
+
+    [RelayCommand]
+    private void PlayTrackNext(Track? track)
+    {
+        if (track is null) return;
+        _queue.InsertNext(track);
+        RefreshQueueRows();
+    }
+
+    [RelayCommand]
+    private void AddTrackToQueue(Track? track)
+    {
+        if (track is null) return;
+        _queue.Append([track]);
+        RefreshQueueRows();
+    }
+
+    [RelayCommand]
+    private async Task SuppressTrackAsync(Track? track)
+    {
+        if (track is null || string.IsNullOrWhiteSpace(track.RemoteId)) return;
+        await SuppressAsync("suppressTrack", track.ServerId, track.RemoteId,
+                            $"Won't recommend {track.Title}.");
+    }
+
+    [RelayCommand]
+    private async Task SuppressTrackArtistAsync(Track? track)
+    {
+        if (track is null || string.IsNullOrWhiteSpace(track.ArtistRemoteId)) return;
+        await SuppressAsync("suppressArtist", track.ServerId, track.ArtistRemoteId!,
+                            $"Won't recommend {track.ArtistName}.");
+    }
+
+    private async Task SuppressAsync(string command, string serverId, string remoteId, string said)
+    {
+        try
+        {
+            await _core.CallAsync<ActionResult>(new CoreRequest(command)
+            {
+                ServerId = serverId,
+                RemoteId = remoteId,
+            });
+            StatusMessage = said;
+        }
+        catch (MozzCoreException ex)
+        {
+            StatusMessage = $"Could not do that: {ex.Message}";
+        }
+    }
+
     [RelayCommand]
     private void PlayTrack(Track? track)
     {
@@ -2702,7 +2875,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (SelectedArtist is null) return;
         var tracks = await LoadArtistRadioAsync(SelectedArtist);
-        if (tracks.Count > 0) await StartQueueAsync(tracks, 0);
+        if (tracks.Count > 0) await StartStationQueueAsync(tracks);
     }
 
     [RelayCommand]
@@ -2835,11 +3008,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task StartQueueAsync(IReadOnlyList<(Track Track, int BaseOrdinal)> tracks, int index, double initialPositionSeconds)
     {
+        // Choosing something directly ends the station. Leaving it running
+        // would have the queue sprout songs the listener never asked for,
+        // minutes after they deliberately put an album on. StartStationQueueAsync
+        // claims it back immediately afterwards.
+        await EndStationAsync();
         SkipHistoryForCurrent();
         BeginContinuityRun();
         _queue.Start(tracks, index);
         RefreshQueueRows();
         await PlayIndexAsync(index, initialPositionSeconds);
+    }
+
+    /// <summary>
+    /// Install a station's opening tracks and remember that it is one.
+    /// </summary>
+    private async Task StartStationQueueAsync(IReadOnlyList<Track> tracks)
+    {
+        await StartQueueAsync(tracks, 0);
+        _stationActive = true;
     }
 
     /// <summary>
@@ -2901,6 +3088,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task PreloadNeighborAsync()
     {
         if (_engine is null) return;
+        // Before choosing the neighbour, not after: on the last track of a
+        // station there is no neighbour to preload until the top-up has
+        // arrived, and preloading nothing is how a station falls silent one
+        // song early.
+        await TopUpStationAsync();
         var next = _queue.NextIndex();
         if (next is null || next.Value == _queue.CurrentIndex) return;
         var track = _queue.Tracks[next.Value];
