@@ -378,3 +378,27 @@ public sealed record ContinuitySnapshot(
     [property: JsonPropertyName("queue")] ContinuityQueue? Queue,
     [property: JsonPropertyName("isQueueMissing")] bool IsQueueMissing,
     [property: JsonPropertyName("hydratedTracks")] IReadOnlyList<Track> HydratedTracks);
+
+/// <summary>
+/// What the attached server can do.
+///
+/// Worth asking rather than inferring: "liked" is not one thing across the
+/// three backends. Plex has per-user star ratings and no boolean favourite;
+/// Jellyfin is the reverse; Subsonic has both. A client that draws its own
+/// choice of control draws the wrong one somewhere.
+/// </summary>
+public sealed record ServerCapabilities(
+    string Backend = "",
+    string? ServerVersion = null,
+    bool SupportsFavorites = false,
+    bool SupportsRatings = false,
+    bool SupportsLyrics = false,
+    bool SupportsTranscoding = false,
+    bool SupportsOriginalFileDownload = false)
+{
+    /// <summary>A heart where the server has favourites, a star where it has ratings.</summary>
+    public LikeGlyph LikeGlyph => SupportsFavorites ? LikeGlyph.Heart : LikeGlyph.Star;
+}
+
+/// <summary>How "liked" is drawn, which is a property of the server, not the client.</summary>
+public enum LikeGlyph { Heart, Star }

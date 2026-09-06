@@ -217,6 +217,10 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         return resolved;
     }
 
+    public Task<ServerCapabilities?> CapabilitiesAsync(
+        string serverId, CancellationToken token = default)
+        => core.CallAsync<ServerCapabilities>(new { cmd = "capabilities", serverId }, token);
+
     public Task<IReadOnlyList<MusicLibrary>?> LibrariesAsync(
         string serverId, CancellationToken token = default)
         => core.CallAsync<IReadOnlyList<MusicLibrary>>(new { cmd = "libraries", serverId }, token);

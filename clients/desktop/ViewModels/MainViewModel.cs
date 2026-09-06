@@ -429,6 +429,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isSettingsBusy;
     [ObservableProperty] private bool _isSettingsDialogOpen;
     [ObservableProperty] private ServerAccountProfile? _activeAccountProfile;
+    /// <summary>
+    /// What the attached server can do. Null until it has answered, which the
+    /// controls below read as "not yet" rather than "no".
+    /// </summary>
+    [ObservableProperty] private ServerCapabilities? _serverCapabilities;
     [ObservableProperty] private string? _lyricStatus;
     [ObservableProperty] private bool _isLyricsLoading;
     [ObservableProperty] private string? _lyricsMessage;
@@ -548,6 +553,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasActiveAccountAvatar));
         OnPropertyChanged(nameof(ActiveAccountFallbackText));
     }
+
+    partial void OnServerCapabilitiesChanged(ServerCapabilities? value)
+    {
+        OnPropertyChanged(nameof(ShowsFavoriteHeart));
+        OnPropertyChanged(nameof(ShowsRatingStars));
+    }
+
+    /// <summary>
+    /// Whether the heart is the right control for this server.
+    ///
+    /// Both controls used to be drawn side by side whatever was attached. On
+    /// Plex that is two controls for one value: the backend has no boolean
+    /// favourite, so the heart is written as five stars and the star row next to
+    /// it silently fills in — with nothing to say the two are the same thing.
+    /// </summary>
+    public bool ShowsFavoriteHeart => ServerCapabilities?.LikeGlyph == LikeGlyph.Heart;
+
+    public bool ShowsRatingStars => ServerCapabilities is { SupportsRatings: true };
 
     partial void OnContinuityOfferChanged(ContinuityResumeOffer? value) =>
         OnPropertyChanged(nameof(HasContinuityOffer));
@@ -972,6 +995,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (account is null || !_core.IsOpen)
         {
             ActiveAccountProfile = null;
+            ServerCapabilities = null;
             return;
         }
 
@@ -982,6 +1006,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         catch
         {
             ActiveAccountProfile = null;
+        }
+
+        try
+        {
+            ServerCapabilities = await _server.CapabilitiesAsync(account.ServerId);
+        }
+        catch
+        {
+            // Left as it was rather than cleared: a server that did not answer
+            // this once is not a reason to take the like control off the screen.
         }
     }
 

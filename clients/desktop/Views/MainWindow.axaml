@@ -1671,6 +1671,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="18" HorizontalAlignment="Center">
                     <Button Classes="transport" Command="{Binding ToggleFavoriteCommand}"
                             CommandParameter="{Binding NowPlaying}"
+                            IsVisible="{Binding ShowsFavoriteHeart}"
                             ToolTip.Tip="{Binding NowPlaying.FavoriteLabel}">
                         <Panel Opacity="{Binding NowPlaying.FavoritePending, Converter={StaticResource PendingOpacity}}">
                             <controls:TablerIcon Size="18" Filled="True" Data="{StaticResource IconHeart}"
@@ -1683,7 +1684,8 @@
                     <!-- Five taps on one control, so they are sized as
                          one control: a row of bare stars, not five
                          buttons each carrying a button's padding. -->
-                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center"
+                                IsVisible="{Binding ShowsRatingStars}">
                         <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="1">
                             <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
