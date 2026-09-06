@@ -176,6 +176,83 @@ public class HomeMixTests
     }
 
     [Fact]
+    public async Task DailyMixesAreRebuiltOnceADayAndTheStampMovesWithThem()
+    {
+        var now = DateTimeOffset.UnixEpoch.AddDays(400);
+        var generated = new List<string>();
+        double? stamped = null;
+
+        var result = await HomeMixLoader.LoadAsync(
+            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([
+                Mix("daily-1", "Daily Mix 1", null),
+                Mix(HomeMixSchedule.MozzWeeklyId, "Mozz Weekly", null, now.ToUnixTimeSeconds()),
+            ]),
+            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            generateMixes: serverId =>
+            {
+                generated.Add(serverId);
+                return Task.CompletedTask;
+            },
+            serverIds: ["srv"],
+            generateWeekly: _ => throw new InvalidOperationException("weekly is not due"),
+            lastGeneratedAt: now.AddHours(-25).ToUnixTimeSeconds(),
+            generatedAtChanged: at => stamped = at,
+            asOf: now);
+
+        Assert.True(result.Generated);
+        Assert.Equal(["srv"], generated);
+        Assert.Equal(now.ToUnixTimeSeconds(), stamped);
+    }
+
+    [Fact]
+    public async Task MozzWeeklyIsRebuiltOnceAWeekWithoutDisturbingTheDailyMixes()
+    {
+        var now = DateTimeOffset.UnixEpoch.AddDays(400);
+        var weekly = new List<string>();
+
+        var result = await HomeMixLoader.LoadAsync(
+            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([
+                Mix("daily-1", "Daily Mix 1", null),
+                Mix(HomeMixSchedule.MozzWeeklyId, "Mozz Weekly", null, now.AddDays(-8).ToUnixTimeSeconds()),
+            ]),
+            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            generateMixes: _ => throw new InvalidOperationException("dailies are not due"),
+            serverIds: ["srv"],
+            generateWeekly: serverId =>
+            {
+                weekly.Add(serverId);
+                return Task.CompletedTask;
+            },
+            lastGeneratedAt: now.AddHours(-1).ToUnixTimeSeconds(),
+            asOf: now);
+
+        Assert.True(result.Generated);
+        Assert.Equal(["srv"], weekly);
+    }
+
+    [Fact]
+    public async Task AMachineThatHasNeverGeneratedMozzWeeklyGeneratesIt()
+    {
+        var now = DateTimeOffset.UnixEpoch.AddDays(400);
+        var weekly = new List<string>();
+
+        await HomeMixLoader.LoadAsync(
+            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([Mix("daily-1", "Daily Mix 1", null)]),
+            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            generateMixes: _ => throw new InvalidOperationException("dailies are not due"),
+            serverIds: ["srv"],
+            generateWeekly: serverId =>
+            {
+                weekly.Add(serverId);
+                return Task.CompletedTask;
+            },
+            lastGeneratedAt: now.AddHours(-1).ToUnixTimeSeconds(),
+            asOf: now);
+
+        Assert.Equal(["srv"], weekly);
+    }
+
+    [Fact]
     public async Task GenerationFailureReturnsPlainMessageAndKeepsLikedTracks()
     {
         var result = await HomeMixLoader.LoadAsync(
@@ -246,8 +323,8 @@ public class HomeMixTests
         Assert.Equal("No generated mixes yet — play more music and check back soon.", result.Message);
     }
 
-    private static HomeMix Mix(string id, string title, string? subtitle) =>
-        new(id, title, subtitle, "supermix", "art", 123);
+    private static HomeMix Mix(string id, string title, string? subtitle, double? generatedAt = 123) =>
+        new(id, title, subtitle, "supermix", "art", generatedAt);
 
     private static Track Track(string title, double duration = 180) =>
         new(
@@ -304,16 +381,26 @@ public class HomeMixTests
     [Fact]
     public async Task FreshMixes_AreLeftAlone()
     {
+        var now = DateTimeOffset.UnixEpoch.AddDays(400);
         var generatedFor = new List<string>();
-        var mixes = new List<HomeMix> { new("supermix", "Supermix", null, "supermix", null, 0) };
+        var weeklyFor = new List<string>();
+        var mixes = new List<HomeMix>
+        {
+            new("supermix", "Supermix", null, "supermix", null, 0),
+            new(HomeMixSchedule.MozzWeeklyId, "Mozz Weekly", null, "weekly", null, now.ToUnixTimeSeconds()),
+        };
 
         var result = await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(mixes),
             readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
             generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
-            serverIds: ["srv-new"]);
+            serverIds: ["srv-new"],
+            generateWeekly: id => { weeklyFor.Add(id); return Task.CompletedTask; },
+            lastGeneratedAt: now.AddHours(-1).ToUnixTimeSeconds(),
+            asOf: now);
 
         Assert.False(result.Generated);
         Assert.Empty(generatedFor);
+        Assert.Empty(weeklyFor);
     }
 }

@@ -280,6 +280,58 @@ public sealed record HomeMixLoadResult(
     bool Generated,
     string? Message);
 
+/// <summary>
+/// When to rebuild the precomputed mixes.
+///
+/// The same two rules the iPhone and the Pixel follow, for the same reasons.
+/// Daily mixes are gated on a stored timestamp rather than on the age of a set,
+/// because someone whose library has just finished syncing has no sets at all —
+/// and gating on "there are none" would re-run the generator every time Home
+/// appeared. Mozz Weekly is gated on its own age, because there is exactly one
+/// of it.
+///
+/// The desktop had neither rule. It generated when the read came back empty and
+/// never again, so a machine that opened Home once kept those mixes for good —
+/// and it never generated Mozz Weekly at all, on any schedule, so the row the
+/// other two platforms show every Monday was simply absent here.
+/// </summary>
+public static class HomeMixSchedule
+{
+    public const string MozzWeeklyId = "mozz-weekly";
+    public static readonly TimeSpan DailyMixInterval = TimeSpan.FromDays(1);
+    public static readonly TimeSpan WeeklyInterval = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Whether Mozz Weekly is due. A set that is absent is due: that is the
+    /// state a machine which has never generated one is in.
+    /// </summary>
+    public static bool WeeklyIsStale(IReadOnlyList<HomeMix> mixes, DateTimeOffset now)
+    {
+        var weekly = mixes.FirstOrDefault(m => string.Equals(m.Id, MozzWeeklyId, StringComparison.Ordinal));
+        if (weekly?.GeneratedAt is not { } generatedAt) return true;
+        return now - FromUnixSeconds(generatedAt) >= WeeklyInterval;
+    }
+
+    /// <summary>
+    /// Whether the daily mixes are due, given when they were last generated on
+    /// this machine. A zero — never generated — is due.
+    /// </summary>
+    public static bool DailyMixesAreStale(double lastGeneratedAt, DateTimeOffset now) =>
+        now - FromUnixSeconds(lastGeneratedAt) >= DailyMixInterval;
+
+    /// <summary>
+    /// Unix seconds as the core writes them, clamped so a nonsense timestamp
+    /// reads as "long ago" rather than throwing on the Home screen.
+    /// </summary>
+    private static DateTimeOffset FromUnixSeconds(double seconds)
+    {
+        if (double.IsNaN(seconds) || seconds <= 0) return DateTimeOffset.UnixEpoch;
+        var milliseconds = seconds * 1000;
+        if (milliseconds >= DateTimeOffset.MaxValue.ToUnixTimeMilliseconds()) return DateTimeOffset.UnixEpoch;
+        return DateTimeOffset.FromUnixTimeMilliseconds((long)milliseconds);
+    }
+}
+
 public static class HomeMixLoader
 {
     public static async Task<HomeMixLoadResult> LoadAsync(
@@ -287,7 +339,11 @@ public static class HomeMixLoader
         Func<Task<IReadOnlyList<Track>>> readLikedTracks,
         Func<string, Task> generateMixes,
         IReadOnlyList<string> serverIds,
-        Action? generationStarted = null)
+        Action? generationStarted = null,
+        Func<string, Task>? generateWeekly = null,
+        double lastGeneratedAt = 0,
+        Action<double>? generatedAtChanged = null,
+        DateTimeOffset? asOf = null)
     {
         var mixes = await readMixes();
         var liked = await readLikedTracks();
@@ -295,7 +351,16 @@ public static class HomeMixLoader
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        if (mixes.Count > 0)
+
+        var now = asOf ?? DateTimeOffset.UtcNow;
+        // A caller that cannot generate Mozz Weekly is never told it is due:
+        // otherwise this reports a generation pass that did nothing.
+        var weeklyIsDue = generateWeekly is not null && HomeMixSchedule.WeeklyIsStale(mixes, now);
+        // Empty stands in for stale on a machine with no stored timestamp yet,
+        // which is what the desktop did before it had one.
+        var dailyIsDue = mixes.Count == 0 || HomeMixSchedule.DailyMixesAreStale(lastGeneratedAt, now);
+
+        if (!weeklyIsDue && !dailyIsDue)
         {
             return new HomeMixLoadResult(mixes, liked, Generated: false, Message: null);
         }
@@ -306,7 +371,7 @@ public static class HomeMixLoader
                 mixes,
                 liked,
                 Generated: false,
-                Message: HomeMixPresentation.NoAttachedHomeServerMessage);
+                Message: mixes.Count == 0 ? HomeMixPresentation.NoAttachedHomeServerMessage : null);
         }
 
         try
@@ -314,8 +379,14 @@ public static class HomeMixLoader
             generationStarted?.Invoke();
             foreach (var serverId in attachedServerIds)
             {
-                await generateMixes(serverId);
+                if (weeklyIsDue) await generateWeekly!(serverId);
+                if (dailyIsDue) await generateMixes(serverId);
             }
+
+            // Only the daily pass is stamped. Weekly carries its own age on the
+            // set it produces, so a second timestamp would be a second thing to
+            // keep true.
+            if (dailyIsDue) generatedAtChanged?.Invoke(now.ToUnixTimeSeconds());
         }
         catch (Exception ex)
         {

@@ -1572,7 +1572,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             LoadLikedTracksAsync,
             GenerateHomeMixesAsync,
             attachedServerIds,
-            () => StatusMessage = "Generating mixes for Home…");
+            () => StatusMessage = "Generating mixes for Home…",
+            GenerateMozzWeeklyAsync,
+            _preferences.GetDouble(AppPreferences.HomeMixesGeneratedAtKey, 0),
+            at => _preferences.SetDouble(AppPreferences.HomeMixesGeneratedAtKey, at));
 
         _homeMixTiles = HomeMixPresentation.BuildTiles(
             result.LikedTracks.Count,
@@ -1623,6 +1626,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task GenerateHomeMixesAsync(string serverId) =>
         await _core.CallAsync<object>(new CoreRequest("generateHomeMixes") { ServerId = serverId });
+
+    private async Task GenerateMozzWeeklyAsync(string serverId) =>
+        await _core.CallAsync<object>(new CoreRequest("generateMozzWeekly") { ServerId = serverId });
 
     private async Task LoadAlbumsAsync()
     {

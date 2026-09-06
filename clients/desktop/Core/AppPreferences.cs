@@ -19,6 +19,13 @@ public sealed class AppPreferences
     public const string DarkStyleKey = MozzTheme.DarkStyleStorageKey;
     public const string DeviceIdKey = "mozz.deviceID";
     public const string DeviceSyncEnabledKey = "mozz.deviceSyncEnabled";
+    /// <summary>
+    /// Unix seconds when the daily Home mixes were last generated on this
+    /// machine. Stored rather than derived from the sets themselves, because a
+    /// library that has just synced has no sets and would otherwise regenerate
+    /// on every visit to Home.
+    /// </summary>
+    public const string HomeMixesGeneratedAtKey = "mozz.homeMixesGeneratedAt";
 
     private readonly string _path;
     private readonly object _gate = new();
