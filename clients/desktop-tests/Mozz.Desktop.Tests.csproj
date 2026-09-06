@@ -53,7 +53,11 @@
     <Compile Include="..\desktop\Core\DesktopEqualizer.cs" />
     <Compile Include="..\desktop\Core\LibrarySelectionState.cs" />
     <Compile Include="..\desktop\Core\PlayHistoryRecorder.cs" />
-    <Compile Include="..\desktop\Core\PlaybackQueue.cs" />
+    <!--
+        Not Core\PlaybackQueue.cs. There are two classes by that name and the
+        app uses the ViewModels one; compiling both makes every mention of the
+        type ambiguous, which is part of why this suite would not build.
+    -->
     <Compile Include="..\desktop\Core\ArtworkPresentation.cs" />
     <Compile Include="..\desktop\ViewModels\GridRows.cs" />
     <Compile Include="..\desktop\ViewModels\HomeMixes.cs" />
@@ -89,6 +93,14 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!--
+        The view models this project compiles reach for Avalonia's colour and
+        brush types (HomeMixes builds the mix tiles' gradients), so the package
+        has to be here even though nothing renders in a test run. Without it the
+        whole suite fails to build on `Avalonia could not be found` - which it
+        had been doing, so none of these tests were running at all.
+    -->
+    <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Google.Protobuf" Version="3.33.1" />
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
     <PackageReference Include="xunit" Version="2.9.2" />

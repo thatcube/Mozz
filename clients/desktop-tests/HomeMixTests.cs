@@ -271,25 +271,34 @@ public class HomeMixTests
         new(1, $"remote-{title}", "server", title, 10, "art");
 
     /// <summary>
-    /// The case that shipped broken: mixes existed, so the loader never rebuilt
-    /// them — but they had been generated from a server that is no longer
-    /// attached, so every track in them refused to stream.
+    /// The case that shipped broken: mixes had been generated from a server that
+    /// is no longer attached, so every track in them refused to stream.
+    ///
+    /// The loader no longer judges staleness itself — it takes a
+    /// <c>mixesAreStale</c> flag no more. A mix belonging to another server is
+    /// not returned by the reader at all, so the loader sees none and rebuilds,
+    /// which is what this now pins down. The test previously described the
+    /// older shape and had not compiled since it was written.
     /// </summary>
     [Fact]
-    public async Task StaleMixes_AreRegenerated_EvenThoughSomeExist()
+    public async Task MixesFromAnotherServerAreRebuilt()
     {
         var generatedFor = new List<string>();
-        var mixes = new List<HomeMix> { new("supermix", "Supermix", null, "supermix", null, 0) };
+        var readCount = 0;
+        // Empty on the first read: the reader scopes to the attached server, and
+        // what exists belongs to a different one.
+        var rebuilt = new List<HomeMix> { new("supermix", "Supermix", null, "supermix", null, 0) };
 
         var result = await HomeMixLoader.LoadAsync(
-            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(mixes),
+            readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(
+                readCount++ == 0 ? [] : rebuilt),
             readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
             generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
-            serverIds: ["srv-new"],
-            mixesAreStale: true);
+            serverIds: ["srv-new"]);
 
         Assert.True(result.Generated);
         Assert.Equal(["srv-new"], generatedFor);
+        Assert.Single(result.Mixes);
     }
 
     [Fact]
@@ -302,8 +311,7 @@ public class HomeMixTests
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(mixes),
             readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
             generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
-            serverIds: ["srv-new"],
-            mixesAreStale: false);
+            serverIds: ["srv-new"]);
 
         Assert.False(result.Generated);
         Assert.Empty(generatedFor);
