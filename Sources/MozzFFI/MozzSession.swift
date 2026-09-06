@@ -99,6 +99,17 @@ struct SessionRequest: Decodable {
     var ciphertext: String?
     var artworkKey: String?
     var size: Int?
+
+    // Downloads. The shell moves the bytes and reports what it did.
+    /// Filter for `downloads`; empty or absent means every state.
+    var states: [String]?
+    var receivedBytes: Int64?
+    var totalBytes: Int64?
+    /// Where the shell put the file. Its own business; the core only records it.
+    var localPath: String?
+    var sizeBytes: Int64?
+    /// Why a download failed, for `failDownload`.
+    var reason: String?
     var maxBitrateKbps: Int?
     var forceTranscode: Bool?
     var itemType: String?
@@ -374,6 +385,33 @@ private struct WireTrack: Encodable {
         try container.encodeIfPresent(addedAt, forKey: .addedAt)
         try container.encodeIfPresent(normalizationGainDB, forKey: .normalizationGainDB)
     }
+}
+
+/// One track's download, as the shell that fetches the bytes sees it.
+///
+/// The core owns the bookkeeping and the shell owns the transfer: it asks for a
+/// stream URL, writes the file wherever that platform keeps them, and reports
+/// back. That split is why these have to exist on the envelope at all — without
+/// them a shell can neither start a download nor say it finished, which is
+/// exactly the state Android was in.
+private struct WireDownload: Encodable {
+    var trackId: Int64
+    var remoteId: String?
+    var serverId: String?
+    var title: String?
+    var state: String
+    var localPath: String?
+    /// Bytes received so far; the final size once complete.
+    var sizeBytes: Int64
+    var totalBytes: Int64?
+    var requestedAt: Double
+    var completedAt: Double?
+    var errorMessage: String?
+}
+
+private struct WireStorageUsage: Encodable {
+    var downloadedTrackCount: Int
+    var totalBytes: Int64
 }
 
 private struct WirePlaylist: Encodable {
@@ -784,6 +822,49 @@ private func radioPayload(
     return WireRadioBatch(remoteIds: rows.map(\.remoteId), tracks: rows.map(wire))
 }
 
+/// The internal track id a download is keyed on.
+///
+/// Downloads are keyed on the local row rather than the remote id because a
+/// file on disk outlives a catalog refresh, and the remote id is how the
+/// caller names the track.
+private func downloadTrackId(
+    _ session: SessionContext, serverId: ServerID, remoteId: String
+) async throws -> Int64 {
+    guard let record = try await session.repository.track(serverId: serverId, remoteId: remoteId),
+          let id = record.id else {
+        throw MozzError.notFound
+    }
+    return id
+}
+
+private func requireDownload(
+    _ session: SessionContext, trackId: Int64
+) async throws -> DownloadRecord {
+    guard let record = try await session.repository.download(trackId: trackId) else {
+        throw MozzError.notFound
+    }
+    return record
+}
+
+/// A download plus enough of its track to show a row without a second call.
+private func wireDownload(
+    _ r: DownloadRecord, session: SessionContext
+) async throws -> WireDownload {
+    let track = try? await session.repository.track(id: r.trackId)
+    return WireDownload(
+        trackId: r.trackId,
+        remoteId: track?.remoteId,
+        serverId: track?.serverId,
+        title: track?.title,
+        state: r.state,
+        localPath: r.localPath,
+        sizeBytes: r.sizeBytes,
+        totalBytes: r.totalBytes,
+        requestedAt: r.requestedAt,
+        completedAt: r.completedAt,
+        errorMessage: r.errorMessage)
+}
+
 private func wire(_ r: PlaylistRecord) -> WirePlaylist {
     WirePlaylist(
         id: r.id ?? 0, remoteId: r.remoteId, serverId: r.serverId,
@@ -934,6 +1015,9 @@ final class MozzSession: @unchecked Sendable {
     let recommendations: RecommendationService
     let lyrics: LyricsService
     let favorites: FavoritesStore
+    /// Download bookkeeping. The bytes are the shell's business; the state
+    /// machine is not, or three shells would each invent their own.
+    let downloads: DownloadStore
     /// Servers this session has been given credentials for. Empty until the
     /// host calls `attach`; browsing a previously-synced library needs none.
     /// On-device sonic analysis (ADR-0018). Built on first use, because which
@@ -970,6 +1054,7 @@ final class MozzSession: @unchecked Sendable {
         self.recommendations = RecommendationService(store: RecommendationStore(database))
         self.lyrics = LyricsService()
         self.favorites = FavoritesStore(database)
+        self.downloads = DownloadStore(self.database)
         // Capture the backend table, not `self`: the fetch closure resolves the
         // reference against whichever server is attached when the cover is asked
         // for, which is the point of resolving lazily rather than at attach time.
@@ -1102,6 +1187,7 @@ protocol SessionContext: AnyObject {
     func allSonicServices() -> [SonicAnalysisService]
     var lyrics: LyricsService { get }
     var favorites: FavoritesStore { get }
+    var downloads: DownloadStore { get }
     var backends: BackendTable { get }
 }
 
@@ -2021,6 +2107,110 @@ private func dispatch(
             active: true, title: state.seed.title,
             serverId: state.serverId, surfaced: state.surfaced))
 
+    // MARK: Downloads
+    //
+    // The core keeps the record and the shell moves the bytes: it resolves a
+    // stream URL, writes the file where that platform keeps them, and reports
+    // progress and completion back here. Absent from this envelope entirely
+    // until now, which is why Android has no downloads — not a missing screen,
+    // a missing surface.
+
+    case "enqueueDownload":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "enqueueDownload needs serverId and remoteId")
+        }
+        let record = try await session.downloads.enqueue(
+            trackId: try await downloadTrackId(session, serverId: serverId, remoteId: remoteId))
+        return sessionSuccess(request, try await wireDownload(record, session: session))
+
+    case "downloads":
+        let states = (request.states ?? []).compactMap(DownloadState.init(rawValue:))
+        let records = try await session.repository.downloads(
+            in: states.isEmpty ? DownloadState.allCases : states)
+        var rows: [WireDownload] = []
+        rows.reserveCapacity(records.count)
+        for record in records {
+            rows.append(try await wireDownload(record, session: session))
+        }
+        return sessionSuccess(request, rows)
+
+    case "downloadStatus":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "downloadStatus needs serverId and remoteId")
+        }
+        let trackId = try await downloadTrackId(session, serverId: serverId, remoteId: remoteId)
+        guard let record = try await session.repository.download(trackId: trackId) else {
+            // Not an error: "this track has never been downloaded" is the
+            // ordinary answer, and a shell asking per row would drown in
+            // failures otherwise.
+            return sessionSuccess(request, WireDownload(
+                trackId: trackId, remoteId: remoteId, serverId: serverId, title: nil,
+                // Not a DownloadState: the enum has no case for "never asked
+                // for", because in the database that is the absence of a row.
+                state: "absent", localPath: nil,
+                sizeBytes: 0, totalBytes: nil,
+                requestedAt: 0, completedAt: nil, errorMessage: nil))
+        }
+        return sessionSuccess(request, try await wireDownload(record, session: session))
+
+    case "reportDownloadProgress":
+        guard let serverId, let remoteId = request.remoteId,
+              let received = request.receivedBytes else {
+            return sessionFailure(request.id, request.cmd,
+                                  "reportDownloadProgress needs serverId, remoteId and receivedBytes")
+        }
+        let trackId = try await downloadTrackId(session, serverId: serverId, remoteId: remoteId)
+        // The first byte report is what turns a queued download into an active
+        // one. A record already downloaded is left alone: a late, stray report
+        // must not un-complete a finished download.
+        let current = try await session.repository.download(trackId: trackId)?.downloadState
+        if current != .downloading && current != .downloaded {
+            try await session.downloads.markDownloading(
+                trackId: trackId, totalBytes: request.totalBytes)
+        }
+        try await session.downloads.updateProgress(
+            trackId: trackId, receivedBytes: received, totalBytes: request.totalBytes)
+        return sessionSuccess(request, try await wireDownload(
+            try await requireDownload(session, trackId: trackId), session: session))
+
+    case "completeDownload":
+        guard let serverId, let remoteId = request.remoteId,
+              let localPath = request.localPath, let size = request.sizeBytes else {
+            return sessionFailure(request.id, request.cmd,
+                                  "completeDownload needs serverId, remoteId, localPath and sizeBytes")
+        }
+        let trackId = try await downloadTrackId(session, serverId: serverId, remoteId: remoteId)
+        try await session.downloads.markDownloaded(
+            trackId: trackId, localPath: localPath, sizeBytes: size)
+        return sessionSuccess(request, try await wireDownload(
+            try await requireDownload(session, trackId: trackId), session: session))
+
+    case "failDownload":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "failDownload needs serverId and remoteId")
+        }
+        let trackId = try await downloadTrackId(session, serverId: serverId, remoteId: remoteId)
+        try await session.downloads.markFailed(
+            trackId: trackId, error: request.reason ?? "download failed")
+        return sessionSuccess(request, try await wireDownload(
+            try await requireDownload(session, trackId: trackId), session: session))
+
+    case "deleteDownload":
+        guard let serverId, let remoteId = request.remoteId else {
+            return sessionFailure(request.id, request.cmd, "deleteDownload needs serverId and remoteId")
+        }
+        // Only the record. The file belongs to the shell that wrote it, which
+        // knows where it put it and is the only thing that can remove it.
+        try await session.downloads.remove(
+            trackId: try await downloadTrackId(session, serverId: serverId, remoteId: remoteId))
+        return sessionSuccess(request, WireAction(ok: true))
+
+    case "storageUsage":
+        let usage = try await session.repository.storageUsage()
+        return sessionSuccess(request, WireStorageUsage(
+            downloadedTrackCount: usage.downloadedTrackCount,
+            totalBytes: usage.totalBytes))
+
     case "lyrics":
         guard let serverId, let remoteId = request.remoteId else {
             return sessionFailure(request.id, request.cmd, "lyrics needs serverId and remoteId")
@@ -2384,6 +2574,8 @@ let mozzSessionCommands = [
     "mix", "mixTracks", "generateMozzWeekly", "mozzWeeklyTracks",
     "mozzWeeklyItems", "radioBatch",
     "radioStart", "radioNext", "radioStop", "radioState",
+    "enqueueDownload", "downloads", "downloadStatus", "reportDownloadProgress",
+    "completeDownload", "failDownload", "deleteDownload", "storageUsage",
     "lyrics", "reportPlayback",
     "continuityQueueHash", "continuityLoad", "continuitySave",
     "suppressTrack", "suppressArtist",
