@@ -150,7 +150,20 @@ class MozzLibrary(private val core: MozzCore) {
         ) ?: emptyList()
 
     /** The songs someone has favourited on their server. v1's home screen. */
-    suspend fun likedTracks(serverId: String? = null, limit: Int = 500): List<Track> =
+    /**
+     * How many liked songs there are.
+     *
+     * Asked for rather than counted from [likedTracks], which answers a page:
+     * counting a page gives the size of the page. Home said "500 songs" to
+     * anyone with more than 500 of them, and paid for 500 track rows over the
+     * envelope to say it.
+     */
+    suspend fun likedTracksCount(serverId: String? = null): Int =
+        core.call<Map<String, Int>>(
+            CoreRequest(cmd = "likedTracksCount", serverId = serverId)
+        )?.get("count") ?: 0
+
+    suspend fun likedTracks(serverId: String? = null, limit: Int = 1000): List<Track> =
         core.call<List<Track>>(
             CoreRequest(cmd = "likedTracks", serverId = serverId, limit = limit)
         ) ?: emptyList()

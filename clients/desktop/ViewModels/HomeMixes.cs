@@ -276,7 +276,7 @@ public static class HomeShelfLoader
 
 public sealed record HomeMixLoadResult(
     IReadOnlyList<HomeMix> Mixes,
-    IReadOnlyList<Track> LikedTracks,
+    int LikedCount,
     bool Generated,
     string? Message);
 
@@ -336,7 +336,7 @@ public static class HomeMixLoader
 {
     public static async Task<HomeMixLoadResult> LoadAsync(
         Func<Task<IReadOnlyList<HomeMix>>> readMixes,
-        Func<Task<IReadOnlyList<Track>>> readLikedTracks,
+        Func<Task<int>> readLikedCount,
         Func<string, Task> generateMixes,
         IReadOnlyList<string> serverIds,
         Action? generationStarted = null,
@@ -346,7 +346,7 @@ public static class HomeMixLoader
         DateTimeOffset? asOf = null)
     {
         var mixes = await readMixes();
-        var liked = await readLikedTracks();
+        var liked = await readLikedCount();
         var attachedServerIds = serverIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)

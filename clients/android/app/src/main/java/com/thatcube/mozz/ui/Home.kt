@@ -93,13 +93,13 @@ fun HomeRoot(
         val played = runCatching { library.recentlyPlayedTracks(account.serverId, limit = 20) }.getOrNull()
         val added = runCatching { library.recentlyAddedAlbums(account.serverId, limit = 20) }.getOrNull()
         val lists = runCatching { library.playlists(account.serverId) }.getOrNull()
-        val liked = runCatching { library.likedTracks(account.serverId) }.getOrNull()
+        val liked = runCatching { library.likedTracksCount(account.serverId) }.getOrNull()
         val sets = runCatching { library.homeMixes() }.getOrNull()
 
         if (played != null) recentlyPlayed = played
         if (added != null) recentlyAdded = added
         if (lists != null) playlists = lists
-        if (liked != null) likedCount = liked.size
+        if (liked != null) likedCount = liked
         if (sets != null) mixes = sets
         loaded = true
 

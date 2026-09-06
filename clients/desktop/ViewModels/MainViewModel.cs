@@ -1603,7 +1603,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         var serverId = attachedServerIds.FirstOrDefault();
         var result = await HomeMixLoader.LoadAsync(
             ReadHomeMixesAsync,
-            LoadLikedTracksAsync,
+            LoadLikedCountAsync,
             GenerateHomeMixesAsync,
             attachedServerIds,
             () => StatusMessage = "Generating mixes for Home…",
@@ -1612,7 +1612,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             at => _preferences.SetDouble(AppPreferences.HomeMixesGeneratedAtKey, at));
 
         _homeMixTiles = HomeMixPresentation.BuildTiles(
-            result.LikedTracks.Count,
+            result.LikedCount,
             result.Mixes,
             serverId).ToList();
         HomeMixGrid.Reset(_homeMixTiles);
@@ -1655,8 +1655,29 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private async Task<IReadOnlyList<HomeMix>> ReadHomeMixesAsync() =>
         await _core.CallAsync<List<HomeMix>>(new CoreRequest("homeMixes") { ServerId = ActiveServerId }) ?? [];
 
+    /// <summary>
+    /// How many liked songs there are, for the Home tile's subtitle.
+    ///
+    /// Asked for rather than counted from <see cref="LoadLikedTracksAsync"/>,
+    /// which answers a page: counting a page gives the size of the page. The
+    /// tile said "100 songs" to anyone with more than a hundred of them.
+    /// </summary>
+    private async Task<int> LoadLikedCountAsync() =>
+        await _core.CallAsync<LikedTracksCount>(
+            new CoreRequest("likedTracksCount") { ServerId = ActiveServerId }) is { } payload
+            ? payload.Count
+            : 0;
+
+    /// <summary>
+    /// The liked songs themselves, for the page that lists them.
+    ///
+    /// The limit matches the iPhone's. Left off, the core answers a hundred, so
+    /// opening Liked Songs on the desktop showed the first hundred and gave no
+    /// sign there were more.
+    /// </summary>
     private async Task<IReadOnlyList<Track>> LoadLikedTracksAsync() =>
-        await _core.CallAsync<List<Track>>(new CoreRequest("likedTracks") { ServerId = ActiveServerId }) ?? [];
+        await _core.CallAsync<List<Track>>(
+            new CoreRequest("likedTracks") { ServerId = ActiveServerId, Limit = 1000 }) ?? [];
 
     private async Task GenerateHomeMixesAsync(string serverId) =>
         await _core.CallAsync<object>(new CoreRequest("generateHomeMixes") { ServerId = serverId });

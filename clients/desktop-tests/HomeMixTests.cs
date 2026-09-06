@@ -159,7 +159,7 @@ public class HomeMixTests
                 return Task.FromResult<IReadOnlyList<HomeMix>>(
                     reads == 1 ? [] : [Mix("supermix", "Supermix", "Glass Animals")]);
             },
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([Track("liked")]),
+            readLikedCount: () => Task.FromResult(1),
             generateMixes: serverId =>
             {
                 generated.Add(serverId);
@@ -172,7 +172,7 @@ public class HomeMixTests
         Assert.Equal(["srv"], generated);
         Assert.Single(result.Mixes);
         Assert.Null(result.Message);
-        Assert.Single(result.LikedTracks);
+        Assert.Equal(1, result.LikedCount);
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class HomeMixTests
                 Mix("daily-1", "Daily Mix 1", null),
                 Mix(HomeMixSchedule.MozzWeeklyId, "Mozz Weekly", null, now.ToUnixTimeSeconds()),
             ]),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: serverId =>
             {
                 generated.Add(serverId);
@@ -215,7 +215,7 @@ public class HomeMixTests
                 Mix("daily-1", "Daily Mix 1", null),
                 Mix(HomeMixSchedule.MozzWeeklyId, "Mozz Weekly", null, now.AddDays(-8).ToUnixTimeSeconds()),
             ]),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: _ => throw new InvalidOperationException("dailies are not due"),
             serverIds: ["srv"],
             generateWeekly: serverId =>
@@ -238,7 +238,7 @@ public class HomeMixTests
 
         await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([Mix("daily-1", "Daily Mix 1", null)]),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: _ => throw new InvalidOperationException("dailies are not due"),
             serverIds: ["srv"],
             generateWeekly: serverId =>
@@ -253,17 +253,17 @@ public class HomeMixTests
     }
 
     [Fact]
-    public async Task GenerationFailureReturnsPlainMessageAndKeepsLikedTracks()
+    public async Task GenerationFailureReturnsPlainMessageAndKeepsTheLikedCount()
     {
         var result = await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([]),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([Track("liked")]),
+            readLikedCount: () => Task.FromResult(1),
             generateMixes: _ => throw new InvalidOperationException("library is still syncing"),
             serverIds: ["srv"]);
 
         Assert.False(result.Generated);
         Assert.Empty(result.Mixes);
-        Assert.Single(result.LikedTracks);
+        Assert.Equal(1, result.LikedCount);
         Assert.Equal("Could not generate Home mixes: library is still syncing", result.Message);
     }
 
@@ -272,7 +272,7 @@ public class HomeMixTests
     {
         var result = await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([]),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: _ => throw new InvalidOperationException("should not run"),
             serverIds: [""]);
 
@@ -315,7 +315,7 @@ public class HomeMixTests
     {
         var result = await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>([]),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: _ => Task.CompletedTask,
             serverIds: ["srv"]);
 
@@ -369,7 +369,7 @@ public class HomeMixTests
         var result = await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(
                 readCount++ == 0 ? [] : rebuilt),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
             serverIds: ["srv-new"]);
 
@@ -392,7 +392,7 @@ public class HomeMixTests
 
         var result = await HomeMixLoader.LoadAsync(
             readMixes: () => Task.FromResult<IReadOnlyList<HomeMix>>(mixes),
-            readLikedTracks: () => Task.FromResult<IReadOnlyList<Track>>([]),
+            readLikedCount: () => Task.FromResult(0),
             generateMixes: id => { generatedFor.Add(id); return Task.CompletedTask; },
             serverIds: ["srv-new"],
             generateWeekly: id => { weeklyFor.Add(id); return Task.CompletedTask; },

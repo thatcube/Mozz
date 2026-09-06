@@ -402,3 +402,6 @@ public sealed record ServerCapabilities(
 
 /// <summary>How "liked" is drawn, which is a property of the server, not the client.</summary>
 public enum LikeGlyph { Heart, Star }
+
+/// <summary>The `likedTracksCount` payload: `{"count": n}`.</summary>
+public sealed record LikedTracksCount(int Count);
