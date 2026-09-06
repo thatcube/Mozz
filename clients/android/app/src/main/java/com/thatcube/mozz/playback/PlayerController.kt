@@ -11,6 +11,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.core.PlaybackReportState
 import com.thatcube.mozz.core.PlayEventKind
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzRadio
@@ -79,6 +80,27 @@ class PlayerController(
 ) {
     private var controller: MediaController? = null
     private var queue: List<Track> = emptyList()
+
+    /**
+     * The track the listener is on, as of the last transition.
+     *
+     * Media3 says only *that* the current item changed, never what it changed
+     * from, and the index arithmetic that stood in for it — `current - 1` —
+     * is only right for a track that ran out on its own. A "previous" press
+     * moves the other way and a tap on a queue row moves neither, so both
+     * filed their history against the wrong song.
+     */
+    private var nowPlaying: Track? = null
+
+    /**
+     * Stream session ids, keyed by remote id.
+     *
+     * Plex matches a timeline report to the transcode it belongs to by this id,
+     * and a `Player.Listener` callback hands back nothing but the media item —
+     * so the id minted in [mediaItem] has to be parked somewhere it can be
+     * found again.
+     */
+    private val streamSessions = mutableMapOf<String, String>()
 
     /**
      * Whether what is playing came from a station, and so should keep going
@@ -167,17 +189,63 @@ class PlayerController(
                 // READY rather than on the retry call means a retry that fails
                 // again never gets credited with fixing anything.
                 if (playbackState == Player.STATE_READY) clearFailure()
+                // The queue ran out. No transition follows the last track, so
+                // without this the server is left believing the final song of
+                // every listening session is still playing.
+                if (playbackState == Player.STATE_ENDED) {
+                    nowPlaying?.let {
+                        record(it, PlayEventKind.COMPLETED)
+                        report(it, PlaybackReportState.STOPPED, media.currentPosition)
+                    }
+                    nowPlaying = null
+                }
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // `playWhenReady` and not `isPlaying`: the latter goes false the
+                // moment a track buffers, which would report a pause the
+                // listener never asked for and then a play they never pressed.
+                // What the server wants to know is the intent.
+                val track = nowPlaying ?: return
+                report(
+                    track,
+                    if (playWhenReady) PlaybackReportState.PLAYING else PlaybackReportState.PAUSED,
+                    media.currentPosition,
+                )
             }
 
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
-                // A track that ran out rather than being skipped is a completed
-                // play, and the history log is what play counts and the
-                // recommender are built from — on every platform, from the same
-                // events. See ADR-0011.
-                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
-                    val finished = queue.getOrNull(previousIndex(media))
-                    if (finished != null) record(finished, PlayEventKind.COMPLETED)
+                val leaving = nowPlaying
+                val arriving = queue.getOrNull(media.currentMediaItemIndex)
+                // Repeat-one hands the same track back, which is a second play
+                // of it rather than no transition at all.
+                val repeated = reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (leaving != null && (repeated || leaving.remoteId != arriving?.remoteId)) {
+                    // Exactly one terminal event per track, as on iOS: a track
+                    // that ran out completed, a track the listener left early
+                    // was skipped. The history log is what play counts and the
+                    // recommender are built from — on every platform, from the
+                    // same events (ADR-0011) — and a skip is not a weak play,
+                    // it is the strongest negative signal there is. Android was
+                    // recording no skips at all.
+                    val terminal = if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                        PlayEventKind.SKIPPED
+                    } else {
+                        PlayEventKind.COMPLETED
+                    }
+                    record(leaving, terminal)
+                    report(leaving, PlaybackReportState.STOPPED, media.currentPosition)
+                    streamSessions.remove(leaving.remoteId)
                 }
+                // A track reached by the queue advancing was never recorded as
+                // started at all: `play` recorded the one song it was handed and
+                // nothing spoke for the rest of the album. PLAYLIST_CHANGED is
+                // left out because that *is* `play`, which records its own.
+                if (arriving != null && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                    record(arriving, PlayEventKind.STARTED)
+                    report(arriving, PlaybackReportState.PLAYING, 0)
+                }
+                nowPlaying = arriving
                 topUpStation(media)
                 publish(media)
             }
@@ -196,9 +264,6 @@ class PlayerController(
             }
         }
     }
-
-    private fun previousIndex(player: Player): Int =
-        (player.currentMediaItemIndex - 1).coerceAtLeast(0)
 
     /**
      * Play [tracks] starting at [startIndex].
@@ -238,11 +303,27 @@ class PlayerController(
             return@launch
         }
 
+        // Whatever was playing is being replaced, and this is the last moment
+        // anything knows what it was: after `setMediaItems` the queue is gone.
+        // A track that is never stopped stays the server's now-playing session
+        // for good, and leaving one early is a skip — the strongest signal the
+        // recommender gets, and the one Android was throwing away.
+        nowPlaying?.let { leaving ->
+            record(leaving, PlayEventKind.SKIPPED)
+            report(leaving, PlaybackReportState.STOPPED, media.currentPosition)
+            streamSessions.remove(leaving.remoteId)
+        }
+
         queue = listOf(first)
+        // Set before the player is touched, not after: the transition callback
+        // is what decides which track a report is about, and it can arrive
+        // before the rest of this function has run.
+        nowPlaying = first
         media.setMediaItems(listOf(firstItem), 0, 0)
         media.prepare()
         media.play()
         record(first, PlayEventKind.STARTED)
+        report(first, PlaybackReportState.PLAYING, 0)
 
         // Everything after the tapped track, in order, appended as it resolves.
         val after = window.drop(start + 1).map { it to async(Dispatchers.IO) { mediaItem(it) } }
@@ -287,8 +368,16 @@ class PlayerController(
         // whole of what "offline" means. A download the player ignores is a
         // progress bar that cost somebody storage and bought them nothing.
         val local = downloadedFile(track)
-        val uri = local?.toURI()?.toString()
-            ?: server.stream(track.serverId, track.remoteId).url
+        val uri = if (local != null) {
+            local.toURI().toString()
+        } else {
+            val source = server.stream(track.serverId, track.remoteId)
+            // Held so the timeline reports for this track can name the session
+            // the bytes are coming from. A downloaded file has none, and needs
+            // none: nothing is being streamed to attribute.
+            source.sessionID?.let { streamSessions[track.remoteId] = it }
+            source.url
+        }
         // The same artwork the app shows, so the notification, the lock screen
         // and Mozz's own player agree. Without this the system surfaces fall
         // back to whatever art is embedded in the file, which is often absent
@@ -675,6 +764,34 @@ class PlayerController(
             hasPrevious = player.hasPreviousMediaItem(),
         )
     }
+
+    /**
+     * Tell the server what is happening to [track].
+     *
+     * Deliberately beside [record] and deliberately not the same call: [record]
+     * writes Mozz's own history, this writes the server's. Before this existed,
+     * everything played on Android was invisible to Plex — no play count, no
+     * "last played", no now-playing session — while the same songs played on
+     * the iPhone counted normally.
+     *
+     * Swallows its own failures. A server that will not take a timeline is not
+     * a reason to interrupt the music, and there is nothing the listener could
+     * do about it anyway.
+     */
+    private fun report(track: Track, state: PlaybackReportState, positionMillis: Long) =
+        scope.launch {
+            runCatching {
+                server.reportPlayback(
+                    serverId = track.serverId,
+                    remoteId = track.remoteId,
+                    state = state,
+                    positionSeconds = positionMillis.coerceAtLeast(0) / 1000.0,
+                    sessionId = streamSessions[track.remoteId],
+                )
+            }.onFailure {
+                Log.w(TAG, "could not report ${state.wire} for ${track.title}", it)
+            }
+        }
 
     private fun record(track: Track, kind: PlayEventKind) = scope.launch {
         runCatching {

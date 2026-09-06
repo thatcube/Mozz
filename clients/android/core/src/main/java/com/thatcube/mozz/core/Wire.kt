@@ -80,6 +80,20 @@ data class CoreRequest(
     val durationSeconds: Double? = null,
     val deviceId: String? = null,
     val deviceName: String? = null,
+
+    // Playback reporting: what the *server* is told, as distinct from the
+    // on-device history above. Plex, Jellyfin and Subsonic each keep their own
+    // play counts and "last played", and they only learn about a play if a
+    // client says so.
+    /** `playing`, `paused` or `stopped`. */
+    val state: String? = null,
+    /**
+     * The stream session id, when the stream URL was minted with one.
+     *
+     * Plex matches a timeline report to the transcode it belongs to by this id.
+     * Without it the report is accepted and attributed to nothing.
+     */
+    val contextID: String? = null,
 )
 
 /**

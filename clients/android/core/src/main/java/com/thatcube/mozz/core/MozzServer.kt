@@ -414,6 +414,40 @@ class MozzServer(
         )
     )
 
+    /**
+     * Tell the server what this device is doing with a track.
+     *
+     * Separate from [MozzLibrary.recordPlayEvent], which writes Mozz's own
+     * history: this is the server's play count, its "last played", its on-deck
+     * row and — on Plex — the now-playing session that other clients can see.
+     * Nothing else reports it on the listener's behalf, so a play that is not
+     * sent here never happened as far as the server is concerned.
+     *
+     * Scrobble-shaped, like the iOS hook it mirrors: transport transitions only,
+     * never a seek and never a tick during steady playback.
+     *
+     * Failures are the caller's to swallow. A server that will not take a
+     * timeline is not a reason to interrupt the music.
+     */
+    suspend fun reportPlayback(
+        serverId: String,
+        remoteId: String,
+        state: PlaybackReportState,
+        positionSeconds: Double,
+        sessionId: String? = null,
+    ) {
+        core.call<Map<String, Boolean>>(
+            CoreRequest(
+                cmd = "reportPlayback",
+                serverId = serverId,
+                remoteId = remoteId,
+                state = state.wire,
+                positionSeconds = positionSeconds,
+                contextID = sessionId,
+            )
+        )
+    }
+
     suspend fun artworkUrl(serverId: String, artworkKey: String, size: Int = 512): String? =
         core.call<UrlPayload>(
             CoreRequest(
@@ -572,4 +606,11 @@ class MozzServer(
         fun secretKey(serverId: String) = "token.$serverId"
         fun plexAccountKey(serverId: String) = "plex.account.$serverId"
     }
+}
+
+/** Mirrors `PlaybackState` in Sources/MozzCore/MusicBackend.swift. */
+enum class PlaybackReportState(val wire: String) {
+    PLAYING("playing"),
+    PAUSED("paused"),
+    STOPPED("stopped"),
 }
