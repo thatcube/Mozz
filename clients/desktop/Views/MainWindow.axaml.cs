@@ -22,6 +22,91 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// The keys a desktop music player is expected to answer to.
+    /// </summary>
+    /// <remarks>
+    /// There were none at all: not space, not the arrow keys, nothing. Every
+    /// command below already existed and was reachable only by aiming a mouse
+    /// at a small round button, which is not how anybody uses a player on a
+    /// computer while doing something else.
+    ///
+    /// Deliberately the shortcuts people already know from other players rather
+    /// than a set of our own — space, arrows, M, S, R — because a shortcut you
+    /// have to learn is one you will not use.
+    /// </remarks>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || DataContext is not MainViewModel model) return;
+
+        // Somebody typing a search query is not asking to pause the music. Any
+        // text field swallows the whole set, not just the letters, because
+        // space and the arrows mean something inside a text box too.
+        if (FocusManager?.GetFocusedElement() is TextBox) return;
+
+        var command = e.KeyModifiers.HasFlag(KeyModifiers.Meta)
+                      || e.KeyModifiers.HasFlag(KeyModifiers.Control);
+
+        switch (e.Key)
+        {
+            case Key.Space:
+                model.TogglePlayPauseCommand.Execute(null);
+                break;
+
+            // Arrows alone scrub, with the platform's command key they skip.
+            // The pairing matches every other player: the small move is the
+            // cheap key and the big one asks for a modifier.
+            case Key.Right when command:
+                model.NextCommand.Execute(null);
+                break;
+            case Key.Left when command:
+                model.PreviousCommand.Execute(null);
+                break;
+            case Key.Right:
+                model.SeekSeconds(SeekStepSeconds);
+                break;
+            case Key.Left:
+                model.SeekSeconds(-SeekStepSeconds);
+                break;
+
+            case Key.Up:
+                model.Volume = System.Math.Clamp(model.Volume + VolumeStep, 0, 1);
+                break;
+            case Key.Down:
+                model.Volume = System.Math.Clamp(model.Volume - VolumeStep, 0, 1);
+                break;
+
+            case Key.M:
+                model.ToggleMuteCommand.Execute(null);
+                break;
+            case Key.S:
+                model.ToggleShuffleCommand.Execute(null);
+                break;
+            case Key.R:
+                model.CycleRepeatCommand.Execute(null);
+                break;
+
+            case Key.F when command:
+                SidebarSearch.Focus();
+                SidebarSearch.SelectAll();
+                break;
+
+            default:
+                return;
+        }
+
+        // Only reached when something above ran, so a key this does not claim
+        // still reaches the list underneath it.
+        e.Handled = true;
+    }
+
+    /// <summary>How far an arrow key moves the play head.</summary>
+    private const double SeekStepSeconds = 5;
+
+    /// <summary>How much an arrow key moves the volume.</summary>
+    private const double VolumeStep = 0.05;
+
+    /// <summary>
     /// Moves the one settings control tree into a native window.
     /// </summary>
     public Control TakeSettingsSurface()

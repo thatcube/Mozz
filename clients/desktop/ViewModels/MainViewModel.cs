@@ -3479,6 +3479,19 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         PositionSeconds = target;
     }
 
+    /// <summary>
+    /// Move the play head by <paramref name="delta"/> seconds, clamped.
+    ///
+    /// Exists for the arrow keys, which want "a bit further on" rather than an
+    /// absolute position, and which should do nothing rather than jump to zero
+    /// when nothing is loaded.
+    /// </summary>
+    public void SeekSeconds(double delta)
+    {
+        if (DurationSeconds <= 0) return;
+        SeekTo(Math.Clamp(PositionSeconds + delta, 0, DurationSeconds));
+    }
+
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
 
     partial void OnIsPlayingChanged(bool value)
