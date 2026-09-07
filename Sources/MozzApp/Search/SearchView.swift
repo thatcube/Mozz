@@ -410,6 +410,11 @@ struct SearchView: View {
     }
 
     private func resolveRecents() async {
+        // Before reading twenty rows from the catalogue, drop the ones filed
+        // under a server this install no longer has — those can never resolve.
+        if let serverId = env.active?.connection.id {
+            recents.forgetServersOtherThan([serverId])
+        }
         var out: [RecentResolved] = []
         for item in recents.items {
             switch item.kind {

@@ -45,6 +45,26 @@ final class RecentSearchStore: ObservableObject {
         save()
     }
 
+    /// Forget references filed under a server this install no longer has.
+    ///
+    /// Most often that is the same library once filed under an id derived from
+    /// the address it answered at (ADR-0017): the row can never resolve, and
+    /// left in place it occupies one of twenty slots and costs a catalogue read
+    /// every time Search comes to rest.
+    ///
+    /// Deliberately narrower than "drop what did not resolve". Failure and
+    /// deletion look identical from the call site — an unreachable server
+    /// answers nothing for a row that is perfectly good — and forgetting
+    /// someone's history because their server was down for a minute is not a
+    /// trade worth making. This mismatch is decidable without the network.
+    func forgetServersOtherThan(_ knownServerIDs: Set<String>) {
+        guard !knownServerIDs.isEmpty else { return }
+        let kept = items.filter { knownServerIDs.contains($0.serverId) }
+        guard kept.count != items.count else { return }
+        items = kept
+        save()
+    }
+
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([RecentSearchItem].self, from: data)

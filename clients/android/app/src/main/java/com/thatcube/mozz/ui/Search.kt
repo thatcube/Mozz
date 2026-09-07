@@ -112,7 +112,7 @@ fun SearchRoot(
     // rest shows current rows rather than what they looked like when tapped.
     LaunchedEffect(recents.items, trimmed.isEmpty()) {
         if (trimmed.isNotEmpty()) return@LaunchedEffect
-        resolved = recents.resolve(library)
+        resolved = recents.resolve(library, knownServerIds = setOf(account.serverId))
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -379,14 +379,44 @@ class RecentSearches(context: Context) {
         write()
     }
 
-    suspend fun resolve(library: MozzLibrary): List<RecentRow> = items.mapNotNull { (kind, server, remote) ->
-        runCatching {
-            when (kind) {
-                RecentKind.ARTIST -> library.artist(server, remote)?.let(RecentRow::OfArtist)
-                RecentKind.ALBUM -> library.album(server, remote)?.let(RecentRow::OfAlbum)
-                RecentKind.TRACK -> library.track(server, remote)?.let(RecentRow::OfTrack)
+    /**
+     * Re-read the stored references against the catalogue.
+     *
+     * [knownServerIds] are the servers this install is actually signed in to.
+     * A reference filed under anything else is dropped for good rather than
+     * merely skipped: that is a server the app no longer has, most often
+     * because the same library was once filed under an id derived from the
+     * address it answered at (see ADR-0017). Those rows can never resolve, and
+     * left in place they occupy the list's twenty slots and cost a round trip
+     * every time Search is opened.
+     *
+     * A reference that simply fails to resolve is left alone. Failure and
+     * deletion look identical from here — an unreachable server answers
+     * nothing for a row that is perfectly good — and forgetting someone's
+     * history because their server was down for a minute is not a trade worth
+     * making. The structural mismatch above is decidable without the network;
+     * this is not.
+     */
+    suspend fun resolve(
+        library: MozzLibrary,
+        knownServerIds: Set<String> = emptySet(),
+    ): List<RecentRow> {
+        if (knownServerIds.isNotEmpty()) {
+            val kept = items.filter { it.second in knownServerIds }
+            if (kept.size != items.size) {
+                items = kept
+                write()
             }
-        }.getOrNull()
+        }
+        return items.mapNotNull { (kind, server, remote) ->
+            runCatching {
+                when (kind) {
+                    RecentKind.ARTIST -> library.artist(server, remote)?.let(RecentRow::OfArtist)
+                    RecentKind.ALBUM -> library.album(server, remote)?.let(RecentRow::OfAlbum)
+                    RecentKind.TRACK -> library.track(server, remote)?.let(RecentRow::OfTrack)
+                }
+            }.getOrNull()
+        }
     }
 
     private fun read(): List<Triple<RecentKind, String, String>> = runCatching {
