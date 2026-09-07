@@ -11,6 +11,7 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzPlaybackSettings
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlaybackSettings
+import com.thatcube.mozz.core.PlexHomeUser
 import com.thatcube.mozz.core.PlexLink
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.SyncStatus
@@ -38,6 +39,19 @@ sealed interface AppState {
 
     /** Plex has issued a PIN; the user approves it in a browser. */
     data class Linking(val link: PlexLink, val waiting: Boolean = true) : AppState
+
+    /**
+     * More than one person on this Plex Home, so the choice is theirs.
+     *
+     * Carries the account token because the choice is not finished until it is
+     * made: a managed profile has to be switched to before there is a session
+     * at all.
+     */
+    data class ChoosingProfile(
+        val accountToken: String,
+        val clientIdentifier: String,
+        val users: List<PlexHomeUser>,
+    ) : AppState
 
     /** More than one music library on the server, so the choice is theirs. */
     data class ChoosingLibrary(
@@ -183,9 +197,48 @@ class AppViewModel(
     }
 
     private fun awaitLink(link: PlexLink) = viewModelScope.launch {
-        runCatching { server.awaitPlexLink(link) }
-            .onSuccess { account -> chooseLibraryOrSync(account) }
+        runCatching { server.awaitPlexAccountToken(link) }
+            .onSuccess { accountToken -> chooseProfileOrComplete(accountToken, link) }
             .onFailure { fail("Plex link", it, resumeLink = link) }
+    }
+
+    /**
+     * Ask who this is, when the account holds more than one person.
+     *
+     * One person is not a decision worth interrupting anybody for, and neither
+     * is a Home the account cannot tell us about: if the lookup fails we sign
+     * in as the account owner, which is exactly what happened before this
+     * existed. Sign-in must not hinge on an optional Plex feature.
+     */
+    private suspend fun chooseProfileOrComplete(accountToken: String, link: PlexLink) {
+        val users = runCatching { server.plexHomeUsers(accountToken, link.clientIdentifier) }
+            .getOrDefault(emptyList())
+        if (users.size > 1) {
+            _state.value = AppState.ChoosingProfile(accountToken, link.clientIdentifier, users)
+            return
+        }
+        completeLogin(accountToken, link.clientIdentifier, users.firstOrNull(), profilePin = null)
+    }
+
+    fun selectProfile(
+        accountToken: String,
+        clientIdentifier: String,
+        user: PlexHomeUser,
+        profilePin: String? = null,
+    ) = viewModelScope.launch {
+        _state.value = AppState.Starting
+        completeLogin(accountToken, clientIdentifier, user, profilePin)
+    }
+
+    private suspend fun completeLogin(
+        accountToken: String,
+        clientIdentifier: String,
+        user: PlexHomeUser?,
+        profilePin: String?,
+    ) {
+        runCatching { server.completePlexLogin(accountToken, clientIdentifier, user, profilePin) }
+            .onSuccess { account -> chooseLibraryOrSync(account) }
+            .onFailure { fail("Signing in", it) }
     }
 
     /**

@@ -1,5 +1,14 @@
 package com.thatcube.mozz.ui
 
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import com.thatcube.mozz.core.PlexHomeUser
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -208,6 +217,89 @@ fun LibraryPickerScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Which person on this Plex Home is signing in.
+ *
+ * A household shares one Plex account and each member has their own play
+ * counts, ratings and sometimes their own libraries. Signing in without asking
+ * files everything under whoever owns the account — which is what Android did
+ * until now, silently.
+ *
+ * A profile with a PIN takes it here rather than on a second screen: the PIN is
+ * the same decision as the name, and splitting one decision across two pages is
+ * how a picker starts feeling like a form.
+ */
+@Composable
+fun ProfilePickerScreen(
+    users: List<PlexHomeUser>,
+    onSelect: (PlexHomeUser, String?) -> Unit,
+) {
+    var pinFor by remember { mutableStateOf<PlexHomeUser?>(null) }
+    var pin by remember { mutableStateOf("") }
+
+    OnboardingScaffold(
+        title = "Who is listening?",
+        subtitle = "This Plex account has more than one person on it. " +
+            "Ratings and play counts follow whoever you pick.",
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = MaterialTheme.shapes.large,
+            border = if (LocalMozzBlackout.current) {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            } else {
+                null
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            LazyColumn(contentPadding = PaddingValues(vertical = 4.dp)) {
+                items(users, key = { it.id }) { user ->
+                    TextButton(
+                        onClick = {
+                            if (user.requiresPin) {
+                                pinFor = user
+                                pin = ""
+                            } else {
+                                onSelect(user, null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (user.requiresPin) "${user.name} · PIN" else user.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                        )
+                    }
+                    if (user != users.last()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+        }
+
+        pinFor?.let { user ->
+            Spacer(Modifier.height(20.dp))
+            OutlinedTextField(
+                value = pin,
+                onValueChange = { entered -> pin = entered.filter { it.isDigit() }.take(8) },
+                label = { Text("${user.name}'s PIN") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { onSelect(user, pin) },
+                enabled = pin.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Continue as ${user.name}") }
         }
     }
 }

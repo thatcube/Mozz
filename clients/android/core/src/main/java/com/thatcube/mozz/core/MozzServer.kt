@@ -113,6 +113,108 @@ class MozzServer(
      * ends this loop unhappily; anything else is retried, and the last error is
      * reported if time runs out so the reason is not lost.
      */
+    /**
+     * Poll for the *account* token rather than a finished session.
+     *
+     * The one-shot `plexPinCheck` this replaces went straight from an approved
+     * PIN to a signed-in session, which quietly signed every Android device in
+     * as whoever owns the account. A Plex Home has several people in it and
+     * each has their own play counts, ratings and libraries; asking which of
+     * them you are needs the account token in hand before the session exists.
+     */
+    suspend fun awaitPlexAccountToken(
+        link: PlexLink,
+        timeoutMillis: Long = 5 * 60 * 1000,
+        pollMillis: Long = 2000,
+        maxBackoffMillis: Long = 15000,
+    ): String {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        var wait = pollMillis
+        var lastError: Throwable? = null
+
+        while (System.currentTimeMillis() < deadline) {
+            val outcome = runCatching {
+                core.call<PlexAccountToken>(
+                    CoreRequest(
+                        cmd = "plexPinToken",
+                        pinId = link.pinId,
+                        code = link.code,
+                        clientIdentifier = link.clientIdentifier,
+                    )
+                )?.accountToken?.takeIf { it.isNotEmpty() }
+            }
+            outcome.getOrNull()?.let { return it }
+
+            if (outcome.isSuccess) {
+                wait = pollMillis
+            } else {
+                // Plex answers 429 if a PIN is checked too eagerly and counts
+                // every client against the same budget, so a failed poll backs
+                // off rather than hammering.
+                lastError = outcome.exceptionOrNull()
+                wait = (wait * 2).coerceAtMost(maxBackoffMillis)
+            }
+            delay(wait)
+        }
+        throw lastError?.let { MozzCoreException(it.message ?: "Plex link timed out") }
+            ?: MozzCoreException("Plex link timed out")
+    }
+
+    /**
+     * Who is on this Plex Home account.
+     *
+     * An empty list is an ordinary answer — plenty of accounts are one person —
+     * and so is a failure: Home is not something sign-in should hinge on, so a
+     * caller that cannot get this should carry on as the account owner rather
+     * than refusing to sign anybody in.
+     */
+    suspend fun plexHomeUsers(accountToken: String, clientIdentifier: String): List<PlexHomeUser> =
+        core.call<List<PlexHomeUser>>(
+            CoreRequest(
+                cmd = "plexHomeUsers",
+                accountToken = accountToken,
+                clientIdentifier = clientIdentifier,
+            )
+        ) ?: emptyList()
+
+    /**
+     * Finish signing in, as [user] when one was chosen.
+     *
+     * A managed profile needs the owner's token swapped for its own first, and
+     * only the swapped one is kept: the owner's token would give this device
+     * the owner's library, which is the whole thing being avoided.
+     */
+    suspend fun completePlexLogin(
+        accountToken: String,
+        clientIdentifier: String,
+        user: PlexHomeUser? = null,
+        profilePin: String? = null,
+    ): ServerAccount {
+        val selected = if (user != null && !user.isAdmin) {
+            core.require<PlexAccountToken>(
+                CoreRequest(
+                    cmd = "plexHomeSwitch",
+                    accountToken = accountToken,
+                    homeUserID = user.id,
+                    profilePIN = profilePin,
+                    clientIdentifier = clientIdentifier,
+                )
+            ).accountToken ?: throw MozzCoreException("Plex returned no profile token")
+        } else {
+            accountToken
+        }
+
+        val session: SessionPayload = core.require(
+            CoreRequest(
+                cmd = "plexCompleteLogin",
+                accountToken = selected,
+                homeUserID = user?.id,
+                clientIdentifier = clientIdentifier,
+            )
+        )
+        return persist(session, username = user?.name, identifier = clientIdentifier)
+    }
+
     suspend fun awaitPlexLink(
         link: PlexLink,
         timeoutMillis: Long = 5 * 60 * 1000,

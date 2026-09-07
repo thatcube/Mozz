@@ -134,6 +134,10 @@ data class CoreRequest(
     val playbackSettings: PlaybackSettings? = null,
     val servers: List<RelayServerRecord>? = null,
     val members: List<RelayMemberRecord>? = null,
+
+    // Plex Home: one account, several people, each with their own library view.
+    @SerialName("homeUserID") val homeUserID: String? = null,
+    @SerialName("profilePIN") val profilePIN: String? = null,
 )
 
 /**
@@ -506,6 +510,27 @@ data class ServerAccountProfile(
     val label: String? get() = displayName?.takeIf { it.isNotBlank() }
         ?: username?.takeIf { it.isNotBlank() }
 }
+
+/**
+ * One person on a Plex Home account.
+ *
+ * A household shares one Plex sign-in and each member has their own view of it
+ * — their own play counts, their own ratings, sometimes their own libraries.
+ * Signing a device in without asking which of them you are files everything
+ * under whoever happens to own the account.
+ */
+@Serializable
+data class PlexHomeUser(
+    val id: String,
+    val name: String = "",
+    @SerialName("requiresPIN") val requiresPin: Boolean = false,
+    val isAdmin: Boolean = false,
+    val isRestricted: Boolean = false,
+    val avatarURL: String? = null,
+)
+
+@Serializable
+data class PlexAccountToken(val accountToken: String? = null)
 
 /** How "liked" is drawn, which is a property of the server, not the client. */
 enum class LikeGlyph { HEART, STAR }

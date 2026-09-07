@@ -25,6 +25,7 @@ import com.thatcube.mozz.ui.FailedScreen
 import com.thatcube.mozz.ui.MozzShell
 import com.thatcube.mozz.ui.LibraryPickerScreen
 import com.thatcube.mozz.ui.LinkingScreen
+import com.thatcube.mozz.ui.ProfilePickerScreen
 import com.thatcube.mozz.ui.SignInScreen
 import com.thatcube.mozz.ui.StartingScreen
 import com.thatcube.mozz.ui.SyncingScreen
@@ -117,6 +118,18 @@ class MainActivity : ComponentActivity() {
             is AppState.Linking -> LinkingScreen(
                 onOpenBrowser = { openLink(state.link.linkUrl) },
                 onCancel = viewModel::signOut,
+            )
+
+            is AppState.ChoosingProfile -> ProfilePickerScreen(
+                users = state.users,
+                onSelect = { user, pin ->
+                    viewModel.selectProfile(
+                        state.accountToken,
+                        state.clientIdentifier,
+                        user,
+                        pin,
+                    )
+                },
             )
 
             is AppState.ChoosingLibrary -> LibraryPickerScreen(
