@@ -304,6 +304,67 @@ assert_contains "$TMP/forged-entrypoint.log" \
 [[ "$(record_count "$HOME_FORGED")" == "0" ]] ||
   fail "partial inherited environment published a lease record"
 
+# The real installer intentionally does not enable global errexit because its
+# device retry flow handles individual failures. Its lease check must therefore
+# exit explicitly: forged or closed inherited capabilities cannot fall through
+# into device inspection, installation, or launch.
+INSTALL_FIXTURE="$TMP/install-entrypoint"
+INSTALL_APP="$INSTALL_FIXTURE/Mozz.app"
+INSTALL_BIN="$INSTALL_FIXTURE/bin"
+INSTALL_MARKER="$INSTALL_FIXTURE/device-tool-invoked"
+mkdir -p "$INSTALL_APP" "$INSTALL_BIN"
+cat > "$INSTALL_APP/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.thatcube.Mozz.fixture</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+</dict>
+</plist>
+PLIST
+cat > "$INSTALL_BIN/xcrun" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$INSTALL_MARKER"
+exit 99
+SH
+chmod +x "$INSTALL_BIN/xcrun"
+
+run_invalid_installer_lease() {
+  local home="$1" mutation="$2" log="$3"
+  set +e
+  test_env "$home" \
+    INSTALL_MARKER="$INSTALL_MARKER" \
+    PATH="$INSTALL_BIN:/usr/bin:/bin" \
+    "$WRAPPER" test/install-parent -- /bin/bash -c "
+      $mutation
+      exec \"\$1\" fixture-device \"\$2\" --force --no-launch
+    " _ "$ROOT/tools/install-verified.sh" "$INSTALL_APP" >"$log" 2>&1
+  INVALID_INSTALL_STATUS=$?
+  set -e
+}
+
+HOME_INSTALL_FORGED="$(new_home forged-installer)"
+run_invalid_installer_lease \
+  "$HOME_INSTALL_FORGED" \
+  'APPLE_BUILD_LEASE_TOKEN=00000000-0000-0000-0000-000000000000; export APPLE_BUILD_LEASE_TOKEN' \
+  "$TMP/forged-installer.log"
+[[ "$INVALID_INSTALL_STATUS" -ne 0 ]] ||
+  fail "installer accepted a forged inherited lease"
+[[ ! -e "$INSTALL_MARKER" ]] ||
+  fail "installer invoked a device tool after forged lease validation failed"
+
+HOME_INSTALL_CLOSED="$(new_home closed-installer)"
+run_invalid_installer_lease \
+  "$HOME_INSTALL_CLOSED" \
+  'exec 8>&-' \
+  "$TMP/closed-installer.log"
+[[ "$INVALID_INSTALL_STATUS" -ne 0 ]] ||
+  fail "installer accepted a closed inherited lease descriptor"
+[[ ! -e "$INSTALL_MARKER" ]] ||
+  fail "installer invoked a device tool after closed lease validation failed"
+
 # Cancellation and ordinary failure retain durable evidence rather than
 # creating a success-shaped release.
 HOME_CANCEL="$(new_home cancellation)"

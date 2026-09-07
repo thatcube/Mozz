@@ -29,7 +29,8 @@
 set -uo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
-enter_mozz_apple_build_entrypoint "mozz/install-verified" "${BASH_SOURCE[0]}" "$@"
+enter_mozz_apple_build_entrypoint \
+  "mozz/install-verified" "${BASH_SOURCE[0]}" "$@" || exit $?
 
 if [[ $# -lt 2 ]]; then
   echo "usage: $0 <core-device-udid> <path-to.app> [--no-launch] [--force]" >&2
