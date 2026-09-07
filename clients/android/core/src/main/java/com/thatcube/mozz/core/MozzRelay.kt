@@ -34,6 +34,15 @@ data class RelayCatalogCounts(
 )
 
 @Serializable
+data class RelayPlaybackSettingsSync(
+    val settings: PlaybackSettings = PlaybackSettings(),
+    /** True when the circle's answer differed from what this device held. */
+    val changed: Boolean = false,
+    val relayKey: String = "",
+    val expiresAtMS: Long = 0,
+)
+
+@Serializable
 data class RelayHistorySync(
     val imported: Int = 0,
     val relayKey: String = "",
@@ -94,6 +103,29 @@ class MozzRelay(private val core: MozzCore) {
             serverId = serverId,
             musicSectionIDs = musicSectionIds,
             allMusicLibraries = allMusicLibraries,
+            relayEndpoint = endpoint,
+        )
+    )
+
+    /**
+     * Equalizer and loudness levelling, both directions.
+     *
+     * These are core behaviour, not shell behaviour — sound may not differ
+     * between a listener's devices — so they travel with everything else. The
+     * seed is what this device holds today; the answer is what the circle
+     * agreed, which may be what somebody chose on their desktop.
+     */
+    suspend fun syncPlaybackSettings(
+        circle: CircleSecrets,
+        deviceId: String,
+        settings: PlaybackSettings,
+        endpoint: String = DEFAULT_ENDPOINT,
+    ): RelayPlaybackSettingsSync? = core.call(
+        CoreRequest(
+            cmd = "relaySyncPlaybackSettings",
+            circle = circle,
+            deviceId = deviceId,
+            playbackSettings = settings,
             relayEndpoint = endpoint,
         )
     )

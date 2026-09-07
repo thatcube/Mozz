@@ -95,10 +95,13 @@ fun SettingsPage(
     server: MozzServer,
     nav: Navigator,
     bottomReserve: Dp,
+    /** Write the change through to the settings the core owns and syncs. */
+    onNormalizationChanged: suspend (Boolean) -> Unit = {},
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     // Polled rather than pushed: the pass lives in the core, and a count that
     // ticks while this screen is open is the only visible sign it is working.
     val sonic by produceState<SonicProgress?>(null, account.serverId) {
@@ -163,7 +166,15 @@ fun SettingsPage(
                         SettingsSwitch(
                             R.drawable.ic_volume, "Volume Normalization", inset,
                             checked = playbackSettings.normalizeVolume,
-                        ) { playbackSettings.normalizeVolume = it }
+                        ) { enabled ->
+                            // The switch answers instantly from the local
+                            // mirror; the core is the record, and what it
+                            // stores is what comes back.
+                            playbackSettings.normalizeVolume = enabled
+                            scope.launch {
+                                runCatching { onNormalizationChanged(enabled) }
+                            }
+                        }
                         SettingsNote(
                             when (capabilities?.supportsNormalizationGain) {
                                 // Said plainly rather than by hiding the switch:

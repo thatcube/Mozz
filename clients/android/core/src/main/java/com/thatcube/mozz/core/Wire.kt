@@ -129,6 +129,9 @@ data class CoreRequest(
     val currentAbsoluteIndex: Int? = null,
     val positionMS: Long? = null,
     val queue: ContinuityQueueInput? = null,
+
+    /** Equalizer and loudness levelling — see [MozzPlaybackSettings]. */
+    val playbackSettings: PlaybackSettings? = null,
 )
 
 /**

@@ -8,7 +8,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.thatcube.mozz.core.MusicLibrary
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.core.MozzPlaybackSettings
 import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.core.PlaybackSettings
 import com.thatcube.mozz.core.PlexLink
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.SyncStatus
@@ -75,6 +77,13 @@ class AppViewModel(
      */
     private val continuity: ContinuityCoordinator? = null,
     private val playback: PlayerController? = null,
+    /** The sound-shaping settings the core owns and the relay carries. */
+    private val playbackSettings: MozzPlaybackSettings? = null,
+    /**
+     * Where to put the levelling flag so the player can read it without a round
+     * trip. The core is the record; this is the mirror in front of it.
+     */
+    private val mirrorNormalization: ((Boolean) -> Unit)? = null,
 ) : ViewModel() {
 
     private val _continuityOffer = MutableStateFlow<ContinuityOffer?>(null)
@@ -90,6 +99,31 @@ class AppViewModel(
 
     fun dismissContinuityOffer() {
         _continuityOffer.value = null
+    }
+
+    /**
+     * Turn loudness levelling on or off, in the place that syncs.
+     *
+     * The switch has already moved locally; this is the record. Everything else
+     * in the stored settings is carried through untouched — Android has no
+     * equalizer screen, and a phone that wrote a flat curve whenever somebody
+     * touched this switch would erase the curve its owner set on their desktop.
+     */
+    suspend fun setNormalization(enabled: Boolean) {
+        val client = playbackSettings ?: return
+        val current = runCatching { client.get() }.getOrNull() ?: PlaybackSettings()
+        runCatching { client.set(current.normalizing(enabled)) }
+    }
+
+    /**
+     * Adopt whatever the core holds, which may be what another device chose.
+     *
+     * Read on attach rather than only written: settings that only ever travel
+     * outward are not synced settings, they are a local copy with extra steps.
+     */
+    private fun adoptPlaybackSettings() = viewModelScope.launch {
+        val stored = runCatching { playbackSettings?.get() }.getOrNull() ?: return@launch
+        mirrorNormalization?.invoke(stored.normalizesVolume)
     }
 
     private val _state = MutableStateFlow<AppState>(AppState.Starting)
@@ -126,6 +160,7 @@ class AppViewModel(
                     flushFavorites(account.serverId)
                     syncCircle(account)
                     watchContinuity(account)
+                    adoptPlaybackSettings()
                 }
             }
         }.onFailure { error ->
@@ -234,6 +269,7 @@ class AppViewModel(
             flushFavorites(target.serverId)
             syncCircle(target)
             watchContinuity(target)
+            adoptPlaybackSettings()
         }
             .onFailure { fail("Sync", it) }
     }
@@ -381,6 +417,8 @@ class AppViewModel(
                     application.relay,
                     application.continuity,
                     application.playback,
+                    application.playbackSettings,
+                    { application.settings.normalizeVolume = it },
                 )
             }
         }

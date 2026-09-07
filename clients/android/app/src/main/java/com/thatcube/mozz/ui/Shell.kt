@@ -93,6 +93,7 @@ fun MozzShell(
     continuityOffer: ContinuityOffer? = null,
     onResumeContinuity: () -> Unit = {},
     onDismissContinuity: () -> Unit = {},
+    onNormalizationChanged: suspend (Boolean) -> Unit = {},
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -324,6 +325,7 @@ fun MozzShell(
                     continuityOffer = continuityOffer,
                     onResumeContinuity = onResumeContinuity,
                     onDismissContinuity = onDismissContinuity,
+                    onNormalizationChanged = onNormalizationChanged,
                     wide = wide,
                     bottomReserve = Dock.reserve(
                         hasTrack,
@@ -531,6 +533,7 @@ private fun TabContent(
     continuityOffer: ContinuityOffer?,
     onResumeContinuity: () -> Unit,
     onDismissContinuity: () -> Unit,
+    onNormalizationChanged: suspend (Boolean) -> Unit,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
@@ -693,6 +696,7 @@ private fun TabContent(
             server = server,
             nav = nav,
             bottomReserve = bottomReserve,
+            onNormalizationChanged = onNormalizationChanged,
             onResync = onResync,
             onSignOut = onSignOut,
         )

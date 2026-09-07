@@ -500,6 +500,35 @@ private struct WireHistoryImport: Encodable {
     var imported: Int
 }
 
+/// The sound-shaping settings, in the shape both other shells already persist.
+///
+/// These are core behaviour rather than shell behaviour — presentation may
+/// differ between platforms, sound may not — which is why they live in one
+/// table and travel between devices through the relay. Android reached them
+/// through neither until now: the Facade carried them for the desktop, and the
+/// envelope Android speaks had no way to ask, so a phone kept its own fourth
+/// copy in preferences that could never sync.
+struct WirePlaybackSettings: Codable {
+    var equalizerEnabled: Bool
+    var equalizer: WireEqualizerSettings
+    var replayGainMode: String
+    var replayGainPreampDB: Double
+
+    init(_ settings: PlaybackSettings) {
+        equalizerEnabled = settings.equalizerEnabled
+        equalizer = WireEqualizerSettings(
+            gains: settings.equalizer.gains,
+            preampDB: settings.equalizer.preampDB)
+        replayGainMode = settings.replayGainMode.rawValue
+        replayGainPreampDB = settings.replayGainPreampDB
+    }
+}
+
+struct WireEqualizerSettings: Codable {
+    var gains: [Double]
+    var preampDB: Double
+}
+
 private struct WireRelayHistorySync: Encodable {
     var imported: Int
     /// Replacement capability after initial provisioning or renewal. The host
@@ -1936,6 +1965,22 @@ private func dispatch(
             flush: request.flush ?? true
         )
 
+    case "getPlaybackSettings":
+        let settings = try await PlaybackSettingsStore(session.database).load()
+        return sessionSuccess(request, WirePlaybackSettings(settings))
+
+    case "setPlaybackSettings":
+        guard let incoming = request.playbackSettings else {
+            return sessionFailure(
+                request.id, request.cmd,
+                "setPlaybackSettings needs playbackSettings")
+        }
+        // The store normalizes on the way in — clamped preamp, right band count
+        // — and answers with exactly what it wrote, so a caller never has to
+        // guess whether its value survived.
+        let stored = try await PlaybackSettingsStore(session.database).save(incoming)
+        return sessionSuccess(request, WirePlaybackSettings(stored))
+
     case "flushFavoriteOutbox":
         guard let serverId else {
             return sessionFailure(request.id, request.cmd, "flushFavoriteOutbox needs serverId")
@@ -2584,6 +2629,7 @@ let mozzSessionCommands = [
     "plexHomeUsers", "plexHomeSwitch", "plexCompleteLogin",
     "attach", "libraries", "account",
     "sync", "syncStatus", "streamURL", "artworkURL",
+    "getPlaybackSettings", "setPlaybackSettings",
     "track",
     "analyzeSonics", "sonicProgress", "cancelSonics",
 ].sorted()

@@ -1,6 +1,7 @@
 package com.thatcube.mozz.relay
 
 import android.util.Log
+import com.thatcube.mozz.core.MozzPlaybackSettings
 import com.thatcube.mozz.core.MozzRelay
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.pairing.PairingService
@@ -25,8 +26,11 @@ data class RelayOutcome(
 class RelayService(
     private val relay: MozzRelay,
     private val pairing: PairingService,
+    private val playbackSettings: MozzPlaybackSettings,
     private val deviceId: String,
     private val deviceName: String,
+    /** Told when the circle's settings differ from what this device held. */
+    private val onSettingsChanged: (Boolean) -> Unit = {},
 ) {
 
     suspend fun sync(account: ServerAccount): RelayOutcome? {
@@ -41,6 +45,21 @@ class RelayService(
         history?.relayKey?.takeIf { it.isNotEmpty() && it != circle.relayKey }?.let { renewed ->
             pairing.rememberRelayKey(renewed)
             circle = circle.copy(relayKey = renewed)
+        }
+
+        val settings = runCatching {
+            val seed = playbackSettings.get() ?: return@runCatching null
+            relay.syncPlaybackSettings(circle, deviceId, seed)
+        }.onFailure { Log.w(TAG, "playback settings relay sync failed", it) }.getOrNull()
+
+        settings?.relayKey?.takeIf { it.isNotEmpty() && it != circle.relayKey }?.let { renewed ->
+            pairing.rememberRelayKey(renewed)
+            circle = circle.copy(relayKey = renewed)
+        }
+        // What the circle agreed, which may be what somebody chose elsewhere.
+        if (settings?.changed == true) {
+            runCatching { playbackSettings.set(settings.settings) }
+            onSettingsChanged(settings.settings.normalizesVolume)
         }
 
         val catalog = runCatching {

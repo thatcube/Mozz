@@ -16,6 +16,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.continuity.ContinuityCoordinator
 import com.thatcube.mozz.core.MozzContinuity
 import com.thatcube.mozz.core.MozzPairing
+import com.thatcube.mozz.core.MozzPlaybackSettings
 import com.thatcube.mozz.core.MozzRelay
 import com.thatcube.mozz.relay.RelayService
 import com.thatcube.mozz.core.SecretStore
@@ -188,8 +189,10 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
         RelayService(
             relay = MozzRelay(core),
             pairing = pairing,
+            playbackSettings = playbackSettings,
             deviceId = playback.deviceId,
             deviceName = android.os.Build.MODEL,
+            onSettingsChanged = { settings.normalizeVolume = it },
         )
     }
 
@@ -197,6 +200,13 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
      * Cross-device resume (ADR-0010). Application-scoped because a checkpoint
      * outlives the screen that was open when playback moved.
      */
+    /**
+     * The sound-shaping settings the core owns. Read through rather than kept
+     * here, so a change made on another device arrives rather than being
+     * overwritten.
+     */
+    val playbackSettings: MozzPlaybackSettings by lazy { MozzPlaybackSettings(core) }
+
     val continuity: ContinuityCoordinator by lazy {
         ContinuityCoordinator(
             continuity = MozzContinuity(core),

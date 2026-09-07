@@ -139,6 +139,7 @@ class MainActivity : ComponentActivity() {
                 continuityOffer = continuityOffer,
                 onResumeContinuity = { viewModel.resumeContinuity() },
                 onDismissContinuity = viewModel::dismissContinuityOffer,
+                onNormalizationChanged = viewModel::setNormalization,
                 onResync = viewModel::resync,
                 onSignOut = viewModel::signOut,
             )

@@ -50,6 +50,7 @@ final class MozzSessionMutationTests: XCTestCase {
         for command in [
             "setFavorite", "setRating", "flushFavoriteOutbox",
             "reportPlayback", "continuityQueueHash", "continuityLoad", "continuitySave",
+            "getPlaybackSettings", "setPlaybackSettings",
             "likedTracksCount", "recentlyAddedTracks",
         ] {
             XCTAssertTrue(commands.contains(command), "\(command) missing from mozzSessionCommands")
@@ -136,6 +137,73 @@ final class MozzSessionMutationTests: XCTestCase {
         XCTAssertTrue(payload["value"] is NSNull)
         XCTAssertEqual(payload["liked"] as? Bool, false)
         XCTAssertEqual(payload["queued"] as? Bool, true)
+    }
+
+    func testPlaybackSettingsDefaultBeforeAnythingIsStored() throws {
+        let path = try makeLibrary("settings-default")
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        let response = try call(handle, ["cmd": "getPlaybackSettings"])
+
+        XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
+        let payload = try XCTUnwrap(response["payload"] as? [String: Any])
+        // The default is `track`, which is what "normalization on" has always
+        // meant on both shells.
+        XCTAssertEqual(payload["replayGainMode"] as? String, "track")
+        XCTAssertEqual(payload["equalizerEnabled"] as? Bool, false)
+    }
+
+    func testSetPlaybackSettingsAnswersWhatItActuallyStored() throws {
+        let path = try makeLibrary("settings-write")
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        // A preamp far outside the allowed range, so the answer has to show the
+        // clamp rather than echo the request back.
+        let written = try call(handle, [
+            "cmd": "setPlaybackSettings",
+            "playbackSettings": [
+                "equalizerEnabled": true,
+                "equalizer": ["gains": Array(repeating: 3.0, count: 10), "preampDB": 0],
+                "replayGainMode": "off",
+                "replayGainPreampDB": 99,
+            ],
+        ])
+
+        XCTAssertEqual(written["ok"] as? Bool, true, "\(written)")
+        let stored = try XCTUnwrap(written["payload"] as? [String: Any])
+        XCTAssertEqual(stored["replayGainMode"] as? String, "off")
+        XCTAssertEqual(stored["equalizerEnabled"] as? Bool, true)
+        XCTAssertEqual(stored["replayGainPreampDB"] as? Double, 12)
+
+        // And it survives being read back by the command the phone will use.
+        let readBack = try call(handle, ["cmd": "getPlaybackSettings"])
+        let payload = try XCTUnwrap(readBack["payload"] as? [String: Any])
+        XCTAssertEqual(payload["replayGainMode"] as? String, "off")
+        XCTAssertEqual(payload["equalizerEnabled"] as? Bool, true)
+    }
+
+    func testUnknownReplayGainModeFallsBackRatherThanFailing() throws {
+        let path = try makeLibrary("settings-garbage")
+        let handle = try open(path)
+        defer { _ = mozz_session_close(handle) }
+
+        // A value from a newer version, or a corrupt one. Refusing here would
+        // make an unreadable row break playback settings for good.
+        let response = try call(handle, [
+            "cmd": "setPlaybackSettings",
+            "playbackSettings": [
+                "equalizerEnabled": false,
+                "equalizer": ["gains": Array(repeating: 0.0, count: 10), "preampDB": 0],
+                "replayGainMode": "loudness-war",
+                "replayGainPreampDB": 0,
+            ],
+        ])
+
+        XCTAssertEqual(response["ok"] as? Bool, true, "\(response)")
+        let payload = try XCTUnwrap(response["payload"] as? [String: Any])
+        XCTAssertEqual(payload["replayGainMode"] as? String, "track")
     }
 
     func testReportPlaybackRequiresAnAttachedBackend() async throws {
