@@ -175,6 +175,19 @@ class PairingService(
         )
     }
 
+    /**
+     * Keep a replacement relay capability the core handed back.
+     *
+     * The relay's own credential is provisioned and renewed by the core during
+     * a sync, and comes back on the result for the host to persist. Narrower
+     * than re-storing the whole circle on purpose: nothing outside pairing
+     * should be able to change the keys.
+     */
+    fun rememberRelayKey(key: String) {
+        if (key.isEmpty()) return
+        secrets.set(RELAY_KEY, key)
+    }
+
     private fun storeCircle(circle: CircleSecrets) {
         // Both halves go to the same store. Unlike Apple, where the channel key
         // sits in ordinary app storage and only the credentials key needs the

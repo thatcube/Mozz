@@ -112,6 +112,13 @@ data class CoreRequest(
     val joinerPublicKey: String? = null,
     val encapsulated: String? = null,
     val ciphertext: String? = null,
+
+    // The relay (ADR-0012). Everything that travels does so encrypted under the
+    // circle's keys; the endpoint only ever holds ciphertext.
+    val relayEndpoint: String? = null,
+    val musicSectionIDs: List<String>? = null,
+    val allMusicLibraries: Boolean? = null,
+    val windowDays: Int? = null,
 )
 
 /**

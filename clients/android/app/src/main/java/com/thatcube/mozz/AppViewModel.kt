@@ -12,6 +12,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlexLink
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.SyncStatus
+import com.thatcube.mozz.relay.RelayService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,6 +60,12 @@ sealed interface AppState {
 class AppViewModel(
     private val server: MozzServer,
     private val library: MozzLibrary,
+    /**
+     * Null where nothing has wired it — the relay is the one dependency here
+     * that a device may legitimately not have, and an optional says so more
+     * honestly than a stub that quietly does nothing.
+     */
+    private val relay: RelayService? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<AppState>(AppState.Starting)
@@ -93,6 +100,7 @@ class AppViewModel(
                     _state.value = AppState.Ready(account)
                     verifyReachable(account)
                     flushFavorites(account.serverId)
+                    syncCircle(account)
                 }
             }
         }.onFailure { error ->
@@ -199,6 +207,7 @@ class AppViewModel(
         }.onSuccess {
             _state.value = AppState.Ready(target)
             flushFavorites(target.serverId)
+            syncCircle(target)
         }
             .onFailure { fail("Sync", it) }
     }
@@ -213,6 +222,20 @@ class AppViewModel(
      */
     private fun flushFavorites(serverId: String) = viewModelScope.launch {
         runCatching { library.flushFavoriteOutbox(serverId) }
+    }
+
+    /**
+     * Trade with the rest of the circle: listening history out and back, and
+     * the analysed vectors this phone would otherwise spend an evening
+     * recomputing.
+     *
+     * Does nothing on a device that has not been paired, which is not a
+     * failure and is not reported as one. Fired at the same two moments the
+     * favourite flush is, for the same reason: those are when the network has
+     * just proved it works.
+     */
+    private fun syncCircle(account: ServerAccount) = viewModelScope.launch {
+        runCatching { relay?.sync(account) }
     }
 
     /** Re-mirror the catalogue for the account already signed in. */
@@ -262,7 +285,7 @@ class AppViewModel(
                 val application =
                     this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
                         as MozzApplication
-                AppViewModel(application.server, application.library)
+                AppViewModel(application.server, application.library, application.relay)
             }
         }
 

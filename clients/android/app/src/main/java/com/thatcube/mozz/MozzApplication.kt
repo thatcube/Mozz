@@ -14,6 +14,8 @@ import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.MozzPairing
+import com.thatcube.mozz.core.MozzRelay
+import com.thatcube.mozz.relay.RelayService
 import com.thatcube.mozz.core.SecretStore
 import com.thatcube.mozz.pairing.PairingDiscovery
 import com.thatcube.mozz.pairing.PairingService
@@ -174,6 +176,19 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
     }
 
     val pairingDiscovery: PairingDiscovery by lazy { PairingDiscovery(this) }
+
+    /**
+     * Keeping this phone level with the rest of its circle — listening history
+     * and, above all, vectors another device already analysed.
+     */
+    val relay: RelayService by lazy {
+        RelayService(
+            relay = MozzRelay(core),
+            pairing = pairing,
+            deviceId = playback.deviceId,
+            deviceName = android.os.Build.MODEL,
+        )
+    }
 
     val server: MozzServer by lazy {
         MozzServer(
