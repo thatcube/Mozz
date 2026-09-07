@@ -436,6 +436,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     /// controls below read as "not yet" rather than "no".
     /// </summary>
     [ObservableProperty] private ServerCapabilities? _serverCapabilities;
+    /// <summary>
+    /// Whether to ask LRCLIB when the server has no lyrics of its own.
+    ///
+    /// The preference key has existed since the settings pane was written and
+    /// nothing ever read it: the request went out with the flag hard-coded on.
+    /// A lookup sends a title, an artist and a length to a third party, which
+    /// is exactly the kind of thing that has to be a switch rather than an
+    /// assumption. The iPhone has honoured this all along.
+    /// </summary>
+    [ObservableProperty] private bool _lyricsOnlineLookup = true;
     [ObservableProperty] private string? _lyricStatus;
     [ObservableProperty] private bool _isLyricsLoading;
     [ObservableProperty] private string? _lyricsMessage;
@@ -580,6 +590,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     private void RestoreSettings()
     {
         NormalizationEnabled = _preferences.GetBool(AppPreferences.NormalizationEnabledKey, true);
+        LyricsOnlineLookup = _preferences.GetBool(AppPreferences.LyricsOnlineLookupKey, true);
         _replayGainMode = NormalizationEnabled
             ? _preferences.GetString(
                 AppPreferences.ReplayGainModeKey,
@@ -628,6 +639,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
 
     partial void OnEnrichmentEnabledChanged(bool value) =>
         _preferences.SetBool(AppPreferences.EnrichmentEnabledKey, value);
+
+    partial void OnLyricsOnlineLookupChanged(bool value) =>
+        _preferences.SetBool(AppPreferences.LyricsOnlineLookupKey, value);
 
     partial void OnDeviceSyncEnabledChanged(bool value)
     {
@@ -2805,7 +2819,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
             {
                 ServerId = track.ServerId,
                 RemoteId = track.RemoteId,
-                UseLRCLIB = true,
+                UseLRCLIB = LyricsOnlineLookup,
                 PositionSeconds = positionSeconds,
             });
             if (NowPlaying is null || NowPlaying.ServerId != track.ServerId || NowPlaying.RemoteId != track.RemoteId) return;

@@ -1,5 +1,6 @@
 package com.thatcube.mozz.ui
 
+import com.thatcube.mozz.ui.theme.LocalMozzSettings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -1448,10 +1449,20 @@ private fun LyricsPane(
     // above it does not push the sung line off its mark.
     var columnHeight by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(track?.remoteId) {
+    val settings = LocalMozzSettings.current
+
+    LaunchedEffect(track?.remoteId, settings?.lookUpLyricsOnline) {
         val current = track ?: return@LaunchedEffect
         loading = true
-        lyrics = runCatching { library.lyrics(current.serverId, current.remoteId) }.getOrNull()
+        lyrics = runCatching {
+            library.lyrics(
+                current.serverId,
+                current.remoteId,
+                // Off means the request never leaves the house. The server's own
+                // lyrics still come back; only the third-party lookup stops.
+                useLRCLIB = settings?.lookUpLyricsOnline ?: true,
+            )
+        }.getOrNull()
         loading = false
     }
 

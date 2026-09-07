@@ -2421,7 +2421,26 @@
                                     <Border Background="{DynamicResource Surface}" CornerRadius="16" Padding="18">
                                         <StackPanel Spacing="14">
                                             <TextBlock Text="Lyrics" Classes="sectionTitle" />
-                                            <TextBlock Text="Desktop lyrics display and offline lyric capture need shared core/FFI support before they can be configured here. This mirrors iOS placement without pretending the controls exist yet."
+                                            <!--
+                                                This pane used to say the
+                                                controls needed core support
+                                                that did not exist. The lookup
+                                                flag is a parameter the lyrics
+                                                request already carried; what
+                                                was missing was anything reading
+                                                the preference beside it.
+                                            -->
+                                            <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="12" Padding="14">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                                    <StackPanel Grid.Column="0" Spacing="3">
+                                                        <TextBlock Text="Look up lyrics online" Classes="primary" FontWeight="SemiBold" />
+                                                        <TextBlock Text="Checks LRCLIB when your server has none. Only title, artist and length are sent."
+                                                                   Classes="secondary" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <CheckBox Grid.Column="1" IsChecked="{Binding LyricsOnlineLookup}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+                                            <TextBlock Text="Keeping lyrics with downloads needs shared core support before it can be configured here."
                                                        Classes="secondary" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>

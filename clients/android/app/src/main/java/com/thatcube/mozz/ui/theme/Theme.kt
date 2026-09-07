@@ -96,6 +96,7 @@ class MozzSettings(context: Context) {
     )
     private var analyseOnBatteryState by mutableStateOf(prefs.getBoolean(KEY_ON_BATTERY, false))
     private var normalizeVolumeState by mutableStateOf(prefs.getBoolean(KEY_NORMALIZE, true))
+    private var lyricsOnlineState by mutableStateOf(prefs.getBoolean(KEY_LYRICS_ONLINE, true))
 
     /** Assigning repaints on this frame and persists for the next launch. */
     var appearance: MozzAppearance
@@ -132,6 +133,21 @@ class MozzSettings(context: Context) {
         }
 
     /**
+     * Whether to ask LRCLIB when the server has no lyrics of its own.
+     *
+     * On by default, as on the iPhone. A request leaves the house when it is
+     * on — title, artist and length, nothing else — which is exactly why it has
+     * to be a switch and not an assumption. Android described the choice in
+     * Settings and then made the request unconditionally.
+     */
+    var lookUpLyricsOnline: Boolean
+        get() = lyricsOnlineState
+        set(value) {
+            lyricsOnlineState = value
+            prefs.edit().putBoolean(KEY_LYRICS_ONLINE, value).apply()
+        }
+
+    /**
      * Whether the listener has said they are happy for analysis to run off a
      * charger.
      *
@@ -153,6 +169,7 @@ class MozzSettings(context: Context) {
         const val KEY_DARK_STYLE = "mozz.darkStyle"
         const val KEY_ON_BATTERY = "mozz.sonicAnalysisOnBattery"
         private const val KEY_NORMALIZE = "mozz.normalizationEnabled"
+        private const val KEY_LYRICS_ONLINE = "mozz.lyricsOnlineLookup"
     }
 }
 

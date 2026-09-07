@@ -193,7 +193,13 @@ fun SettingsPage(
 
             item {
                 SettingsSection("Lyrics", inset) {
-                    SettingsToggle(R.drawable.ic_quote, "Look Up Lyrics Online", inset, soon = true)
+                    val lyricsSettings = LocalMozzSettings.current
+                    if (lyricsSettings != null) {
+                        SettingsSwitch(
+                            R.drawable.ic_quote, "Look Up Lyrics Online", inset,
+                            checked = lyricsSettings.lookUpLyricsOnline,
+                        ) { lyricsSettings.lookUpLyricsOnline = it }
+                    }
                     SettingsNote(
                         "Checks LRCLIB when your server has none. Only title, artist and length are sent.",
                         inset,
