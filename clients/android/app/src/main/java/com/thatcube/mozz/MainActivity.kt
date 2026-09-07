@@ -153,6 +153,8 @@ class MainActivity : ComponentActivity() {
                 onResumeContinuity = { viewModel.resumeContinuity() },
                 onDismissContinuity = viewModel::dismissContinuityOffer,
                 onNormalizationChanged = viewModel::setNormalization,
+                soundSettings = viewModel::soundSettings,
+                onSoundChanged = { viewModel.setSound(it) },
                 onResync = viewModel::resync,
                 onSignOut = viewModel::signOut,
             )

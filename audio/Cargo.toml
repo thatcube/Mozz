@@ -4,7 +4,7 @@
 # decides how music sounds stays provably free of unsafe; only the few hundred
 # lines that talk to C are allowed any.
 [workspace]
-members = ["ffi"]
+members = ["ffi", "android"]
 
 [package]
 name = "mozz_audio"
@@ -19,3 +19,9 @@ path = "src/lib.rs"
 [dependencies]
 cpal = "0.18.2"
 symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "flac", "alac", "vorbis", "wav"] }
+
+[profile.release]
+# Stripped here rather than by each platform's packager. Android's strip step
+# rewrites program headers and undoes the 16 KB page alignment the loader needs,
+# so the library has to arrive already small enough not to need stripping.
+strip = "symbols"

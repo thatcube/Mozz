@@ -1,5 +1,9 @@
 package com.thatcube.mozz.ui
 
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Slider
+import com.thatcube.mozz.core.PlaybackSettings
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -189,15 +193,8 @@ fun SettingsPage(
                         )
                     }
                     SettingsRow(
-                        R.drawable.ic_waveform, "Equalizer", inset, soon = true,
-                        onClick = {
-                            nav.open(
-                                Route.SettingsSoon(
-                                    "Equalizer",
-                                    "Ten bands and the presets, sharing the same curve the desktop and the iPhone use.",
-                                )
-                            )
-                        },
+                        R.drawable.ic_waveform, "Equalizer", inset,
+                        onClick = { nav.open(Route.SettingsEqualizer) },
                     )
                 }
             }
@@ -522,6 +519,141 @@ fun MusicLibrariesPage(
  * reading both, and a dialog that can be dismissed by tapping beside it is the
  * wrong shape for the one step that must not be waved through.
  */
+/**
+ * Ten bands and a preamp.
+ *
+ * The filters are the ones the desktop runs — the same Rust, the same
+ * coefficients (ADR-0015) — and the curve is the one the core stores and the
+ * relay carries, so a curve set here is the curve heard on every device in the
+ * circle. That is what makes this worth a screen rather than a preset list: it
+ * is one setting, not one per platform.
+ *
+ * Changes are heard while dragging. An equaliser you cannot hear yourself
+ * adjusting is a guess.
+ */
+@Composable
+fun EqualizerPage(
+    settings: PlaybackSettings?,
+    onChange: suspend (PlaybackSettings) -> Unit,
+    nav: Navigator,
+    bottomReserve: Dp,
+) {
+    val scope = rememberCoroutineScope()
+    var current by remember(settings) { mutableStateOf(settings) }
+
+    fun update(next: PlaybackSettings) {
+        current = next
+        scope.launch { runCatching { onChange(next) } }
+    }
+
+    ListPage("Equalizer", onBack = nav::back) { inset, _ ->
+        val model = current
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
+        ) {
+            if (model == null) {
+                item { SettingsNote("Reading your settings…", inset) }
+            }
+
+            if (model != null) item {
+                SettingsSwitch(
+                    R.drawable.ic_waveform, "Equalizer", inset,
+                    checked = model.equalizerEnabled,
+                ) { update(model.copy(equalizerEnabled = it)) }
+                SettingsNote(
+                    "Off plays the file untouched. The curve is kept either way, " +
+                        "and it follows you to your other devices.",
+                    inset,
+                )
+            }
+
+            if (model != null) itemsIndexed(ISO_BAND_LABELS) { index, label ->
+                BandRow(
+                    label = label,
+                    gainDb = model.equalizer.gains.getOrElse(index) { 0.0 },
+                    enabled = model.equalizerEnabled,
+                    inset = inset,
+                ) { gain ->
+                    val gains = MutableList(ISO_BAND_LABELS.size) {
+                        model.equalizer.gains.getOrElse(it) { 0.0 }
+                    }
+                    gains[index] = gain
+                    update(model.copy(equalizer = model.equalizer.copy(gains = gains)))
+                }
+            }
+
+            if (model != null) item {
+                BandRow(
+                    label = "Preamp",
+                    gainDb = model.equalizer.preampDB,
+                    enabled = model.equalizerEnabled,
+                    inset = inset,
+                ) { preamp ->
+                    update(model.copy(equalizer = model.equalizer.copy(preampDB = preamp)))
+                }
+                SettingsNote(
+                    "Pull the preamp down if boosted bands start to distort.",
+                    inset,
+                )
+                TextButton(
+                    onClick = {
+                        update(
+                            model.copy(
+                                equalizer = model.equalizer.copy(
+                                    gains = List(ISO_BAND_LABELS.size) { 0.0 },
+                                    preampDB = 0.0,
+                                )
+                            )
+                        )
+                    },
+                    modifier = Modifier.padding(horizontal = inset),
+                ) { Text("Flat") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BandRow(
+    label: String,
+    gainDb: Double,
+    enabled: Boolean,
+    inset: Dp,
+    onChange: (Double) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = inset, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = LocalContentColor.current.copy(alpha = if (enabled) 0.9f else 0.4f),
+            modifier = Modifier.width(52.dp),
+        )
+        Slider(
+            value = gainDb.toFloat(),
+            onValueChange = { onChange(it.toDouble()) },
+            // The same ±12 dB the core clamps to. A slider that goes further
+            // than the store accepts is a control that lies about its range.
+            valueRange = -12f..12f,
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "%+.0f".format(gainDb),
+            style = MaterialTheme.typography.labelMedium,
+            color = LocalContentColor.current.copy(alpha = if (enabled) 0.9f else 0.4f),
+            modifier = Modifier.width(36.dp),
+        )
+    }
+}
+
+/** The ten ISO centres the core filters on, as a person would read them. */
+private val ISO_BAND_LABELS =
+    listOf("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+
 @Composable
 fun DevicesPage(
     pairing: PairingService,

@@ -5,6 +5,10 @@ build/
 # Staged by the stageSwiftCore task from .build/android-stage-<arch>; it is
 # ~150 MB of Swift runtime and is rebuilt from Sources/, so it is not committed.
 core/src/main/jniLibs/
+# Built by tools/build-audio-android.sh, for the same reason the core's are
+# built rather than committed: a checked-in binary is one nobody can tell is
+# stale, and this one has to match the Rust it came from.
+app/src/main/jniLibs/
 .cxx/
 */.cxx/
 .idea/

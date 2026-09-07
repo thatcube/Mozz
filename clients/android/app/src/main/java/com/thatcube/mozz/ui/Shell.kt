@@ -1,5 +1,7 @@
 package com.thatcube.mozz.ui
 
+import androidx.compose.runtime.produceState
+import com.thatcube.mozz.core.PlaybackSettings
 import android.os.Build
 import android.view.RoundedCorner
 import androidx.activity.compose.BackHandler
@@ -94,6 +96,8 @@ fun MozzShell(
     onResumeContinuity: () -> Unit = {},
     onDismissContinuity: () -> Unit = {},
     onNormalizationChanged: suspend (Boolean) -> Unit = {},
+    soundSettings: suspend () -> PlaybackSettings? = { null },
+    onSoundChanged: suspend (PlaybackSettings) -> Unit = {},
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -326,6 +330,8 @@ fun MozzShell(
                     onResumeContinuity = onResumeContinuity,
                     onDismissContinuity = onDismissContinuity,
                     onNormalizationChanged = onNormalizationChanged,
+                    soundSettings = soundSettings,
+                    onSoundChanged = onSoundChanged,
                     wide = wide,
                     bottomReserve = Dock.reserve(
                         hasTrack,
@@ -534,6 +540,8 @@ private fun TabContent(
     onResumeContinuity: () -> Unit,
     onDismissContinuity: () -> Unit,
     onNormalizationChanged: suspend (Boolean) -> Unit,
+    soundSettings: suspend () -> PlaybackSettings?,
+    onSoundChanged: suspend (PlaybackSettings) -> Unit,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
@@ -716,6 +724,18 @@ private fun TabContent(
             nav = nav,
             bottomReserve = bottomReserve,
         )
+
+        Route.SettingsEqualizer -> {
+            // Read once when the page opens, not held in the shell: the curve
+            // lives in the core and nothing else on this screen needs it.
+            val sound by produceState<PlaybackSettings?>(null) { value = soundSettings() }
+            EqualizerPage(
+                settings = sound,
+                onChange = onSoundChanged,
+                nav = nav,
+                bottomReserve = bottomReserve,
+            )
+        }
 
         Route.SettingsDevices -> DevicesPage(
             pairing = pairing,

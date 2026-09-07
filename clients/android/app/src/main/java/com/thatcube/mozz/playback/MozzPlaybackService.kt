@@ -4,6 +4,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -48,7 +49,26 @@ class MozzPlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        // Held by the service because the processor lives inside the audio sink,
+        // which the player owns: a curve changed from Settings has to reach the
+        // thing already running, not the next one built.
+        val equalizer = MozzAudioProcessor()
+        app.equalizer = equalizer
         val player = ExoPlayer.Builder(this)
+            .setRenderersFactory(
+                object : DefaultRenderersFactory(this) {
+                    override fun buildAudioSink(
+                        context: android.content.Context,
+                        enableFloatOutput: Boolean,
+                        enableAudioTrackPlaybackParams: Boolean,
+                    ): androidx.media3.exoplayer.audio.AudioSink =
+                        androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                            .setAudioProcessors(arrayOf(equalizer))
+                            .setEnableFloatOutput(enableFloatOutput)
+                            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                            .build()
+                }
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -81,6 +101,7 @@ class MozzPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         scope.cancel()
+        app.equalizer = null
         session?.run {
             player.release()
             release()

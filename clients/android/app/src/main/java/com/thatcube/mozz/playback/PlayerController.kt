@@ -85,6 +85,15 @@ class PlayerController(
      * next track instead of the next launch.
      */
     private val normalizesVolume: () -> Boolean = { true },
+    /**
+     * The equaliser in the running audio sink, when there is one.
+     *
+     * Levelling goes through it rather than through the player's volume so the
+     * gain and the curve are applied in one place, in the order the desktop
+     * applies them. Null on a device the shared library was not built for,
+     * which falls back below.
+     */
+    private val equalizer: () -> MozzAudioProcessor? = { null },
 ) {
     private var controller: MediaController? = null
     private var queue: List<Track> = emptyList()
@@ -791,8 +800,21 @@ class PlayerController(
      * instead of pretending.
      */
     private fun levelVolume(player: Player, track: Track?) {
-        val gainDB = track?.normalizationGainDB?.takeIf { normalizesVolume() }
-        player.volume = if (gainDB == null) {
+        val gainDB = track?.normalizationGainDB?.takeIf { normalizesVolume() } ?: 0.0
+        val processor = equalizer()
+        if (processor != null) {
+            // Through the shared filters, where levelling runs before the curve
+            // — ReplayGain answers how loud a record was mastered, the curve
+            // answers how a listener wants music to sound, and reversing them
+            // makes the curve's headroom depend on the master.
+            processor.setTrackGainDb(gainDB)
+            player.volume = 1f
+            return
+        }
+        // No shared library for this device's ABI. Levelling still happens,
+        // through the player's own volume, because a missing equaliser is not a
+        // reason to hand somebody back the loudness war.
+        player.volume = if (gainDB == 0.0) {
             1f
         } else {
             10.0.pow(gainDB / 20.0).coerceIn(0.0, 1.0).toFloat()

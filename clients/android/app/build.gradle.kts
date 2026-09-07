@@ -31,6 +31,24 @@ android {
         noCompress += "bin"
     }
 
+
+    packaging {
+        jniLibs {
+            // Do not strip the audio DSP.
+            //
+            // The library is built 16 KB page aligned, which Android 15 and
+            // later require, and AGP's strip step rewrites its program headers
+            // back to 4 KB — verified by reading the alignment out of the
+            // staged file and again out of the APK. A Pixel says so in a dialog
+            // naming the library; a user's phone would simply fail to load it
+            // and lose the equaliser with no explanation.
+            //
+            // Cargo already strips symbols on the way out, so nothing is being
+            // kept here that AGP would have removed.
+            keepDebugSymbols += "**/libmozz_audio_android.so"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

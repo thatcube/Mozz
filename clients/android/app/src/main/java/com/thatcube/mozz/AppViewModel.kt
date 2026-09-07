@@ -17,6 +17,7 @@ import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.SyncStatus
 import com.thatcube.mozz.continuity.ContinuityCoordinator
 import com.thatcube.mozz.continuity.ContinuityOffer
+import com.thatcube.mozz.playback.MozzAudioProcessor
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.relay.RelayService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -98,6 +99,8 @@ class AppViewModel(
      * trip. The core is the record; this is the mirror in front of it.
      */
     private val mirrorNormalization: ((Boolean) -> Unit)? = null,
+    /** The equaliser in the running audio sink, while there is one. */
+    private val equalizer: () -> MozzAudioProcessor? = { null },
 ) : ViewModel() {
 
     private val _continuityOffer = MutableStateFlow<ContinuityOffer?>(null)
@@ -138,6 +141,39 @@ class AppViewModel(
     private fun adoptPlaybackSettings() = viewModelScope.launch {
         val stored = runCatching { playbackSettings?.get() }.getOrNull() ?: return@launch
         mirrorNormalization?.invoke(stored.normalizesVolume)
+        applySound(stored)
+    }
+
+    /**
+     * Read the stored curve so a screen can draw it.
+     *
+     * Straight from the core rather than from a mirror: the equaliser is the
+     * one setting with no local copy, because a ten-band curve is not something
+     * worth keeping in two places.
+     */
+    suspend fun soundSettings(): PlaybackSettings? =
+        runCatching { playbackSettings?.get() }.getOrNull()
+
+    /**
+     * Write a curve, and put what was actually stored into the running sink.
+     *
+     * The store normalizes on the way in, so what comes back is the truth; a
+     * screen that echoed its own request would show a preamp the filters are
+     * not using.
+     */
+    suspend fun setSound(settings: PlaybackSettings): PlaybackSettings? {
+        val stored = runCatching { playbackSettings?.set(settings) }.getOrNull() ?: return null
+        applySound(stored)
+        mirrorNormalization?.invoke(stored.normalizesVolume)
+        return stored
+    }
+
+    private fun applySound(settings: PlaybackSettings) {
+        equalizer()?.setEqualizer(
+            settings.equalizer.gains.toDoubleArray(),
+            settings.equalizer.preampDB,
+            settings.equalizerEnabled,
+        )
     }
 
     private val _state = MutableStateFlow<AppState>(AppState.Starting)
@@ -472,6 +508,7 @@ class AppViewModel(
                     application.playback,
                     application.playbackSettings,
                     { application.settings.normalizeVolume = it },
+                    { application.equalizer },
                 )
             }
         }

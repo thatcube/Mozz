@@ -22,6 +22,7 @@ import com.thatcube.mozz.relay.RelayService
 import com.thatcube.mozz.core.SecretStore
 import com.thatcube.mozz.pairing.PairingDiscovery
 import com.thatcube.mozz.pairing.PairingService
+import com.thatcube.mozz.playback.MozzAudioProcessor
 import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.ui.ToastCenter
 import com.thatcube.mozz.ui.theme.MozzSettings
@@ -145,6 +146,7 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             toasts = toasts,
             scope = MainScope(),
             normalizesVolume = { settings.normalizeVolume },
+            equalizer = { equalizer },
         )
     }
 
@@ -207,6 +209,17 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
      * overwritten.
      */
     val playbackSettings: MozzPlaybackSettings by lazy { MozzPlaybackSettings(core) }
+
+    /**
+     * The equaliser inside the running audio sink, while there is one.
+     *
+     * Published by the playback service rather than owned here, because it
+     * belongs to a sink the player builds and dies with it. Null between a
+     * service stopping and the next one starting, which is why every caller
+     * treats it as optional rather than as a thing that must exist.
+     */
+    @Volatile
+    var equalizer: MozzAudioProcessor? = null
 
     val continuity: ContinuityCoordinator by lazy {
         ContinuityCoordinator(

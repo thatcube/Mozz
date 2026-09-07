@@ -1,0 +1,17 @@
+# The JNI boundary, in its own crate for the same reason the C ABI is: JNI
+# cannot be written without unsafe, and the DSP is meant to stay provably free
+# of it. Nothing here decides how music sounds; it moves buffers.
+[package]
+name = "mozz_audio_android"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+mozz_audio = { path = ".." }
+jni = "0.21"

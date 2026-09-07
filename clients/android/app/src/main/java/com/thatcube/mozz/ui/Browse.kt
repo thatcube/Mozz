@@ -88,6 +88,9 @@ sealed interface Route {
     /** The user's other devices, and pairing this one with them (ADR-0013). */
     data object SettingsDevices : Route
 
+    /** Ten bands and a preamp, on the curve the core stores for every device. */
+    data object SettingsEqualizer : Route
+
     /**
      * A settings page that exists in the map before it exists in code. Carries
      * its own text so one destination covers every one of them.
