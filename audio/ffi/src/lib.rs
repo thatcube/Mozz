@@ -33,7 +33,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use mozz_audio::player::{FailureKind, Player, State};
-use mozz_audio::{EqualizerProfile, ReplayGainMode, ReplayGainSettings};
+use mozz_audio::{Equalizer, EqualizerProfile, ReplayGainMode, ReplayGainSettings, ISO_CENTRES_HZ};
 
 /// Read bytes from a shell-owned stream.
 ///
@@ -114,6 +114,157 @@ impl Drop for CallbackSource {
         // SAFETY: called exactly once, which `closed` enforces.
         unsafe { (self.source.close)(self.source.ctx) };
     }
+}
+
+// MARK: - The DSP on its own
+//
+// A shell that already has a decoder and a device — Android has both, in
+// ExoPlayer — does not want a whole player. What it wants is the part of this
+// crate that decides how music sounds, applied to buffers it already has.
+//
+// That is the divergence ADR-0015 is actually about: "ReplayGain and the
+// biquad equaliser exist in two implementations that nothing forces to agree."
+// Handing out the filters rather than the player means Android keeps
+// ExoPlayer's decoding, its HLS support and its media session, and still runs
+// the same coefficients as the desktop rather than a fourth set of its own.
+
+/// Opaque handle to a filter bank plus its levelling gain.
+pub struct MozzDsp {
+    equalizer: Equalizer,
+    /// Linear multiplier for loudness levelling, already resolved from dB.
+    gain: f32,
+    channels: usize,
+}
+
+/// Create a filter bank for a fixed stream format.
+///
+/// Biquad coefficients are computed against a sample rate, so a stream that
+/// changes format needs a new handle rather than a reconfigured one.
+///
+/// # Safety
+/// The returned pointer must be released with [`mozz_dsp_free`] exactly once.
+#[no_mangle]
+pub extern "C" fn mozz_dsp_new(sample_rate: u32, channels: u16) -> *mut MozzDsp {
+    if sample_rate == 0 || channels == 0 {
+        return std::ptr::null_mut();
+    }
+    let channels = usize::from(channels);
+    match catch_unwind(|| Equalizer::new(f64::from(sample_rate), channels)) {
+        Ok(equalizer) => Box::into_raw(Box::new(MozzDsp {
+            equalizer,
+            gain: 1.0,
+            channels,
+        })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Replace the curve.
+///
+/// `gains_db` is one value per ISO band, low to high; passing a different
+/// count is refused rather than padded, because a shell that disagrees with the
+/// core about how many bands there are has a bug worth finding.
+///
+/// # Safety
+/// `dsp` must come from [`mozz_dsp_new`]. `gains_db` must point to at least
+/// `gain_count` readable `f64`s.
+#[no_mangle]
+pub unsafe extern "C" fn mozz_dsp_set_equalizer(
+    dsp: *mut MozzDsp,
+    gains_db: *const f64,
+    gain_count: usize,
+    preamp_db: f64,
+    enabled: bool,
+    sample_rate: u32,
+) -> bool {
+    let Some(dsp) = (unsafe { dsp.as_mut() }) else {
+        return false;
+    };
+    if gains_db.is_null() || gain_count != ISO_CENTRES_HZ.len() || sample_rate == 0 {
+        return false;
+    }
+    // SAFETY: the caller guarantees `gain_count` readable values, and the count
+    // was just checked against the layout this crate defines.
+    let slice = unsafe { std::slice::from_raw_parts(gains_db, gain_count) };
+    let mut gains = [0.0f64; ISO_CENTRES_HZ.len()];
+    gains.copy_from_slice(slice);
+    let profile = EqualizerProfile::from_gains(gains, preamp_db);
+    dsp.equalizer = Equalizer::from_profile(
+        f64::from(sample_rate),
+        dsp.channels,
+        &profile,
+        enabled,
+    );
+    true
+}
+
+/// Set the levelling gain for the track now playing, in dB.
+///
+/// Separate from the curve because it changes on every track while the curve
+/// changes when somebody opens Settings. `NaN` and infinities are refused —
+/// a bad gain silences a library rather than colouring it.
+///
+/// # Safety
+/// `dsp` must come from [`mozz_dsp_new`].
+#[no_mangle]
+pub unsafe extern "C" fn mozz_dsp_set_gain_db(dsp: *mut MozzDsp, gain_db: f64) -> bool {
+    let Some(dsp) = (unsafe { dsp.as_mut() }) else {
+        return false;
+    };
+    if !gain_db.is_finite() {
+        return false;
+    }
+    // Clamped at unity for the same reason every shell clamps it: a positive
+    // ReplayGain value asks for headroom that is not there, and clipping is a
+    // worse answer than not boosting.
+    dsp.gain = (10f64.powf(gain_db / 20.0)).clamp(0.0, 1.0) as f32;
+    true
+}
+
+/// Filter `frames` of interleaved f32 in place.
+///
+/// # Safety
+/// `samples` must point to at least `frames * channels` writable `f32`s, with
+/// `channels` as passed to [`mozz_dsp_new`].
+#[no_mangle]
+pub unsafe extern "C" fn mozz_dsp_process(
+    dsp: *mut MozzDsp,
+    samples: *mut f32,
+    frames: usize,
+) -> bool {
+    let Some(dsp) = (unsafe { dsp.as_mut() }) else {
+        return false;
+    };
+    if samples.is_null() || frames == 0 {
+        return true;
+    }
+    // SAFETY: the caller guarantees the buffer holds this many frames.
+    let buffer = unsafe { std::slice::from_raw_parts_mut(samples, frames * dsp.channels) };
+    // Levelling before the curve, as in the engine: ReplayGain answers "how
+    // loud was this mastered", which is a property of the recording, and the
+    // equaliser answers "how does this listener want music to sound". Reversing
+    // them would make the curve's headroom depend on the master.
+    if dsp.gain != 1.0 {
+        for sample in buffer.iter_mut() {
+            *sample *= dsp.gain;
+        }
+    }
+    dsp.equalizer.process(buffer);
+    true
+}
+
+/// Release a filter bank.
+///
+/// # Safety
+/// `dsp` must come from [`mozz_dsp_new`] and must not be used afterwards.
+/// Passing null is allowed and does nothing.
+#[no_mangle]
+pub unsafe extern "C" fn mozz_dsp_free(dsp: *mut MozzDsp) {
+    if dsp.is_null() {
+        return;
+    }
+    // SAFETY: the caller guarantees this came from `mozz_dsp_new` and is freed once.
+    drop(unsafe { Box::from_raw(dsp) });
 }
 
 /// Opaque player handle.
