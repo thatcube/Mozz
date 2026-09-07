@@ -62,7 +62,9 @@ import androidx.compose.foundation.lazy.items
 import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.MusicLibrary
+import com.thatcube.mozz.core.ServerAccountProfile
 import com.thatcube.mozz.core.SonicProgress
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import com.thatcube.mozz.core.ServerAccount
@@ -104,6 +106,9 @@ fun SettingsPage(
             delay(SONIC_POLL_MS)
         }
     }
+    val profile by produceState<ServerAccountProfile?>(null, account.serverId) {
+        value = runCatching { server.account(account.serverId) }.getOrNull()
+    }
     fun open(url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
@@ -113,6 +118,10 @@ fun SettingsPage(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = bottomReserve + 24.dp),
         ) {
+            item {
+                AccountHeader(profile, account.serverName, inset)
+            }
+
             item {
                 SettingsSection("Library", inset) {
                     SettingsRow(
@@ -1038,6 +1047,68 @@ private fun ChoiceRow(label: String, selected: Boolean, inset: Dp, onClick: () -
 }
 
 /** The small print under a row, in iOS's voice and iOS's position. */
+/**
+ * Who the phone is signed in as.
+ *
+ * The iPhone and the desktop have both shown this for as long as they have had
+ * a settings screen; Android showed the server's name and nothing about the
+ * person. On a Plex Home with more than one profile that is the difference
+ * between knowing whose library this is and guessing.
+ *
+ * The avatar is whatever the account has. A person with none gets their initial
+ * rather than an empty circle, because a blank ring reads as something that
+ * failed to load.
+ */
+@Composable
+private fun AccountHeader(profile: ServerAccountProfile?, serverName: String, inset: Dp) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = inset, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            val avatar = profile?.avatarURL
+            if (avatar != null) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
+            } else {
+                Text(
+                    profile?.label?.take(1)?.uppercase() ?: "?",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(
+                profile?.label ?: "Signed in",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                serverName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 private fun SettingsNote(text: String, inset: Dp) {
     Text(

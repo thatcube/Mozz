@@ -448,6 +448,17 @@ class MozzServer(
         )
     }
 
+    /**
+     * Who this device is signed in as.
+     *
+     * Asked of the server rather than read off the saved account: the stored
+     * row holds what was typed at sign-in, and Plex knows the display name and
+     * the avatar the person actually chose. The iPhone and the desktop have
+     * both shown this since they had a settings screen.
+     */
+    suspend fun account(serverId: String, size: Int = 120): ServerAccountProfile? =
+        core.call(CoreRequest(cmd = "account", serverId = serverId, size = size))
+
     suspend fun artworkUrl(serverId: String, artworkKey: String, size: Int = 512): String? =
         core.call<UrlPayload>(
             CoreRequest(

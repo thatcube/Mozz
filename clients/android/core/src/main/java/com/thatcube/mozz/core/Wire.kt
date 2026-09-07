@@ -466,6 +466,18 @@ data class ServerCapabilities(
         get() = if (supportsFavorites) LikeGlyph.HEART else LikeGlyph.STAR
 }
 
+/** The signed-in account, as the server describes it. */
+@Serializable
+data class ServerAccountProfile(
+    val displayName: String? = null,
+    val username: String? = null,
+    val avatarURL: String? = null,
+) {
+    /** What to put on the row, preferring what the person chose to be called. */
+    val label: String? get() = displayName?.takeIf { it.isNotBlank() }
+        ?: username?.takeIf { it.isNotBlank() }
+}
+
 /** How "liked" is drawn, which is a property of the server, not the client. */
 enum class LikeGlyph { HEART, STAR }
 
