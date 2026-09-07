@@ -9,11 +9,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Mozz.Desktop.Audio;
 using Mozz.Desktop.Audio.Platform;
+using System.Windows.Input;
+using Mozz.Desktop.Controls;
 using Mozz.Desktop.Core;
 
 namespace Mozz.Desktop.ViewModels;
 
-public sealed partial class MainViewModel : ViewModelBase, IDisposable
+public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMenuCommands
 {
     private readonly MozzCore _core = new();
 
@@ -2847,6 +2849,20 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     // are the one item still missing everywhere but iOS.
 
     /// <summary>Play this track and keep going with music like it, forever.</summary>
+
+    // The context menu reaches these through `ITrackMenuCommands`, which speaks
+    // in `ICommand`. The generated properties are `IRelayCommand<Track?>` and
+    // `IAsyncRelayCommand<Track?>`, so the interface is satisfied explicitly
+    // rather than by widening what the rest of the app sees.
+    ICommand ITrackMenuCommands.PlayTrackNextCommand => PlayTrackNextCommand;
+    ICommand ITrackMenuCommands.AddTrackToQueueCommand => AddTrackToQueueCommand;
+    ICommand ITrackMenuCommands.StartTrackRadioCommand => StartTrackRadioCommand;
+    ICommand ITrackMenuCommands.OpenTrackArtistCommand => OpenTrackArtistCommand;
+    ICommand ITrackMenuCommands.OpenTrackAlbumCommand => OpenTrackAlbumCommand;
+    ICommand ITrackMenuCommands.DownloadTrackCommand => DownloadTrackCommand;
+    ICommand ITrackMenuCommands.SuppressTrackCommand => SuppressTrackCommand;
+    ICommand ITrackMenuCommands.SuppressTrackArtistCommand => SuppressTrackArtistCommand;
+
     [RelayCommand]
     private async Task StartTrackRadio(Track? track)
     {

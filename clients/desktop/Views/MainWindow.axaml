@@ -415,7 +415,8 @@
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
                                            <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
-                                                   CommandParameter="{Binding}">
+                                                   CommandParameter="{Binding}"
+                                                   controls:TrackMenu.Track="{Binding}">
                                                <Border Width="300" Margin="0,0,20,12" Padding="8" CornerRadius="8"
                                                        Background="{DynamicResource SurfaceRaised}">
                                                    <Grid ColumnDefinitions="44,*,38,64" Height="44">
@@ -530,41 +531,13 @@
                         </ListBox.ItemsPanel>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Classes="rowPlate">
-                                    <!--
-                                        The same actions the iPhone and Android
-                                        offer on a track. The desktop had
-                                        commands for some of them and nowhere to
-                                        invoke any of them: there was no context
-                                        menu anywhere in the app.
-                                    -->
-                                    <Border.ContextFlyout>
-                                        <MenuFlyout>
-                                            <MenuItem Header="Play Next"
-                                                      Command="{Binding $parent[Window].DataContext.PlayTrackNextCommand}"
-                                                      CommandParameter="{Binding}" />
-                                            <MenuItem Header="Add to Queue"
-                                                      Command="{Binding $parent[Window].DataContext.AddTrackToQueueCommand}"
-                                                      CommandParameter="{Binding}" />
-                                            <MenuItem Header="Start Radio"
-                                                      Command="{Binding $parent[Window].DataContext.StartTrackRadioCommand}"
-                                                      CommandParameter="{Binding}" />
-                                            <Separator />
-                                            <MenuItem Header="Go to Artist"
-                                                      Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
-                                                      CommandParameter="{Binding}" />
-                                            <MenuItem Header="Go to Album"
-                                                      Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                                      CommandParameter="{Binding}" />
-                                            <Separator />
-                                            <MenuItem Header="Don't recommend this track"
-                                                      Command="{Binding $parent[Window].DataContext.SuppressTrackCommand}"
-                                                      CommandParameter="{Binding}" />
-                                            <MenuItem Header="Don't recommend this artist"
-                                                      Command="{Binding $parent[Window].DataContext.SuppressTrackArtistCommand}"
-                                                      CommandParameter="{Binding}" />
-                                        </MenuFlyout>
-                                    </Border.ContextFlyout>
+                                <!--
+                                    The same actions the iPhone and Android offer
+                                    on a track, on every list that shows one. The
+                                    menu used to be written inline here and so
+                                    existed only here.
+                                -->
+                                <Border Classes="rowPlate" controls:TrackMenu.Track="{Binding}">
                                     <Grid ColumnDefinitions="40,*,Auto,Auto,Auto" Height="40" Classes="libraryTrackRow">
                                         <controls:ArtworkImage Grid.Column="0"
                                                 Width="40" Height="40" DisplaySize="40"
@@ -814,7 +787,7 @@
                                 </Border>
                             </DataTemplate>
                             <DataTemplate DataType="vm:SearchTrackRow">
-                                <Border Classes="rowPlate">
+                                <Border Classes="rowPlate" controls:TrackMenu.Track="{Binding Track}">
                                     <Grid ColumnDefinitions="40,*,Auto,Auto,Auto" Height="40" Classes="libraryTrackRow">
                                         <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
@@ -1237,7 +1210,8 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
-                                                    CommandParameter="{Binding Track}">
+                                                    CommandParameter="{Binding Track}"
+                                                    controls:TrackMenu.Track="{Binding Track}">
                                                 <Border Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
                                                         Background="{DynamicResource SurfaceRaised}">
                                                     <Grid ColumnDefinitions="44,*,38,64" Height="44">
@@ -1270,7 +1244,7 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:AlbumTrackItemRow">
-                                <Border Classes="rowPlate">
+                                <Border Classes="rowPlate" controls:TrackMenu.Track="{Binding Row.Track}">
                                     <Grid ColumnDefinitions="36,*,46,46,70" Height="36">
                                         <TextBlock Grid.Column="0" Text="{Binding Row.TrackNumberText}" Classes="secondary"
                                                    VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
@@ -1312,7 +1286,7 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistTrackItemRow">
-                                <Border Classes="rowPlate">
+                                <Border Classes="rowPlate" controls:TrackMenu.Track="{Binding Track}">
                                     <Grid ColumnDefinitions="40,*,Auto,Auto,Auto,Auto" Height="40" Classes="playlistTrackRow">
                                         <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
