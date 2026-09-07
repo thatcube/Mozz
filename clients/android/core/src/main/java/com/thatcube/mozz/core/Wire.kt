@@ -467,6 +467,13 @@ data class ServerCapabilities(
     val supportsLyrics: Boolean = false,
     val supportsTranscoding: Boolean = false,
     val supportsOriginalFileDownload: Boolean = false,
+    /**
+     * Track metadata carries a measured loudness this client can level by.
+     *
+     * True on Jellyfin from 10.7 and on OpenSubsonic servers; false on Plex,
+     * which does not measure loudness at all.
+     */
+    val supportsNormalizationGain: Boolean = false,
 ) {
     /** A heart where the server has favourites, a star where it has ratings. */
     val likeGlyph: LikeGlyph

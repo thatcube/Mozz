@@ -63,6 +63,7 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.MusicLibrary
 import com.thatcube.mozz.core.ServerAccountProfile
+import com.thatcube.mozz.core.ServerCapabilities
 import com.thatcube.mozz.core.SonicProgress
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -109,6 +110,13 @@ fun SettingsPage(
     val profile by produceState<ServerAccountProfile?>(null, account.serverId) {
         value = runCatching { server.account(account.serverId) }.getOrNull()
     }
+    // Asked rather than inferred from the backend kind: Jellyfin reports track
+    // loudness from 10.7 and Subsonic only where the server speaks
+    // OpenSubsonic, so "does this server measure loudness" is a question about
+    // the server in front of us and not about which of the three it is.
+    val capabilities by produceState<ServerCapabilities?>(null, account.serverId) {
+        value = runCatching { server.capabilities(account.serverId) }.getOrNull()
+    }
     fun open(url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
@@ -150,7 +158,25 @@ fun SettingsPage(
 
             item {
                 SettingsSection("Playback", inset) {
-                    SettingsToggle(R.drawable.ic_volume, "Volume Normalization", inset, soon = true)
+                    val playbackSettings = LocalMozzSettings.current
+                    if (playbackSettings != null) {
+                        SettingsSwitch(
+                            R.drawable.ic_volume, "Volume Normalization", inset,
+                            checked = playbackSettings.normalizeVolume,
+                        ) { playbackSettings.normalizeVolume = it }
+                        SettingsNote(
+                            when (capabilities?.supportsNormalizationGain) {
+                                // Said plainly rather than by hiding the switch:
+                                // the setting is real and it will work the day
+                                // this library moves to a server that measures.
+                                false -> "This server does not measure track loudness, so there is " +
+                                    "nothing to level by. Jellyfin and OpenSubsonic report it."
+                                else -> "Levels each track to its measured loudness, so an album " +
+                                    "mastered loud does not arrive louder."
+                            },
+                            inset,
+                        )
+                    }
                     SettingsRow(
                         R.drawable.ic_waveform, "Equalizer", inset, soon = true,
                         onClick = {

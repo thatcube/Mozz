@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import kotlin.math.pow
 
 /** What the UI needs to know about playback, and nothing more. */
 data class PlaybackState(
@@ -77,6 +78,12 @@ class PlayerController(
     private val radio: MozzRadio,
     private val toasts: ToastCenter,
     private val scope: CoroutineScope,
+    /**
+     * Whether to level each track to its measured loudness. Read afresh each
+     * time rather than captured, so turning the switch off takes effect on the
+     * next track instead of the next launch.
+     */
+    private val normalizesVolume: () -> Boolean = { true },
 ) {
     private var controller: MediaController? = null
     private var queue: List<Track> = emptyList()
@@ -246,6 +253,7 @@ class PlayerController(
                     report(arriving, PlaybackReportState.PLAYING, 0)
                 }
                 nowPlaying = arriving
+                levelVolume(media, arriving)
                 topUpStation(media)
                 publish(media)
             }
@@ -319,6 +327,7 @@ class PlayerController(
         // is what decides which track a report is about, and it can arrive
         // before the rest of this function has run.
         nowPlaying = first
+        levelVolume(media, first)
         media.setMediaItems(listOf(firstItem), 0, 0)
         media.prepare()
         media.play()
@@ -740,6 +749,33 @@ class PlayerController(
         retryJob = null
         controller?.release()
         controller = null
+    }
+
+    /**
+     * Level [track] to its measured loudness.
+     *
+     * ReplayGain is a dB figure the server reports per track, and applying it is
+     * a straight amplitude scale: an album mastered in 2011 next to one from
+     * 1989 stops being a jump in volume. The player's own volume is the right
+     * place for it on this platform — Mozz has no in-app volume control on a
+     * phone, where the hardware keys own that — so nothing else is competing
+     * for it.
+     *
+     * Clamped at unity. Gains are almost always negative (they turn loud
+     * masters down), and boosting past 1.0 is not something Media3 can do
+     * anyway; a positive gain simply plays at full scale rather than clipping.
+     *
+     * A track with no gain plays untouched. Plex reports none at all, so on a
+     * Plex server this is every track — which is why the setting says so
+     * instead of pretending.
+     */
+    private fun levelVolume(player: Player, track: Track?) {
+        val gainDB = track?.normalizationGainDB?.takeIf { normalizesVolume() }
+        player.volume = if (gainDB == null) {
+            1f
+        } else {
+            10.0.pow(gainDB / 20.0).coerceIn(0.0, 1.0).toFloat()
+        }
     }
 
     private fun publish(player: Player) {

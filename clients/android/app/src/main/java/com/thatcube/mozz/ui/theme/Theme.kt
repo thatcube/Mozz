@@ -95,6 +95,7 @@ class MozzSettings(context: Context) {
         MozzDarkStyle.from(prefs.getString(KEY_DARK_STYLE, null))
     )
     private var analyseOnBatteryState by mutableStateOf(prefs.getBoolean(KEY_ON_BATTERY, false))
+    private var normalizeVolumeState by mutableStateOf(prefs.getBoolean(KEY_NORMALIZE, true))
 
     /** Assigning repaints on this frame and persists for the next launch. */
     var appearance: MozzAppearance
@@ -109,6 +110,25 @@ class MozzSettings(context: Context) {
         set(value) {
             darkStyleState = value
             prefs.edit().putString(KEY_DARK_STYLE, value.stored).apply()
+        }
+
+    /**
+     * Whether to level each track to its measured loudness.
+     *
+     * On by default, matching `ReplayGainMode.default` in the core and both
+     * other shells: an album mastered in 2011 next to one mastered in 1989 is a
+     * jump in volume nobody asked for, and the measurement that fixes it is
+     * already in the metadata wherever the server reports one.
+     *
+     * Jellyfin from 10.7 and OpenSubsonic both report it. Plex does not measure
+     * loudness at all, which is why the row says so on a Plex server rather
+     * than offering a switch that quietly does nothing.
+     */
+    var normalizeVolume: Boolean
+        get() = normalizeVolumeState
+        set(value) {
+            normalizeVolumeState = value
+            prefs.edit().putBoolean(KEY_NORMALIZE, value).apply()
         }
 
     /**
@@ -132,6 +152,7 @@ class MozzSettings(context: Context) {
         const val KEY_APPEARANCE = "mozz.appearance"
         const val KEY_DARK_STYLE = "mozz.darkStyle"
         const val KEY_ON_BATTERY = "mozz.sonicAnalysisOnBattery"
+        private const val KEY_NORMALIZE = "mozz.normalizationEnabled"
     }
 }
 

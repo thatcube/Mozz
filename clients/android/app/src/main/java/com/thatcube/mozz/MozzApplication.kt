@@ -141,6 +141,7 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             radio = radio,
             toasts = toasts,
             scope = MainScope(),
+            normalizesVolume = { settings.normalizeVolume },
         )
     }
 
