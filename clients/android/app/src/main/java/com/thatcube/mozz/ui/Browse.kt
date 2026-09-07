@@ -273,6 +273,11 @@ class TrackActions(
     fun setLiked(track: Track, liked: Boolean) {
         scope.launch {
             runCatching { library.setLiked(track.serverId, track.remoteId, liked, playback.deviceId) }
+            // Then push anything still queued, this one included if its own
+            // write did not land. A like is the moment the server is most
+            // likely to be reachable again, so it is the cheapest place to
+            // retry the ones that were not.
+            runCatching { library.flushFavoriteOutbox(track.serverId) }
         }
     }
 

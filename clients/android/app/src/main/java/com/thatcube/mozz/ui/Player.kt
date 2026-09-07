@@ -212,6 +212,7 @@ internal fun PlayerBody(
                 // Snap back if the core disagreed; it owns the policy for what a
                 // like means on this backend.
                 if (settled != null) likeOverride = settled
+                runCatching { library.flushFavoriteOutbox(track.serverId) }
             }
         },
         onSetRating = { stars ->
@@ -222,6 +223,7 @@ internal fun PlayerBody(
                 runCatching {
                     library.setRating(track.serverId, track.remoteId, stars, playback.deviceId)
                 }
+                runCatching { library.flushFavoriteOutbox(track.serverId) }
             }
         },
     )

@@ -405,3 +405,6 @@ public enum LikeGlyph { Heart, Star }
 
 /// <summary>The `likedTracksCount` payload: `{"count": n}`.</summary>
 public sealed record LikedTracksCount(int Count);
+
+/// <summary>The `flushFavoriteOutbox` payload: `{"flushed": n}`.</summary>
+public sealed record FavoriteFlushResult(int Flushed);

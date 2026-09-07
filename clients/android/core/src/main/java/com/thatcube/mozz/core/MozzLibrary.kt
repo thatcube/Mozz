@@ -372,6 +372,24 @@ class MozzLibrary(private val core: MozzCore) {
             )
         )?.liked ?: false
 
+    /**
+     * Send any likes and ratings that never reached the server, and forget each
+     * one that lands.
+     *
+     * [setLiked] promises the write "survives being offline", and it does — the
+     * core queues it. Draining that queue is this side's job, and until this
+     * existed nothing on Android did it: a like made while the server was
+     * unreachable stayed queued for the life of the install, showing as liked
+     * on the phone and never once reaching Plex.
+     *
+     * Returns how many were sent. Stops at the first failure rather than
+     * hammering a server that is still down.
+     */
+    suspend fun flushFavoriteOutbox(serverId: String): Int =
+        core.call<Map<String, Int>>(
+            CoreRequest(cmd = "flushFavoriteOutbox", serverId = serverId)
+        )?.get("flushed") ?: 0
+
     suspend fun recordPlayEvent(
         serverId: String,
         remoteId: String,

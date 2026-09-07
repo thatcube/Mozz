@@ -817,6 +817,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         await RefreshCountsAsync();
         await LoadSectionAsync(Section == LibrarySection.Connect ? LibrarySection.Settings : Section, clearBackStack: true);
         StatusMessage = TrackCount > 0 ? null : StatusMessage;
+        // A finished sync is proof the server answers, which is the moment
+        // anything queued against it while unreachable is most likely to land.
+        await FlushFavoriteOutboxAsync(ActiveServerId);
         _ = SyncRelayHistoryAsync();
     }
 
@@ -2678,11 +2681,46 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             StatusMessage = result is { Synced: false, Queued: true }
                 ? "Favorite queued — it will sync when the server is reachable."
                 : null;
+            if (result is { Synced: false, Queued: true }
+                && await FlushFavoriteOutboxAsync(track.ServerId) > 0)
+            {
+                ApplyTrackUpdate(track, t => t with { FavoritePending = false });
+                StatusMessage = null;
+            }
         }
         catch (Exception ex)
         {
             ApplyTrackUpdate(track, t => t with { IsFavorite = track.IsFavorite, FavoritePending = false });
             StatusMessage = $"Could not update favorite: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Send favourites and ratings that never reached the server, and forget
+    /// each one that lands. Returns how many went.
+    /// </summary>
+    /// <remarks>
+    /// The desktop told people "it will sync when the server is reachable" and
+    /// then had nothing that would ever do it: `flushFavoriteOutbox` existed in
+    /// the core and only the iPhone called it, so a like made against an
+    /// unreachable server stayed queued for the life of the install. Called
+    /// where the server has just answered — after a write, and after a sync —
+    /// because those are the moments something queued is most likely to go
+    /// through. Failure is deliberately silent: a like that stays queued is
+    /// what the queue is for.
+    /// </remarks>
+    private async Task<int> FlushFavoriteOutboxAsync(string? serverId)
+    {
+        if (string.IsNullOrWhiteSpace(serverId) || !_core.IsOpen) return 0;
+        try
+        {
+            var result = await _core.CallAsync<FavoriteFlushResult>(
+                new CoreRequest("flushFavoriteOutbox") { ServerId = serverId });
+            return result?.Flushed ?? 0;
+        }
+        catch
+        {
+            return 0;
         }
     }
 
@@ -2713,6 +2751,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             StatusMessage = result is { Synced: false, Queued: true }
                 ? "Rating queued — it will sync when the server is reachable."
                 : null;
+            if (result is { Synced: false, Queued: true }
+                && await FlushFavoriteOutboxAsync(track.ServerId) > 0)
+            {
+                ApplyTrackUpdate(track, t => t with { RatingPending = false });
+                StatusMessage = null;
+            }
         }
         catch (Exception ex)
         {

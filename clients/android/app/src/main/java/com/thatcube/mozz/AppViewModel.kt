@@ -92,6 +92,7 @@ class AppViewModel(
                 else -> {
                     _state.value = AppState.Ready(account)
                     verifyReachable(account)
+                    flushFavorites(account.serverId)
                 }
             }
         }.onFailure { error ->
@@ -195,8 +196,23 @@ class AppViewModel(
             server.sync(target.serverId).collect { status ->
                 _state.value = AppState.Syncing(target.serverName, status)
             }
-        }.onSuccess { _state.value = AppState.Ready(target) }
+        }.onSuccess {
+            _state.value = AppState.Ready(target)
+            flushFavorites(target.serverId)
+        }
             .onFailure { fail("Sync", it) }
+    }
+
+    /**
+     * Send likes and ratings that never reached the server.
+     *
+     * Called where the server has just proved it answers — a fresh attach and a
+     * finished sync — because those are the two moments something queued while
+     * offline is most likely to go through. Failure is not reported: a like
+     * that stays queued is exactly what the queue is for.
+     */
+    private fun flushFavorites(serverId: String) = viewModelScope.launch {
+        runCatching { library.flushFavoriteOutbox(serverId) }
     }
 
     /** Re-mirror the catalogue for the account already signed in. */
