@@ -20,6 +20,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  source "$ROOT/tools/lib/apple-build-entrypoint.sh"
+  enter_mozz_apple_build_entrypoint \
+    "mozz/build-audio-cdylib" "${BASH_SOURCE[0]}" "$@"
+fi
+
 AUDIO="$ROOT/audio"
 
 # cargo lives in ~/.cargo/bin, which is not on the PATH a `dotnet build` runs

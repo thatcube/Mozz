@@ -11,6 +11,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  source "$ROOT/tools/lib/apple-build-entrypoint.sh"
+  enter_mozz_apple_build_entrypoint \
+    "mozz/run-audio-abi-test" "${BASH_SOURCE[0]}" "$@"
+fi
+
 AUDIO="$ROOT/audio"
 HEADER_DIR="$AUDIO/ffi/include"
 SOURCE="$AUDIO/ffi/tests/abi_smoke.c"

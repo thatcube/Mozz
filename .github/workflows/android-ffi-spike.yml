@@ -39,6 +39,9 @@ on:
       - "Package.swift"
       - "spec/**"
       - "spike/android-ffi/**"
+      - "tools/with-apple-build-lease.sh"
+      - "tools/lib/apple-build-lease.sh"
+      - "tools/lib/apple_build_lease.py"
       - ".github/workflows/android-ffi-spike.yml"
 
 concurrency:
@@ -376,10 +379,14 @@ jobs:
       # macOS ships SQLite with FTS5, so GRDBSQLite resolves against the OS and
       # no amalgamation step is needed — the same asymmetry the Windows control has.
       - name: Build the FFI shared library
-        run: swift build -c release --product MozzFFI
+        run: >
+          tools/with-apple-build-lease.sh mozz/ci-android-control-swift --
+          swift build -c release --product MozzFFI
 
       - name: Compile the harness natively
-        run: clang -O2 spike/android-ffi/harness/android_harness.c -o harness
+        run: >
+          tools/with-apple-build-lease.sh mozz/ci-android-control-clang --
+          clang -O2 spike/android-ffi/harness/android_harness.c -o harness
 
       - name: Run the harness
         run: |

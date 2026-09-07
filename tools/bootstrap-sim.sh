@@ -3,6 +3,9 @@
 # Idempotent: reuses the device if it already exists.
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/bootstrap-sim" "${BASH_SOURCE[0]}" "$@"
+
 DEVICE_NAME="${MOZZ_SIM_NAME:-Mozz iPhone}"
 
 # Pick the newest installed iOS runtime and an iPhone device type it actually

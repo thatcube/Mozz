@@ -2,6 +2,10 @@
 # Build the Mozz iOS app for the simulator (compile check; no signing needed).
 # Regenerates the Xcode project first so it always reflects project.yml.
 set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/build-ios" "${BASH_SOURCE[0]}" "$@"
+
 cd "$(dirname "$0")/.."
 
 # Append rather than default-assign: the environment may already inject other
