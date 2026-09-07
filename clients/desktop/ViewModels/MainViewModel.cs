@@ -181,6 +181,44 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     [ObservableProperty] private double _durationSeconds;
     [ObservableProperty] private double _volume = 0.85;
 
+    /// <summary>
+    /// The level to go back to when unmuting, or null when not muted.
+    /// </summary>
+    /// <remarks>
+    /// Remembered rather than recomputed: muting by dragging to zero and
+    /// unmuting to some default is not the same control, and somebody who set
+    /// their volume carefully expects it back exactly.
+    /// </remarks>
+    private double? _volumeBeforeMute;
+
+    public bool IsMuted => _volumeBeforeMute is not null;
+
+    /// <summary>
+    /// Silence, and back again.
+    ///
+    /// The speaker beside the slider had no command at all — it looked like
+    /// every other player's mute button and did nothing when clicked.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleMute()
+    {
+        if (_volumeBeforeMute is { } previous)
+        {
+            _volumeBeforeMute = null;
+            // Restored before the flag is published so anything reading both
+            // sees a consistent pair.
+            Volume = previous;
+        }
+        else
+        {
+            // Dragging to zero and then clicking mute would otherwise store a
+            // zero to "restore", which is a mute button that never unmutes.
+            _volumeBeforeMute = Volume > 0 ? Volume : 0.85;
+            Volume = 0;
+        }
+        OnPropertyChanged(nameof(IsMuted));
+    }
+
     /// <summary>Left counter in the player bar (m:ss of the play head).</summary>
     public string PositionText => FormatClock(PositionSeconds);
 
@@ -3453,6 +3491,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     partial void OnVolumeChanged(double value)
     {
         if (_engine is not null) _engine.Volume = value;
+        // Dragging the slider up is an unmute, whatever the button thinks.
+        if (value > 0 && _volumeBeforeMute is not null)
+        {
+            _volumeBeforeMute = null;
+            OnPropertyChanged(nameof(IsMuted));
+        }
     }
 
     private void OnEngineTrackChanged(object? sender, TrackChangedEventArgs e)

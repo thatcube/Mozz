@@ -1454,9 +1454,16 @@
                             <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
                                                  Brush="{Binding $parent[Button].Foreground}" />
                         </Button>
-                        <Button Classes="transport" ToolTip.Tip="Volume">
-                            <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
-                                                 Brush="{Binding $parent[Button].Foreground}" />
+                        <Button Classes="transport" Command="{Binding ToggleMuteCommand}"
+                                ToolTip.Tip="Mute">
+                            <Panel>
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconVolume}"
+                                                     IsVisible="{Binding !IsMuted}"
+                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                <controls:TablerIcon Size="19" Data="{StaticResource IconVolumeOff}"
+                                                     IsVisible="{Binding IsMuted}"
+                                                     Brush="{Binding $parent[Button].Foreground}" />
+                            </Panel>
                         </Button>
                         <controls:SeekBar Width="96"
                                           Position="{Binding Volume, Mode=TwoWay}"
