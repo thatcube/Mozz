@@ -47,6 +47,10 @@ on:
       # for "picking a song does not change what is playing" sat in a green
       # audio run while every desktop artifact still carried the bug.
       - "audio/**"
+      - "tools/with-apple-build-lease.sh"
+      - "tools/lib/apple-build-entrypoint.sh"
+      - "tools/lib/apple-build-lease.sh"
+      - "tools/lib/apple_build_lease.py"
       - ".github/workflows/desktop-app.yml"
 
 concurrency:
@@ -466,7 +470,9 @@ jobs:
         run: tools/build-audio-xcframework.sh
 
       - name: Build MozzFFI.dylib
-        run: swift build -c release --product MozzFFI
+        run: >
+          tools/with-apple-build-lease.sh mozz/ci-macos-swift-release --
+          swift build -c release --product MozzFFI
 
 
       - name: Test the typed command path against the built core

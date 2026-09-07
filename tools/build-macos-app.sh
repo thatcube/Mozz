@@ -26,6 +26,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO/tools/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/build-macos-app" "${BASH_SOURCE[0]}" "$@"
+
 cd "$REPO"
 
 RUN=0

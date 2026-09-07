@@ -78,12 +78,14 @@ a fast inner loop. iOS-only code is guarded behind `#if os(iOS)`, and the server
 backends are tested against recorded JSON fixtures rather than a live server.
 
 ```bash
-swift test                  # all logic-layer tests on the host toolchain
-swift test --parallel       # the same, in parallel (what CI runs)
 tools/run-tests.sh          # the same via the helper (sets the git flag for you)
 tools/run-tests.sh --sim    # run the suite on an iOS Simulator instead
 tools/run-tests.sh --filter <name>   # pass-through filter (host mode)
+tools/with-apple-build-lease.sh mozz/manual-parallel-tests -- swift test --parallel
 ```
+
+Use the helpers (or explicitly wrap a raw Swift/Xcode command) so future
+authorized machine-wide build-cache maintenance cannot overlap the compiler.
 
 Every non-UI module (backends, database/search, sync, playback queue, downloads,
 recommendations, enrichment, history, continuity) has a matching test target under

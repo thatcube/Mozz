@@ -12,6 +12,10 @@
 # The fixture defaults to ScreenshotAssets/ in the repo root, which is
 # gitignored: the audio and artwork are large binaries that don't belong in git.
 set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/screenshots" "${BASH_SOURCE[0]}" "$@"
+
 cd "$(dirname "$0")/.."
 
 FIXTURE="${1:-$PWD/ScreenshotAssets}"

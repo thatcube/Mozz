@@ -9,6 +9,10 @@
 #     unless MOZZ_BUILD_NUMBER overrides it; dirty trees get a per-worktree suffix.
 # Both come from tools/version-info.py, which the desktop build uses too.
 set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/generate-project" "${BASH_SOURCE[0]}" "$@"
+
 cd "$(dirname "$0")/.."
 
 # SwiftPM in a worktree/bare-repository host needs this to resolve packages.

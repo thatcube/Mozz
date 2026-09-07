@@ -16,6 +16,9 @@
 #
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/lib/apple-build-entrypoint.sh"
+enter_mozz_apple_build_entrypoint "mozz/run-carplay-sim" "${BASH_SOURCE[0]}" "$@"
+
 cd "$(dirname "$0")/.."
 
 # SwiftPM refuses to resolve inside a git worktree without this.
