@@ -170,6 +170,13 @@ class MozzServer(
                 serverName = account.serverName,
                 clientIdentifier = account.clientIdentifier,
                 musicSectionID = account.musicSectionId,
+                // Plex keeps the account profile — the name and the picture a
+                // person chose — behind the *account* token, which is a
+                // different secret from the per-server one above. Without it
+                // Settings can only say "Signed in". Null for the other
+                // backends, which answer from what they already have.
+                accountToken = secrets.get(plexAccountKey(account.serverId))
+                    ?.takeIf { it.isNotEmpty() },
             )
         )
     }

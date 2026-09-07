@@ -150,6 +150,14 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         await core.CallAsync<AttachPayload>(new
         {
             cmd = "attach",
+            // The account's own id, not one the core derives from the address it
+            // answers at today. A Plex server has several addresses and the
+            // catalogue is filed under one id; re-deriving it means a library
+            // reached over the LAN and the same library reached through
+            // plex.direct are two different libraries, one of which looks empty.
+            // Android hit exactly this and the core carries the migration for
+            // it — but only for a shell that says which id it means.
+            serverId = account.ServerId,
             kind = account.Kind.Wire(),
             baseURL = account.BaseUrl,
             token = secret,
@@ -161,12 +169,18 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             musicSectionID = account.MusicSectionId,
             musicSectionIDs = EffectiveMusicSectionIds(account),
             allMusicLibraries = account.AllMusicLibraries,
+            // Plex keeps the account profile — the name and the picture a person
+            // chose — behind the *account* token, which is a different secret
+            // from the per-server one above. Without it the sidebar can only
+            // say "Signed in". Null for the other backends, which answer from
+            // what they already have.
+            accountToken = secrets.Get(PlexAccountKey(account.ServerId)),
         }, token).ConfigureAwait(false);
         ServerSyncJournal.Upsert(
             secrets,
             account,
             secret,
-            secrets.Get($"plex.account.{account.ServerId}"));
+            secrets.Get(PlexAccountKey(account.ServerId)));
     }
 
     /// <summary>
@@ -378,7 +392,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             DeleteCredentialKeys(account);
         }
         secrets.Set(SecretKey(canonical), null);
-        secrets.Set($"plex.account.{canonical}", null);
+        secrets.Set(PlexAccountKey(canonical), null);
     }
 
     public void ForgetAllAccounts()
@@ -415,7 +429,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         {
             // Plex's account token is distinct from the per-server access token
             // and is what re-discovers the account's other servers later.
-            secrets.Set($"plex.account.{account.ServerId}", accountToken);
+            secrets.Set(PlexAccountKey(account.ServerId), accountToken);
         }
 
         SaveAccount(account);
@@ -437,7 +451,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                 secrets,
                 account,
                 token,
-                secrets.Get($"plex.account.{account.ServerId}"));
+                secrets.Get(PlexAccountKey(account.ServerId)));
         }
     }
 
@@ -445,7 +459,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
     {
         account = NormalizeSavedAccount(account);
         secrets.Set(SecretKey(account.ServerId), secret);
-        if (accountToken is not null) secrets.Set($"plex.account.{account.ServerId}", accountToken);
+        if (accountToken is not null) secrets.Set(PlexAccountKey(account.ServerId), accountToken);
         SaveAccount(account);
     }
 
@@ -460,7 +474,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
                     secrets,
                     account,
                     token,
-                    secrets.Get($"plex.account.{account.ServerId}"));
+                    secrets.Get(PlexAccountKey(account.ServerId)));
             }
         }
         return ServerSyncJournal.Load(secrets);
@@ -485,7 +499,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             if (record.IsRemoved)
             {
                 secrets.Set(SecretKey(record.Id), null);
-                secrets.Set($"plex.account.{record.Id}", null);
+                secrets.Set(PlexAccountKey(record.Id), null);
                 continue;
             }
             if (record.Token is not { Length: > 0 } token
@@ -513,7 +527,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
             if (record.AccountToken is not null)
             {
                 secrets.Set(
-                    $"plex.account.{account.ServerId}",
+                    PlexAccountKey(account.ServerId),
                     record.AccountToken);
             }
         }
@@ -538,6 +552,12 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
         File.WriteAllText(_accountsPath, JsonSerializer.Serialize(accounts,
             new JsonSerializerOptions { WriteIndented = true }));
     }
+
+    /// <summary>
+    /// Where Plex's *account* token lives — the one that reaches plex.tv, as
+    /// distinct from the per-server access token under <see cref="SecretKey"/>.
+    /// </summary>
+    private static string PlexAccountKey(string serverId) => $"plex.account.{serverId}";
 
     private static string SecretKey(string serverId) => $"token.{serverId}";
 
@@ -600,7 +620,7 @@ public sealed class MozzServer(MozzCore core, ISecretStore secrets, string? acco
 
             if (canonical != chosen || group.Count() > 1) changed = true;
             MigrateCredential(group, canonical.ServerId, SecretKey);
-            MigrateCredential(group, canonical.ServerId, id => $"plex.account.{id}");
+            MigrateCredential(group, canonical.ServerId, PlexAccountKey);
         }
 
         if (writeIfChanged && changed) WriteAccounts(normalized);
