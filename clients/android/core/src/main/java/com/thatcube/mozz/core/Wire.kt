@@ -132,6 +132,8 @@ data class CoreRequest(
 
     /** Equalizer and loudness levelling — see [MozzPlaybackSettings]. */
     val playbackSettings: PlaybackSettings? = null,
+    val servers: List<RelayServerRecord>? = null,
+    val members: List<RelayMemberRecord>? = null,
 )
 
 /**

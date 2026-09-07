@@ -3,11 +3,14 @@ package com.thatcube.mozz.relay
 import android.util.Log
 import com.thatcube.mozz.core.MozzPlaybackSettings
 import com.thatcube.mozz.core.MozzRelay
+import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.pairing.PairingService
 
 /** What one relay run moved, for the log and for the settings screen. */
 data class RelayOutcome(
+    /** Servers this device did not have before — a phone that can now play. */
+    val importedServers: Int = 0,
     val importedHistory: Int = 0,
     val importedFeatures: Int = 0,
     val publishedFeatures: Int = 0,
@@ -27,6 +30,7 @@ class RelayService(
     private val relay: MozzRelay,
     private val pairing: PairingService,
     private val playbackSettings: MozzPlaybackSettings,
+    private val server: MozzServer,
     private val deviceId: String,
     private val deviceName: String,
     /** Told when the circle's settings differ from what this device held. */
@@ -62,6 +66,19 @@ class RelayService(
             onSettingsChanged(settings.settings.normalizesVolume)
         }
 
+        // Servers before the catalogue: a device that has just learned about a
+        // server should be able to hydrate that server's catalogue on the same
+        // run rather than waiting for the next one.
+        val servers = runCatching {
+            relay.syncServers(circle, deviceId, server.exportSyncedServers())
+        }.onFailure { Log.w(TAG, "server relay sync failed", it) }.getOrNull()
+
+        servers?.relayKey?.takeIf { it.isNotEmpty() && it != circle.relayKey }?.let { renewed ->
+            pairing.rememberRelayKey(renewed)
+            circle = circle.copy(relayKey = renewed)
+        }
+        val importedServers = servers?.servers?.let { server.importSyncedServers(it) } ?: 0
+
         val catalog = runCatching {
             relay.syncCatalog(
                 circle = circle,
@@ -75,8 +92,9 @@ class RelayService(
             pairing.rememberRelayKey(it)
         }
 
-        if (history == null && catalog == null) return null
+        if (history == null && catalog == null && servers == null) return null
         return RelayOutcome(
+            importedServers = importedServers,
             importedHistory = history?.imported ?: 0,
             importedFeatures = catalog?.importedFeatures ?: 0,
             publishedFeatures = catalog?.publishedFeatures ?: 0,
@@ -86,8 +104,8 @@ class RelayService(
             // phone now never spends, and nothing else on the device says so.
             Log.i(
                 TAG,
-                "relay: ${it.importedHistory} plays, ${it.importedFeatures} vectors in, " +
-                    "${it.publishedFeatures} out",
+                "relay: ${it.importedServers} servers, ${it.importedHistory} plays, " +
+                    "${it.importedFeatures} vectors in, ${it.publishedFeatures} out",
             )
         }
     }

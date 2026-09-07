@@ -190,6 +190,7 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
             relay = MozzRelay(core),
             pairing = pairing,
             playbackSettings = playbackSettings,
+            server = server,
             deviceId = playback.deviceId,
             deviceName = android.os.Build.MODEL,
             onSettingsChanged = { settings.normalizeVolume = it },

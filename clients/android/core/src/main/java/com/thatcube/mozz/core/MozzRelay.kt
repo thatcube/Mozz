@@ -1,5 +1,6 @@
 package com.thatcube.mozz.core
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -31,6 +32,51 @@ data class RelayCatalogCounts(
     val playlists: Int = 0,
     val playlistItems: Int = 0,
     val features: Int = 0,
+)
+
+/**
+ * One server as the circle knows it.
+ *
+ * Carries the credential, which is the point: a device that joins should be
+ * able to play music without its owner finding a password again. [removedAtMS]
+ * is how a sign-out travels — a record that vanished would simply be restored
+ * by the next device to publish, so removal has to be a fact rather than an
+ * absence.
+ */
+@Serializable
+data class RelayServerRecord(
+    val id: String,
+    val kind: String,
+    val name: String? = null,
+    @SerialName("baseURL") val baseUrl: String? = null,
+    val token: String? = null,
+    val accountToken: String? = null,
+    @SerialName("userID") val userId: String? = null,
+    val username: String? = null,
+    val serverMachineIdentifier: String? = null,
+    @SerialName("musicSectionIDs") val musicSectionIds: List<String>? = null,
+    val allMusicLibraries: Boolean? = null,
+    val updatedAtMS: Long = 0,
+    val removedAtMS: Long? = null,
+) {
+    val isRemoved: Boolean get() = removedAtMS != null
+}
+
+/** A device in the circle, by the name a person would recognise. */
+@Serializable
+data class RelayMemberRecord(
+    @SerialName("deviceID") val deviceId: String,
+    val name: String? = null,
+    val updatedAtMS: Long = 0,
+    val removedAtMS: Long? = null,
+)
+
+@Serializable
+data class RelayServerSync(
+    val servers: List<RelayServerRecord> = emptyList(),
+    val members: List<RelayMemberRecord> = emptyList(),
+    val relayKey: String = "",
+    val expiresAtMS: Long = 0,
 )
 
 @Serializable
@@ -126,6 +172,32 @@ class MozzRelay(private val core: MozzCore) {
             circle = circle,
             deviceId = deviceId,
             playbackSettings = settings,
+            relayEndpoint = endpoint,
+        )
+    )
+
+    /**
+     * The servers this listener is signed in to, and who is in the circle.
+     *
+     * The fourth thing ADR-0013 says pairing unblocks: a new phone or PC
+     * getting the user's servers without anyone retyping a password. What
+     * travels is what the relay always carries — ciphertext under the circle's
+     * keys — and the merge happens in the core, so this side only says what it
+     * has and applies what comes back.
+     */
+    suspend fun syncServers(
+        circle: CircleSecrets,
+        deviceId: String,
+        servers: List<RelayServerRecord>,
+        members: List<RelayMemberRecord> = emptyList(),
+        endpoint: String = DEFAULT_ENDPOINT,
+    ): RelayServerSync? = core.call(
+        CoreRequest(
+            cmd = "relaySyncServers",
+            circle = circle,
+            deviceId = deviceId,
+            servers = servers,
+            members = members,
             relayEndpoint = endpoint,
         )
     )

@@ -599,8 +599,128 @@ class MozzServer(
         }
 
         saveAccount(account)
+        stamp(account.serverId)
         return account
     }
+
+    // MARK: Sharing servers with the circle
+
+    /**
+     * What this device knows, in the shape the relay carries.
+     *
+     * The credential goes with it, which is the point of ADR-0013: a device
+     * that joins a circle should be able to play music without its owner
+     * finding a password again. It only ever leaves encrypted under the
+     * circle's own keys, and only to devices a person confirmed six digits for.
+     */
+    fun exportSyncedServers(): List<RelayServerRecord> {
+        // Seed accounts that were signed in before any of this existed. Without
+        // a stamp they publish as updatedAtMS 0, which loses every merge — so a
+        // server this device actually has would be silently outranked by
+        // anything another device says about it, including a stale removal.
+        val stamps = journal()
+        val unstamped = savedAccounts().map { it.serverId }.filterNot { stamps.containsKey(it) }
+        if (unstamped.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            writeJournal(stamps + unstamped.associateWith { now })
+        }
+        return savedAccounts().mapNotNull { account ->
+        val token = secrets.get(secretKey(account.serverId))?.takeIf { it.isNotEmpty() }
+            ?: return@mapNotNull null
+        RelayServerRecord(
+            id = account.serverId,
+            kind = account.kind.wire,
+            name = account.serverName,
+            baseUrl = account.baseUrl,
+            token = token,
+            accountToken = secrets.get(plexAccountKey(account.serverId))?.takeIf { it.isNotEmpty() },
+            userId = account.userId,
+            username = account.username,
+            serverMachineIdentifier = account.machineIdentifier,
+            musicSectionIds = account.musicSectionId?.let { listOf(it) },
+            allMusicLibraries = account.musicSectionId == null,
+            updatedAtMS = journal()[account.serverId] ?: 0L,
+        )
+        }
+    }
+
+    /**
+     * Take what the circle knows.
+     *
+     * Returns how many servers this device did not have before — the number
+     * worth telling somebody about, because it is the difference between a
+     * phone that can play music and one still asking for a password.
+     *
+     * A record marked removed is a sign-out that happened elsewhere, and is
+     * applied as one: the credential is forgotten here too. Removal has to be a
+     * fact rather than an absence, or the next device to publish would simply
+     * restore what somebody had just deleted.
+     */
+    fun importSyncedServers(remote: List<RelayServerRecord>): Int {
+        if (remote.isEmpty()) return 0
+        val existing = savedAccounts().associateBy { it.serverId }.toMutableMap()
+        var added = 0
+        for (record in remote) {
+            if (record.isRemoved) {
+                if (existing.remove(record.id) != null) {
+                    secrets.set(secretKey(record.id), null)
+                    secrets.set(plexAccountKey(record.id), null)
+                    writeJournal(journal() - record.id)
+                }
+                continue
+            }
+            val token = record.token?.takeIf { it.isNotEmpty() } ?: continue
+            val baseUrl = record.baseUrl?.takeIf { it.isNotEmpty() } ?: continue
+            val name = record.name?.takeIf { it.isNotEmpty() } ?: continue
+            val known = existing[record.id]
+            if (known == null) added += 1
+            existing[record.id] = ServerAccount(
+                serverId = record.id,
+                kind = BackendKind.parse(record.kind),
+                baseUrl = baseUrl,
+                serverName = name,
+                userId = record.userId,
+                username = record.username,
+                // Never adopted from another device: it is *that* device's
+                // identity with the server, and two installs sharing one would
+                // show up as a single device in somebody's Plex account.
+                clientIdentifier = known?.clientIdentifier ?: clientIdentifier(),
+                musicSectionId = known?.musicSectionId ?: record.musicSectionIds?.firstOrNull(),
+                machineIdentifier = record.serverMachineIdentifier,
+            )
+            secrets.set(secretKey(record.id), token)
+            record.accountToken?.takeIf { it.isNotEmpty() }
+                ?.let { secrets.set(plexAccountKey(record.id), it) }
+            writeJournal(journal() + (record.id to record.updatedAtMS))
+        }
+        writeAccounts(existing.values.toList())
+        return added
+    }
+
+    /**
+     * When each server was last changed here, so the circle can tell a newer
+     * record from an older one. Stamped on every write rather than derived,
+     * because "when did this change" is not recoverable from the account row.
+     */
+    private fun stamp(serverId: String) {
+        writeJournal(journal() + (serverId to System.currentTimeMillis()))
+    }
+
+    /** Server id to the moment it last changed here. */
+    private fun journal(): Map<String, Long> = runCatching {
+        if (!journalFile.exists()) emptyMap()
+        else MozzCore.json.decodeFromString<Map<String, Long>>(journalFile.readText())
+    }.getOrDefault(emptyMap())
+
+    private fun writeJournal(entries: Map<String, Long>) {
+        runCatching {
+            journalFile.parentFile?.mkdirs()
+            journalFile.writeText(MozzCore.json.encodeToString(entries))
+        }
+    }
+
+    private val journalFile: File
+        get() = File(accountsFile.parentFile, "server-journal.json")
 
     private fun writeAccounts(accounts: List<ServerAccount>) {
         accountsFile.parentFile?.mkdirs()
