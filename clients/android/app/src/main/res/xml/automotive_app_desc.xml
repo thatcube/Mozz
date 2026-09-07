@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What Android Auto is told this app is for.
+
+    "media" is the whole of it: Mozz draws no screens in a car. The car builds
+    its own list from the browse tree in MozzPlaybackService and its own
+    transport from the session, which is why a phone app needs no car UI to be
+    usable while driving — and why a session with nothing to browse shows up as
+    an app you can only see what is already playing on.
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

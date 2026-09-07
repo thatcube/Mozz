@@ -45,12 +45,25 @@
             </intent-filter>
         </activity>
 
+        <!-- Tells Android Auto this app is a media app; see automotive_app_desc. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <service
             android:name=".playback.MozzPlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
+                <!--
+                    Both actions on purpose. Android Auto looks for the browser
+                    action to decide the app is usable in a car; everything
+                    already connecting to this service — the app itself, the
+                    notification, Bluetooth — looks for the session one.
+                -->
+                <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
     </application>
