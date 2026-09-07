@@ -241,6 +241,7 @@ class TrackActions(
     private val downloads: MozzDownloads,
     private val nav: Navigator,
     private val scope: CoroutineScope,
+    private val toasts: ToastCenter,
 ) {
     fun playNext(track: Track) = playback.playNext(track)
     fun startRadio(track: Track) = playback.startRadio(track)
@@ -266,6 +267,31 @@ class TrackActions(
             }
         }
     }
+    /**
+     * Keep a whole album, playlist or mix offline.
+     *
+     * One record at a time through the song menu was the only way to do this,
+     * which for a twelve-track album is twelve menus. iOS has had "Download
+     * Album" since it had downloads and the desktop has a button for it.
+     *
+     * Already-downloaded tracks are enqueued again rather than filtered out:
+     * the worker skips a file it already has, and asking the core which of
+     * twelve are present before starting is a round trip that changes nothing.
+     */
+    fun downloadAll(tracks: List<Track>, context: android.content.Context) {
+        if (tracks.isEmpty()) return
+        scope.launch {
+            for (track in tracks) {
+                runCatching { downloads.enqueue(track.serverId, track.remoteId) }
+                DownloadWorker.enqueue(context, track.serverId, track.remoteId)
+            }
+            toasts.show(
+                if (tracks.size == 1) "Keeping 1 song offline"
+                else "Keeping ${tracks.size} songs offline"
+            )
+        }
+    }
+
     fun addToQueue(track: Track) = playback.addToQueue(track)
     fun goToArtist(track: Track) = nav.openArtist(track.serverId, track.artistRemoteId)
     fun goToAlbum(track: Track) = nav.openAlbum(track.serverId, track.albumRemoteId)

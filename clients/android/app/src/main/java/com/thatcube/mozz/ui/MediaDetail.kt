@@ -497,7 +497,20 @@ private fun TitleBlock(title: String, subtitle: String?, meta: String?, align: T
  * loudest thing on screen.
  */
 @Composable
-fun DetailPlayActions(onPlay: () -> Unit, onShuffle: () -> Unit) {
+fun DetailPlayActions(
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    /**
+     * Keep the whole collection offline. Null where there is nothing fixed to
+     * keep — an artist is not a track list, it is a person.
+     *
+     * Icon-only and last, because it is the rarer of the three and Play is what
+     * the page is for. iOS has offered this on an album since it had downloads
+     * and the desktop has a button for it; Android could only keep a record by
+     * going through its songs one menu at a time.
+     */
+    onDownload: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -516,12 +529,22 @@ fun DetailPlayActions(onPlay: () -> Unit, onShuffle: () -> Unit) {
             onClick = onShuffle,
             modifier = Modifier.weight(1f),
         )
+        if (onDownload != null) {
+            DetailActionButton(
+                label = null,
+                icon = R.drawable.ic_download,
+                filled = false,
+                onClick = onDownload,
+                modifier = Modifier.width(48.dp),
+            )
+        }
     }
 }
 
 @Composable
 private fun DetailActionButton(
-    label: String,
+    /** Null for an icon-only button, which is what the narrow one is. */
+    label: String?,
     icon: Int,
     filled: Boolean,
     onClick: () -> Unit,
@@ -537,14 +560,23 @@ private fun DetailActionButton(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val tint = if (filled) Color.Black else Color.White
-        Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = tint,
+        Icon(
+            painterResource(icon),
+            // The icon carries the whole meaning where there is no label, so it
+            // is the only thing a screen reader has to go on.
+            contentDescription = label ?: "Download",
+            tint = tint,
+            modifier = Modifier.size(20.dp),
         )
+        if (label != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = tint,
+            )
+        }
     }
 }
 

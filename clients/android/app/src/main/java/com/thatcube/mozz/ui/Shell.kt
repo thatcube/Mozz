@@ -140,7 +140,7 @@ fun MozzShell(
     // inside TabContent, and the player is a sibling of the tabs rather than a
     // child of them. That is why its overflow menu sat disabled.
     val playerActions = remember(library, playback, nav) {
-        TrackActions(library, playback, downloads, nav, scope)
+        TrackActions(library, playback, downloads, nav, scope, toasts)
     }
     val density = LocalDensity.current
 
@@ -316,6 +316,7 @@ fun MozzShell(
                     downloads = downloads,
                     pairing = pairing,
                     pairingDiscovery = pairingDiscovery,
+                    toasts = toasts,
                     wide = wide,
                     bottomReserve = Dock.reserve(
                         hasTrack,
@@ -519,6 +520,7 @@ private fun TabContent(
     downloads: MozzDownloads,
     pairing: PairingService,
     pairingDiscovery: PairingDiscovery,
+    toasts: ToastCenter,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
@@ -530,7 +532,7 @@ private fun TabContent(
     // there. Stated once, here, so no page has to remember it.
     val scope = rememberCoroutineScope()
     val actions = remember(library, playback, nav) {
-        TrackActions(library, playback, downloads, nav, scope)
+        TrackActions(library, playback, downloads, nav, scope, toasts)
     }
 
     CompositionLocalProvider(

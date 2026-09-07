@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.R
@@ -70,6 +71,7 @@ fun AlbumDetailPage(
         loaded = true
     }
 
+    val context = LocalContext.current
     MediaDetail(
         server = server,
         serverId = album.serverId,
@@ -85,6 +87,9 @@ fun AlbumDetailPage(
             DetailPlayActions(
                 onPlay = { playback.play(tracks, 0) },
                 onShuffle = { playback.play(tracks.shuffled(), 0) },
+                onDownload = LocalTrackActions.current?.let { actions ->
+                    { actions.downloadAll(tracks, context) }
+                },
             )
         },
     ) {
@@ -258,6 +263,7 @@ fun PlaylistDetailPage(
         loaded = true
     }
 
+    val context = LocalContext.current
     MediaDetail(
         server = server,
         serverId = playlist.serverId,
@@ -274,6 +280,9 @@ fun PlaylistDetailPage(
             DetailPlayActions(
                 onPlay = { playback.play(tracks, 0) },
                 onShuffle = { playback.play(tracks.shuffled(), 0) },
+                onDownload = LocalTrackActions.current?.let { actions ->
+                    { actions.downloadAll(tracks, context) }
+                },
             )
         },
     ) {
@@ -396,6 +405,7 @@ private fun CollectionDetail(
     }
     val heroServerId = serverId.ifEmpty { tracks.firstOrNull()?.serverId.orEmpty() }
 
+    val context = LocalContext.current
     MediaDetail(
         server = server,
         serverId = heroServerId,
@@ -411,6 +421,9 @@ private fun CollectionDetail(
             DetailPlayActions(
                 onPlay = { playback.play(tracks, 0) },
                 onShuffle = { playback.play(tracks.shuffled(), 0) },
+                onDownload = LocalTrackActions.current?.let { actions ->
+                    { actions.downloadAll(tracks, context) }
+                },
             )
         },
     ) {
