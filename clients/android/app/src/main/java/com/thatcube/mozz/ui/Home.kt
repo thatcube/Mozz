@@ -1,5 +1,7 @@
 package com.thatcube.mozz.ui
 
+import androidx.compose.material3.TextButton
+import com.thatcube.mozz.continuity.ContinuityOffer
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,6 +79,10 @@ fun HomeRoot(
     playback: PlayerController,
     nav: Navigator,
     bottomReserve: Dp,
+    /** What another device left off at, when there is anything worth offering. */
+    continuityOffer: ContinuityOffer? = null,
+    onResumeContinuity: () -> Unit = {},
+    onDismissContinuity: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var mixes by remember { mutableStateOf<List<HomeMix>>(emptyList()) }
@@ -129,6 +135,17 @@ fun HomeRoot(
             item(key = "header") {
                 TabHeader("Home", inset = inset) {
                     SettingsButton { nav.open(Route.Settings) }
+                }
+            }
+
+            continuityOffer?.let { offer ->
+                item(key = "continuity") {
+                    ContinueHere(
+                        offer = offer,
+                        inset = inset,
+                        onResume = onResumeContinuity,
+                        onDismiss = onDismissContinuity,
+                    )
                 }
             }
 
@@ -358,6 +375,54 @@ fun TrackCell(track: Track, server: MozzServer, width: Dp, onClick: () -> Unit) 
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/**
+ * Where another device got to, offered rather than imposed.
+ *
+ * At the top of Home and nowhere else: it is the first thing you see on opening
+ * the app, which is exactly when picking up where a laptop left off is worth
+ * asking about, and it is dismissible because the answer is often no.
+ *
+ * Never shown while this phone is playing something — that decision is made
+ * before it gets here, in `ContinuityCoordinator.offerFor`, because an offer
+ * over the top of music is an invitation to stop listening.
+ */
+@Composable
+private fun ContinueHere(
+    offer: ContinuityOffer,
+    inset: Dp,
+    onResume: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = inset)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onResume)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                offer.headline,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                offer.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalContentColor.current.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TextButton(onClick = onDismiss) { Text("Not now") }
     }
 }
 

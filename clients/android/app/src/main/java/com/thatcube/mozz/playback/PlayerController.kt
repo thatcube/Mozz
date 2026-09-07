@@ -14,6 +14,7 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlaybackReportState
 import com.thatcube.mozz.core.PlayEventKind
 import com.thatcube.mozz.core.MozzLibrary
+import com.thatcube.mozz.continuity.CheckpointReason
 import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.downloads.DownloadWorker
 import com.thatcube.mozz.core.Track
@@ -120,6 +121,17 @@ class PlayerController(
     /** One top-up at a time: transitions fire faster than a batch comes back. */
     private var toppingUp = false
 
+    /**
+     * Cross-device resume (ADR-0010).
+     *
+     * Deliberately separate from the scrobble hook, which fires only on
+     * transport transitions and never during steady playback — a checkpoint
+     * written from that would sit at a stale position for the whole of a long
+     * track. Whoever sets this owns the throttling and the network; this side
+     * only says when something happened.
+     */
+    var onCheckpoint: ((CheckpointReason) -> Unit)? = null
+
     /** The retry schedule currently working against a failure, if any. */
     private var retryJob: Job? = null
     private var attemptsSpent = 0
@@ -219,6 +231,7 @@ class PlayerController(
                     if (playWhenReady) PlaybackReportState.PLAYING else PlaybackReportState.PAUSED,
                     media.currentPosition,
                 )
+                onCheckpoint?.invoke(CheckpointReason.TRANSPORT_CHANGED)
             }
 
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
@@ -254,6 +267,7 @@ class PlayerController(
                 }
                 nowPlaying = arriving
                 levelVolume(media, arriving)
+                onCheckpoint?.invoke(CheckpointReason.TRACK_CHANGED)
                 topUpStation(media)
                 publish(media)
             }
@@ -268,7 +282,12 @@ class PlayerController(
             while (true) {
                 delay(POSITION_TICK_MS)
                 val player = controller ?: continue
-                if (player.isPlaying) publish(player)
+                if (!player.isPlaying) continue
+                publish(player)
+                // The consumer throttles this to one write every twenty
+                // seconds; firing it from the clock is what keeps a long
+                // track's stored position from sitting where it started.
+                onCheckpoint?.invoke(CheckpointReason.PERIODIC)
             }
         }
     }
@@ -328,6 +347,7 @@ class PlayerController(
         // before the rest of this function has run.
         nowPlaying = first
         levelVolume(media, first)
+        onCheckpoint?.invoke(CheckpointReason.QUEUE_CHANGED)
         media.setMediaItems(listOf(firstItem), 0, 0)
         media.prepare()
         media.play()
@@ -552,6 +572,7 @@ class PlayerController(
     }
 
     fun seekTo(millis: Long) {
+        onCheckpoint?.invoke(CheckpointReason.SEEKED)
         controller?.seekTo(millis.coerceAtLeast(0))
     }
 

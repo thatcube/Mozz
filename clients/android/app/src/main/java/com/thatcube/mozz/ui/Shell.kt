@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.thatcube.mozz.core.LikeGlyph
+import com.thatcube.mozz.continuity.ContinuityOffer
 import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.pairing.PairingDiscovery
 import com.thatcube.mozz.pairing.PairingService
@@ -89,6 +90,9 @@ fun MozzShell(
     pairing: PairingService,
     pairingDiscovery: PairingDiscovery,
     toasts: ToastCenter,
+    continuityOffer: ContinuityOffer? = null,
+    onResumeContinuity: () -> Unit = {},
+    onDismissContinuity: () -> Unit = {},
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -317,6 +321,9 @@ fun MozzShell(
                     pairing = pairing,
                     pairingDiscovery = pairingDiscovery,
                     toasts = toasts,
+                    continuityOffer = continuityOffer,
+                    onResumeContinuity = onResumeContinuity,
+                    onDismissContinuity = onDismissContinuity,
                     wide = wide,
                     bottomReserve = Dock.reserve(
                         hasTrack,
@@ -521,6 +528,9 @@ private fun TabContent(
     pairing: PairingService,
     pairingDiscovery: PairingDiscovery,
     toasts: ToastCenter,
+    continuityOffer: ContinuityOffer?,
+    onResumeContinuity: () -> Unit,
+    onDismissContinuity: () -> Unit,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
     onResync: () -> Unit,
@@ -552,6 +562,9 @@ private fun TabContent(
                 playback = playback,
                 nav = nav,
                 bottomReserve = bottomReserve,
+                continuityOffer = continuityOffer,
+                onResumeContinuity = onResumeContinuity,
+                onDismissContinuity = onDismissContinuity,
             )
             AppTab.LIBRARY -> LibraryRoot(
                 account = account,

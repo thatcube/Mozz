@@ -13,6 +13,8 @@ import com.thatcube.mozz.core.MozzLibrary
 import com.thatcube.mozz.core.MozzDownloads
 import com.thatcube.mozz.core.MozzRadio
 import com.thatcube.mozz.core.MozzServer
+import com.thatcube.mozz.continuity.ContinuityCoordinator
+import com.thatcube.mozz.core.MozzContinuity
 import com.thatcube.mozz.core.MozzPairing
 import com.thatcube.mozz.core.MozzRelay
 import com.thatcube.mozz.relay.RelayService
@@ -186,6 +188,18 @@ class MozzApplication : Application(), SingletonImageLoader.Factory {
         RelayService(
             relay = MozzRelay(core),
             pairing = pairing,
+            deviceId = playback.deviceId,
+            deviceName = android.os.Build.MODEL,
+        )
+    }
+
+    /**
+     * Cross-device resume (ADR-0010). Application-scoped because a checkpoint
+     * outlives the screen that was open when playback moved.
+     */
+    val continuity: ContinuityCoordinator by lazy {
+        ContinuityCoordinator(
+            continuity = MozzContinuity(core),
             deviceId = playback.deviceId,
             deviceName = android.os.Build.MODEL,
         )

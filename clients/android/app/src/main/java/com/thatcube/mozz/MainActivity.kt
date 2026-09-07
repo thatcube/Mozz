@@ -1,5 +1,6 @@
 package com.thatcube.mozz
 
+import com.thatcube.mozz.continuity.ContinuityOffer
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -99,14 +100,15 @@ class MainActivity : ComponentActivity() {
                 // reach one would be worse than a local.
                 CompositionLocalProvider(LocalMozzSettings provides settings) {
                     val state by viewModel.state.collectAsStateWithLifecycle()
-                    Root(state)
+                    val continuityOffer by viewModel.continuityOffer.collectAsStateWithLifecycle()
+                    Root(state, continuityOffer)
                 }
             }
         }
     }
 
     @Composable
-    private fun Root(state: AppState) {
+    private fun Root(state: AppState, continuityOffer: ContinuityOffer?) {
         when (state) {
             AppState.Starting -> StartingScreen()
 
@@ -134,6 +136,9 @@ class MainActivity : ComponentActivity() {
                 pairing = (application as MozzApplication).pairing,
                 pairingDiscovery = (application as MozzApplication).pairingDiscovery,
                 toasts = (application as MozzApplication).toasts,
+                continuityOffer = continuityOffer,
+                onResumeContinuity = { viewModel.resumeContinuity() },
+                onDismissContinuity = viewModel::dismissContinuityOffer,
                 onResync = viewModel::resync,
                 onSignOut = viewModel::signOut,
             )

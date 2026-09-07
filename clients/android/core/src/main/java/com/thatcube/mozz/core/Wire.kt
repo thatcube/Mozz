@@ -119,6 +119,16 @@ data class CoreRequest(
     val musicSectionIDs: List<String>? = null,
     val allMusicLibraries: Boolean? = null,
     val windowDays: Int? = null,
+
+    // Cross-device resume (ADR-0010). One shared slot on the user's own server,
+    // written by whichever device is playing.
+    @SerialName("playbackRunID") val playbackRunID: String? = null,
+    val cursorSequence: Long? = null,
+    val capturedAtMS: Long? = null,
+    @SerialName("currentRemoteID") val currentRemoteID: String? = null,
+    val currentAbsoluteIndex: Int? = null,
+    val positionMS: Long? = null,
+    val queue: ContinuityQueueInput? = null,
 )
 
 /**

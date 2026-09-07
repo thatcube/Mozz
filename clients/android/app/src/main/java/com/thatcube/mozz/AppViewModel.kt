@@ -12,6 +12,9 @@ import com.thatcube.mozz.core.MozzServer
 import com.thatcube.mozz.core.PlexLink
 import com.thatcube.mozz.core.ServerAccount
 import com.thatcube.mozz.core.SyncStatus
+import com.thatcube.mozz.continuity.ContinuityCoordinator
+import com.thatcube.mozz.continuity.ContinuityOffer
+import com.thatcube.mozz.playback.PlayerController
 import com.thatcube.mozz.relay.RelayService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,7 +69,28 @@ class AppViewModel(
      * honestly than a stub that quietly does nothing.
      */
     private val relay: RelayService? = null,
+    /**
+     * Cross-device resume. Null where nothing wired it, which is the same
+     * honesty as [relay]: a device may legitimately not have one.
+     */
+    private val continuity: ContinuityCoordinator? = null,
+    private val playback: PlayerController? = null,
 ) : ViewModel() {
+
+    private val _continuityOffer = MutableStateFlow<ContinuityOffer?>(null)
+
+    /**
+     * What another device left off at, when it is worth offering.
+     *
+     * Null is the ordinary state: nothing stored, this device's own
+     * checkpoint, something already playing here, or a server with no store
+     * for it at all — which is every Plex server, and is not a failure.
+     */
+    val continuityOffer: StateFlow<ContinuityOffer?> = _continuityOffer.asStateFlow()
+
+    fun dismissContinuityOffer() {
+        _continuityOffer.value = null
+    }
 
     private val _state = MutableStateFlow<AppState>(AppState.Starting)
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -101,6 +125,7 @@ class AppViewModel(
                     verifyReachable(account)
                     flushFavorites(account.serverId)
                     syncCircle(account)
+                    watchContinuity(account)
                 }
             }
         }.onFailure { error ->
@@ -208,6 +233,7 @@ class AppViewModel(
             _state.value = AppState.Ready(target)
             flushFavorites(target.serverId)
             syncCircle(target)
+            watchContinuity(target)
         }
             .onFailure { fail("Sync", it) }
     }
@@ -236,6 +262,70 @@ class AppViewModel(
      */
     private fun syncCircle(account: ServerAccount) = viewModelScope.launch {
         runCatching { relay?.sync(account) }
+    }
+
+    /**
+     * Read what another device left, then start writing what this one is doing.
+     *
+     * In that order and not the other way round: a phone paused in a pocket
+     * while a laptop took over would otherwise publish what it remembered and
+     * clobber the newer session before it had read it.
+     */
+    private fun watchContinuity(account: ServerAccount) = viewModelScope.launch {
+        val coordinator = continuity ?: return@launch
+        val player = playback ?: return@launch
+        _continuityOffer.value = runCatching {
+            coordinator.reconcile(
+                serverId = account.serverId,
+                isPlayingLocally = player.state.value.isPlaying,
+            )
+        }.getOrNull()
+
+        player.onCheckpoint = { reason ->
+            val snapshot = player.state.value
+            viewModelScope.launch {
+                coordinator.checkpoint(
+                    reason = reason,
+                    account = account,
+                    queue = snapshot.queue,
+                    indexInQueue = snapshot.indexInQueue,
+                    positionMS = snapshot.positionMillis,
+                    isPlaying = snapshot.intendsToPlay,
+                    repeatMode = snapshot.repeat.name.lowercase(),
+                    isShuffled = snapshot.shuffle,
+                )
+            }
+        }
+    }
+
+    /**
+     * Take up the offer: rebuild what the other device was playing and drop in
+     * where it left off.
+     *
+     * The queue is resolved a track at a time through the catalogue, because a
+     * checkpoint carries locators and titles rather than playable rows. A queue
+     * that cannot be rebuilt still leaves the one song, which is the part
+     * somebody actually wanted back.
+     */
+    fun resumeContinuity() = viewModelScope.launch {
+        val offer = _continuityOffer.value ?: return@launch
+        val account = (state.value as? AppState.Ready)?.account ?: return@launch
+        val player = playback ?: return@launch
+        _continuityOffer.value = null
+
+        val cursor = offer.snapshot.cursor
+        val hydrated = offer.snapshot.hydratedTracks.associateBy { it.remoteId }
+        val wanted = offer.snapshot.queue?.items?.map { it.locator.remoteId }
+            ?: listOf(cursor.current.remoteId)
+        val tracks = wanted.take(RESUME_QUEUE_LIMIT).mapNotNull { remoteId ->
+            hydrated[remoteId]
+                ?: runCatching { library.track(account.serverId, remoteId) }.getOrNull()
+        }
+        if (tracks.isEmpty()) return@launch
+
+        val startAt = tracks.indexOfFirst { it.remoteId == cursor.current.remoteId }.coerceAtLeast(0)
+        player.play(tracks, startAt).join()
+        if (cursor.positionMS > 0) player.seekTo(cursor.positionMS)
     }
 
     /** Re-mirror the catalogue for the account already signed in. */
@@ -285,10 +375,24 @@ class AppViewModel(
                 val application =
                     this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
                         as MozzApplication
-                AppViewModel(application.server, application.library, application.relay)
+                AppViewModel(
+                    application.server,
+                    application.library,
+                    application.relay,
+                    application.continuity,
+                    application.playback,
+                )
             }
         }
 
         private const val TAG = "Mozz"
     }
 }
+
+/**
+ * How much of another device's queue to rebuild.
+ *
+ * A screen's worth, not a library: resolving is a round trip per track, and
+ * nobody resumes into two hundred songs they need immediately.
+ */
+private const val RESUME_QUEUE_LIMIT = 200
