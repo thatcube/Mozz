@@ -120,6 +120,15 @@ public sealed record Track(
     public string RatingText => Rating is > 0
         ? $"{Rating.Value.ToString("0.#", CultureInfo.InvariantCulture)}/5"
         : "Not rated";
+
+    /// <summary>
+    /// Whether there is a rating worth showing on a row.
+    ///
+    /// Distinct from "Rating is not null": a cleared rating comes back as zero
+    /// rather than as nothing, and a row that binds to null-ness alone
+    /// announces "Not rated" on every unrated song in the library.
+    /// </summary>
+    public bool HasRating => Rating is > 0;
 }
 
 public sealed record FavoriteMutationResult(

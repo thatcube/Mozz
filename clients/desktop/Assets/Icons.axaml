@@ -27,6 +27,16 @@
     -->
     <StreamGeometry x:Key="IconDownload">M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2 M7 11l5 5l5 -5 M12 4l0 12</StreamGeometry>
     <StreamGeometry x:Key="IconTrash">M4 7l16 0 M10 11l0 6 M14 11l0 6 M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12 M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3</StreamGeometry>
+    <!--
+        "Play next" — queue lines with a play triangle, which is what iOS's
+        text.line.first.and.arrowtriangle.forward says too.
+
+        Not the transport skip glyph: that one is authored filled, so stroking
+        its outline draws both edges of the bar and it arrives twice as thick as
+        every other icon in the menu. It also means "next track" rather than
+        "play this one next", which is a different promise.
+    -->
+    <StreamGeometry x:Key="IconPlayNext">M4 7h11 M4 11h11 M4 15h7 M16 10l5 3.5l-5 3.5z</StreamGeometry>
     <!-- Tabler "dots" — the overflow control every row now carries. -->
     <StreamGeometry x:Key="IconDots">M5 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M17 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0</StreamGeometry>
     <StreamGeometry x:Key="IconMusic">M3 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0 M13 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0 M9 17v-13h10v13 M9 8h10</StreamGeometry>

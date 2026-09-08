@@ -20,13 +20,33 @@ public class TrackMenuTests
         TrackMenu.SetTrack(row, Song());
 
         var flyout = Assert.IsType<MenuFlyout>(row.ContextFlyout);
-        // Like leads, as it does on Android — the action people reach for most,
-        // and the only one that says something about the song rather than about
-        // what to do with it next.
+        // Both ways of saying "I like this" are built; which one is shown is
+        // decided when the menu opens, from what the server can actually keep —
+        // Plex records star ratings and no favourite, Jellyfin the reverse.
         Assert.Equal(
-            ["Like", "Play Next", "Add to Queue", "Start Radio", "Go to Artist", "Go to Album",
-             "Download", "Don't recommend this track", "Don't recommend this artist"],
+            ["Like", "Rating", "Play Next", "Add to Queue", "Start Radio", "Go to Artist",
+             "Go to Album", "Download", "Don't recommend this track", "Don't recommend this artist"],
             flyout.ItemsSource!.Cast<object>().OfType<MenuItem>().Select(i => i.Header));
+    }
+
+    [Fact]
+    public void RatingOffersFiveStarsAndAWayBackToNone()
+    {
+        var row = new Border();
+        TrackMenu.SetTrack(row, Song());
+
+        var flyout = Assert.IsType<MenuFlyout>(row.ContextFlyout);
+        var rating = flyout.ItemsSource!.Cast<object>().OfType<MenuItem>()
+            .Single(i => Equals(i.Header, "Rating"));
+
+        // Half steps, because the core clamps to 0.5 and Plex stores halves;
+        // whole stars only would round somebody's four-and-a-half down every
+        // time they opened this. And "No Rating", because a rating and no
+        // rating are different things — a control that cannot say the second
+        // turns a misclick into a permanent opinion.
+        Assert.Equal(
+            ["½", "★", "★½", "★★", "★★½", "★★★", "★★★½", "★★★★", "★★★★½", "★★★★★", "No Rating"],
+            rating.ItemsSource!.Cast<object>().OfType<MenuItem>().Select(i => i.Header));
     }
 
     [Fact]

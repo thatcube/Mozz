@@ -591,7 +591,19 @@
                                              does not already know it is there has no reason to try. Both appear
                                              with the pointer, on the same rule. -->
                                         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <!-- A rated song says so, the way a liked one shows a
+                                                 filled heart. Only ever set on a server that keeps
+                                                 ratings, so the binding needs no second condition:
+                                                 a favourites server leaves it null. -->
+                                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
+                                                        Margin="0,0,8,0"
+                                                        IsVisible="{Binding HasRating}">
+                                                <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
+                                                                     Brush="{DynamicResource TextSecondary}" />
+                                                <TextBlock Text="{Binding RatingText}" Classes="secondary" FontSize="12" />
+                                            </StackPanel>
                                             <Button Classes="ghost rowAction trackFavoriteColumn"
+                                                    IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}"
                                                     Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
                                                     CommandParameter="{Binding}"
                                                     ToolTip.Tip="{Binding FavoriteLabel}">
@@ -852,7 +864,19 @@
                                              does not already know it is there has no reason to try. Both appear
                                              with the pointer, on the same rule. -->
                                         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <!-- A rated song says so, the way a liked one shows a
+                                                 filled heart. Only ever set on a server that keeps
+                                                 ratings, so the binding needs no second condition:
+                                                 a favourites server leaves it null. -->
+                                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
+                                                        Margin="0,0,8,0"
+                                                        IsVisible="{Binding Track.HasRating}">
+                                                <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
+                                                                     Brush="{DynamicResource TextSecondary}" />
+                                                <TextBlock Text="{Binding Track.RatingText}" Classes="secondary" FontSize="12" />
+                                            </StackPanel>
                                             <Button Classes="ghost rowAction trackFavoriteColumn"
+                                                    IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}"
                                                     Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
                                                     CommandParameter="{Binding Track}"
                                                     ToolTip.Tip="{Binding Track.FavoriteLabel}">
@@ -1366,7 +1390,19 @@
                                              does not already know it is there has no reason to try. Both appear
                                              with the pointer, on the same rule. -->
                                         <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <!-- A rated song says so, the way a liked one shows a
+                                                 filled heart. Only ever set on a server that keeps
+                                                 ratings, so the binding needs no second condition:
+                                                 a favourites server leaves it null. -->
+                                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
+                                                        Margin="0,0,8,0"
+                                                        IsVisible="{Binding Track.HasRating}">
+                                                <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
+                                                                     Brush="{DynamicResource TextSecondary}" />
+                                                <TextBlock Text="{Binding Track.RatingText}" Classes="secondary" FontSize="12" />
+                                            </StackPanel>
                                             <Button Classes="ghost rowAction trackFavoriteColumn"
+                                                    IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}"
                                                     Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
                                                     CommandParameter="{Binding Track}"
                                                     ToolTip.Tip="{Binding Track.FavoriteLabel}">

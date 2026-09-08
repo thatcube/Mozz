@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
@@ -19,8 +21,27 @@ namespace Mozz.Desktop.Controls;
 /// already exposes every one of these as a generated command; declaring the
 /// interface on it adds nothing but the name.
 /// </remarks>
+/// <summary>One track and the rating being given to it.</summary>
+/// <remarks>
+/// A command takes one parameter and rating needs two, so the pair travels as
+/// one value rather than the menu holding the track in a field that a recycled
+/// row would invalidate.
+/// </remarks>
+public sealed record TrackRating(Track Track, double? Stars);
+
 public interface ITrackMenuCommands
 {
+    /// <summary>
+    /// Whether this server keeps star ratings rather than a boolean favourite.
+    ///
+    /// Plex has per-user ratings and no favourite; Jellyfin is the reverse.
+    /// Offering "Like" on Plex throws away four fifths of what the server can
+    /// record, and offering stars on Jellyfin promises precision it cannot
+    /// keep.
+    /// </summary>
+    bool UsesRatings { get; }
+
+    ICommand RateTrackCommand { get; }
     ICommand ToggleFavoriteCommand { get; }
     ICommand PlayTrackNextCommand { get; }
     ICommand AddTrackToQueueCommand { get; }
@@ -89,20 +110,30 @@ public static class TrackMenu
     private static MenuFlyout Build(Control owner)
     {
         var flyout = new MenuFlyout();
-        // Like leads, as it does on Android. It is the action people reach for
-        // most and the only one that says something about the song rather than
-        // about what to do with it next.
+        // Whichever of the two this server actually keeps leads the menu. It is
+        // the action people reach for most and the only one that says something
+        // about the song rather than about what to do with it next.
         var like = Item(owner, "Like", c => c.ToggleFavoriteCommand, "IconHeartOutline");
-        // The word has to be right at the moment the menu opens, not at the
-        // moment the row was built: a row is recycled under a different song,
-        // and the same song is liked and unliked without the row changing.
+        var rate = RatingItem(owner);
+        // Decided when the menu opens, not when the row was built: a row is
+        // recycled under a different song, the same song is liked and unliked
+        // without the row changing, and the server can be swapped underneath
+        // the whole list.
         flyout.Opening += (_, _) =>
+        {
+            var commands = Commands(owner);
+            var ratings = commands?.UsesRatings == true;
+            like.IsVisible = !ratings;
+            rate.IsVisible = ratings;
             like.Header = GetTrack(owner)?.IsFavorite == true ? "Unlike" : "Like";
+            MarkRating(rate, GetTrack(owner)?.Rating);
+        };
         flyout.ItemsSource = new object[]
         {
             like,
+            rate,
             new Separator(),
-            Item(owner, "Play Next", c => c.PlayTrackNextCommand, "IconSkipForward"),
+            Item(owner, "Play Next", c => c.PlayTrackNextCommand, "IconPlayNext"),
             Item(owner, "Add to Queue", c => c.AddTrackToQueueCommand, "IconQueue"),
             Item(owner, "Start Radio", c => c.StartTrackRadioCommand, "IconWaveform"),
             new Separator(),
@@ -115,6 +146,63 @@ public static class TrackMenu
             Item(owner, "Don't recommend this artist", c => c.SuppressTrackArtistCommand, "IconCircleX"),
         };
         return flyout;
+    }
+
+    /// <summary>
+    /// A submenu of stars, for a server that keeps ratings.
+    ///
+    /// Five entries and a way back to none, because "no rating" and "one star"
+    /// are different things and a control that cannot say the first turns an
+    /// accident into a permanent opinion.
+    /// </summary>
+    private static MenuItem RatingItem(Control owner)
+    {
+        var stars = new List<object>();
+        // Half steps, because the core clamps to 0.5 and Plex stores halves —
+        // offering only whole stars would round somebody's four-and-a-half down
+        // every time they touched the menu.
+        for (var half = 1; half <= 10; half++)
+        {
+            var value = half / 2.0;
+            var star = new MenuItem { Header = Stars(value), Tag = value };
+            star.Click += (_, _) => Rate(owner, value);
+            stars.Add(star);
+        }
+        stars.Add(new Separator());
+        var clear = new MenuItem { Header = "No Rating", Tag = null };
+        clear.Click += (_, _) => Rate(owner, null);
+        stars.Add(clear);
+
+        return new MenuItem { Header = "Rating", Icon = Glyph("IconStar"), ItemsSource = stars };
+    }
+
+    /// <summary>
+    /// A rating drawn as stars, with a half where there is one.
+    ///
+    /// "★★½" rather than "2.5" because the row above and the player below both
+    /// draw stars, and a menu that spelt the number would be the only place in
+    /// the application talking about ratings in digits.
+    /// </summary>
+    private static string Stars(double value)
+    {
+        var whole = (int)value;
+        return new string('\u2605', whole) + (value > whole ? "\u00BD" : "");
+    }
+
+    /// <summary>Ticks whichever star count the track already carries.</summary>
+    private static void MarkRating(MenuItem rating, double? current)
+    {
+        foreach (var entry in rating.ItemsSource?.OfType<MenuItem>() ?? [])
+        {
+            entry.Icon = Equals(entry.Tag as double?, current) ? Glyph("IconCheck") : null;
+        }
+    }
+
+    private static void Rate(Control owner, double? stars)
+    {
+        if (Commands(owner) is not { } commands || GetTrack(owner) is not { } track) return;
+        var parameter = new TrackRating(track, stars);
+        if (commands.RateTrackCommand.CanExecute(parameter)) commands.RateTrackCommand.Execute(parameter);
     }
 
     /// <summary>

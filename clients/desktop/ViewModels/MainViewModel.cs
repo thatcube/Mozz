@@ -2781,6 +2781,22 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         }
     }
 
+    /// <summary>
+    /// Rate any track, from the row menu.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="RateNowPlayingAsync"/>, which is the star row in
+    /// the player and always means the song playing. This one carries its track
+    /// with it, because a menu opened on the fortieth row is not about whatever
+    /// happens to be playing.
+    /// </remarks>
+    [RelayCommand]
+    private async Task RateTrackAsync(TrackRating? rating)
+    {
+        if (rating is null || !_core.IsOpen) return;
+        await ApplyRatingAsync(rating.Track, rating.Stars);
+    }
+
     [RelayCommand]
     private async Task RateNowPlayingAsync(string? value)
     {
@@ -2790,6 +2806,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         var rating = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
             ? Math.Clamp(parsed, 0.5, 5.0)
             : (double?)null;
+        await ApplyRatingAsync(track, rating);
+    }
+
+    /// <summary>
+    /// Write a rating and reconcile the row with what the server stored.
+    ///
+    /// Shared by the player's star row and the menu's rating submenu, so a
+    /// rating set from either place queues, flushes and reports identically.
+    /// </summary>
+    private async Task ApplyRatingAsync(Track track, double? rating)
+    {
         ApplyTrackUpdate(track, t => t with { Rating = rating, RatingPending = true });
         try
         {
@@ -2909,6 +2936,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     // in `ICommand`. The generated properties are `IRelayCommand<Track?>` and
     // `IAsyncRelayCommand<Track?>`, so the interface is satisfied explicitly
     // rather than by widening what the rest of the app sees.
+    /// <summary>
+    /// Plex keeps per-user star ratings and no boolean favourite; Jellyfin is
+    /// the reverse. The menu asks so it can offer the one the server can
+    /// actually record.
+    /// </summary>
+    bool ITrackMenuCommands.UsesRatings => ServerCapabilities is { SupportsRatings: true };
+
+    ICommand ITrackMenuCommands.RateTrackCommand => RateTrackCommand;
     ICommand ITrackMenuCommands.ToggleFavoriteCommand => ToggleFavoriteCommand;
     ICommand ITrackMenuCommands.PlayTrackNextCommand => PlayTrackNextCommand;
     ICommand ITrackMenuCommands.AddTrackToQueueCommand => AddTrackToQueueCommand;
