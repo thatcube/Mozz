@@ -520,10 +520,14 @@
             <Setter Property="CornerRadius" Value="14" />
             <Setter Property="Padding" Value="6" />
         </Style>
+        <!-- The inset is the item's margin, not the panel's padding. Padding on
+             the presenter is overridden by the theme's own template, so the
+             highlight ran to both edges of the panel however wide the padding
+             was set; a margin on the item is the one the item itself honours. -->
         <Style Selector="MenuFlyoutPresenter MenuItem">
             <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="12,9" />
-            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="6,1" />
             <Setter Property="FontWeight" Value="Normal" />
         </Style>
         <Style Selector="MenuFlyoutPresenter MenuItem /template/ Border#PART_LayoutRoot">
@@ -535,12 +539,16 @@
         <Style Selector="MenuFlyoutPresenter MenuItem:selected /template/ Border#PART_LayoutRoot">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
         </Style>
-        <!-- Inset to the item's own padding, so the rule starts where the words
-             start rather than cutting the panel in half. -->
+        <!-- Aligned to where the words start — the item's margin plus its
+             padding — so the rule reads as separating the words rather than
+             cutting the panel in half. Faint on purpose: a divider inside a
+             small panel is a hint about grouping, and at full strength it
+             competes with the words it is grouping. -->
         <Style Selector="MenuFlyoutPresenter Separator">
             <Setter Property="Height" Value="1" />
-            <Setter Property="Margin" Value="12,5" />
+            <Setter Property="Margin" Value="18,6" />
             <Setter Property="Background" Value="{DynamicResource Divider}" />
+            <Setter Property="Opacity" Value="0.3" />
         </Style>
 
         <!-- A row's controls are icon-sized but have to be button-sized to hit.

@@ -1,7 +1,9 @@
 using System;
 using System.Windows.Input;
 using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 // Avalonia has a `Track` of its own — the slider part — and this file is about
 // the other kind.
@@ -91,7 +93,7 @@ public static class TrackMenu
         // Like leads, as it does on Android. It is the action people reach for
         // most and the only one that says something about the song rather than
         // about what to do with it next.
-        var like = Item(owner, "Like", c => c.ToggleFavoriteCommand);
+        var like = Item(owner, "Like", c => c.ToggleFavoriteCommand, "IconHeartOutline");
         // The word has to be right at the moment the menu opens, not at the
         // moment the row was built: a row is recycled under a different song,
         // and the same song is liked and unliked without the row changing.
@@ -101,27 +103,49 @@ public static class TrackMenu
         {
             like,
             new Separator(),
-            Item(owner, "Play Next", c => c.PlayTrackNextCommand),
-            Item(owner, "Add to Queue", c => c.AddTrackToQueueCommand),
-            Item(owner, "Start Radio", c => c.StartTrackRadioCommand),
+            Item(owner, "Play Next", c => c.PlayTrackNextCommand, "IconSkipForward"),
+            Item(owner, "Add to Queue", c => c.AddTrackToQueueCommand, "IconQueue"),
+            Item(owner, "Start Radio", c => c.StartTrackRadioCommand, "IconWaveform"),
             new Separator(),
-            Item(owner, "Go to Artist", c => c.OpenTrackArtistCommand),
-            Item(owner, "Go to Album", c => c.OpenTrackAlbumCommand),
+            Item(owner, "Go to Artist", c => c.OpenTrackArtistCommand, "IconArtist"),
+            Item(owner, "Go to Album", c => c.OpenTrackAlbumCommand, "IconDisc"),
             new Separator(),
-            Item(owner, "Download", c => c.DownloadTrackCommand),
+            Item(owner, "Download", c => c.DownloadTrackCommand, "IconDownload"),
             new Separator(),
-            Item(owner, "Don't recommend this track", c => c.SuppressTrackCommand),
-            Item(owner, "Don't recommend this artist", c => c.SuppressTrackArtistCommand),
+            Item(owner, "Don't recommend this track", c => c.SuppressTrackCommand, "IconCircleX"),
+            Item(owner, "Don't recommend this artist", c => c.SuppressTrackArtistCommand, "IconCircleX"),
         };
         return flyout;
+    }
+
+    /// <summary>
+    /// Looks a Tabler geometry up by the key Icons.axaml files it under.
+    ///
+    /// Null when the key is missing, which leaves the item without an icon
+    /// rather than without a menu — a missing glyph should not cost somebody
+    /// the action next to it.
+    /// </summary>
+    private static Control? Glyph(string key)
+    {
+        if (Application.Current?.TryFindResource(key, out var found) != true) return null;
+        if (found is not Geometry geometry) return null;
+        // The brush has to be given: TablerIcon paints nothing without one, and
+        // it does not inherit the menu's foreground. DynamicResource so the icon
+        // follows a theme change rather than freezing at whichever theme was
+        // loaded when the row was built.
+        var brush = Application.Current?.TryFindResource("TextSecondary", out var brushValue) == true
+            ? brushValue as IBrush
+            : null;
+        return new TablerIcon { Data = geometry, Size = 16, Brush = brush };
     }
 
     private static MenuItem Item(
         Control owner,
         string header,
-        Func<ITrackMenuCommands, ICommand> pick)
+        Func<ITrackMenuCommands, ICommand> pick,
+        string? icon = null)
     {
-        var item = new MenuItem { Header = header };
+        var item = new MenuItem { Header = header, Icon = icon is null ? null : Glyph(icon) };
         item.Click += (_, _) =>
         {
             if (Commands(owner) is not { } commands) return;
