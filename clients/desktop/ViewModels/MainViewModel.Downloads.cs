@@ -34,7 +34,18 @@ public sealed partial class MainViewModel
     /// <summary>Rows the Downloads pane's list binds to, newest transfer first.</summary>
     public ObservableCollection<DownloadRow> DownloadRows { get; } = new();
 
-    [ObservableProperty] private string _downloadStorageSummary = "No downloads yet.";
+    /// <summary>
+    /// What an empty Downloads page says.
+    ///
+    /// It is the only line on an otherwise blank page, so it says how to get a
+    /// download rather than only that there are none — which is what the
+    /// phones' empty state does and what makes the difference between a page
+    /// that looks broken and one that is merely empty.
+    /// </summary>
+    private const string EmptyDownloads =
+        "Nothing kept offline yet. Keep a song from its menu and it plays without the server.";
+
+    [ObservableProperty] private string _downloadStorageSummary = EmptyDownloads;
 
     public bool IsDownloadsSelected => Section == LibrarySection.Downloads;
 
@@ -85,7 +96,7 @@ public sealed partial class MainViewModel
                 .ToList();
 
             var summary = usage.DownloadedTrackCount == 0
-                ? "No downloads yet."
+                ? EmptyDownloads
                 : $"{usage.DownloadedTrackCount} " +
                   $"{(usage.DownloadedTrackCount == 1 ? "track" : "tracks")} · " +
                   DownloadFormatting.Bytes(usage.TotalBytes);

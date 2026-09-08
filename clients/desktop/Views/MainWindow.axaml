@@ -904,7 +904,10 @@
                     <Grid IsVisible="{Binding ShowDownloads}" RowDefinitions="Auto,*" Margin="0,0,8,0">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,18,0,10">
                             <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                                <TextBlock Text="Downloads" Classes="sectionTitle" />
+                                <!-- No heading of its own. The page title above already
+                                     says Downloads; it only ever said "Mozz" because this
+                                     section was missing from the title switch, and this
+                                     heading was quietly covering for that. -->
                                 <TextBlock Text="{Binding DownloadStorageSummary}" Classes="secondary" FontSize="12.5" />
                             </StackPanel>
                             <Button Grid.Column="1" Classes="ghost" VerticalAlignment="Center"

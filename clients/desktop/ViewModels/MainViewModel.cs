@@ -1558,6 +1558,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
             LibrarySection.Artists => "Artists",
             LibrarySection.Genres => "Genres",
             LibrarySection.Playlists => "Playlists",
+            // Missing, so Downloads fell through to the fallback and titled
+            // itself with the name of the application.
+            LibrarySection.Downloads => "Downloads",
             LibrarySection.Search => "Search",
             LibrarySection.Connect => "Servers",
             LibrarySection.Settings => "Settings",

@@ -91,6 +91,13 @@ public partial class MainWindow : Window
                 SidebarSearch.SelectAll();
                 break;
 
+            // The sidebar in order, the way every desktop player numbers its
+            // own. Reaching Albums should not require finding a small target
+            // with a mouse when the list it opens is the app's whole point.
+            case >= Key.D1 and <= Key.D7 when command:
+                model.SelectSectionCommand.Execute(NumberedSections[e.Key - Key.D1]);
+                break;
+
             default:
                 return;
         }
@@ -99,6 +106,24 @@ public partial class MainWindow : Window
         // still reaches the list underneath it.
         e.Handled = true;
     }
+
+    /// <summary>
+    /// What ⌘1 through ⌘7 open, top to bottom as the sidebar lists them.
+    ///
+    /// Search is deliberately absent: it has ⌘F, which is where every other
+    /// application puts it, and giving it a number as well would push the rest
+    /// out of step with the list somebody is looking at.
+    /// </summary>
+    private static readonly LibrarySection[] NumberedSections =
+    [
+        LibrarySection.Home,
+        LibrarySection.Songs,
+        LibrarySection.Albums,
+        LibrarySection.Artists,
+        LibrarySection.Genres,
+        LibrarySection.Playlists,
+        LibrarySection.Downloads,
+    ];
 
     /// <summary>How far an arrow key moves the play head.</summary>
     private const double SeekStepSeconds = 5;
