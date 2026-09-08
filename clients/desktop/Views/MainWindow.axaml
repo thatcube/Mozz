@@ -797,7 +797,17 @@
                                             <Button Classes="link" HorizontalAlignment="Left"
                                                     Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
                                                     CommandParameter="{Binding Track}">
-                                                <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary compactOnly" />
+                                                <!--
+                                                    Not compactOnly. That class hides a line
+                                                    on a wide window because a dedicated column
+                                                    shows it there instead — which the queue and
+                                                    the playlist rows have and this one does not,
+                                                    so the artist simply vanished from search
+                                                    results on any window worth calling wide. The
+                                                    Songs list, which is otherwise the same row,
+                                                    shows it here.
+                                                -->
+                                                <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
                                             </Button>
                                         </StackPanel>
                                         <Button Grid.Column="2" Classes="link trackAlbumColumn" Width="200" HorizontalAlignment="Left" VerticalAlignment="Center"
