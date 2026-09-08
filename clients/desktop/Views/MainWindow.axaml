@@ -410,14 +410,33 @@
                             <DataTemplate DataType="vm:HomeTrackShelfRow">
                                 <ItemsControl ItemsSource="{Binding Tracks}">
                                    <ItemsControl.ItemsPanel>
-                                       <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                       <!--
+                                           Three columns that divide the width, rather than three
+                                           cards of a fixed 300. A fixed width is wrong at every
+                                           window size but one: at this one it left five hundred
+                                           points unused and still cut every title after fourteen
+                                           characters, and widening it far enough to fit a title
+                                           pushed the third card off the edge. Sharing the space
+                                           is right at all of them.
+                                       -->
+                                       <ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate>
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
+                                           <Button Classes="tile" HorizontalAlignment="Stretch"
+                                                   Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}"
                                                    controls:TrackMenu.Track="{Binding}">
-                                               <Border Width="300" Margin="0,0,20,12" Padding="8" CornerRadius="8"
+                                               <!--
+                                                   380 rather than 300. Three of these sit in a row
+                                                   with roughly five hundred points of the content
+                                                   area left unused beyond them, while the title
+                                                   column — what is left after artwork, heart and
+                                                   duration — was about a hundred, so every title
+                                                   longer than "Blood In The Wi…" was cut. The extra
+                                                   eighty all lands in the title.
+                                               -->
+                                               <Border Margin="0,0,20,12" Padding="8" CornerRadius="8"
                                                        Background="{DynamicResource SurfaceRaised}">
                                                    <Grid ColumnDefinitions="44,*,38,64" Height="44">
                                                        <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
