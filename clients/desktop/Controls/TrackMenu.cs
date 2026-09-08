@@ -2,6 +2,7 @@ using System;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.VisualTree;
 // Avalonia has a `Track` of its own — the slider part — and this file is about
 // the other kind.
 using Track = Mozz.Desktop.Core.Track;
@@ -64,6 +65,11 @@ public static class TrackMenu
 
     static TrackMenu()
     {
+        OpensMenuProperty.Changed.AddClassHandler<Button>((button, args) =>
+        {
+            if (GetOpensMenu(button)) button.Click += (_, _) => OpenRowMenu(button);
+        });
+
         TrackProperty.Changed.AddClassHandler<Control>((control, args) =>
         {
             if (GetTrack(control) is null)
@@ -125,6 +131,41 @@ public static class TrackMenu
             if (command.CanExecute(track)) command.Execute(track);
         };
         return item;
+    }
+
+    /// <summary>
+    /// Marks a button as the row's overflow control.
+    /// </summary>
+    /// <remarks>
+    /// Right-click was the only way to reach any of this, which is a poor way
+    /// to publish a feature: somebody who does not already know the menu exists
+    /// has no reason to try. A visible control on the row says so.
+    /// </remarks>
+    public static readonly AttachedProperty<bool> OpensMenuProperty =
+        AvaloniaProperty.RegisterAttached<Button, bool>("OpensMenu", typeof(TrackMenu));
+
+    public static void SetOpensMenu(Button button, bool value) =>
+        button.SetValue(OpensMenuProperty, value);
+
+    public static bool GetOpensMenu(Button button) => button.GetValue(OpensMenuProperty);
+
+    /// <summary>
+    /// Opens the menu belonging to the row this button sits in.
+    ///
+    /// The flyout is the row's, not the button's: one menu per row, reached
+    /// either way, so the two routes can never drift into different menus.
+    /// </summary>
+    private static void OpenRowMenu(Button button)
+    {
+        for (Visual? v = button; v is not null; v = v.GetVisualParent())
+        {
+            if (v is Control control && GetTrack(control) is not null
+                && control.ContextFlyout is { } flyout)
+            {
+                flyout.ShowAt(button);
+                return;
+            }
+        }
     }
 
     /// <summary>

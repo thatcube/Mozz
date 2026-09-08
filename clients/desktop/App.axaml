@@ -501,6 +501,61 @@
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
             <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
+        <!-- =================================================================
+             Menus.
+
+             Nothing styled these, so they arrived as the platform's default:
+             square items running edge to edge inside a square panel. The row
+             menu is now the main way anybody reaches these actions, so it is
+             worth looking like the rest of the application.
+
+             The radii are concentric — the panel's 14 is the item's 8 plus the
+             6 of padding between them — which is what stops a rounded item
+             inside a rounded panel from reading as two unrelated curves.
+             ================================================================= -->
+        <Style Selector="MenuFlyoutPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Divider}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Padding" Value="6" />
+        </Style>
+        <Style Selector="MenuFlyoutPresenter MenuItem">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="FontWeight" Value="Normal" />
+        </Style>
+        <Style Selector="MenuFlyoutPresenter MenuItem /template/ Border#PART_LayoutRoot">
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="MenuFlyoutPresenter MenuItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="MenuFlyoutPresenter MenuItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <!-- Inset to the item's own padding, so the rule starts where the words
+             start rather than cutting the panel in half. -->
+        <Style Selector="MenuFlyoutPresenter Separator">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Margin" Value="12,5" />
+            <Setter Property="Background" Value="{DynamicResource Divider}" />
+        </Style>
+
+        <!-- A row's controls are icon-sized but have to be button-sized to hit.
+             Thirty-six is the smallest target that does not ask for aim, and the
+             plate under it is rounded so it reads as a control rather than as a
+             square that appeared. -->
+        <Style Selector="Button.ghost.rowAction">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="MinWidth" Value="36" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="10" />
+        </Style>
+
         <Style Selector="Button.destructive">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource Accent}" />

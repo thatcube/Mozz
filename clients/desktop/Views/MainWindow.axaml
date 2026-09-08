@@ -586,17 +586,28 @@
                                                 CommandParameter="{Binding}">
                                             <TextBlock Text="{Binding AlbumTitle}" Classes="secondary" />
                                         </Button>
-                                        <Button Grid.Column="3" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                                CommandParameter="{Binding}"
-                                                ToolTip.Tip="{Binding FavoriteLabel}">
-                                            <Panel Opacity="{Binding FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsFavorite}" />
-                                            </Panel>
-                                        </Button>
+                                        <!-- Heart and overflow share the cell. The menu was reachable only by
+                                             right-clicking, which is no way to publish a feature: somebody who
+                                             does not already know it is there has no reason to try. Both appear
+                                             with the pointer, on the same rule. -->
+                                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <Button Classes="ghost rowAction trackFavoriteColumn"
+                                                    Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="{Binding FavoriteLabel}">
+                                                <Panel Opacity="{Binding FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                    <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                         Brush="{DynamicResource BrandForeground}" IsVisible="{Binding IsFavorite}" />
+                                                    <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
+                                                                         Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsFavorite}" />
+                                                </Panel>
+                                            </Button>
+                                            <Button Classes="ghost rowAction trackMenuColumn"
+                                                    controls:TrackMenu.OpensMenu="True" ToolTip.Tip="More">
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconDots}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                        </StackPanel>
                                         <TextBlock Grid.Column="4" Classes="secondary trackDurationColumn" Text="{Binding Duration}"
                                                    VerticalAlignment="Center"
                                                    HorizontalAlignment="Right" Margin="0,0,10,0" />
@@ -836,17 +847,28 @@
                                                 CommandParameter="{Binding Track}">
                                             <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
                                         </Button>
-                                        <Button Grid.Column="3" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                                CommandParameter="{Binding Track}"
-                                                ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                            <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                            </Panel>
-                                        </Button>
+                                        <!-- Heart and overflow share the cell. The menu was reachable only by
+                                             right-clicking, which is no way to publish a feature: somebody who
+                                             does not already know it is there has no reason to try. Both appear
+                                             with the pointer, on the same rule. -->
+                                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <Button Classes="ghost rowAction trackFavoriteColumn"
+                                                    Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                    CommandParameter="{Binding Track}"
+                                                    ToolTip.Tip="{Binding Track.FavoriteLabel}">
+                                                <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                    <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                         Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
+                                                    <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
+                                                                         Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
+                                                </Panel>
+                                            </Button>
+                                            <Button Classes="ghost rowAction trackMenuColumn"
+                                                    controls:TrackMenu.OpensMenu="True" ToolTip.Tip="More">
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconDots}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                        </StackPanel>
                                         <TextBlock Grid.Column="4" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
                                                    VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                     </Grid>
@@ -1339,17 +1361,28 @@
                                                 CommandParameter="{Binding Track}">
                                             <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
                                         </Button>
-                                        <Button Grid.Column="4" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                                CommandParameter="{Binding Track}"
-                                                ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                            <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                            </Panel>
-                                        </Button>
+                                        <!-- Heart and overflow share the cell. The menu was reachable only by
+                                             right-clicking, which is no way to publish a feature: somebody who
+                                             does not already know it is there has no reason to try. Both appear
+                                             with the pointer, on the same rule. -->
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Classes="ghost rowAction trackFavoriteColumn"
+                                                    Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
+                                                    CommandParameter="{Binding Track}"
+                                                    ToolTip.Tip="{Binding Track.FavoriteLabel}">
+                                                <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
+                                                    <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
+                                                                         Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
+                                                    <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
+                                                                         Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
+                                                </Panel>
+                                            </Button>
+                                            <Button Classes="ghost rowAction trackMenuColumn"
+                                                    controls:TrackMenu.OpensMenu="True" ToolTip.Tip="More">
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconDots}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                        </StackPanel>
                                         <TextBlock Grid.Column="5" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
                                                    VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                     </Grid>
@@ -1766,6 +1799,7 @@
                 <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12"
                            IsVisible="False" />
                 <ListBox Grid.Row="1"
+                         Classes="plated"
                          ItemsSource="{Binding QueueRows}"
                          DoubleTapped="OnQueueRowActivated"
                          Background="Transparent" BorderThickness="0">
@@ -1774,45 +1808,38 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid ColumnDefinitions="Auto,44,*,Auto,Auto,Auto,Auto" Height="54" Classes="queueTrackRow">
-                                <TextBlock Grid.Column="0" Width="78" Text="{Binding NumberText}" Classes="secondary compactHidden" VerticalAlignment="Center" />
-                                <controls:ArtworkImage Grid.Column="1" Classes="queueArtworkColumn" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
-                                        ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
-                                        FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
-                                <TextBlock Grid.Column="2" Text="{Binding Track.Title}" Classes="primary queueTitleColumn" VerticalAlignment="Center" Margin="13,0" />
-                                <Button Grid.Column="3" Classes="link queueArtistColumn" Width="180" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                        Command="{Binding $parent[Window].DataContext.OpenTrackArtistCommand}"
-                                        CommandParameter="{Binding Track}">
-                                    <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" />
-                                </Button>
-                                <Button Grid.Column="4" Classes="link queueAlbumColumn" Width="220" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                        Command="{Binding $parent[Window].DataContext.OpenTrackAlbumCommand}"
-                                        CommandParameter="{Binding Track}">
-                                    <TextBlock Text="{Binding Track.AlbumTitle}" Classes="secondary" />
-                                </Button>
-                                <Button Grid.Column="5" Classes="ghost trackFavoriteColumn" Width="34" Height="34"
-                                        Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                        CommandParameter="{Binding Track}"
-                                        ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                    <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                        <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
-                                                             Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                        <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
-                                                             Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                    </Panel>
-                                </Button>
-                                <StackPanel Grid.Column="6" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Classes="queueActionsColumn">
-                                    <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemUpCommand}" CommandParameter="{Binding}">
-                                        <TextBlock Text="Up" />
+                            <!--
+                                    Laid out for the panel it lives in, not for the window.
+                                    This was the library's wide table — number, art, title,
+                                    a 180pt artist column, a 220pt album column, a heart and
+                                    three buttons — inside a side panel about half that wide.
+                                    Fixed columns win, so the one starred column collapsed
+                                    first: the queue showed an artist and a clipped album and
+                                    no song title at all, and the reorder buttons were off the
+                                    edge entirely.
+
+                                    So it is the phones' shape now — art, title over artist,
+                                    and the actions behind the overflow every other row has.
+                                -->
+                                <Border Classes="rowPlate" controls:TrackMenu.Track="{Binding Track}">
+                                <Grid ColumnDefinitions="34,44,*,Auto" Height="54" Classes="queueTrackRow">
+                                    <TextBlock Grid.Column="0" Text="{Binding NumberText}" Classes="secondary"
+                                               VerticalAlignment="Center" HorizontalAlignment="Center"
+                                               FontSize="11.5" TextTrimming="None" />
+                                    <controls:ArtworkImage Grid.Column="1" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
+                                            ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
+                                            FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="12,0" Spacing="1">
+                                        <TextBlock Text="{Binding Track.Title}" Classes="primary" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Track.ArtistName}" Classes="secondary" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <Button Grid.Column="3" Classes="ghost rowAction" VerticalAlignment="Center"
+                                            controls:TrackMenu.OpensMenu="True" ToolTip.Tip="More">
+                                        <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconDots}"
+                                                             Brush="{Binding $parent[Button].Foreground}" />
                                     </Button>
-                                    <Button Classes="ghost" Command="{Binding $parent[Window].DataContext.MoveQueueItemDownCommand}" CommandParameter="{Binding}">
-                                        <TextBlock Text="Down" />
-                                    </Button>
-                                    <Button Classes="destructive" Command="{Binding $parent[Window].DataContext.RemoveQueueItemCommand}" CommandParameter="{Binding}">
-                                        <TextBlock Text="Remove" />
-                                    </Button>
-                                </StackPanel>
-                            </Grid>
+                                </Grid>
+                                </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
