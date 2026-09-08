@@ -47,6 +47,10 @@
     <Compile Include="..\desktop\Core\Downloads\DownloadService.cs" />
     <Compile Include="..\desktop\Core\PlaybackSettingsCommands.cs" />
     <Compile Include="..\desktop\Core\Models.cs" />
+    <!-- TrackMenu draws its item icons with TablerIcon, so the suite needs
+         both or neither. Compiling one without the other is how this
+         project stopped building before. -->
+    <Compile Include="..\desktop\Controls\TablerIcon.cs" />
     <Compile Include="..\desktop\Controls\TrackMenu.cs" />
     <Compile Include="..\desktop\Core\AppPreferences.cs" />
     <Compile Include="..\desktop\Core\MozzTheme.cs" />

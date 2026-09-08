@@ -1,7 +1,6 @@
 using System;
 using System.Windows.Input;
 using Avalonia;
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.VisualTree;
