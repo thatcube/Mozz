@@ -2909,6 +2909,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     // in `ICommand`. The generated properties are `IRelayCommand<Track?>` and
     // `IAsyncRelayCommand<Track?>`, so the interface is satisfied explicitly
     // rather than by widening what the rest of the app sees.
+    ICommand ITrackMenuCommands.ToggleFavoriteCommand => ToggleFavoriteCommand;
     ICommand ITrackMenuCommands.PlayTrackNextCommand => PlayTrackNextCommand;
     ICommand ITrackMenuCommands.AddTrackToQueueCommand => AddTrackToQueueCommand;
     ICommand ITrackMenuCommands.StartTrackRadioCommand => StartTrackRadioCommand;

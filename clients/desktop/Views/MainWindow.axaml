@@ -423,7 +423,17 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
+                                           <!--
+                                               The gap between cards sits on the button, not on
+                                               the card inside it. A margin on the card leaves it
+                                               inside the button's bounds, so the hover plate —
+                                               which is the button — extended twenty points past
+                                               the card on the right and twelve below it while
+                                               hugging it on the other two sides. Even padding is
+                                               the whole of what makes a hover look deliberate.
+                                           -->
                                            <Button Classes="tile" HorizontalAlignment="Stretch"
+                                                   Margin="0,0,20,12"
                                                    Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}"
                                                    controls:TrackMenu.Track="{Binding}">
@@ -436,9 +446,12 @@
                                                    longer than "Blood In The Wi…" was cut. The extra
                                                    eighty all lands in the title.
                                                -->
-                                               <Border Margin="0,0,20,12" Padding="8" CornerRadius="8"
+                                               <Border Padding="8" CornerRadius="8"
                                                        Background="{DynamicResource SurfaceRaised}">
-                                                   <Grid ColumnDefinitions="44,*,38,64" Height="44">
+                                                   <!-- No heart here. The card is itself a play button, so a second
+                                                            target inside it is a boundary nobody can see; Like is on
+                                                            the row menu now, where Android puts it. -->
+                                                       <Grid ColumnDefinitions="44,*,64" Height="44">
                                                        <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                                ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
                                                                FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
@@ -446,18 +459,7 @@
                                                            <TextBlock Text="{Binding Track.Title}" Classes="primary" />
                                                            <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
                                                        </StackPanel>
-                                                       <Button Grid.Column="2" Classes="ghost" Width="32" Height="32"
-                                                               Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                                               CommandParameter="{Binding Track}"
-                                                               ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                                           <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                               <controls:TablerIcon Size="16" Filled="True" Data="{StaticResource IconHeart}"
-                                                                                    Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                               <controls:TablerIcon Size="16" Data="{StaticResource IconHeartOutline}"
-                                                                                    Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                                           </Panel>
-                                                       </Button>
-                                                       <TextBlock Grid.Column="3" Text="{Binding Track.Duration}" Classes="secondary"
+                                                       <TextBlock Grid.Column="2" Text="{Binding Track.Duration}" Classes="secondary"
                                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
                                                    </Grid>
                                                </Border>
@@ -535,7 +537,7 @@
                     <!-- Songs / search results.
                          ListBox rather than ItemsControl: it virtualizes, which is
                          what keeps a hundred thousand rows scrolling smoothly. -->
-                    <ListBox IsVisible="{Binding ShowTracks}"
+                    <ListBox Classes="plated" IsVisible="{Binding ShowTracks}"
                              x:Name="TracksList"
                              ItemsSource="{Binding Tracks}"
                              DoubleTapped="OnTrackActivated"
@@ -591,7 +593,7 @@
                                             <Panel Opacity="{Binding FavoritePending, Converter={StaticResource PendingOpacity}}">
                                                 <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
                                                                      Brush="{DynamicResource BrandForeground}" IsVisible="{Binding IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
                                                                      Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !IsFavorite}" />
                                             </Panel>
                                         </Button>
@@ -788,7 +790,7 @@
 
                     <!-- Search: compact result groups. Each item pushes onto the
                          same navigation stack as the library walls. -->
-                    <ListBox IsVisible="{Binding ShowSearch}"
+                    <ListBox Classes="plated" IsVisible="{Binding ShowSearch}"
                              ItemsSource="{Binding SearchRows}"
                              DoubleTapped="OnSearchRowActivated"
                              Background="Transparent" BorderThickness="0"
@@ -841,7 +843,7 @@
                                             <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
                                                 <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
                                                                      Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
                                                                      Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
                                             </Panel>
                                         </Button>
@@ -916,7 +918,7 @@
                                                      Brush="{Binding $parent[Button].Foreground}" />
                             </Button>
                         </Grid>
-                        <ListBox Grid.Row="1" ItemsSource="{Binding DownloadRows}"
+                        <ListBox Grid.Row="1" Classes="plated" ItemsSource="{Binding DownloadRows}"
                                  Background="Transparent" BorderThickness="0"
                                  Padding="0,0,0,24">
                             <ListBox.ItemsPanel>
@@ -1261,7 +1263,7 @@
                                                             <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
                                                                 <controls:TablerIcon Size="16" Filled="True" Data="{StaticResource IconHeart}"
                                                                                      Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                                <controls:TablerIcon Size="16" Data="{StaticResource IconHeartOutline}"
+                                                                <controls:TablerIcon Size="16" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
                                                                                      Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
                                                             </Panel>
                                                         </Button>
@@ -1291,7 +1293,7 @@
                                             <Panel Opacity="{Binding Row.Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
                                                 <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
                                                                      Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Row.Track.IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
                                                                      Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Row.Track.IsFavorite}" />
                                             </Panel>
                                         </Button>
@@ -1344,7 +1346,7 @@
                                             <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
                                                 <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
                                                                      Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                                <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
                                                                      Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
                                             </Panel>
                                         </Button>
@@ -1795,7 +1797,7 @@
                                     <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
                                         <controls:TablerIcon Size="17" Filled="True" Data="{StaticResource IconHeart}"
                                                              Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                        <controls:TablerIcon Size="17" Data="{StaticResource IconHeartOutline}"
+                                        <controls:TablerIcon Size="17" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
                                                              Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
                                     </Panel>
                                 </Button>

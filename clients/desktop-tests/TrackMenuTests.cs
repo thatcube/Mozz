@@ -20,8 +20,11 @@ public class TrackMenuTests
         TrackMenu.SetTrack(row, Song());
 
         var flyout = Assert.IsType<MenuFlyout>(row.ContextFlyout);
+        // Like leads, as it does on Android — the action people reach for most,
+        // and the only one that says something about the song rather than about
+        // what to do with it next.
         Assert.Equal(
-            ["Play Next", "Add to Queue", "Start Radio", "Go to Artist", "Go to Album",
+            ["Like", "Play Next", "Add to Queue", "Start Radio", "Go to Artist", "Go to Album",
              "Download", "Don't recommend this track", "Don't recommend this artist"],
             flyout.ItemsSource!.Cast<object>().OfType<MenuItem>().Select(i => i.Header));
     }

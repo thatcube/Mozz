@@ -1,5 +1,6 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Mozz.Desktop.Controls"
              xmlns:local="using:Mozz.Desktop"
              x:Class="Mozz.Desktop.App"
              Name="Mozz">
@@ -169,6 +170,21 @@
         <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
         </Style>
+        <!-- A list whose rows carry their own rowPlate does not want this one.
+             The item's plate is the full width of the list and square; the row's
+             is inset and rounded. Both painting the same colour reads as the
+             square one, which is why hovering a song looked like a sharp band
+             while hovering an album looked like a card. Marking the list says
+             which surface owns the hover. -->
+        <Style Selector="ListBox.plated ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ListBox.plated ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ListBox.plated ListBoxItem:selected:focus-within /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
         <Style Selector="ListBoxItem:selected TextBlock.primary">
             <Setter Property="Foreground" Value="{DynamicResource Accent}" />
         </Style>
@@ -209,6 +225,17 @@
         </Style>
         <Style Selector="Border.rowPlate:pointerover">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <!-- An outline heart on every row of a nine-thousand-song library is
+             nine thousand grey hearts. A liked song keeps its filled one, which
+             is information; an unliked one has nothing to say until the pointer
+             is on it, which is also when it can be clicked. Apple Music and
+             Spotify both do this, for the same reason. -->
+        <Style Selector="controls|TablerIcon.restingHeart">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        <Style Selector="Border.rowPlate:pointerover controls|TablerIcon.restingHeart">
+            <Setter Property="Opacity" Value="1" />
         </Style>
 
         <!-- A tile that is already a raised card lifts its own surface: a plate

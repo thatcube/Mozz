@@ -19,6 +19,7 @@ namespace Mozz.Desktop.Controls;
 /// </remarks>
 public interface ITrackMenuCommands
 {
+    ICommand ToggleFavoriteCommand { get; }
     ICommand PlayTrackNextCommand { get; }
     ICommand AddTrackToQueueCommand { get; }
     ICommand StartTrackRadioCommand { get; }
@@ -81,8 +82,19 @@ public static class TrackMenu
     private static MenuFlyout Build(Control owner)
     {
         var flyout = new MenuFlyout();
+        // Like leads, as it does on Android. It is the action people reach for
+        // most and the only one that says something about the song rather than
+        // about what to do with it next.
+        var like = Item(owner, "Like", c => c.ToggleFavoriteCommand);
+        // The word has to be right at the moment the menu opens, not at the
+        // moment the row was built: a row is recycled under a different song,
+        // and the same song is liked and unliked without the row changing.
+        flyout.Opening += (_, _) =>
+            like.Header = GetTrack(owner)?.IsFavorite == true ? "Unlike" : "Like";
         flyout.ItemsSource = new object[]
         {
+            like,
+            new Separator(),
             Item(owner, "Play Next", c => c.PlayTrackNextCommand),
             Item(owner, "Add to Queue", c => c.AddTrackToQueueCommand),
             Item(owner, "Start Radio", c => c.StartTrackRadioCommand),
