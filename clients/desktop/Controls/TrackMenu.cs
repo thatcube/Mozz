@@ -137,7 +137,7 @@ public static class TrackMenu
             like.IsVisible = !ratings;
             rate.IsVisible = ratings;
             like.Header = GetTrack(owner)?.IsFavorite == true ? "Unlike" : "Like";
-            MarkRating(strip, rate, GetTrack(owner)?.Rating);
+            MarkRating(strip, GetTrack(owner)?.Rating);
         };
         flyout.ItemsSource = new object[]
         {
@@ -163,80 +163,48 @@ public static class TrackMenu
     /// The rating strip, at the top of the menu, for a server that keeps ratings.
     /// </summary>
     /// <remarks>
-    /// It was a submenu listing "½", "★", "★½" … eleven entries you had to open
-    /// a second menu to reach and then read as text. A rating is a value, not a
-    /// command, and the phone has always shown it as one: five stars you click
-    /// or drag across. So does this, in place, without the menu having to
-    /// disappear and come back.
+    /// A MenuItem lays its content out in columns — icon, header, keyboard
+    /// shortcut, submenu chevron — and this row has only stars. Left in the
+    /// header column they sat a column to the right of every glyph below them,
+    /// behind an icon slot nothing fills, and read as indented.
     ///
-    /// The strip does not dismiss the menu either. A rating is usually adjusted
-    /// twice — half a step either way — and a control that closes after one
-    /// touch makes the second adjustment cost a whole reopen.
+    /// Two tidier-looking fixes do not work. Handing the flyout a bare control
+    /// instead of a MenuItem does nothing: MenuFlyout wraps anything that is not
+    /// one, so it lands in the header column anyway. And the icon slot, which IS
+    /// the leftmost column, is sized for a 16-point glyph — the strip put there
+    /// is squashed to a row of dots.
+    ///
+    /// So the strip stays in the header and is pulled back across the empty icon
+    /// column by <see cref="IconColumnOffset"/>, which puts the first star on the
+    /// same edge as the icons below it.
+    ///
+    /// The row does not dismiss the menu either. A rating is aimed at rather
+    /// than invoked, and closing on the first half star would make the second
+    /// adjustment — usually half a step back — cost a whole reopen.
     /// </remarks>
     private static MenuItem RatingItem(Control owner, RatingStrip strip)
     {
         strip.Committed += (_, stars) => Rate(owner, stars);
+        strip.HorizontalAlignment = HorizontalAlignment.Left;
+        strip.Margin = new Thickness(-IconColumnOffset, 2, 0, 2);
 
-        var row = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        row.Children.Add(strip);
-        var readout = new TextBlock
-        {
-            VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 12,
-            Foreground = Resource<IBrush>("TextTertiary"),
-            // A FIXED width, not an automatic one, and this is load-bearing.
-            //
-            // The rating row is the widest thing in this menu, and the readout's
-            // text changes with every half step — "No rating", "0.5 stars",
-            // "1 star". Letting it size itself made the whole flyout re-measure
-            // as the pointer crossed the strip, which moved the strip out from
-            // under the pointer, which picked a different star, which changed
-            // the text again: the menu shook and the rating flickered.
-            //
-            // Wide enough for the longest string it can hold, and clipped so an
-            // unexpectedly long one cannot start the loop again.
-            Width = ReadoutWidth,
-            ClipToBounds = true,
-        };
-        row.Children.Add(readout);
-        // The words follow the stars. Left on the committed value they said
-        // "0 stars" under a strip previewing four, which is the control
-        // disagreeing with itself.
-        strip.Previewed += (_, stars) => readout.Text = Readout(stars);
-
-        // StaysOpenOnClick so a half star does not dismiss the menu. The strip
-        // also marks its own pointer events handled, which is what stops the
-        // item counting the same press as a click on itself.
-        var item = new MenuItem { Header = row, StaysOpenOnClick = true };
-        // Not a command, so it must not wear a command's hover plate. Without
-        // this the strip sat on a selection highlight that said "click me to do
-        // the thing" about a row whose whole job is to be aimed at.
+        var item = new MenuItem { Header = strip, StaysOpenOnClick = true };
+        // Not a command, so it must not wear a command's hover plate: the strip
+        // is aimed at, and a selection highlight behind it promises that
+        // clicking anywhere on the row does something.
         item.Classes.Add("ratingRow");
         return item;
     }
 
-    /// <summary>Show the rating the track already carries, in words beside the stars.</summary>
-    private static void MarkRating(RatingStrip strip, MenuItem item, double? current)
-    {
-        strip.Value = current;
-        if (item.Header is not StackPanel row) return;
-        foreach (var child in row.Children.OfType<TextBlock>()) child.Text = Readout(current);
-    }
-
     /// <summary>
-    /// Room for "No rating" and for "0.5 stars", whichever is wider, at the
-    /// readout's 12px size — with enough slack that no value it can produce
-    /// makes it grow.
+    /// How far the header column sits to the right of the icon column, measured
+    /// off the rendered menu: icons ink at 21pt from the row's edge, header
+    /// content at 48pt.
     /// </summary>
-    private const double ReadoutWidth = 76;
+    private const double IconColumnOffset = 27;
 
-    private static string Readout(double? value) =>
-        value is { } stars ? RatingMath.Label(stars) : "No rating";
+    /// <summary>Show the rating the track already carries. The strip names itself.</summary>
+    private static void MarkRating(RatingStrip strip, double? current) => strip.Value = current;
 
     private static void Rate(Control owner, double? stars)
     {

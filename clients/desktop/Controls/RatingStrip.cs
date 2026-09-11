@@ -1,5 +1,6 @@
 using System;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -109,7 +110,27 @@ public sealed class RatingStrip : Control
         set => SetValue(EmptyBrushProperty, value);
     }
 
+    public RatingStrip() => Describe();
+
     private double? Shown => _previewing ? _preview : Value;
+
+    /// <summary>
+    /// Say the value out loud, for anyone not reading the stars.
+    ///
+    /// On the control rather than in a label beside it: the text changes with
+    /// every half step, and a visible label that does that resizes whatever
+    /// holds it. In the row menu that shook the whole flyout, and pinning its
+    /// width to stop the shake made the menu as wide as its longest sentence.
+    /// An automation name has no width.
+    /// </summary>
+    private void Describe() =>
+        AutomationProperties.SetName(this, $"Rating, {(Shown is { } v ? RatingMath.Label(v) : "No rating")}");
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == ValueProperty) Describe();
+    }
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -188,6 +209,7 @@ public sealed class RatingStrip : Control
         // un-pressed pointer leaving puts the real value back.
         if (_dragging) return;
         _previewing = false;
+        Describe();
         Previewed?.Invoke(this, Value);
         InvalidateVisual();
     }
@@ -225,6 +247,7 @@ public sealed class RatingStrip : Control
         if (_previewing && _preview == value) return;
         _preview = value;
         _previewing = true;
+        Describe();
         Previewed?.Invoke(this, value);
         InvalidateVisual();
     }

@@ -2,6 +2,8 @@ package com.thatcube.mozz.ui
 
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -554,7 +556,20 @@ private fun RatingMenuRow(rating: Double?, onSet: (Double?) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             RatingStrip(
                 value = shown,
-                modifier = Modifier.pointerInput(Unit) {
+                modifier = Modifier
+                    // The value in words, on the control rather than in a label
+                    // beside it. A visible one changes with every half step, so
+                    // it resizes whatever holds it — and a menu that sizes to
+                    // its content then re-measures as the finger crosses the
+                    // strip, sliding the strip out from under it. Pinning the
+                    // label's width stops that and instead makes this row
+                    // permanently the widest thing in the menu. Semantics have
+                    // no width.
+                    .semantics {
+                        contentDescription = "Rating, " +
+                            (shown?.let { ratingLabel(it) } ?: "no rating")
+                    }
+                    .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
                         down.consume()
@@ -582,21 +597,7 @@ private fun RatingMenuRow(rating: Double?, onSet: (Double?) -> Unit) {
                     }
                 },
             )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                shown?.let { ratingLabel(it) } ?: "No rating",
-                style = MaterialTheme.typography.bodySmall,
-                color = LocalContentColor.current.copy(alpha = 0.6f),
-                maxLines = 1,
-                // A FIXED width, because this row is the widest thing in the
-                // menu and the label changes with every half step — "No
-                // rating", "0.5 stars", "1 star". Sized to its text, the menu
-                // re-measures as the finger crosses the strip, which moves the
-                // strip out from under the finger, which picks a different
-                // star, which changes the label again. The desktop shook
-                // visibly doing exactly this.
-                modifier = Modifier.width(84.dp),
-            )
+
         }
         AnimatedVisibility(visible = showClear) {
             Text(

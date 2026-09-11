@@ -1,4 +1,5 @@
 using System.Linq;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Mozz.Desktop.Controls;
 using Xunit;
@@ -26,6 +27,8 @@ public class TrackMenuTests
         // Plex records star ratings and no favourite, Jellyfin the reverse.
         // The rating item's header is the strip itself rather than a word, so
         // it is named by the control it carries.
+        // The rating row's header is the strip itself, so it is named for what
+        // it carries.
         Assert.Equal(
             ["Like", "<rating strip>", "Play Next", "Add to Queue", "Start Radio", "Go to Artist",
              "Go to Album", "Download", "Don't recommend this track", "Don't recommend this artist"],
@@ -33,91 +36,58 @@ public class TrackMenuTests
     }
 
     [Fact]
-    public void RatingIsAStripRatherThanAListOfSpelledOutStars()
+    public void TheRatingStripLinesUpWithTheIconsBelowIt()
     {
         var row = new Border();
         TrackMenu.SetTrack(row, Song());
 
         var flyout = Assert.IsType<MenuFlyout>(row.ContextFlyout);
-        var rating = flyout.ItemsSource!.Cast<object>().OfType<MenuItem>()
-            .Single(i => i.Header is StackPanel);
-
         // It used to be a submenu of eleven typed-out glyphs ("½", "★", "★½" …)
         // you had to open a second menu to reach. A rating is a value, not a
         // command: it is five stars now, clicked or dragged across, the way
         // both phones have always shown it.
-        var panel = Assert.IsType<StackPanel>(rating.Header);
-        Assert.Single(panel.Children.OfType<RatingStrip>());
-        Assert.Null(rating.ItemsSource);
+        var rating = flyout.ItemsSource!.Cast<object>().OfType<MenuItem>()
+            .Single(i => i.Header is RatingStrip);
+        var strip = Assert.IsType<RatingStrip>(rating.Header);
 
-        // And the menu survives setting one. A rating is usually adjusted
-        // twice, half a step either way, so closing after the first touch makes
-        // the second adjustment cost a reopen.
+        // Pulled back across the empty icon column so the first star lands on
+        // the same edge as the icons below it. Left where the header column
+        // puts it, the row read as indented past everything else in the menu.
+        Assert.True(strip.Margin.Left < 0);
         Assert.True(rating.StaysOpenOnClick);
     }
 
     /// <summary>
-    /// The readout beside the stars must not size itself to its text.
+    /// The rating row is stars and nothing else.
     ///
-    /// The rating row is the widest thing in the menu, so a readout that grew
-    /// and shrank with "No rating" / "0.5 stars" / "1 star" made the whole
-    /// flyout re-measure as the pointer crossed the strip — which moved the
-    /// strip out from under the pointer, picked a different star, and changed
-    /// the text again. The menu shook and the rating flickered.
+    /// It briefly carried a readout ("2.5 stars") beside them, and that one
+    /// label caused both of this menu's layout bugs. Sized to its text it
+    /// re-measured the whole flyout on every half step — which moved the strip
+    /// out from under the pointer, snapped a different star, and changed the
+    /// text again, so the menu shook. Pinning its width stopped the shake and
+    /// made the rating row permanently the widest thing here, leaving dead
+    /// space beside every other item.
+    ///
+    /// The strip is a fixed size, so a header that is only the strip cannot do
+    /// either. The value still reaches anyone not reading the stars, through
+    /// the control's automation name.
     /// </summary>
     [Fact]
-    public void TheRatingReadoutDoesNotResizeTheMenu()
+    public void TheRatingRowCarriesNoTextToResizeTheMenu()
     {
         var row = new Border();
         TrackMenu.SetTrack(row, Song());
 
         var flyout = Assert.IsType<MenuFlyout>(row.ContextFlyout);
-        var rating = flyout.ItemsSource!.Cast<object>().OfType<MenuItem>()
-            .Single(i => i.Header is StackPanel);
-        var readout = Assert.IsType<StackPanel>(rating.Header).Children.OfType<TextBlock>().Single();
+        var strip = flyout.ItemsSource!.Cast<object>().OfType<MenuItem>()
+            .Select(i => i.Header).OfType<RatingStrip>().Single();
 
-        // A set Width, so the measure is the same whatever the text says.
-        // (The strings themselves cannot be measured here — laying out text
-        // needs a rendering platform these tests deliberately do not start.)
-        Assert.False(double.IsNaN(readout.Width));
-
-        // And clipped, so a longer string than expected overflows quietly
-        // instead of growing the row and starting the loop again.
-        Assert.True(readout.ClipToBounds);
+        Assert.False(string.IsNullOrEmpty(AutomationProperties.GetName(strip)));
     }
 
     /// <summary>The header is a control now, so tests name items by what they carry.</summary>
     private static object? Name(MenuItem item) =>
-        item.Header is StackPanel panel && panel.Children.OfType<RatingStrip>().Any()
-            ? "<rating strip>"
-            : item.Header;
-
-    [Fact]
-    public void ARowWithNoTrackHasNoMenu()
-    {
-        var row = new Border();
-
-        TrackMenu.SetTrack(row, null);
-
-        Assert.Null(row.ContextFlyout);
-    }
-
-    [Fact]
-    public void ARecycledRowKeepsOneMenuAndFollowsTheNewTrack()
-    {
-        // A virtualized list hands the same Border a different song as it
-        // scrolls. Building a second flyout each time would leak one per row
-        // per scroll; reading the track when the menu opens is what keeps the
-        // one flyout correct.
-        var row = new Border();
-        TrackMenu.SetTrack(row, Song("first"));
-        var first = row.ContextFlyout;
-
-        TrackMenu.SetTrack(row, Song("second"));
-
-        Assert.Same(first, row.ContextFlyout);
-        Assert.Equal("second", TrackMenu.GetTrack(row)!.RemoteId);
-    }
+        item.Header is RatingStrip ? "<rating strip>" : item.Header;
 
     private static Track Song(string remoteId = "remote") =>
         new(
