@@ -338,6 +338,7 @@ fun MozzShell(
                         hasBottomNav = !wide,
                         safeBottom = with(density) { safeBottomPx.toDp() },
                     ),
+                    capabilities = capabilities,
                     onResync = onResync,
                     onSignOut = onSignOut,
                 )
@@ -544,6 +545,8 @@ private fun TabContent(
     onSoundChanged: suspend (PlaybackSettings) -> Unit,
     wide: Boolean,
     bottomReserve: androidx.compose.ui.unit.Dp,
+    /** What this server keeps — null until it has answered. */
+    capabilities: ServerCapabilities?,
     onResync: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -559,6 +562,11 @@ private fun TabContent(
     CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onBackground,
         LocalTrackActions provides actions,
+        // The row menu has to know whether this server keeps ratings or
+        // favourites, the same way the player does. It reaches it the same way
+        // it reaches the actions themselves: rows are drawn several layers
+        // below here and have no argument list to thread it through.
+        LocalServerCapabilities provides capabilities,
     ) {
     // A pushed page replaces the tab's root rather than covering it. Both are
     // full-screen and opaque, so keeping the root composed underneath would only

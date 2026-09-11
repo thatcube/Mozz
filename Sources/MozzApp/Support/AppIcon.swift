@@ -91,7 +91,11 @@ enum MozzIconMap {
         "waveform": "waveform",
         "text.quote": "quote",
         "wand.and.stars": "wand",
-        "text.line.first.and.arrowtriangle.forward": "playlist-add",
+        // Play Next and Add to Queue are different actions and had been sharing
+        // one glyph, so the menu offered the same picture twice and neither
+        // said which was which. Play Next has its own now — the queue with the
+        // play head arriving at the top of it — matching the desktop.
+        "text.line.first.and.arrowtriangle.forward": "play-next",
         "text.append": "playlist-add",
         "tag": "tag",
         "stethoscope": "stethoscope",

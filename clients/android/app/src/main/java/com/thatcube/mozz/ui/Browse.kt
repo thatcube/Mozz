@@ -1,5 +1,12 @@
 package com.thatcube.mozz.ui
 
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import com.thatcube.mozz.core.ServerCapabilities
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -237,6 +244,13 @@ fun SongRow(
 /** Where a row finds [TrackActions]. Null means "this list has no menu". */
 val LocalTrackActions = staticCompositionLocalOf<TrackActions?> { null }
 
+/**
+ * What the signed-in server keeps. Null means it has not answered yet, which is
+ * a different thing from "nothing" — see [TrackMenu], which draws neither a
+ * like nor a rating until it knows which one this library actually has.
+ */
+val LocalServerCapabilities = staticCompositionLocalOf<ServerCapabilities?> { null }
+
 @Stable
 class TrackActions(
     private val library: MozzLibrary,
@@ -310,6 +324,21 @@ class TrackActions(
         }
     }
 
+    /**
+     * Record a rating, in half stars, or clear it with null.
+     *
+     * The companion to [setLiked], for the servers that keep a rating rather
+     * than a favourite. Same shape and same follow-up flush: a rating is a
+     * moment the server is likely reachable, so it is the cheapest place to
+     * retry whatever else is still queued.
+     */
+    fun setRating(track: Track, stars: Double?) {
+        scope.launch {
+            runCatching { library.setRating(track.serverId, track.remoteId, stars, playback.deviceId) }
+            runCatching { library.flushFavoriteOutbox(track.serverId) }
+        }
+    }
+
     fun suppressTrack(track: Track) {
         scope.launch { runCatching { library.suppressTrack(track.serverId, track.remoteId) } }
     }
@@ -323,7 +352,15 @@ class TrackActions(
 /**
  * The per-row overflow.
  *
- * Same actions as the iPhone's, in the same order.
+ * Same actions as the iPhone's and the desktop's, in the same order, with the
+ * same glyph beside each one. It was text-only but for the like, which made a
+ * list of nine identical grey lines you had to read end to end to find the one
+ * you wanted — the other two clients had already stopped doing that.
+ *
+ * What sits at the top depends on the server. A library that keeps ratings gets
+ * stars; one that keeps favourites gets Like. Until the server has answered,
+ * neither is drawn: a heart that becomes a star a moment later has claimed this
+ * library works a way it does not. Same rule the player already followed.
  */
 @Composable
 private fun TrackMenu(track: Track, actions: TrackActions) {
@@ -331,6 +368,8 @@ private fun TrackMenu(track: Track, actions: TrackActions) {
     // Held locally so the row reflects the tap immediately; the write goes to the
     // database first and the server after, so there is nothing to wait for.
     var liked by remember(track.id) { mutableStateOf(track.isLiked) }
+    var rating by remember(track.id) { mutableStateOf(track.rating) }
+    val capabilities = LocalServerCapabilities.current
     val context = LocalContext.current
     // Read from the file rather than the record: the worker renames a .part
     // into place only once the last byte lands, so a file that exists is one
@@ -360,51 +399,72 @@ private fun TrackMenu(track: Track, actions: TrackActions) {
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(if (liked) "Unlike" else "Like") },
-                leadingIcon = {
-                    Icon(
-                        painterResource(
-                            if (liked) R.drawable.ic_heart_filled else R.drawable.ic_heart
-                        ),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
+            when (capabilities?.supportsRatings) {
+                null -> Unit
+                true -> {
+                    // The strip itself, inline. A rating is a value rather than
+                    // a command, and Compose menus have no submenu to put one
+                    // in — so it is set here, in place, at the half steps the
+                    // core stores, without the menu having to close and reopen.
+                    RatingMenuRow(
+                        rating = rating,
+                        onSet = {
+                            rating = it
+                            actions.setRating(track, it)
+                        },
                     )
-                },
-                onClick = {
-                    liked = !liked
-                    actions.setLiked(track, liked)
-                    open = false
-                },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Start Radio") },
-                onClick = { actions.startRadio(track); open = false },
-            )
+                    HorizontalDivider()
+                }
+                false -> {
+                    DropdownMenuItem(
+                        text = { Text(if (liked) "Unlike" else "Like") },
+                        leadingIcon = {
+                            MenuIcon(if (liked) R.drawable.ic_heart_filled else R.drawable.ic_heart)
+                        },
+                        onClick = {
+                            liked = !liked
+                            actions.setLiked(track, liked)
+                            open = false
+                        },
+                    )
+                    HorizontalDivider()
+                }
+            }
             DropdownMenuItem(
                 text = { Text("Play Next") },
+                leadingIcon = { MenuIcon(R.drawable.ic_play_next) },
                 onClick = { actions.playNext(track); open = false },
             )
             DropdownMenuItem(
                 text = { Text("Add to Queue") },
+                leadingIcon = { MenuIcon(R.drawable.ic_queue) },
                 onClick = { actions.addToQueue(track); open = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Start Radio") },
+                leadingIcon = { MenuIcon(R.drawable.ic_waveform) },
+                onClick = { actions.startRadio(track); open = false },
             )
             if (track.artistRemoteId != null) {
                 DropdownMenuItem(
                     text = { Text("Go to Artist") },
+                    leadingIcon = { MenuIcon(R.drawable.ic_microphone) },
                     onClick = { actions.goToArtist(track); open = false },
                 )
             }
             if (track.albumRemoteId != null) {
                 DropdownMenuItem(
                     text = { Text("Go to Album") },
+                    leadingIcon = { MenuIcon(R.drawable.ic_disc) },
                     onClick = { actions.goToAlbum(track); open = false },
                 )
             }
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text(if (downloaded) "Remove Download" else "Download") },
+                leadingIcon = {
+                    MenuIcon(if (downloaded) R.drawable.ic_trash else R.drawable.ic_download)
+                },
                 onClick = {
                     actions.toggleDownload(track, context, downloaded)
                     // Flipped here so the menu reflects the tap. The file
@@ -416,15 +476,71 @@ private fun TrackMenu(track: Track, actions: TrackActions) {
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("Don't recommend this track") },
+                leadingIcon = { MenuIcon(R.drawable.ic_circle_x) },
                 onClick = { actions.suppressTrack(track); open = false },
             )
             if (track.artistRemoteId != null) {
                 DropdownMenuItem(
                     text = { Text("Don't recommend this artist") },
+                    leadingIcon = { MenuIcon(R.drawable.ic_circle_x) },
                     onClick = { actions.suppressArtist(track); open = false },
                 )
             }
         }
+    }
+}
+
+/** One menu glyph, at the size Material expects a leading icon to be. */
+@Composable
+private fun MenuIcon(@DrawableRes id: Int) {
+    Icon(
+        painterResource(id),
+        contentDescription = null,
+        modifier = Modifier.size(20.dp),
+    )
+}
+
+/**
+ * Five stars across the top of the menu, tapped or dragged to rate.
+ *
+ * Not a [DropdownMenuItem]: the row does not dismiss the menu, because a rating
+ * is often adjusted twice — a half step either way — and a control that closes
+ * itself after one touch makes the second adjustment cost a whole reopen.
+ * Tapping the star already showing clears the rating, which is how the phones'
+ * player control already behaves.
+ */
+@Composable
+private fun RatingMenuRow(rating: Double?, onSet: (Double?) -> Unit) {
+    val density = LocalDensity.current
+    val starPx = with(density) { RatingTuning.stripStarSize.toPx() }
+    val spacingPx = with(density) { RatingTuning.stripStarSpacing.toPx() }
+    val haptics = LocalHapticFeedback.current
+
+    Row(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RatingStrip(
+            value = rating,
+            modifier = Modifier.pointerInput(rating) {
+                detectTapGestures { offset ->
+                    // `ratingAtX` is the shared half-step math — the same
+                    // function the player's drag uses, and a port of iOS's
+                    // `RatingMath`. Tapping the value already set clears it, so
+                    // taking a rating off never needs a second control.
+                    val picked = ratingAtX(offset.x, starPx, spacingPx)
+                    val next = if (picked == rating) null else picked
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSet(next)
+                }
+            },
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            rating?.let { ratingLabel(it) } ?: "No rating",
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalContentColor.current.copy(alpha = 0.6f),
+        )
     }
 }
 
