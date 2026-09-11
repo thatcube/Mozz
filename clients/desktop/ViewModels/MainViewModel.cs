@@ -1994,7 +1994,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
                 SelectedArtist = null;
                 SelectedPlaylist = null;
                 _selectedMix = null;
-                PageTitle = "Album";
+                PageTitle = page.Album?.Title ?? "Album";
                 if (reload && page.Album is not null) await LoadAlbumDetailAsync(page.Album);
                 break;
             case LibraryPageKind.ArtistDetail:
@@ -2003,7 +2003,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
                 SelectedAlbum = null;
                 SelectedPlaylist = null;
                 _selectedMix = null;
-                PageTitle = "Artist";
+                PageTitle = page.Artist?.Name ?? "Artist";
                 if (reload && page.Artist is not null) await LoadArtistDetailAsync(page.Artist);
                 break;
             case LibraryPageKind.PlaylistDetail:
@@ -2012,7 +2012,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
                 SelectedAlbum = null;
                 SelectedArtist = null;
                 _selectedMix = null;
-                PageTitle = "Playlist";
+                PageTitle = page.Playlist?.Title ?? "Playlist";
                 if (reload && page.Playlist is not null) await LoadPlaylistDetailAsync(page.Playlist);
                 break;
             case LibraryPageKind.GenreDetail:

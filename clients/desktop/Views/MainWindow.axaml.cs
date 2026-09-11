@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Media.Transformation;
 using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 
@@ -404,6 +405,36 @@ public partial class MainWindow : Window
 
         var remaining = viewer.Extent.Height - viewer.Offset.Y - viewer.Viewport.Height;
         if (remaining <= viewer.Viewport.Height) _ = vm.LoadMoreAsync();
+
+        RevealTitleForScroll(vm, viewer.Offset.Y);
+    }
+
+    // MARK: The page title
+    //
+    // On a detail page the hero already names the subject in larger type just
+    // below the bar, so showing the same words in both is saying it twice. The
+    // bar holds the name back until the hero has scrolled away, and then takes
+    // it over — which is also the point at which the reader has lost the only
+    // other thing telling them where they are.
+
+    /// <summary>Scroll offset at which the bar title starts to arrive.</summary>
+    private const double TitleRevealStart = 90;
+
+    /// <summary>And the offset by which it is fully there.</summary>
+    private const double TitleRevealEnd = 170;
+
+    private void RevealTitleForScroll(MainViewModel vm, double offsetY)
+    {
+        if (!vm.ShowDetailPage)
+        {
+            // A list page has no hero to compete with, so its title is simply
+            // always there.
+            PageTitleText.Opacity = 1;
+            return;
+        }
+
+        var span = TitleRevealEnd - TitleRevealStart;
+        PageTitleText.Opacity = Math.Clamp((offsetY - TitleRevealStart) / span, 0, 1);
     }
 
     /// <summary>
@@ -472,6 +503,40 @@ public partial class MainWindow : Window
     private void OnModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(MainViewModel.ActiveLyricIndex)) ScrollLyricsToActive();
+        // A new page starts at the top of its own scroll, so the bar has to give
+        // the title back — otherwise opening a detail page from one already
+        // scrolled would show its name twice again.
+        if (e.PropertyName is nameof(MainViewModel.PageTitle) && sender is MainViewModel vm)
+        {
+            RevealTitleForScroll(vm, 0);
+            PlayPageEntrance();
+        }
+    }
+
+    /// <summary>
+    /// Fade and lift the content pane as a new page takes it over.
+    ///
+    /// Driven from the title rather than from the section, because the section
+    /// does not change when you open an album from the album grid — and that is
+    /// exactly the move that most needs to say something happened.
+    ///
+    /// The transition is declared on the Panel, so this only has to set the
+    /// starting state and hand back the resting one; Avalonia animates between
+    /// the two. The hand-back is posted rather than immediate because both
+    /// values would otherwise be applied in the same layout pass, and a
+    /// transition between a value and itself is nothing at all.
+    /// </summary>
+    private void PlayPageEntrance()
+    {
+        ContentPane.Opacity = 0;
+        ContentPane.RenderTransform = TransformOperations.Parse("translateY(10px)");
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () =>
+            {
+                ContentPane.Opacity = 1;
+                ContentPane.RenderTransform = TransformOperations.Parse("translateY(0px)");
+            },
+            Avalonia.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>

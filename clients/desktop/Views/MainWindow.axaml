@@ -253,13 +253,50 @@
                                              Brush="{Binding $parent[Button].Foreground}" />
                     </Button>
                     <StackPanel Grid.Column="2" Spacing="5">
-                    <TextBlock Text="{Binding PageTitle}" Classes="pageTitle" />
+                    <!--
+                        On a detail page this starts invisible and fades in as the
+                        hero scrolls away, the way both phones do it.
+
+                        The hero already names the page, in bigger type, eighty
+                        points below — so the bar was saying "Daily Mix 3" over a
+                        heading that said "Daily Mix 3". The album, artist and
+                        playlist pages dodged that by saying "Album", "Artist" and
+                        "Playlist" instead, which is a label rather than a title
+                        and told the reader nothing they could not see. Now every
+                        detail page names its subject, and says it once: in the
+                        hero while the hero is there, in the bar once it is not.
+                    -->
+                    <TextBlock x:Name="PageTitleText" Text="{Binding PageTitle}" Classes="pageTitle">
+                        <TextBlock.Transitions>
+                            <Transitions>
+                                <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
+                            </Transitions>
+                        </TextBlock.Transitions>
+                    </TextBlock>
                     <TextBlock Text="{Binding StatusMessage}" Classes="secondary"
                                IsVisible="{Binding StatusMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
                     </StackPanel>
                 </Grid>
 
-                <Panel Grid.Row="1" x:Name="ContentPane" SizeChanged="OnContentResized">
+                <!--
+                    The page arrives rather than appearing.
+
+                    Switching sections replaced the whole pane in one frame, and
+                    so did going into and out of a detail page: the library was
+                    there, and then something else was, with nothing in between
+                    to say which direction you had moved. A short fade and a few
+                    points of rise is enough — it is the same gesture the phones
+                    use, and it costs one property animation.
+                -->
+                <Panel Grid.Row="1" x:Name="ContentPane" SizeChanged="OnContentResized"
+                       RenderTransformOrigin="50%,0%">
+                    <Panel.Transitions>
+                        <Transitions>
+                            <DoubleTransition Property="Opacity" Duration="0:0:0.20" Easing="CubicEaseOut" />
+                            <TransformOperationsTransition Property="RenderTransform"
+                                                           Duration="0:0:0.24" Easing="CubicEaseOut" />
+                        </Transitions>
+                    </Panel.Transitions>
 
                     <StackPanel IsVisible="{Binding IsLibraryEmpty}"
                                 HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -431,8 +468,25 @@
                                                hugging it on the other two sides. Even padding is
                                                the whole of what makes a hover look deliberate.
                                            -->
+                                           <!--
+                                               The same gap every other card on this page
+                                               uses, which is none of its own: the tile's
+                                               8pt padding on each side is the gap, so two
+                                               neighbours sit 16 apart and the outer edges
+                                               stay flush with the heading above them.
+
+                                               It used to carry Margin="0,0,20,12" on top of
+                                               that padding, which made this one shelf 36
+                                               points apart horizontally and 28 vertically
+                                               while the mixes above it were 16 and 20 and
+                                               the album shelf below was 16 and 18. Three
+                                               spacing systems on one page, and this was the
+                                               loose one. The right margin also applied to
+                                               the LAST column, so the shelf stopped short of
+                                               the right edge while its left was flush.
+                                           -->
                                            <Button Classes="tile" HorizontalAlignment="Stretch"
-                                                   Margin="0,0,20,12"
+                                                   Margin="0,0,0,4" Padding="8"
                                                    Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}"
                                                    controls:TrackMenu.Track="{Binding}">

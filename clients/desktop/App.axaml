@@ -221,7 +221,20 @@
                  each other, and hovering one row looks like a band of colour
                  across the list rather than a card under the pointer. -->
             <Setter Property="Margin" Value="0,2" />
-            <Setter Property="Transitions" Value="{x:Null}" />
+            <!-- A short ease rather than none.
+            
+                 These were set to {x:Null} to strip Fluent's own transitions,
+                 which are slow enough on a list row to feel like lag. But none
+                 at all is the other extreme: every surface in the app snapped
+                 between two colours, so nothing on screen ever moved and the
+                 whole thing read as a screenshot of an app rather than an app.
+                 Twelve hundredths is under the threshold where a hover feels
+                 delayed and over the one where it reads as a hard cut. -->
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="Border.rowPlate:pointerover">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
@@ -233,6 +246,14 @@
              Spotify both do this, for the same reason. -->
         <Style Selector="controls|TablerIcon.restingHeart">
             <Setter Property="Opacity" Value="0" />
+            <!-- Faded in, not blinked in. The row's plate is already easing
+                 under the pointer; a control appearing on top of it in one
+                 frame arrives before the surface it sits on. -->
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="Border.rowPlate:pointerover controls|TablerIcon.restingHeart">
             <Setter Property="Opacity" Value="1" />
@@ -242,7 +263,11 @@
              behind a card is a halo at the same colour. -->
         <Style Selector="Border.tileSurface">
             <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
-            <Setter Property="Transitions" Value="{x:Null}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="Border.tileSurface:pointerover">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
@@ -253,7 +278,11 @@
             <Setter Property="Transitions" Value="{x:Null}" />
         </Style>
         <Style Selector="ListBoxItem /template/ ContentPresenter">
-            <Setter Property="Transitions" Value="{x:Null}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
         </Style>
 
         <!-- The default button.
@@ -442,7 +471,11 @@
              rule below unable to raise it. -->
         <Style Selector="Border.coverHover">
             <Setter Property="Opacity" Value="0" />
-            <Setter Property="Transitions" Value="{x:Null}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.14" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="Button.cover:pointerover Border.coverHover">
             <Setter Property="Opacity" Value="1" />
