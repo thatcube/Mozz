@@ -648,13 +648,30 @@
                                                  filled heart. Only ever set on a server that keeps
                                                  ratings, so the binding needs no second condition:
                                                  a favourites server leaves it null. -->
-                                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
-                                                        Margin="0,0,8,0"
-                                                        IsVisible="{Binding HasRating}">
-                                                <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
-                                                                     Brush="{DynamicResource TextSecondary}" />
-                                                <TextBlock Text="{Binding RatingText}" Classes="secondary" FontSize="12" />
-                                            </StackPanel>
+                                            <!-- The chip keeps its space whether or not the song
+                                                 has a rating.
+
+                                                 Every row is its own Grid, so an Auto column sizes
+                                                 to THAT row's content: a rated song made this
+                                                 column wider, which took the width out of the
+                                                 starred title column, which dragged Artist and
+                                                 Album 54 points left of where the unrated rows
+                                                 above and below them put the same headings. A list
+                                                 with a few rated songs in it had columns that
+                                                 stepped in and out as you read down.
+
+                                                 Reserving the width once means every row agrees,
+                                                 and the column headings can then line up with the
+                                                 columns they name. -->
+                                            <Panel Width="56" Margin="0,0,8,0">
+                                                <StackPanel Orientation="Horizontal" Spacing="3"
+                                                            VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                            IsVisible="{Binding HasRating}">
+                                                    <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
+                                                                         Brush="{DynamicResource TextSecondary}" />
+                                                    <TextBlock Text="{Binding RatingText}" Classes="secondary" FontSize="12" />
+                                                </StackPanel>
+                                            </Panel>
                                             <Button Classes="ghost rowAction trackFavoriteColumn"
                                                     IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}"
                                                     Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
@@ -673,7 +690,11 @@
                                                                      Brush="{Binding $parent[Button].Foreground}" />
                                             </Button>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="4" Classes="secondary trackDurationColumn" Text="{Binding Duration}"
+                                        <!-- A fixed width, so a ten-minute track cannot widen this column and
+                                             shift Artist and Album across just that one row — the same
+                                             fault the rating chip had, in a form the library happens not
+                                             to show off: every song on screen is under ten minutes. -->
+                                        <TextBlock Grid.Column="4" Classes="secondary trackDurationColumn" Width="44" TextAlignment="Right" Text="{Binding Duration}"
                                                    VerticalAlignment="Center"
                                                    HorizontalAlignment="Right" Margin="0,0,10,0" />
                                     </Grid>
@@ -921,13 +942,30 @@
                                                  filled heart. Only ever set on a server that keeps
                                                  ratings, so the binding needs no second condition:
                                                  a favourites server leaves it null. -->
-                                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
-                                                        Margin="0,0,8,0"
-                                                        IsVisible="{Binding Track.HasRating}">
-                                                <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
-                                                                     Brush="{DynamicResource TextSecondary}" />
-                                                <TextBlock Text="{Binding Track.RatingText}" Classes="secondary" FontSize="12" />
-                                            </StackPanel>
+                                            <!-- The chip keeps its space whether or not the song
+                                                 has a rating.
+
+                                                 Every row is its own Grid, so an Auto column sizes
+                                                 to THAT row's content: a rated song made this
+                                                 column wider, which took the width out of the
+                                                 starred title column, which dragged Artist and
+                                                 Album 54 points left of where the unrated rows
+                                                 above and below them put the same headings. A list
+                                                 with a few rated songs in it had columns that
+                                                 stepped in and out as you read down.
+
+                                                 Reserving the width once means every row agrees,
+                                                 and the column headings can then line up with the
+                                                 columns they name. -->
+                                            <Panel Width="56" Margin="0,0,8,0">
+                                                <StackPanel Orientation="Horizontal" Spacing="3"
+                                                            VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                            IsVisible="{Binding Track.HasRating}">
+                                                    <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
+                                                                         Brush="{DynamicResource TextSecondary}" />
+                                                    <TextBlock Text="{Binding Track.RatingText}" Classes="secondary" FontSize="12" />
+                                                </StackPanel>
+                                            </Panel>
                                             <Button Classes="ghost rowAction trackFavoriteColumn"
                                                     IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}"
                                                     Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
@@ -946,7 +984,7 @@
                                                                      Brush="{Binding $parent[Button].Foreground}" />
                                             </Button>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="4" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
+                                        <TextBlock Grid.Column="4" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn" Width="44" TextAlignment="Right"
                                                    VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                     </Grid>
                                 </Border>
@@ -1146,7 +1184,7 @@
                         </ListBox.Styles>
                         <ListBox.DataTemplates>
                             <DataTemplate DataType="vm:AlbumHeroRow">
-                                <WrapPanel Margin="0,0,0,28" Classes="detailHero">
+                                <WrapPanel Margin="8,0,8,28" Classes="detailHero">
                                     <controls:ArtworkImage Grid.Column="0" Width="220" Height="220" DisplaySize="220"
                                             CornerRadius="13" ServerId="{Binding Album.ServerId}"
                                             ArtworkKey="{Binding Album.ArtworkKey}" FallbackText="{Binding Album.Title}"
@@ -1224,7 +1262,7 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistHeroRow">
-                                <WrapPanel Margin="0,0,0,28" Classes="detailHero">
+                                <WrapPanel Margin="8,0,8,28" Classes="detailHero">
                                     <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource SurfaceRaised}"
                                             CornerRadius="13" Padding="28">
                                         <controls:TablerIcon Size="74" Data="{StaticResource IconPlaylist}"
@@ -1254,7 +1292,7 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:MixHeroRow">
-                                <WrapPanel Margin="0,0,0,28" Classes="detailHero">
+                                <WrapPanel Margin="8,0,8,28" Classes="detailHero">
                                     <Border Grid.Column="0" Width="220" Height="220" Background="{DynamicResource SurfaceRaised}"
                                             CornerRadius="13" IsVisible="{Binding Mix.IsLiked}">
                                         <controls:TablerIcon Size="74" Filled="True" Data="{StaticResource IconHeart}"
@@ -1291,7 +1329,7 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:GenreHeroRow">
-                                <WrapPanel Margin="0,0,0,28" Classes="detailHero">
+                                <WrapPanel Margin="8,0,8,28" Classes="detailHero">
                                     <Border Grid.Column="0" Width="220" Height="160" Background="{DynamicResource SurfaceRaised}"
                                             CornerRadius="13" Padding="28">
                                         <controls:TablerIcon Size="74" Data="{StaticResource IconStack}"
@@ -1307,7 +1345,11 @@
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:DetailSectionRow">
-                                <TextBlock Text="{Binding Title}" Classes="sectionTitle" Margin="0,14,0,12" />
+                                <!-- Inset to the same edge the rows keep their artwork on:
+                                     the plate around a row pads it by 8, so a heading flush
+                                     with the plate sits 8 points left of everything it
+                                     introduces. -->
+                                <TextBlock Text="{Binding Title}" Classes="sectionTitle" Margin="8,14,0,12" />
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:DetailAlbumShelfRow">
@@ -1409,12 +1451,37 @@
                                 </Border>
                             </DataTemplate>
 
+                            <!--
+                                The header mirrors the ROW's geometry rather than
+                                approximating it.
+
+                                It had its own columns — 44 where the row has an artwork
+                                cell of 40 and a title inset of 13, and nothing at all
+                                where the row keeps its rating chip and buttons. So
+                                "Song" sat 17 points left of the titles under it while
+                                "Artist" and "Album" sat 38 points right of theirs: a
+                                header whose every label missed the column it named.
+
+                                Same margin as the row plate's padding, same column
+                                widths, same title inset, and a spacer standing in for
+                                the actions — including the heart, which only a
+                                favourites server draws.
+                            -->
                             <DataTemplate DataType="vm:PlaylistTrackHeaderRow">
-                                <Grid ColumnDefinitions="44,*,Auto,Auto,Auto,Auto" Height="34" Margin="0,8,0,4" Classes="playlistTrackHeaderRow">
-                                    <TextBlock Grid.Column="1" Text="Song" Classes="secondary" />
+                                <Grid ColumnDefinitions="40,*,Auto,Auto,Auto,Auto" Height="34"
+                                      Margin="8,8,8,4" Classes="playlistTrackHeaderRow">
+                                    <TextBlock Grid.Column="1" Text="Song" Classes="secondary" Margin="13,0" />
                                     <TextBlock Grid.Column="2" Width="180" Text="Artist" Classes="secondary compactHidden" />
                                     <TextBlock Grid.Column="3" Width="220" Text="Album" Classes="secondary compactHidden" />
-                                    <TextBlock Grid.Column="5" Text="Time" Classes="secondary trackDurationColumn" HorizontalAlignment="Right" Margin="0,0,10,0" />
+                                    <StackPanel Grid.Column="4" Orientation="Horizontal">
+                                        <!-- The rating chip's reserved 56 plus its 8pt gap. -->
+                                        <Panel Width="64" />
+                                        <Panel Width="36"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}" />
+                                        <!-- The overflow, which every row carries. -->
+                                        <Panel Width="36" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="5" Text="Time" Classes="secondary trackDurationColumn" Width="44" TextAlignment="Right" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                 </Grid>
                             </DataTemplate>
 
@@ -1447,13 +1514,30 @@
                                                  filled heart. Only ever set on a server that keeps
                                                  ratings, so the binding needs no second condition:
                                                  a favourites server leaves it null. -->
-                                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center"
-                                                        Margin="0,0,8,0"
-                                                        IsVisible="{Binding Track.HasRating}">
-                                                <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
-                                                                     Brush="{DynamicResource TextSecondary}" />
-                                                <TextBlock Text="{Binding Track.RatingText}" Classes="secondary" FontSize="12" />
-                                            </StackPanel>
+                                            <!-- The chip keeps its space whether or not the song
+                                                 has a rating.
+
+                                                 Every row is its own Grid, so an Auto column sizes
+                                                 to THAT row's content: a rated song made this
+                                                 column wider, which took the width out of the
+                                                 starred title column, which dragged Artist and
+                                                 Album 54 points left of where the unrated rows
+                                                 above and below them put the same headings. A list
+                                                 with a few rated songs in it had columns that
+                                                 stepped in and out as you read down.
+
+                                                 Reserving the width once means every row agrees,
+                                                 and the column headings can then line up with the
+                                                 columns they name. -->
+                                            <Panel Width="56" Margin="0,0,8,0">
+                                                <StackPanel Orientation="Horizontal" Spacing="3"
+                                                            VerticalAlignment="Center" HorizontalAlignment="Right"
+                                                            IsVisible="{Binding Track.HasRating}">
+                                                    <controls:TablerIcon Size="14" Filled="True" Data="{StaticResource IconStar}"
+                                                                         Brush="{DynamicResource TextSecondary}" />
+                                                    <TextBlock Text="{Binding Track.RatingText}" Classes="secondary" FontSize="12" />
+                                                </StackPanel>
+                                            </Panel>
                                             <Button Classes="ghost rowAction trackFavoriteColumn"
                                                     IsVisible="{Binding $parent[Window].DataContext.ShowsFavoriteHeart}"
                                                     Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
@@ -1472,7 +1556,7 @@
                                                                      Brush="{Binding $parent[Button].Foreground}" />
                                             </Button>
                                         </StackPanel>
-                                        <TextBlock Grid.Column="5" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn"
+                                        <TextBlock Grid.Column="5" Text="{Binding Track.Duration}" Classes="secondary trackDurationColumn" Width="44" TextAlignment="Right"
                                                    VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0" />
                                     </Grid>
                                 </Border>
