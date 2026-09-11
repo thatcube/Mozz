@@ -342,6 +342,44 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
         </Style>
+        <!--
+             A lyric line. It is a Button because a timed line seeks to itself,
+             but it must not look like one: the words are the content and any
+             chrome around them is noise. The plate only appears under the
+             pointer, and only on lines that actually have somewhere to go —
+             an unsynced line is disabled, so it stays at full brightness and
+             simply does not light up.
+        -->
+        <Style Selector="Button.lyricLine">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+        </Style>
+        <Style Selector="Button.lyricLine:disabled">
+            <Setter Property="Cursor" Value="Arrow" />
+        </Style>
+        <!-- Fluent dims a disabled button's content. An unsynced lyric is not
+             an unavailable control, it is a line of the song, so it keeps the
+             brightness LyricDepth gave it. -->
+        <Style Selector="Button.lyricLine:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Button.lyricLine:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Button.lyricLine:disabled:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.lyricLine:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
+        </Style>
+
         <!-- The artist and album names in a row stay clickable, but they sit
              inside a plate that already lights up, so a second surface under
              them would read as two overlapping targets. -->

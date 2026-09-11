@@ -391,6 +391,20 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     public bool HasQueue => QueueRows.Count > 0;
     public bool HasLyrics => LyricRows.Count > 0;
     public bool ShowLyricsSilent => ShowNowPlaying && !IsLyricsLoading && LyricStatus == "silent";
+
+    /// <summary>
+    /// Whether to say "no lyrics" out loud.
+    ///
+    /// Not while loading — a verdict that appears for a beat and is then
+    /// replaced by the words is worse than a blank column. And not when the
+    /// core reports "silent", which means we have already resolved this track
+    /// to nothing and there is no news to report: both phones draw an empty
+    /// column for that, and the desktop used to draw a raised card with the
+    /// verdict on it AND the bare label underneath, in the same grid cell, on
+    /// top of each other.
+    /// </summary>
+    public bool ShowLyricsPlaceholder =>
+        !HasLyrics && !IsLyricsLoading && !ShowLyricsSilent && !string.IsNullOrWhiteSpace(LyricsMessage);
     public string ShuffleStateText => _queue.Shuffle == ShuffleMode.On ? "Shuffle On" : "Shuffle";
     public string RepeatStateText => _queue.Repeat switch
     {
@@ -487,7 +501,22 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     [ObservableProperty] private string? _lyricStatus;
     [ObservableProperty] private bool _isLyricsLoading;
     [ObservableProperty] private string? _lyricsMessage;
+    [ObservableProperty] private string? _lyricsSource;
+    /// <summary>
+    /// Which line is being sung, or null when nothing is — the column scrolls
+    /// itself to keep this one in the focus slot.
+    /// </summary>
+    [ObservableProperty] private int? _activeLyricIndex;
     [ObservableProperty] private ContinuityResumeOffer? _continuityOffer;
+
+    /// <summary>
+    /// The lines as the server gave them. Kept so the ten-a-second highlight
+    /// pass can find the active index without rebuilding a list of them from
+    /// the rows it is about to update.
+    /// </summary>
+    private IReadOnlyList<LyricLine> _lyricLines = [];
+
+    public bool HasLyricsSource => !string.IsNullOrWhiteSpace(LyricsSource);
 
     public bool HasContinuityOffer => ContinuityOffer is not null;
 
@@ -2874,10 +2903,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     private async Task LoadLyricsAsync(Track track, double positionSeconds)
     {
         LyricRows.Clear();
+        _lyricLines = [];
+        ActiveLyricIndex = null;
         LyricsMessage = null;
+        LyricsSource = null;
         LyricStatus = null;
         OnPropertyChanged(nameof(HasLyrics));
         OnPropertyChanged(nameof(ShowLyricsSilent));
+        OnPropertyChanged(nameof(ShowLyricsPlaceholder));
         if (!_core.IsOpen) return;
 
         try
@@ -2900,8 +2933,19 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
             }
 
             var active = payload?.ActiveLineIndex ?? LyricLineSelector.ActiveIndex(payload?.Lyrics?.Lines, positionSeconds);
+            _lyricLines = payload?.Lyrics?.Lines ?? [];
+            // Rows first, then the index. The view seats the column when the
+            // index changes, and it can only do that once the rows it is going
+            // to measure exist — announcing the line before there is anything to
+            // scroll left the column pinned to the top of a song resumed from
+            // the middle, until the singer happened to reach the next line.
             Replace(LyricRows, LyricLineSelector.Rows(payload?.Lyrics?.Lines, active));
-            LyricsMessage = LyricRows.Count == 0 ? "No lyrics for this track." : payload?.Lyrics?.SourceDisplayName;
+            ActiveLyricIndex = active;
+            // The source belongs under the last line, the way it does on both
+            // phones — not in the "no lyrics" slot, where it was being written
+            // to a label that is only ever shown when there are none.
+            LyricsSource = LyricRows.Count == 0 ? null : payload?.Lyrics?.SourceDisplayName;
+            LyricsMessage = LyricRows.Count == 0 ? "No lyrics for this track." : null;
         }
         catch (Exception ex)
         {
@@ -2915,13 +2959,23 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         }
     }
 
+    /// <summary>
+    /// Move the highlight to whichever line is being sung now.
+    ///
+    /// This runs ten times a second, so it does as little as possible: it works
+    /// out the active index, returns immediately if it has not changed, and
+    /// otherwise re-lights the rows that are already on screen. It used to
+    /// rebuild the whole collection every tick, which discarded every list
+    /// container ten times a second — the column flickered and could never hold
+    /// a scroll position long enough to follow the song.
+    /// </summary>
     private void UpdateActiveLyric(double positionSeconds)
     {
         if (LyricRows.Count == 0) return;
-        var lines = LyricRows.Select(r => new LyricLine(r.Text, r.StartSeconds)).ToList();
-        var active = LyricLineSelector.ActiveIndex(lines, positionSeconds);
-        Replace(LyricRows, LyricLineSelector.Rows(lines, active));
-        OnPropertyChanged(nameof(HasLyrics));
+        var active = LyricLineSelector.ActiveIndex(_lyricLines, positionSeconds);
+        if (active == ActiveLyricIndex) return;
+        ActiveLyricIndex = active;
+        LyricLineSelector.Light(LyricRows, active);
     }
 
     // MARK: The track menu
@@ -3531,6 +3585,24 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         SeekTo(Math.Clamp(PositionSeconds + delta, 0, DurationSeconds));
     }
 
+    /// <summary>
+    /// Jump to the moment a lyric line is sung.
+    ///
+    /// Synced lines only: an unsynced line has no timestamp, so there is nowhere
+    /// to go and clicking one should do nothing rather than seek to zero.
+    /// </summary>
+    [RelayCommand]
+    private void SeekToLyric(LyricLineRow? row)
+    {
+        if (row?.StartSeconds is not { } start) return;
+        SeekTo(start);
+        // Do not wait for the next tick to move the highlight: the click already
+        // said which line, and a beat of the old line still lit reads as a miss.
+        UpdateActiveLyric(start);
+    }
+
+    partial void OnLyricsSourceChanged(string? value) => OnPropertyChanged(nameof(HasLyricsSource));
+
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(DurationText));
 
     partial void OnIsPlayingChanged(bool value)
@@ -3775,6 +3847,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(HasQueue));
         OnPropertyChanged(nameof(HasLyrics));
         OnPropertyChanged(nameof(ShowLyricsSilent));
+        OnPropertyChanged(nameof(ShowLyricsPlaceholder));
         OnPropertyChanged(nameof(ShuffleStateText));
         OnPropertyChanged(nameof(RepeatStateText));
         OnPropertyChanged(nameof(HasArtistAlbums));

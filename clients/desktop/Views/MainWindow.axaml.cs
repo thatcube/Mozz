@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Linq;
 using Avalonia;
 using Avalonia.VisualTree;
@@ -18,7 +19,12 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Opened += (_, _) => ApplyLayoutForWidth(Bounds.Width);
+        Opened += (_, _) =>
+        {
+            ApplyLayoutForWidth(Bounds.Width);
+            ObserveLyrics();
+        };
+        DataContextChanged += (_, _) => ObserveLyrics();
     }
 
     /// <summary>
@@ -399,4 +405,139 @@ public partial class MainWindow : Window
         var remaining = viewer.Extent.Height - viewer.Offset.Y - viewer.Viewport.Height;
         if (remaining <= viewer.Viewport.Height) _ = vm.LoadMoreAsync();
     }
+
+    // MARK: The lyrics column
+    //
+    // The column keeps the line being sung a third of the way down rather than
+    // wherever the reader last left the scroll, which is the whole reason to
+    // show timed lyrics at all. The phones get this from a list that can scroll
+    // to an item at a given anchor; Avalonia's ScrollViewer only takes an
+    // offset, so the offset is worked out here.
+
+    /// <summary>
+    /// Drives the eased scroll. A ScrollViewer moves instantly when its Offset
+    /// is set, and a column of words that teleports once a line reads as a
+    /// glitch — so the offset is walked to its target over
+    /// <see cref="LyricScrollDuration"/> instead.
+    /// </summary>
+    private Avalonia.Threading.DispatcherTimer? _lyricScrollTimer;
+    private double _lyricScrollFrom;
+    private double _lyricScrollTo;
+    private DateTime _lyricScrollStarted;
+    private MainViewModel? _observedModel;
+
+    private static readonly TimeSpan LyricScrollDuration = TimeSpan.FromMilliseconds(450);
+
+    /// <summary>
+    /// Watch the view model for the line being sung. Done by hand rather than
+    /// with a binding because the answer is a scroll offset, which needs the
+    /// measured height of a container the binding system knows nothing about.
+    /// </summary>
+    private void ObserveLyrics()
+    {
+        if (ReferenceEquals(_observedModel, DataContext)) return;
+        if (_observedModel is not null)
+        {
+            _observedModel.PropertyChanged -= OnModelPropertyChanged;
+            _observedModel.LyricRows.CollectionChanged -= OnLyricRowsChanged;
+        }
+        _observedModel = DataContext as MainViewModel;
+        if (_observedModel is not null)
+        {
+            _observedModel.PropertyChanged += OnModelPropertyChanged;
+            // A new song's lines arrive as a collection change, and the index
+            // that comes with them is often unchanged from the last song's — so
+            // waiting for the index alone left a column resumed from the middle
+            // pinned to its first line until the singer reached the next one.
+            _observedModel.LyricRows.CollectionChanged += OnLyricRowsChanged;
+        }
+    }
+
+    private void OnLyricRowsChanged(object? sender, NotifyCollectionChangedEventArgs e) => ScrollLyricsToActive();
+
+    private void OnModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.ActiveLyricIndex)) ScrollLyricsToActive();
+    }
+
+    /// <summary>
+    /// Put the active line in the focus slot.
+    ///
+    /// The lead and tail pads are sized here too, and from the viewport: without
+    /// them the first line can never rise to the focus slot and the last can
+    /// never reach it either, so the column would snap to the top at the start
+    /// of a song and stop following near the end of one.
+    /// </summary>
+    /// <summary>
+    /// Seat the column on the active line, after the next layout pass.
+    ///
+    /// Deferred because the two things that ask for it — a fresh set of lines
+    /// and a change of viewport — both arrive before the containers being
+    /// measured exist, and measuring one that has not been realised yet scrolls
+    /// nowhere at all.
+    /// </summary>
+    private void ScrollLyricsToActive() =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(SeatLyricColumn, Avalonia.Threading.DispatcherPriority.Loaded);
+
+    private void SeatLyricColumn()
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var scroller = LyricsScroller;
+        var viewport = scroller.Viewport.Height;
+        if (viewport <= 0) return;
+
+        var focusOffset = viewport * LyricDepth.FocusAnchor;
+        LyricsLeadPad.Height = Math.Max(0, focusOffset - 24);
+        LyricsTailPad.Height = Math.Max(0, viewport - focusOffset);
+
+        if (vm.ActiveLyricIndex is not { } index) return;
+        if (LyricsLines.ContainerFromIndex(index) is not Control container) return;
+
+        var top = container.TranslatePoint(new Point(0, 0), LyricsColumn);
+        if (top is not { } point) return;
+
+        var target = Math.Clamp(
+            point.Y - focusOffset,
+            0,
+            Math.Max(0, scroller.Extent.Height - viewport));
+        AnimateLyricScroll(target);
+    }
+
+    private void AnimateLyricScroll(double target)
+    {
+        var current = LyricsScroller.Offset.Y;
+        if (Math.Abs(target - current) < 0.5) return;
+
+        _lyricScrollFrom = current;
+        _lyricScrollTo = target;
+        _lyricScrollStarted = DateTime.UtcNow;
+
+        if (_lyricScrollTimer is null)
+        {
+            _lyricScrollTimer = new Avalonia.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(16),
+            };
+            _lyricScrollTimer.Tick += OnLyricScrollTick;
+        }
+        _lyricScrollTimer.Start();
+    }
+
+    private void OnLyricScrollTick(object? sender, EventArgs e)
+    {
+        var elapsed = DateTime.UtcNow - _lyricScrollStarted;
+        var t = Math.Clamp(elapsed.TotalMilliseconds / LyricScrollDuration.TotalMilliseconds, 0, 1);
+        // Ease out: leaves quickly, settles gently, which is how the eye expects
+        // a column of text to come to rest.
+        var eased = 1 - Math.Pow(1 - t, 3);
+        var y = _lyricScrollFrom + (_lyricScrollTo - _lyricScrollFrom) * eased;
+        LyricsScroller.Offset = LyricsScroller.Offset.WithY(y);
+        if (t >= 1) _lyricScrollTimer?.Stop();
+    }
+
+    /// <summary>
+    /// Re-seat the column when the panel is resized: the focus slot is a
+    /// fraction of the viewport, so a taller window moves it.
+    /// </summary>
+    private void OnLyricsScrollerSizeChanged(object? sender, SizeChangedEventArgs e) => ScrollLyricsToActive();
 }

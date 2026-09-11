@@ -1807,28 +1807,92 @@
                  on every screen: a player is mostly a large square, and what is
                  left over is at its side, not under it. -->
             <Grid x:Name="NowPlayingLowerGrid" Grid.Column="1" Width="380" Classes="nowPlayingLower">
+                <!--
+                     The lyrics column, built the way the phones build theirs.
+
+                     It was a ListBox of 16pt grey lines with a "▶ " typed onto the
+                     front of whichever one was playing. Three things wrong with
+                     that: lyrics are not a list of choices, so every line offered
+                     a selection highlight and a square hover band; the marker
+                     reflowed the line it marked; and nothing scrolled, so the
+                     song left the viewport within a verse.
+
+                     So: an ItemsControl, not a ListBox. Brightness and softness
+                     say which line is being sung (LyricDepth, shared numbers with
+                     iOS and Android), the column scrolls itself to keep that line
+                     a third of the way down, and clicking a timed line seeks to
+                     it.
+                -->
                 <Grid RowDefinitions="Auto,*" IsVisible="{Binding ShowLyricsPanel}">
                 <TextBlock Grid.Row="0" Text="Lyrics" Classes="sectionTitle" Margin="0,0,0,12"
                            IsVisible="False" />
-                <Border Grid.Row="1" Background="{DynamicResource SurfaceRaised}" CornerRadius="14" Padding="18"
-                        IsVisible="{Binding ShowLyricsSilent}">
-                    <TextBlock Text="{Binding LyricsMessage}" Classes="secondary" TextWrapping="Wrap" />
-                </Border>
-                <TextBlock Grid.Row="1" Text="{Binding LyricsMessage}" Classes="secondary"
-                           IsVisible="{Binding !HasLyrics}" />
-                <ListBox Grid.Row="1" ItemsSource="{Binding LyricRows}"
-                         IsVisible="{Binding HasLyrics}"
-                         Background="Transparent" BorderThickness="0">
-                    <ListBox.ItemsPanel>
-                        <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding DisplayText}" Classes="secondary" FontSize="16" TextWrapping="Wrap"
-                                       Margin="0,0,0,9" />
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <!-- One verdict, centred and quiet, and only when there is one
+                     to give. "Silent" means the core already resolved this
+                     track to nothing, which both phones draw as an empty
+                     column rather than an announcement. -->
+                <StackPanel Grid.Row="1" Spacing="10"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsVisible="{Binding ShowLyricsPlaceholder}">
+                    <controls:TablerIcon Size="28" Data="{StaticResource IconQuote}"
+                                         Brush="{DynamicResource TextTertiary}"
+                                         HorizontalAlignment="Center" />
+                    <TextBlock Text="{Binding LyricsMessage}" Classes="secondary"
+                               TextAlignment="Center" TextWrapping="Wrap" MaxWidth="260" />
+                </StackPanel>
+                <ScrollViewer Grid.Row="1" x:Name="LyricsScroller"
+                              IsVisible="{Binding HasLyrics}"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Hidden"
+                              SizeChanged="OnLyricsScrollerSizeChanged">
+                    <!-- Dissolve into the backdrop at the edges rather than
+                         cutting off against them. Relative stops, unlike the
+                         phones' fixed point heights, because this column sits in
+                         a fixed slot and never grows mid-song. -->
+                    <ScrollViewer.OpacityMask>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                            <GradientStop Offset="0" Color="#00000000" />
+                            <GradientStop Offset="0.10" Color="#FF000000" />
+                            <GradientStop Offset="0.88" Color="#FF000000" />
+                            <GradientStop Offset="1" Color="#00000000" />
+                        </LinearGradientBrush>
+                    </ScrollViewer.OpacityMask>
+                    <StackPanel x:Name="LyricsColumn" Margin="2,0,10,0">
+                        <!-- Heights are set from the code-behind once the
+                             viewport is measured: the first line has to be able
+                             to reach the focus slot, and so does the last. -->
+                        <Border x:Name="LyricsLeadPad" Height="120" />
+                        <ItemsControl x:Name="LyricsLines" ItemsSource="{Binding LyricRows}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Classes="lyricLine"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            IsEnabled="{Binding IsSynced}"
+                                            Command="{Binding $parent[Window].DataContext.SeekToLyricCommand}"
+                                            CommandParameter="{Binding}">
+                                        <TextBlock Text="{Binding DisplayText}"
+                                                   FontSize="21"
+                                                   LineHeight="28"
+                                                   FontWeight="{Binding LineWeight}"
+                                                   Foreground="{DynamicResource TextPrimary}"
+                                                   Opacity="{Binding LineOpacity}"
+                                                   TextWrapping="Wrap"
+                                                   Effect="{Binding LineEffect}" />
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- Quiet attribution at the very end of the scroll, so
+                             it is discoverable without ever competing with the
+                             words. Same place both phones put it. -->
+                        <TextBlock Text="{Binding LyricsSource, StringFormat='Lyrics from {0}'}"
+                                   IsVisible="{Binding HasLyricsSource}"
+                                   Classes="secondary" FontSize="11"
+                                   Foreground="{DynamicResource TextTertiary}"
+                                   Margin="12,20,0,0" TextWrapping="Wrap" />
+                        <Border x:Name="LyricsTailPad" Height="200" />
+                    </StackPanel>
+                </ScrollViewer>
                 </Grid>
                 <Grid x:Name="NowPlayingQueuePanel" RowDefinitions="Auto,*"
                       IsVisible="{Binding ShowQueuePanel}" Classes="nowPlayingQueuePanel">
