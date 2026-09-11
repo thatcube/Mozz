@@ -56,6 +56,36 @@ public class TrackMenuTests
         Assert.True(rating.StaysOpenOnClick);
     }
 
+    /// <summary>
+    /// The readout beside the stars must not size itself to its text.
+    ///
+    /// The rating row is the widest thing in the menu, so a readout that grew
+    /// and shrank with "No rating" / "0.5 stars" / "1 star" made the whole
+    /// flyout re-measure as the pointer crossed the strip — which moved the
+    /// strip out from under the pointer, picked a different star, and changed
+    /// the text again. The menu shook and the rating flickered.
+    /// </summary>
+    [Fact]
+    public void TheRatingReadoutDoesNotResizeTheMenu()
+    {
+        var row = new Border();
+        TrackMenu.SetTrack(row, Song());
+
+        var flyout = Assert.IsType<MenuFlyout>(row.ContextFlyout);
+        var rating = flyout.ItemsSource!.Cast<object>().OfType<MenuItem>()
+            .Single(i => i.Header is StackPanel);
+        var readout = Assert.IsType<StackPanel>(rating.Header).Children.OfType<TextBlock>().Single();
+
+        // A set Width, so the measure is the same whatever the text says.
+        // (The strings themselves cannot be measured here — laying out text
+        // needs a rendering platform these tests deliberately do not start.)
+        Assert.False(double.IsNaN(readout.Width));
+
+        // And clipped, so a longer string than expected overflows quietly
+        // instead of growing the row and starting the loop again.
+        Assert.True(readout.ClipToBounds);
+    }
+
     /// <summary>The header is a control now, so tests name items by what they carry.</summary>
     private static object? Name(MenuItem item) =>
         item.Header is StackPanel panel && panel.Children.OfType<RatingStrip>().Any()

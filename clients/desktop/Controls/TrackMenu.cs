@@ -189,6 +189,19 @@ public static class TrackMenu
             VerticalAlignment = VerticalAlignment.Center,
             FontSize = 12,
             Foreground = Resource<IBrush>("TextTertiary"),
+            // A FIXED width, not an automatic one, and this is load-bearing.
+            //
+            // The rating row is the widest thing in this menu, and the readout's
+            // text changes with every half step — "No rating", "0.5 stars",
+            // "1 star". Letting it size itself made the whole flyout re-measure
+            // as the pointer crossed the strip, which moved the strip out from
+            // under the pointer, which picked a different star, which changed
+            // the text again: the menu shook and the rating flickered.
+            //
+            // Wide enough for the longest string it can hold, and clipped so an
+            // unexpectedly long one cannot start the loop again.
+            Width = ReadoutWidth,
+            ClipToBounds = true,
         };
         row.Children.Add(readout);
         // The words follow the stars. Left on the committed value they said
@@ -214,6 +227,13 @@ public static class TrackMenu
         if (item.Header is not StackPanel row) return;
         foreach (var child in row.Children.OfType<TextBlock>()) child.Text = Readout(current);
     }
+
+    /// <summary>
+    /// Room for "No rating" and for "0.5 stars", whichever is wider, at the
+    /// readout's 12px size — with enough slack that no value it can produce
+    /// makes it grow.
+    /// </summary>
+    private const double ReadoutWidth = 76;
 
     private static string Readout(double? value) =>
         value is { } stars ? RatingMath.Label(stars) : "No rating";

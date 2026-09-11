@@ -587,6 +587,15 @@ private fun RatingMenuRow(rating: Double?, onSet: (Double?) -> Unit) {
                 shown?.let { ratingLabel(it) } ?: "No rating",
                 style = MaterialTheme.typography.bodySmall,
                 color = LocalContentColor.current.copy(alpha = 0.6f),
+                maxLines = 1,
+                // A FIXED width, because this row is the widest thing in the
+                // menu and the label changes with every half step — "No
+                // rating", "0.5 stars", "1 star". Sized to its text, the menu
+                // re-measures as the finger crosses the strip, which moves the
+                // strip out from under the finger, which picks a different
+                // star, which changes the label again. The desktop shook
+                // visibly doing exactly this.
+                modifier = Modifier.width(84.dp),
             )
         }
         AnimatedVisibility(visible = showClear) {
