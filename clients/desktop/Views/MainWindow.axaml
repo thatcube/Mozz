@@ -1666,9 +1666,28 @@
              for everything inside it at once rather than each
              control hard-coding white and Light quietly breaking
              one of them. -->
-        <Border IsVisible="{Binding ShowNowPlaying}"
+        <!--
+             Now Playing arrives and leaves rather than blinking.
+
+             It is a full-window surface, so cutting it in and out in one frame
+             is the most jarring switch in the app: the whole library is
+             replaced by a dark player with nothing in between to say it came
+             from the dock you just clicked. Opacity and a small rise are
+             enough, and the leaving half needs the code-behind — IsVisible
+             cannot be animated, so it has to be held until the fade is done.
+        -->
+        <Border x:Name="NowPlayingSurface"
+                IsVisible="False"
                 Background="{Binding PlayerBackground}"
+                RenderTransformOrigin="50%,100%"
                 Grid.Row="0" Grid.RowSpan="2" ZIndex="15">
+            <Border.Transitions>
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.19" Easing="CubicEaseOut" />
+                    <TransformOperationsTransition Property="RenderTransform"
+                                                   Duration="0:0:0.24" Easing="CubicEaseOut" />
+                </Transitions>
+            </Border.Transitions>
             <Border.Resources>
                 <SolidColorBrush x:Key="TextPrimary" Color="#F2F2F4" />
                 <SolidColorBrush x:Key="TextSecondary" Color="#B9B9C1" />
@@ -1872,7 +1891,8 @@
                      a third of the way down, and clicking a timed line seeks to
                      it.
                 -->
-                <Grid RowDefinitions="Auto,*" IsVisible="{Binding ShowLyricsPanel}">
+                <Grid RowDefinitions="Auto,*" Classes="playerPanel"
+                      Classes.active="{Binding ShowLyricsPanel}">
                 <TextBlock Grid.Row="0" Text="Lyrics" Classes="sectionTitle" Margin="0,0,0,12"
                            IsVisible="False" />
                 <!-- One verdict, centred and quiet, and only when there is one
@@ -1944,7 +1964,8 @@
                 </ScrollViewer>
                 </Grid>
                 <Grid x:Name="NowPlayingQueuePanel" RowDefinitions="Auto,*"
-                      IsVisible="{Binding ShowQueuePanel}" Classes="nowPlayingQueuePanel">
+                      Classes="nowPlayingQueuePanel playerPanel"
+                      Classes.active="{Binding ShowQueuePanel}">
                 <TextBlock Grid.Row="0" Text="Play Queue" Classes="sectionTitle" Margin="0,0,0,12"
                            IsVisible="False" />
                 <ListBox Grid.Row="1"

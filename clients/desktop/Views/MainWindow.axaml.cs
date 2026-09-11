@@ -495,6 +495,10 @@ public partial class MainWindow : Window
             // waiting for the index alone left a column resumed from the middle
             // pinned to its first line until the singer reached the next one.
             _observedModel.LyricRows.CollectionChanged += OnLyricRowsChanged;
+            // The player can already be open when the model attaches, and
+            // nothing will raise the property again to tell us.
+            NowPlayingSurface.IsVisible = _observedModel.ShowNowPlaying;
+            NowPlayingSurface.Opacity = _observedModel.ShowNowPlaying ? 1 : 0;
         }
     }
 
@@ -511,6 +515,57 @@ public partial class MainWindow : Window
             RevealTitleForScroll(vm, 0);
             PlayPageEntrance();
         }
+        if (e.PropertyName is nameof(MainViewModel.ShowNowPlaying) && sender is MainViewModel model)
+            ShowNowPlayingSurface(model.ShowNowPlaying);
+    }
+
+    // MARK: Now Playing
+    //
+    // Its IsVisible is driven from here rather than bound, because the leaving
+    // half of the animation cannot be expressed as a binding: IsVisible is not
+    // animatable, so binding it hides the surface in the frame the flag flips
+    // and there is nothing left on screen to fade. The surface has to outlive
+    // the flag by exactly as long as the fade.
+
+    private Avalonia.Threading.DispatcherTimer? _nowPlayingHide;
+
+    private static readonly TimeSpan NowPlayingFade = TimeSpan.FromMilliseconds(240);
+
+    private void ShowNowPlayingSurface(bool shown)
+    {
+        _nowPlayingHide?.Stop();
+
+        if (shown)
+        {
+            NowPlayingSurface.IsVisible = true;
+            NowPlayingSurface.Opacity = 0;
+            NowPlayingSurface.RenderTransform = TransformOperations.Parse("translateY(14px)");
+            Avalonia.Threading.Dispatcher.UIThread.Post(
+                () =>
+                {
+                    NowPlayingSurface.Opacity = 1;
+                    NowPlayingSurface.RenderTransform = TransformOperations.Parse("translateY(0px)");
+                },
+                Avalonia.Threading.DispatcherPriority.Background);
+            return;
+        }
+
+        NowPlayingSurface.Opacity = 0;
+        NowPlayingSurface.RenderTransform = TransformOperations.Parse("translateY(10px)");
+        // Held on screen, transparent, until the fade has finished — and
+        // stopped above if the player is reopened before then, so a fast
+        // in-and-out cannot leave it hidden while the view model says it is up.
+        _nowPlayingHide ??= new Avalonia.Threading.DispatcherTimer { Interval = NowPlayingFade };
+        _nowPlayingHide.Tick -= OnNowPlayingHidden;
+        _nowPlayingHide.Tick += OnNowPlayingHidden;
+        _nowPlayingHide.Start();
+    }
+
+    private void OnNowPlayingHidden(object? sender, EventArgs e)
+    {
+        _nowPlayingHide?.Stop();
+        if (DataContext is MainViewModel vm && vm.ShowNowPlaying) return;
+        NowPlayingSurface.IsVisible = false;
     }
 
     /// <summary>

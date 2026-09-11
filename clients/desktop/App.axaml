@@ -615,6 +615,31 @@
              cutting the panel in half. Faint on purpose: a divider inside a
              small panel is a hint about grouping, and at full strength it
              competes with the words it is grouping. -->
+        <!--
+             The two Now Playing panels share one slot and cross-fade between
+             each other, so both stay laid out and only their opacity moves.
+             Toggling IsVisible instead cut from one to the other in a single
+             frame, which on a panel the size of half the window reads as a
+             glitch rather than a switch.
+
+             The inactive one must stop taking pointer input, or an invisible
+             queue sits over the lyrics swallowing clicks — which is the classic
+             way this technique goes wrong.
+        -->
+        <Style Selector="Grid.playerPanel">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.16" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Grid.playerPanel.active">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IsHitTestVisible" Value="True" />
+        </Style>
+
         <!-- The rating row carries the star strip, which is aimed at rather
              than clicked as a whole. A command's hover plate behind it says the
              wrong thing about what a click there does. -->
