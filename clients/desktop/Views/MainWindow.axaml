@@ -235,9 +235,14 @@
             </Border>
 
             <!-- Content -->
-            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="32,26,24,0" Classes="contentShell">
+            <!-- The page's own tone is painted on the SHELL, which spans the
+                 column, rather than on the pane inside it — on the pane it
+                 stopped at the inset and left a pale gutter down each side of a
+                 tinted page, which is exactly the seam it was there to remove. -->
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="0,26,0,0" Classes="contentShell"
+                  Background="{Binding PageBackground}">
 
-                <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="0,0,0,20">
+                <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="32,0,24,20">
                     <Button x:Name="CompactNavigationButton" Grid.Column="0" Classes="transport"
                             Margin="0,0,12,0"
                             IsVisible="False"
@@ -295,9 +300,7 @@
                          so the photograph above has something to dissolve INTO.
                          Null on every other page and while the histogram is still
                          running, which leaves the app's normal surface showing. -->
-                    <Panel.Background>
-                        <Binding Path="PageBackground" />
-                    </Panel.Background>
+
                     <Panel.Transitions>
                         <Transitions>
                             <DoubleTransition Property="Opacity" Duration="0:0:0.20" Easing="CubicEaseOut" />
@@ -305,6 +308,23 @@
                                                            Duration="0:0:0.24" Easing="CubicEaseOut" />
                         </Transitions>
                     </Panel.Transitions>
+
+                    <!--
+                        The pane spans the window; the INSET lives in here.
+
+                        The content shell used to hold both, which meant a margin
+                        of 32 and 24 sat between the window edge and everything
+                        inside — including a hero photograph that is supposed to
+                        run edge to edge, and including the page's own colour,
+                        which stopped short and left a pale gutter down each side
+                        of a tinted page. A container cannot be escaped by its own
+                        child, so the inset moved one level in: the pane now
+                        reaches the edges and paints them, and this border gives
+                        every page the margin it had. The artist hero cancels this
+                        padding and gets the full width back.
+                    -->
+                    <Border Padding="32,0,24,0" ClipToBounds="False">
+                        <Panel>
 
                     <StackPanel IsVisible="{Binding IsLibraryEmpty}"
                                 HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -1168,13 +1188,22 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <!-- Album, artist and playlist details share one virtualized scaffold. -->
+                    <!-- Album, artist and playlist details share one virtualized scaffold.
+
+                         The list spans the window and pads its own rows. The content
+                         shell insets everything by 32 and 24, which is right for a row
+                         and wrong for a hero: a photograph meant to run edge to edge
+                         cannot escape a margin on its container. Cancelling that margin
+                         here and re-applying it as PADDING moves the inset inside the
+                         scroll area, where a row keeps it and the hero can pull back out
+                         of it — and every other row lands exactly where it did before. -->
                     <ListBox IsVisible="{Binding ShowDetailPage}"
                              ItemsSource="{Binding DetailRows}"
                              x:Name="DetailList"
                              DoubleTapped="OnDetailRowActivated"
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
+                             ClipToBounds="False"
                              Padding="0,0,8,128">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -1250,12 +1279,16 @@
                                 the page colour arriving over the bottom.
                             -->
                             <DataTemplate DataType="vm:ArtistHeroRow">
-                                <Panel Height="380" Margin="0,-16,-8,8" ClipToBounds="True">
+                                <Panel Height="260" Margin="-32,-26,-32,0" ClipToBounds="True">
+                                    <!-- No giant letter. An artist with no picture got a 92-point
+                                         initial on an empty rectangle, which is a placeholder the
+                                         size of the page. With nothing to show, the hero is just
+                                         the tone. -->
                                     <controls:ArtworkImage ArtistHero="True" CornerRadius="0"
                                             HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                             DisplaySize="1400"
-                                            ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.HeroArtworkKey}"
-                                            FallbackText="{Binding Artist.Name}" FallbackFontSize="92"
+                                            ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding HeroKey}"
+                                            FallbackText=""
                                             FallbackForeground="{DynamicResource ArtworkHeroFallback}" />
                                     <Border>
                                         <Border.Background>
@@ -1276,14 +1309,22 @@
                                         <Border.OpacityMask>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                                                 <GradientStop Color="#00000000" Offset="0" />
-                                                <GradientStop Color="#00000000" Offset="0.45" />
-                                                <GradientStop Color="#8C000000" Offset="0.8" />
+                                                <GradientStop Color="#00000000" Offset="0.40" />
+                                                <GradientStop Color="#B3000000" Offset="0.82" />
+                                                <!-- Opaque BEFORE the edge, so the last few points are
+                                                     the page's own colour at full strength and the seam
+                                                     has nothing left to reveal. -->
+                                                <GradientStop Color="#FF000000" Offset="0.96" />
                                                 <GradientStop Color="#FF000000" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.OpacityMask>
                                     </Border>
-                                    <StackPanel Margin="24,0,24,26" VerticalAlignment="Bottom" Spacing="14">
-                                        <TextBlock Text="{Binding Artist.Name}" FontSize="52" FontWeight="Bold"
+                                    <!-- 40, not 32: the hero has pulled 32 points left to reach the
+                                         window, and the rows below it sit 8 further in again inside
+                                         their plates. This puts the name on the same edge as every
+                                         heading under it. -->
+                                    <StackPanel Margin="40,0,40,18" VerticalAlignment="Bottom" Spacing="10">
+                                        <TextBlock Text="{Binding Artist.Name}" FontSize="40" FontWeight="Bold"
                                                    Foreground="White" TextWrapping="Wrap" />
                                         <StackPanel Orientation="Horizontal" Spacing="10">
                                             <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
@@ -1609,6 +1650,8 @@
                     </ListBox>
 
 
+                        </Panel>
+                    </Border>
                 </Panel>
             </Grid>
             <!-- The transport is a dock, not a band across the bottom.

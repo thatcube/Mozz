@@ -851,6 +851,13 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <!-- A detail row must not clip its own children: the artist hero pulls
+             back out of the list's padding to reach the window edges, and a
+             clipping container would cut exactly that overhang off. -->
+        <Style Selector="ListBox#DetailList ListBoxItem">
+            <Setter Property="ClipToBounds" Value="False" />
+        </Style>
+
         <!--
              A page painted with artwork reads as light-on-dark.
 

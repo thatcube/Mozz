@@ -8,7 +8,19 @@ public abstract record DetailRow;
 
 public sealed record AlbumHeroRow(Album Album, string Metadata) : DetailRow;
 
-public sealed record ArtistHeroRow(Artist Artist) : DetailRow;
+/// <summary>
+/// The artist hero, with the picture it should actually draw.
+/// </summary>
+/// <remarks>
+/// <paramref name="HeroKey"/> rather than reading the artist's own key at the
+/// binding: most artists in a real library have no photograph of their own, and
+/// the page was drawing a 92-point letter on an empty rectangle for them. The
+/// core already prefers a representative album cover when an artist has no art
+/// (ArtistDetailPresentation.heroArtworkKey) and the phones rely on it; this
+/// carries the same rule to the row so the hero has something to bloom with
+/// whichever way the key arrives.
+/// </remarks>
+public sealed record ArtistHeroRow(Artist Artist, string? HeroKey) : DetailRow;
 
 public sealed record PlaylistHeroRow(Playlist Playlist, string Metadata) : DetailRow;
 

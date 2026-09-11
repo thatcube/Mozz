@@ -2594,7 +2594,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
                 break;
 
             case LibraryPageKind.ArtistDetail when SelectedArtist is not null:
-                rows.Add(new ArtistHeroRow(SelectedArtist));
+                rows.Add(new ArtistHeroRow(SelectedArtist, ArtistHeroKey(SelectedArtist)));
                 // Ordered by the same rule the phone uses, so the two apps can
                 // never name different records as this artist's latest.
                 if (MediaDetailFormatting.LatestRelease(
@@ -3529,6 +3529,25 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     /// page can fade its hero into the same tone the player uses. One sampler
     /// means the two cannot disagree about what a record looks like.
     /// </summary>
+    private async Task<ArtworkTones?> SampleArtworkTonesAsync(string serverId, string? artworkKey)
+    {
+        if (_artwork is null || artworkKey is not { Length: > 0 }) return null;
+
+        var bitmap = await _artwork.LoadAsync(
+            new ArtworkRef(serverId, artworkKey, ArtworkSampling.RequestSize), CancellationToken.None);
+        if (bitmap is null) return null;
+
+        var pixels = ArtworkSampling.Rgba(bitmap);
+        if (pixels is null) return null;
+
+        return await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+        {
+            Pixels = Convert.ToBase64String(pixels),
+            Width = ArtworkSampling.SampleDim,
+            Height = ArtworkSampling.SampleDim,
+        }));
+    }
+
     private async Task<IBrush?> SampleArtworkBrushAsync(string serverId, string? artworkKey)
     {
         if (_artwork is null || artworkKey is not { Length: > 0 }) return null;
@@ -3625,15 +3644,38 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(PageCardBackground));
     }
 
+    /// <summary>
+    /// The picture an artist page leads with: the artist's own hero art, then
+    /// their portrait, then the cover of whatever they released most recently.
+    /// </summary>
+    private string? ArtistHeroKey(Artist artist) =>
+        artist.HeroArtworkKey is { Length: > 0 } hero ? hero
+        : artist.ArtworkKey is { Length: > 0 } portrait ? portrait
+        : MediaDetailFormatting.LatestRelease(_detailArtistAlbums.Concat(_detailArtistSingles))?.ArtworkKey
+          ?? _detailArtistAlbums.Concat(_detailArtistSingles)
+              .Select(a => a.ArtworkKey)
+              .FirstOrDefault(k => k is { Length: > 0 });
+
     private async Task RefreshArtistBackgroundAsync(Artist? artist)
     {
         ArtistBackground = null;
         if (artist is null) return;
 
-        var key = artist.HeroArtworkKey ?? artist.ArtworkKey;
-        var brush = await SampleArtworkBrushAsync(artist.ServerId, key);
+        var tones = await SampleArtworkTonesAsync(artist.ServerId, ArtistHeroKey(artist));
+        if (tones is null) return;
+
+        // ONE flat colour, not the player's three-stop field.
+        //
+        // The hero has to end in exactly the colour the page begins with, and a
+        // gradient cannot promise that: the hero drew the three stops across its
+        // own 380 points while the page drew the same three across eight
+        // hundred, so the shade at the hero's foot and the shade just under it
+        // were sampled from different places on the same ramp and met as a
+        // visible band. A solid cannot disagree with itself.
+        var brush = new ImmutableSolidColorBrush(ArtworkSampling.ToColor(tones.Middle));
+
         // The page may have moved on while the histogram ran.
-        if (brush is not null && SelectedArtist == artist) ArtistBackground = brush;
+        if (SelectedArtist == artist) ArtistBackground = brush;
     }
 
     private async Task RefreshPlayerBackgroundAsync(Track? track)
