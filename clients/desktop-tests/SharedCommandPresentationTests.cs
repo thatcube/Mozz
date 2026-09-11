@@ -41,6 +41,46 @@ public sealed class SharedCommandPresentationTests
     }
 
     /// <summary>
+    /// The rating strip's geometry, which must agree with the phones' to the
+    /// half star: the same drag across the same five stars has to mean the same
+    /// rating everywhere, or a song rated on the phone reads back differently
+    /// on the desktop.
+    ///
+    /// These are iOS's own cases, ported alongside the math.
+    /// </summary>
+    [Fact]
+    public void RatingGeometryMatchesThePhones()
+    {
+        const double star = 22, gap = 6, pitch = star + gap;
+
+        // Left half of a star is the half step, right half the whole.
+        Assert.Equal(0.5, RatingMath.RatingAtX(1, star, gap));
+        Assert.Equal(1.0, RatingMath.RatingAtX(star - 1, star, gap));
+        Assert.Equal(2.5, RatingMath.RatingAtX(2 * pitch + 1, star, gap));
+        Assert.Equal(3.0, RatingMath.RatingAtX(2 * pitch + star - 1, star, gap));
+
+        // Past the end saturates rather than running off.
+        Assert.Equal(5.0, RatingMath.RatingAtX(10_000, star, gap));
+
+        // Left of the first star clears — this is how a rating is taken away
+        // without lifting the pointer.
+        Assert.Null(RatingMath.RatingAtX(-1, star, gap));
+
+        Assert.Equal(5 * star + 4 * gap, RatingMath.StripWidth(star, gap));
+    }
+
+    /// <summary>Trailing zeroes are noise on a star count, and one is the only singular.</summary>
+    [Fact]
+    public void RatingReadsBackTheWayItIsSpoken()
+    {
+        Assert.Equal("4", RatingMath.Format(4.0));
+        Assert.Equal("4.5", RatingMath.Format(4.5));
+        Assert.Equal("1 star", RatingMath.Label(1.0));
+        Assert.Equal("1.5 stars", RatingMath.Label(1.5));
+        Assert.Equal("5 stars", RatingMath.Label(5.0));
+    }
+
+    /// <summary>
     /// The numbers the phones use. Both of them dim and soften a lyric column
     /// on exactly this curve, and a desktop that picked its own would read as a
     /// different app rather than the same one on a bigger screen.

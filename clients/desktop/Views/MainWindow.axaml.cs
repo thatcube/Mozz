@@ -406,6 +406,20 @@ public partial class MainWindow : Window
         if (remaining <= viewer.Viewport.Height) _ = vm.LoadMoreAsync();
     }
 
+    /// <summary>
+    /// The player's star strip committed a rating.
+    /// </summary>
+    /// <remarks>
+    /// A plain event rather than a command binding: the strip reports a
+    /// <c>double?</c>, and a XAML CommandParameter is text — which is exactly
+    /// why the old control was five buttons each carrying a literal whole
+    /// number and could never say 3.5.
+    /// </remarks>
+    private void OnNowPlayingRated(object? sender, double? rating)
+    {
+        if (DataContext is MainViewModel vm) _ = vm.RateNowPlayingAsync(rating);
+    }
+
     // MARK: The lyrics column
     //
     // The column keeps the line being sung a third of the way down rather than

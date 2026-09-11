@@ -1,7 +1,12 @@
 package com.thatcube.mozz.ui
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import kotlinx.coroutines.delay
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -503,11 +508,19 @@ private fun MenuIcon(@DrawableRes id: Int) {
 /**
  * Five stars across the top of the menu, tapped or dragged to rate.
  *
- * Not a [DropdownMenuItem]: the row does not dismiss the menu, because a rating
- * is often adjusted twice — a half step either way — and a control that closes
- * itself after one touch makes the second adjustment cost a whole reopen.
- * Tapping the star already showing clears the rating, which is how the phones'
- * player control already behaves.
+ * The iPhone's control, which is the one worth copying. A single gesture
+ * handles BOTH a tap and a slide: the stars light live as the finger crosses
+ * them, with a tick at every half step so the drag feels detented rather than
+ * continuous, and the value commits on release. Sliding left off the first star
+ * clears, so taking a rating off never needs a second control.
+ *
+ * It does not dismiss the menu. A rating is usually adjusted twice — half a
+ * step either way — and a control that closes after one touch makes the second
+ * adjustment cost a whole reopen.
+ *
+ * "Clear" appears under the stars a beat after you lift, and never while you
+ * are still adjusting: a row that arrived mid-drag would move the thing your
+ * finger is on.
  */
 @Composable
 private fun RatingMenuRow(rating: Double?, onSet: (Double?) -> Unit) {
@@ -516,33 +529,88 @@ private fun RatingMenuRow(rating: Double?, onSet: (Double?) -> Unit) {
     val spacingPx = with(density) { RatingTuning.stripStarSpacing.toPx() }
     val haptics = LocalHapticFeedback.current
 
-    Row(
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RatingStrip(
-            value = rating,
-            modifier = Modifier.pointerInput(rating) {
-                detectTapGestures { offset ->
-                    // `ratingAtX` is the shared half-step math — the same
-                    // function the player's drag uses, and a port of iOS's
-                    // `RatingMath`. Tapping the value already set clears it, so
-                    // taking a rating off never needs a second control.
-                    val picked = ratingAtX(offset.x, starPx, spacingPx)
-                    val next = if (picked == rating) null else picked
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSet(next)
-                }
-            },
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            rating?.let { ratingLabel(it) } ?: "No rating",
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalContentColor.current.copy(alpha = 0.6f),
-        )
+    // What the strip SHOWS: the live value under the finger while a drag is in
+    // progress, and the committed one otherwise. Deliberately not a copy of
+    // `rating` that re-keys on every change — a `remember(rating)` here reset
+    // itself the instant a rating committed, which defeated the delay below and
+    // made Clear appear the moment you lifted.
+    var dragging by remember { mutableStateOf(false) }
+    var dragValue by remember { mutableStateOf<Double?>(null) }
+    val shown = if (dragging) dragValue else rating
+    var showClear by remember { mutableStateOf((rating ?: 0.0) > 0) }
+
+    // The delayed reveal, and only once the finger is up. iOS never changes the
+    // bubble's height mid-drag in either direction, for the same reason: a row
+    // that arrives under a moving finger moves the thing being aimed at.
+    LaunchedEffect(rating, dragging) {
+        if (dragging) return@LaunchedEffect
+        val wanted = (rating ?: 0.0) > 0
+        if (wanted == showClear) return@LaunchedEffect
+        delay(RATING_CLEAR_REVEAL_MS)
+        showClear = wanted
+    }
+
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RatingStrip(
+                value = shown,
+                modifier = Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        var last = ratingAtX(down.position.x, starPx, spacingPx)
+                        dragValue = last
+                        dragging = true
+                        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!pointer.pressed) break
+                            pointer.consume()
+                            val next = ratingAtX(pointer.position.x, starPx, spacingPx)
+                            if (next != last) {
+                                // A tick per half step is what makes the slide
+                                // feel detented instead of continuous.
+                                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                last = next
+                                dragValue = next
+                            }
+                        }
+                        dragging = false
+                        onSet(last)
+                    }
+                },
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                shown?.let { ratingLabel(it) } ?: "No rating",
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalContentColor.current.copy(alpha = 0.6f),
+            )
+        }
+        AnimatedVisibility(visible = showClear) {
+            Text(
+                "Clear",
+                style = MaterialTheme.typography.bodyMedium,
+                color = LocalContentColor.current.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        // Collapse at once rather than through the delay: the
+                        // delay exists to keep a row from arriving under a
+                        // moving finger, and this IS the row being touched.
+                        showClear = false
+                        onSet(null)
+                    }
+                    .padding(vertical = 12.dp),
+            )
+        }
     }
 }
+
+/** How long after lifting before "Clear" appears. iOS's `clearRevealDelay`. */
+private const val RATING_CLEAR_REVEAL_MS = 500L
 
 /** An album in a vertical list. */
 @Composable

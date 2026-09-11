@@ -61,6 +61,13 @@ STAGE="build/publish-$RID"
 
 echo "▸ Building the Swift core…"
 swift build -c release --product MozzFFI
+# Ask SwiftPM where it actually put the binaries rather than reading
+# `.build/release`. That name is a SYMLINK, and it is shared: the Android
+# client's Gradle build cross-compiles the same package for
+# aarch64-unknown-linux-android28 and repoints it on the way past. A macOS
+# build running alongside one then copied from an Android directory and failed
+# on a missing dylib, with nothing in the output to say why.
+SWIFT_BIN="$(swift build -c release --product MozzFFI --show-bin-path)"
 
 echo "▸ Publishing the app ($RID, self-contained)…"
 rm -rf "$STAGE"
@@ -74,7 +81,7 @@ dotnet publish clients/desktop/Mozz.Desktop.csproj \
   -p:MozzFileVersion="$MOZZ_RESOLVED_FILE_VERSION" \
   -o "$STAGE" \
   --nologo -v quiet
-cp .build/release/libMozzFFI.dylib "$STAGE/"
+cp "$SWIFT_BIN/libMozzFFI.dylib" "$STAGE/"
 
 echo "▸ Assembling ${APP}…"
 rm -rf "$APP"

@@ -582,6 +582,16 @@
              cutting the panel in half. Faint on purpose: a divider inside a
              small panel is a hint about grouping, and at full strength it
              competes with the words it is grouping. -->
+        <!-- The rating row carries the star strip, which is aimed at rather
+             than clicked as a whole. A command's hover plate behind it says the
+             wrong thing about what a click there does. -->
+        <Style Selector="MenuFlyoutPresenter MenuItem.ratingRow:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="MenuFlyoutPresenter MenuItem.ratingRow:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
         <Style Selector="MenuFlyoutPresenter Separator">
             <Setter Property="Height" Value="1" />
             <Setter Property="Margin" Value="18,6" />

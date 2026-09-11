@@ -23,7 +23,6 @@
         <core:EnumMatchConverter x:Key="EnumMatch" />
         <core:StringMatchConverter x:Key="StringMatch" />
         <core:PendingOpacityConverter x:Key="PendingOpacity" />
-        <core:RatingAtLeastConverter x:Key="RatingAtLeast" />
     </Window.Resources>
 
     <Window.Styles>
@@ -1765,27 +1764,23 @@
                         </Panel>
                     </Button>
 
-                    <!-- Five taps on one control, so they are sized as
-                         one control: a row of bare stars, not five
-                         buttons each carrying a button's padding. -->
-                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center"
-                                IsVisible="{Binding ShowsRatingStars}">
-                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="1">
-                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Brush="{Binding $parent[Button].Foreground}" />
-                        </Button>
-                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="2">
-                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=2}" Brush="{Binding $parent[Button].Foreground}" />
-                        </Button>
-                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="3">
-                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=3}" Brush="{Binding $parent[Button].Foreground}" />
-                        </Button>
-                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="4">
-                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=4}" Brush="{Binding $parent[Button].Foreground}" />
-                        </Button>
-                        <Button Classes="star" Command="{Binding RateNowPlayingCommand}" CommandParameter="5">
-                            <controls:TablerIcon Size="17" Data="{StaticResource IconStar}" Filled="{Binding NowPlaying.Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=5}" Brush="{Binding $parent[Button].Foreground}" />
-                        </Button>
-                    </StackPanel>
+                    <!-- One strip, not five buttons.
+
+                         It WAS five buttons, each hard-wired to a whole number,
+                         so the control built to set a rating could not express
+                         half the values the library stores — the menu could set
+                         3.5 and the player could only ever read it back. The
+                         strip is the iPhone's: click a star or drag across
+                         them, hover to see what a click would set, and drag off
+                         the left edge to clear. -->
+                    <controls:RatingStrip x:Name="NowPlayingRating"
+                                          VerticalAlignment="Center"
+                                          StarSize="17" Spacing="3"
+                                          IsVisible="{Binding ShowsRatingStars}"
+                                          Value="{Binding NowPlaying.Rating}"
+                                          FilledBrush="{DynamicResource TextPrimary}"
+                                          EmptyBrush="{DynamicResource TextTertiary}"
+                                          Committed="OnNowPlayingRated" />
 
                     <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                         <controls:TablerIcon Size="18" Data="{StaticResource IconVolume}" Brush="{DynamicResource TextSecondary}" />

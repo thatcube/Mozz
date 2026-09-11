@@ -62,6 +62,8 @@
     <Compile Include="..\desktop\ViewModels\GridRows.cs" />
     <Compile Include="..\desktop\ViewModels\HomeMixes.cs" />
     <Compile Include="..\desktop\ViewModels\LibraryNavigation.cs" />
+    <Compile Include="..\desktop\ViewModels\RatingMath.cs" />
+    <Compile Include="..\desktop\Controls\RatingStrip.cs" />
     <Compile Include="..\desktop\ViewModels\LyricDepth.cs" />
     <Compile Include="..\desktop\ViewModels\DetailRows.cs" />
     <Compile Include="..\desktop\ViewModels\MediaDetailFormatting.cs" />

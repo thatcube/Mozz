@@ -2826,23 +2826,27 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         await ApplyRatingAsync(rating.Track, rating.Stars);
     }
 
-    [RelayCommand]
-    private async Task RateNowPlayingAsync(string? value)
+    /// <summary>
+    /// Rate the song playing, from the player's star strip.
+    /// </summary>
+    /// <remarks>
+    /// Takes the value rather than a string: it used to parse one, because a
+    /// XAML CommandParameter is text and the stars were five buttons each
+    /// carrying a literal. The strip hands over a real number, so the parse and
+    /// its clamp are gone — the strip cannot produce a value outside 0.5–5.0,
+    /// and null means clear rather than "did not parse".
+    /// </remarks>
+    public async Task RateNowPlayingAsync(double? rating)
     {
         if (NowPlaying is not { } track || !_core.IsOpen) return;
-        // Half-stars are real values in a library, so parse as a double and clamp
-        // to the half-step range rather than rounding to whole stars on the way in.
-        var rating = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
-            ? Math.Clamp(parsed, 0.5, 5.0)
-            : (double?)null;
         await ApplyRatingAsync(track, rating);
     }
 
     /// <summary>
     /// Write a rating and reconcile the row with what the server stored.
     ///
-    /// Shared by the player's star row and the menu's rating submenu, so a
-    /// rating set from either place queues, flushes and reports identically.
+    /// Shared by the player's star strip and the row menu's, so a rating set
+    /// from either place queues, flushes and reports identically.
     /// </summary>
     private async Task ApplyRatingAsync(Track track, double? rating)
     {

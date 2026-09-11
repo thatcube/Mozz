@@ -4,10 +4,12 @@ using System.Linq;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 // Avalonia has a `Track` of its own — the slider part — and this file is about
 // the other kind.
+using Mozz.Desktop.ViewModels;
 using Track = Mozz.Desktop.Core.Track;
 
 namespace Mozz.Desktop.Controls;
@@ -107,6 +109,10 @@ public static class TrackMenu
         });
     }
 
+    /// <summary>A themed resource by key, or null if the dictionary has no such entry.</summary>
+    private static T? Resource<T>(string key) where T : class =>
+        Application.Current?.TryFindResource(key, out var value) == true ? value as T : null;
+
     private static MenuFlyout Build(Control owner)
     {
         var flyout = new MenuFlyout();
@@ -114,7 +120,12 @@ public static class TrackMenu
         // the action people reach for most and the only one that says something
         // about the song rather than about what to do with it next.
         var like = Item(owner, "Like", c => c.ToggleFavoriteCommand, "IconHeartOutline");
-        var rate = RatingItem(owner);
+        var strip = new RatingStrip
+        {
+            FilledBrush = Resource<IBrush>("TextPrimary"),
+            EmptyBrush = Resource<IBrush>("TextTertiary"),
+        };
+        var rate = RatingItem(owner, strip);
         // Decided when the menu opens, not when the row was built: a row is
         // recycled under a different song, the same song is liked and unliked
         // without the row changing, and the server can be swapped underneath
@@ -126,7 +137,7 @@ public static class TrackMenu
             like.IsVisible = !ratings;
             rate.IsVisible = ratings;
             like.Header = GetTrack(owner)?.IsFavorite == true ? "Unlike" : "Like";
-            MarkRating(rate, GetTrack(owner)?.Rating);
+            MarkRating(strip, rate, GetTrack(owner)?.Rating);
         };
         flyout.ItemsSource = new object[]
         {
@@ -149,54 +160,63 @@ public static class TrackMenu
     }
 
     /// <summary>
-    /// A submenu of stars, for a server that keeps ratings.
-    ///
-    /// Five entries and a way back to none, because "no rating" and "one star"
-    /// are different things and a control that cannot say the first turns an
-    /// accident into a permanent opinion.
+    /// The rating strip, at the top of the menu, for a server that keeps ratings.
     /// </summary>
-    private static MenuItem RatingItem(Control owner)
-    {
-        var stars = new List<object>();
-        // Half steps, because the core clamps to 0.5 and Plex stores halves —
-        // offering only whole stars would round somebody's four-and-a-half down
-        // every time they touched the menu.
-        for (var half = 1; half <= 10; half++)
-        {
-            var value = half / 2.0;
-            var star = new MenuItem { Header = Stars(value), Tag = value };
-            star.Click += (_, _) => Rate(owner, value);
-            stars.Add(star);
-        }
-        stars.Add(new Separator());
-        var clear = new MenuItem { Header = "No Rating", Tag = null };
-        clear.Click += (_, _) => Rate(owner, null);
-        stars.Add(clear);
-
-        return new MenuItem { Header = "Rating", Icon = Glyph("IconStar"), ItemsSource = stars };
-    }
-
-    /// <summary>
-    /// A rating drawn as stars, with a half where there is one.
+    /// <remarks>
+    /// It was a submenu listing "½", "★", "★½" … eleven entries you had to open
+    /// a second menu to reach and then read as text. A rating is a value, not a
+    /// command, and the phone has always shown it as one: five stars you click
+    /// or drag across. So does this, in place, without the menu having to
+    /// disappear and come back.
     ///
-    /// "★★½" rather than "2.5" because the row above and the player below both
-    /// draw stars, and a menu that spelt the number would be the only place in
-    /// the application talking about ratings in digits.
-    /// </summary>
-    private static string Stars(double value)
+    /// The strip does not dismiss the menu either. A rating is usually adjusted
+    /// twice — half a step either way — and a control that closes after one
+    /// touch makes the second adjustment cost a whole reopen.
+    /// </remarks>
+    private static MenuItem RatingItem(Control owner, RatingStrip strip)
     {
-        var whole = (int)value;
-        return new string('\u2605', whole) + (value > whole ? "\u00BD" : "");
+        strip.Committed += (_, stars) => Rate(owner, stars);
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(strip);
+        var readout = new TextBlock
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 12,
+            Foreground = Resource<IBrush>("TextTertiary"),
+        };
+        row.Children.Add(readout);
+        // The words follow the stars. Left on the committed value they said
+        // "0 stars" under a strip previewing four, which is the control
+        // disagreeing with itself.
+        strip.Previewed += (_, stars) => readout.Text = Readout(stars);
+
+        // StaysOpenOnClick so a half star does not dismiss the menu. The strip
+        // also marks its own pointer events handled, which is what stops the
+        // item counting the same press as a click on itself.
+        var item = new MenuItem { Header = row, StaysOpenOnClick = true };
+        // Not a command, so it must not wear a command's hover plate. Without
+        // this the strip sat on a selection highlight that said "click me to do
+        // the thing" about a row whose whole job is to be aimed at.
+        item.Classes.Add("ratingRow");
+        return item;
     }
 
-    /// <summary>Ticks whichever star count the track already carries.</summary>
-    private static void MarkRating(MenuItem rating, double? current)
+    /// <summary>Show the rating the track already carries, in words beside the stars.</summary>
+    private static void MarkRating(RatingStrip strip, MenuItem item, double? current)
     {
-        foreach (var entry in rating.ItemsSource?.OfType<MenuItem>() ?? [])
-        {
-            entry.Icon = Equals(entry.Tag as double?, current) ? Glyph("IconCheck") : null;
-        }
+        strip.Value = current;
+        if (item.Header is not StackPanel row) return;
+        foreach (var child in row.Children.OfType<TextBlock>()) child.Text = Readout(current);
     }
+
+    private static string Readout(double? value) =>
+        value is { } stars ? RatingMath.Label(stars) : "No rating";
 
     private static void Rate(Control owner, double? stars)
     {

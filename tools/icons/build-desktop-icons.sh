@@ -70,7 +70,13 @@ code                Code
 star                Star
 x                   X
 dots-vertical       DotsVertical
+dots                Dots
 chevron-right       ChevronRight
+download            Download
+trash               Trash
+play-next           PlayNext
+star-filled         StarFilled
+star-half-filled    StarHalf
 "
 
 tmp="${OUT}.tmp"

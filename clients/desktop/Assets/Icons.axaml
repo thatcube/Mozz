@@ -17,28 +17,6 @@
     <StreamGeometry x:Key="IconVolume">M15 8a5 5 0 0 1 0 8 M17.7 5a9 9 0 0 1 0 14 M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5</StreamGeometry>
     <StreamGeometry x:Key="IconVolumeOff">M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5 M16 10l4 4 M16 14l4 -4</StreamGeometry>
     <StreamGeometry x:Key="IconHome">M18 21h-2a1 1 0 0 1-1-1v-3.5q-.2-2.3-2.5-2.5h-1A2.5 2.5 0 0 0 9 16.5V20q0 1-1 1H6a3 3 0 0 1-3-3v-6a5 5 0 0 1 1.5-3.5l4-4c2-2 5-2 7 0l4 4a5 5 0 0 1 1.5 3.6V18a3 3 0 0 1-3 3Z</StreamGeometry>
-    <!--
-        Two icons the window has always asked for and this file never had, so
-        the Downloads row in the sidebar drew its label with an empty space
-        where every other row has a glyph, and the delete button on a download
-        drew nothing at all.
-
-        Tabler's "download" and "trash", to match the rest.
-    -->
-    <StreamGeometry x:Key="IconDownload">M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2 M7 11l5 5l5 -5 M12 4l0 12</StreamGeometry>
-    <StreamGeometry x:Key="IconTrash">M4 7l16 0 M10 11l0 6 M14 11l0 6 M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12 M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3</StreamGeometry>
-    <!--
-        "Play next" — queue lines with a play triangle, which is what iOS's
-        text.line.first.and.arrowtriangle.forward says too.
-
-        Not the transport skip glyph: that one is authored filled, so stroking
-        its outline draws both edges of the bar and it arrives twice as thick as
-        every other icon in the menu. It also means "next track" rather than
-        "play this one next", which is a different promise.
-    -->
-    <StreamGeometry x:Key="IconPlayNext">M4 7h11 M4 11h11 M4 15h7 M16 10l5 3.5l-5 3.5z</StreamGeometry>
-    <!-- Tabler "dots" — the overflow control every row now carries. -->
-    <StreamGeometry x:Key="IconDots">M5 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M17 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0</StreamGeometry>
     <StreamGeometry x:Key="IconMusic">M3 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0 M13 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0 M9 17v-13h10v13 M9 8h10</StreamGeometry>
     <StreamGeometry x:Key="IconDisc">M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M7 12a5 5 0 0 1 5 -5 M12 17a5 5 0 0 0 5 -5</StreamGeometry>
     <StreamGeometry x:Key="IconArtist">M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0 M9 10a3 3 0 1 0 6 0a3 3 0 1 0 -6 0 M6.168 18.849a4 4 0 0 1 3.832 -2.849h4a4 4 0 0 1 3.834 2.855</StreamGeometry>
@@ -62,5 +40,11 @@
     <StreamGeometry x:Key="IconStar">M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873l-6.158 -3.245</StreamGeometry>
     <StreamGeometry x:Key="IconX">M18 6l-12 12 M6 6l12 12</StreamGeometry>
     <StreamGeometry x:Key="IconDotsVertical">M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0</StreamGeometry>
+    <StreamGeometry x:Key="IconDots">M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0</StreamGeometry>
     <StreamGeometry x:Key="IconChevronRight">M9 6l6 6l-6 6</StreamGeometry>
+    <StreamGeometry x:Key="IconDownload">M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2 M7 11l5 5l5 -5 M12 4l0 12</StreamGeometry>
+    <StreamGeometry x:Key="IconTrash">M4 7l16 0 M10 11l0 6 M14 11l0 6 M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12 M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3</StreamGeometry>
+    <StreamGeometry x:Key="IconPlayNext">M4 7h11 M4 11h11 M4 15h7 M16 10l5 3.5l-5 3.5z</StreamGeometry>
+    <StreamGeometry x:Key="IconStarFilled">F1 M8.243 7.34l-6.38 .925l-.113 .023a1 1 0 0 0 -.44 1.684l4.622 4.499l-1.09 6.355l-.013 .11a1 1 0 0 0 1.464 .944l5.706 -3l5.693 3l.1 .046a1 1 0 0 0 1.352 -1.1l-1.091 -6.355l4.624 -4.5l.078 -.085a1 1 0 0 0 -.633 -1.62l-6.38 -.926l-2.852 -5.78a1 1 0 0 0 -1.794 0l-2.853 5.78z</StreamGeometry>
+    <StreamGeometry x:Key="IconStarHalf">F1 M12 1a.993 .993 0 0 1 .823 .443l.067 .116l2.852 5.781l6.38 .925c.741 .108 1.08 .94 .703 1.526l-.07 .095l-.078 .086l-4.624 4.499l1.09 6.355a1.001 1.001 0 0 1 -1.249 1.135l-.101 -.035l-.101 -.046l-5.693 -3l-5.706 3c-.105 .055 -.212 .09 -.32 .106l-.106 .01a1.003 1.003 0 0 1 -1.038 -1.06l.013 -.11l1.09 -6.355l-4.623 -4.5a1.001 1.001 0 0 1 .328 -1.647l.113 -.036l.114 -.023l6.379 -.925l2.853 -5.78a.968 .968 0 0 1 .904 -.56zm0 3.274v12.476a1 1 0 0 1 .239 .029l.115 .036l.112 .05l4.363 2.299l-.836 -4.873a1 1 0 0 1 .136 -.696l.07 -.099l.082 -.09l3.546 -3.453l-4.891 -.708a1 1 0 0 1 -.62 -.344l-.073 -.097l-.06 -.106l-2.183 -4.424z</StreamGeometry>
 </ResourceDictionary>
