@@ -289,7 +289,15 @@
                     use, and it costs one property animation.
                 -->
                 <Panel Grid.Row="1" x:Name="ContentPane" SizeChanged="OnContentResized"
-                       RenderTransformOrigin="50%,0%">
+                       RenderTransformOrigin="50%,0%"
+                       Classes.tinted="{Binding HasPageBackground}">
+                    <!-- The artist page's own tone, taken from the hero artwork,
+                         so the photograph above has something to dissolve INTO.
+                         Null on every other page and while the histogram is still
+                         running, which leaves the app's normal surface showing. -->
+                    <Panel.Background>
+                        <Binding Path="PageBackground" />
+                    </Panel.Background>
                     <Panel.Transitions>
                         <Transitions>
                             <DoubleTransition Property="Opacity" Duration="0:0:0.20" Easing="CubicEaseOut" />
@@ -1223,42 +1231,77 @@
                                 </WrapPanel>
                             </DataTemplate>
 
+                            <!--
+                                The artist page leads with the photograph, the way
+                                Apple Music and both phones do.
+
+                                It was a 980-point rounded card floating on a pale
+                                page: the image had a hard edge on all four sides and
+                                a grey scrim at the bottom that faded into nothing the
+                                page was actually painted with, so a dark photograph
+                                sat on white like a pasted-in rectangle.
+
+                                Now it fills the width, squares off its sides, and
+                                dissolves into the colour the artwork itself casts —
+                                the same tone the player takes from a cover, through
+                                the same core histogram, so the two cannot disagree
+                                about what a record looks like. The stops are iOS's:
+                                clear for the top half so the face is untouched, then
+                                the page colour arriving over the bottom.
+                            -->
                             <DataTemplate DataType="vm:ArtistHeroRow">
-                                <Grid Height="282" Margin="0,0,0,24" ClipToBounds="True">
-                                    <Border CornerRadius="16" ClipToBounds="True">
-                                        <controls:ArtworkImage Width="980" Height="282" DisplaySize="980"
-                                                ArtistHero="True" CornerRadius="16"
-                                                ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.HeroArtworkKey}"
-                                                FallbackText="{Binding Artist.Name}" FallbackFontSize="72"
-                                                FallbackForeground="{DynamicResource ArtworkHeroFallback}" />
-                                    </Border>
-                                    <Border VerticalAlignment="Bottom" Height="130">
+                                <Panel Height="380" Margin="0,-16,-8,8" ClipToBounds="True">
+                                    <controls:ArtworkImage ArtistHero="True" CornerRadius="0"
+                                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                            DisplaySize="1400"
+                                            ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding Artist.HeroArtworkKey}"
+                                            FallbackText="{Binding Artist.Name}" FallbackFontSize="92"
+                                            FallbackForeground="{DynamicResource ArtworkHeroFallback}" />
+                                    <Border>
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                                <GradientStop Color="{DynamicResource HeroGradientStart}" Offset="0" />
-                                                <GradientStop Color="{DynamicResource HeroGradientEnd}" Offset="1" />
+                                                <GradientStop Color="#00000000" Offset="0" />
+                                                <GradientStop Color="#00000000" Offset="0.42" />
+                                                <GradientStop Color="#8C000000" Offset="0.78" />
+                                                <GradientStop Color="#FF000000" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.Background>
                                     </Border>
-                                    <StackPanel Margin="24" VerticalAlignment="Bottom" Classes="artistHeroChrome">
-                                        <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
-                                            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}" Brush="{Binding $parent[Button].Foreground}" />
-                                        </Button>
-                                        <TextBlock Text="{Binding Artist.Name}" FontSize="38" FontWeight="Bold"
-                                                   Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"
-                                                   TextWrapping="Wrap" />
-                                        <Button Classes="transport lead" Command="{Binding $parent[Window].DataContext.ShuffleSelectedArtistCommand}"
-                                                VerticalAlignment="Center">
-                                            <controls:TablerIcon Size="18" Data="{StaticResource IconShuffle}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" />
-                                        </Button>
-                                        <Button Classes="transport lead" Command="{Binding $parent[Window].DataContext.StartSelectedArtistRadioCommand}"
-                                                VerticalAlignment="Center">
-                                            <controls:TablerIcon Size="18" Data="{StaticResource IconMusic}"
-                                                                 Brush="{Binding $parent[Button].Foreground}" />
-                                        </Button>
+                                    <!-- The page's own tone laid over the same band, so
+                                         the image ends in the colour the rest of the page
+                                         is painted with rather than in black. -->
+                                    <Border Background="{Binding $parent[Window].DataContext.ArtistBackground}"
+                                            IsVisible="{Binding $parent[Window].DataContext.ArtistBackground,
+                                                        Converter={x:Static ObjectConverters.IsNotNull}}">
+                                        <Border.OpacityMask>
+                                            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                                <GradientStop Color="#00000000" Offset="0" />
+                                                <GradientStop Color="#00000000" Offset="0.45" />
+                                                <GradientStop Color="#8C000000" Offset="0.8" />
+                                                <GradientStop Color="#FF000000" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.OpacityMask>
+                                    </Border>
+                                    <StackPanel Margin="24,0,24,26" VerticalAlignment="Bottom" Spacing="14">
+                                        <TextBlock Text="{Binding Artist.Name}" FontSize="52" FontWeight="Bold"
+                                                   Foreground="White" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
+                                                <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}" Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                            <Button Classes="transport lead" VerticalAlignment="Center"
+                                                    Command="{Binding $parent[Window].DataContext.ShuffleSelectedArtistCommand}">
+                                                <controls:TablerIcon Size="18" Data="{StaticResource IconShuffle}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                            <Button Classes="transport lead" VerticalAlignment="Center"
+                                                    Command="{Binding $parent[Window].DataContext.StartSelectedArtistRadioCommand}">
+                                                <controls:TablerIcon Size="18" Data="{StaticResource IconMusic}"
+                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                            </Button>
+                                        </StackPanel>
                                     </StackPanel>
-                                </Grid>
+                                </Panel>
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistHeroRow">
@@ -1349,7 +1392,8 @@
                                      the plate around a row pads it by 8, so a heading flush
                                      with the plate sits 8 points left of everything it
                                      introduces. -->
-                                <TextBlock Text="{Binding Title}" Classes="sectionTitle" Margin="8,14,0,12" />
+                                <TextBlock Text="{Binding Title}" Classes="sectionTitle" Margin="8,14,0,12"
+                                           Foreground="{Binding $parent[Window].DataContext.PageTextPrimary}" />
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:DetailAlbumShelfRow">
@@ -1388,7 +1432,7 @@
                                                     CommandParameter="{Binding Track}"
                                                     controls:TrackMenu.Track="{Binding Track}">
                                                 <Border Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
-                                                        Background="{DynamicResource SurfaceRaised}">
+                                                        Background="{Binding $parent[Window].DataContext.PageCardBackground}">
                                                     <Grid ColumnDefinitions="44,*,38,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"

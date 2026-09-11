@@ -851,5 +851,34 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <!--
+             A page painted with artwork reads as light-on-dark.
+
+             The artist page takes its colour from the hero, through the same
+             histogram that gives the player its backdrop — and that field is
+             built to carry white text. The headings, titles and years under the
+             hero kept their light-theme colours and all but vanished against a
+             saturated field, so they are restated here for that one state. The
+             plates too: a pale card on a coloured field is a hole in it.
+        -->
+        <Style Selector="Panel.tinted TextBlock.sectionTitle">
+            <Setter Property="Foreground" Value="#FFFFFFFF" />
+        </Style>
+        <Style Selector="Panel.tinted TextBlock.primary">
+            <Setter Property="Foreground" Value="#F2F2F4" />
+        </Style>
+        <Style Selector="Panel.tinted TextBlock.secondary">
+            <Setter Property="Foreground" Value="#C2C2CA" />
+        </Style>
+        <Style Selector="Panel.tinted Border.rowPlate:pointerover">
+            <Setter Property="Background" Value="#26FFFFFF" />
+        </Style>
+        <Style Selector="Panel.tinted Border.tileSurface">
+            <Setter Property="Background" Value="#1AFFFFFF" />
+        </Style>
+        <Style Selector="Panel.tinted Border.tileSurface:pointerover">
+            <Setter Property="Background" Value="#26FFFFFF" />
+        </Style>
+
     </Application.Styles>
 </Application>

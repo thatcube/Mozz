@@ -3522,6 +3522,120 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         RebuildHomeRows();
     }
 
+    /// <summary>
+    /// The colour a piece of artwork casts, through the core's own histogram.
+    ///
+    /// Split out of <see cref="RefreshPlayerBackgroundAsync"/> so the artist
+    /// page can fade its hero into the same tone the player uses. One sampler
+    /// means the two cannot disagree about what a record looks like.
+    /// </summary>
+    private async Task<IBrush?> SampleArtworkBrushAsync(string serverId, string? artworkKey)
+    {
+        if (_artwork is null || artworkKey is not { Length: > 0 }) return null;
+
+        var bitmap = await _artwork.LoadAsync(
+            new ArtworkRef(serverId, artworkKey, ArtworkSampling.RequestSize), CancellationToken.None);
+        if (bitmap is null) return null;
+
+        var pixels = ArtworkSampling.Rgba(bitmap);
+        if (pixels is null) return null;
+
+        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+        {
+            Pixels = Convert.ToBase64String(pixels),
+            Width = ArtworkSampling.SampleDim,
+            Height = ArtworkSampling.SampleDim,
+        }));
+        return tones is null ? null : ArtworkSampling.Brush(tones);
+    }
+
+    /// <summary>
+    /// The tone the artist page fades its hero into.
+    ///
+    /// Null until the hero has been sampled, and the page falls back to its
+    /// normal surface — a guess here would flash one colour and correct itself,
+    /// which is worse than arriving a moment late.
+    /// </summary>
+    [ObservableProperty] private IBrush? _artistBackground;
+
+    /// <summary>
+    /// What the content pane is painted with.
+    ///
+    /// Only the artist page has one of its own; everywhere else this is null and
+    /// the app's normal surface shows through. It is also null while the
+    /// histogram is still running, because a guess would flash one colour and
+    /// then correct itself.
+    /// </summary>
+    public IBrush? PageBackground => ShowArtistDetail ? ArtistBackground : null;
+
+    /// <summary>
+    /// Whether the page is painted with artwork rather than the app's surface,
+    /// and so has to read as light-on-dark.
+    ///
+    /// The tones come from the same histogram the player's backdrop uses, and
+    /// that is built to carry white text. Without this the headings and years
+    /// under the hero stayed at their light-theme colours and went nearly
+    /// invisible against a saturated field.
+    /// </summary>
+    public bool HasPageBackground => PageBackground is not null;
+
+    /// <summary>
+    /// Text colours for a page that may be painted with artwork.
+    /// </summary>
+    /// <remarks>
+    /// Bound rather than styled. A style setter for the tinted state has to beat
+    /// the one that gives every heading its normal colour, and in Avalonia that
+    /// is a question of which rule the theme happens to apply last — a fight
+    /// this lost twice, leaving "Latest Release" in near-black on a saturated
+    /// field. A binding is not in that argument at all.
+    /// </remarks>
+    public IBrush PageTextPrimary =>
+        HasPageBackground ? Brushes.White : Themed("TextPrimary", Brushes.Black);
+
+    public IBrush PageTextSecondary =>
+        HasPageBackground ? new SolidColorBrush(Color.FromRgb(0xC2, 0xC2, 0xCA)) : Themed("TextSecondary", Brushes.Gray);
+
+    /// <summary>
+    /// The surface a card sits on, for a page that may be painted with artwork.
+    ///
+    /// A light-theme card on a saturated field is a hole punched in it — and
+    /// once the text on those cards turned light to suit the page, the pale
+    /// plate left it light-on-light and unreadable. On a tinted page the cards
+    /// become a wash of the page itself instead.
+    /// </summary>
+    public IBrush PageCardBackground =>
+        HasPageBackground
+            ? new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF))
+            : Themed("SurfaceRaised", Brushes.White);
+
+    private static IBrush Themed(string key, IBrush fallback)
+    {
+        if (Avalonia.Application.Current is not { } app) return fallback;
+        return app.TryGetResource(key, app.ActualThemeVariant, out var value) && value is IBrush brush
+            ? brush
+            : fallback;
+    }
+
+    partial void OnArtistBackgroundChanged(IBrush? value)
+    {
+        OnPropertyChanged(nameof(PageBackground));
+        OnPropertyChanged(nameof(HasPageBackground));
+        OnPropertyChanged(nameof(PageTextPrimary));
+        OnPropertyChanged(nameof(PageTextSecondary));
+        OnPropertyChanged(nameof(PageCardBackground));
+    }
+
+    private async Task RefreshArtistBackgroundAsync(Artist? artist)
+    {
+        ArtistBackground = null;
+        if (artist is null) return;
+
+        var key = artist.HeroArtworkKey ?? artist.ArtworkKey;
+        var brush = await SampleArtworkBrushAsync(artist.ServerId, key);
+        // The page may have moved on while the histogram ran.
+        if (brush is not null && SelectedArtist == artist) ArtistBackground = brush;
+    }
+
     private async Task RefreshPlayerBackgroundAsync(Track? track)
     {
         // Black takes no colour from the artwork anywhere in the app, and
@@ -3554,6 +3668,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         if (tones is not null && NowPlaying == track)
             PlayerBackground = ArtworkSampling.Brush(tones);
     }
+
+    partial void OnSelectedArtistChanged(Artist? value) => _ = RefreshArtistBackgroundAsync(value);
 
     partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
 
@@ -3842,6 +3958,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(ShowSettings));
         OnPropertyChanged(nameof(ShowAlbumDetail));
         OnPropertyChanged(nameof(ShowArtistDetail));
+        OnPropertyChanged(nameof(PageBackground));
+        OnPropertyChanged(nameof(HasPageBackground));
+        OnPropertyChanged(nameof(PageTextPrimary));
+        OnPropertyChanged(nameof(PageTextSecondary));
+        OnPropertyChanged(nameof(PageCardBackground));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
         OnPropertyChanged(nameof(ShowMixDetail));
         OnPropertyChanged(nameof(ShowGenreDetail));
