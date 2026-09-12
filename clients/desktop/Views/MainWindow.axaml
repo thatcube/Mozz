@@ -1534,7 +1534,7 @@
                                                     controls:TrackMenu.Track="{Binding Track}">
                                                 <Border Classes="cardSurface" Width="300" Padding="8" CornerRadius="8"
                                                         Background="{Binding $parent[Window].DataContext.PageCardBackground}">
-                                                    <Grid ColumnDefinitions="44,*,38,64" Height="44">
+                                                    <Grid ColumnDefinitions="44,*,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
                                                                 ServerId="{Binding Track.ServerId}" ArtworkKey="{Binding Track.ArtworkKey}"
                                                                 FallbackText="{Binding Track.AlbumTitle}" FallbackFontSize="15" FallbackForeground="{DynamicResource ArtworkFallbackSecondary}" />
@@ -1542,18 +1542,21 @@
                                                             <TextBlock Text="{Binding Track.Title}" Classes="primary" />
                                                             <TextBlock Text="{Binding Subtitle}" Classes="secondary" />
                                                         </StackPanel>
-                                                        <Button Grid.Column="2" Classes="ghost" Width="32" Height="32"
-                                                                Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"
-                                                                CommandParameter="{Binding Track}"
-                                                                ToolTip.Tip="{Binding Track.FavoriteLabel}">
-                                                            <Panel Opacity="{Binding Track.FavoritePending, Converter={StaticResource PendingOpacity}}">
-                                                                <controls:TablerIcon Size="16" Filled="True" Data="{StaticResource IconHeart}"
-                                                                                     Brush="{DynamicResource BrandForeground}" IsVisible="{Binding Track.IsFavorite}" />
-                                                                <controls:TablerIcon Size="16" Classes="restingHeart" Data="{StaticResource IconHeartOutline}"
-                                                                                     Brush="{Binding $parent[Button].Foreground}" IsVisible="{Binding !Track.IsFavorite}" />
-                                                            </Panel>
-                                                        </Button>
-                                                        <TextBlock Grid.Column="3" Text="{Binding Track.Duration}" Classes="secondary"
+                                                        <!-- No heart on this card, for the reason the Recently
+                                                             Played card already gives: the card IS a play button,
+                                                             so a second target inside it is a boundary nobody can
+                                                             see. Like and Rate are on the row menu, which this
+                                                             card carries.
+
+                                                             It was also broken three ways over. It showed on every
+                                                             server, including the ones that keep a star rating and
+                                                             no favourite at all. Its outline glyph is revealed by a
+                                                             rule keyed to Border.rowPlate, and this is a
+                                                             cardSurface — so the heart never appeared and the
+                                                             button was a blank plate sitting over the title. And
+                                                             that plate was the light theme's, on a page painted by
+                                                             its own artwork. -->
+                                                        <TextBlock Grid.Column="2" Text="{Binding Track.Duration}" Classes="secondary"
                                                                    HorizontalAlignment="Right" VerticalAlignment="Center" />
                                                     </Grid>
                                                 </Border>
