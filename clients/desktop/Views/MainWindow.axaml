@@ -380,7 +380,7 @@
                                            
                                                 The colour comes from the mix's id, not its artwork — see
                                                 HomeMixTile.AccentColor for why it is deliberately not sampled. -->
-                                           <Button Classes="tile" Margin="0,0,0,4"
+                                           <Button Classes="tile" Margin="0"
                                                    Width="{Binding $parent[Window].DataContext.AlbumTileWidth}"
                                                    Command="{Binding $parent[Window].DataContext.OpenMixCommand}"
                                                    CommandParameter="{Binding}">
@@ -495,7 +495,7 @@
                                                the right edge while its left was flush.
                                            -->
                                            <Button Classes="tile cardTile" HorizontalAlignment="Stretch"
-                                                   Margin="0,0,0,4" Padding="8"
+                                                   Margin="0" Padding="8"
                                                    Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}"
                                                    controls:TrackMenu.Track="{Binding}">
@@ -538,7 +538,7 @@
                                    </ItemsControl.ItemsPanel>
                                    <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                           <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,2"
+                                           <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
                                                    Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                    CommandParameter="{Binding}">
                                                <StackPanel Spacing="9">
@@ -567,7 +567,7 @@
                                                 a mix. It was a tall card with a glyph in the middle,
                                                 which made three different shapes on one screen for
                                                 three things that are all "a collection you open". -->
-                                           <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
+                                           <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
                                                    Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
                                                    CommandParameter="{Binding}">
                                                <StackPanel Spacing="9">
@@ -754,7 +754,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="9">
@@ -817,7 +817,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.ArtistTileWidth}" Margin="0,0,0,4"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.ArtistTileWidth}" Margin="0"
                                                     Command="{Binding $parent[Window].DataContext.OpenArtistCommand}"
                                                     CommandParameter="{Binding}">
                                             <StackPanel Spacing="10">
@@ -875,7 +875,7 @@
                                             <!-- A genre has no cover to show, so it keeps a label card — but on
                                                  the same square footprint as everything else, so the wall
                                                  stays one rhythm instead of two. -->
-                                            <Button Classes="tile card" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
+                                            <Button Classes="tile card" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
                                                     Command="{Binding $parent[Window].DataContext.OpenGenreCommand}"
                                                     CommandParameter="{Binding}">
                                                 <Border Classes="tileSurface" CornerRadius="8" Padding="18"
@@ -1140,7 +1140,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,4"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
         Command="{Binding $parent[Window].DataContext.OpenPlaylistCommand}"
         CommandParameter="{Binding}">
     <StackPanel Spacing="9">
@@ -1504,7 +1504,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0,0,0,2"
+                                            <Button Classes="tile" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
                                                     Command="{Binding $parent[Window].DataContext.OpenAlbumCommand}"
                                                     CommandParameter="{Binding}">
                                                 <StackPanel Spacing="9">
@@ -1532,7 +1532,7 @@
                                             <Button Classes="tile cardTile" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
                                                     CommandParameter="{Binding Track}"
                                                     controls:TrackMenu.Track="{Binding Track}">
-                                                <Border Classes="cardSurface" Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
+                                                <Border Classes="cardSurface" Width="300" Padding="8" CornerRadius="8"
                                                         Background="{Binding $parent[Window].DataContext.PageCardBackground}">
                                                     <Grid ColumnDefinitions="44,*,38,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
@@ -2747,7 +2747,7 @@
                                                                 <ItemsControl.ItemTemplate>
                                                                     <DataTemplate>
                                                                         <Button Classes="tile"
-                                                                                Margin="0,0,0,7"
+                                                                                Margin="0"
                                                                                 Command="{Binding $parent[Window].DataContext.Connect.SelectPlexHomeUserCommand}"
                                                                                 CommandParameter="{Binding}">
                                                                             <Border Background="{DynamicResource SurfaceRaised}"
@@ -2846,7 +2846,7 @@
                                             <ItemsControl ItemsSource="{Binding SettingsLibraries}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Button Classes="tile" Margin="0,0,0,8"
+                                                        <Button Classes="tile" Margin="0"
                                                                 Command="{Binding $parent[Window].DataContext.SelectMusicLibraryCommand}"
                                                                 CommandParameter="{Binding}">
                                                             <Border Background="{DynamicResource SurfaceRaised}" CornerRadius="10" Padding="13">
