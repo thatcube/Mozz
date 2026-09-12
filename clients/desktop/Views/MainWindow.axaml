@@ -242,7 +242,11 @@
             <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="0,26,0,0" Classes="contentShell"
                   Background="{Binding PageBackground}">
 
-                <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="32,0,24,20">
+                <!-- Above the content, because the artist hero now runs up
+                     underneath it: the pane is declared after this row, so
+                     without a z-index the photograph would paint straight over
+                     the back arrow. -->
+                <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="32,0,24,20" ZIndex="5">
                     <Button x:Name="CompactNavigationButton" Grid.Column="0" Classes="transport"
                             Margin="0,0,12,0"
                             IsVisible="False"
@@ -250,12 +254,18 @@
                         <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
                                             Brush="{Binding $parent[Button].Foreground}" />
                     </Button>
+                    <!-- On a page whose hero runs up behind this bar, the arrow
+                         has to be legible ON the photograph: a translucent plate
+                         and a white glyph, the same treatment the hero's own
+                         controls get. Without it the back button disappeared into
+                         the picture entirely and the page had no way out. -->
                     <Button Grid.Column="1" Classes="transport"
+                            Classes.onHero="{Binding HasPageBackground}"
                             Margin="0,0,12,0"
                             IsVisible="{Binding CanGoBack}"
                             Command="{Binding GoBackCommand}">
                         <controls:TablerIcon Size="19" Data="{StaticResource IconChevronLeft}"
-                                             Brush="{Binding $parent[Button].Foreground}" />
+                                             Brush="{Binding PageTextPrimary}" />
                     </Button>
                     <StackPanel Grid.Column="2" Spacing="5">
                     <!--
@@ -271,7 +281,8 @@
                         detail page names its subject, and says it once: in the
                         hero while the hero is there, in the bar once it is not.
                     -->
-                    <TextBlock x:Name="PageTitleText" Text="{Binding PageTitle}" Classes="pageTitle">
+                    <TextBlock x:Name="PageTitleText" Text="{Binding PageTitle}" Classes="pageTitle"
+                               Foreground="{Binding PageTextPrimary}">
                         <TextBlock.Transitions>
                             <Transitions>
                                 <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
@@ -1188,6 +1199,23 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
+
+
+                        </Panel>
+                    </Border>
+
+                    <!--
+                        The detail list sits OUTSIDE the inset wrapper, and that is
+                        the whole reason the hero can reach the window.
+
+                        A ScrollViewer clips at its BOUNDS, not at its padding. Inside
+                        the wrapper the list's bounds began 32 points in, so a hero
+                        with a negative margin was simply cut off there however large
+                        the margin was — three attempts at bleeding it failed on
+                        exactly that. Out here the list spans the pane and insets its
+                        own rows with padding instead, so a row that pulls back out of
+                        that padding is still inside the viewport and draws.
+                    -->
                     <!-- Album, artist and playlist details share one virtualized scaffold.
 
                          The list spans the window and pads its own rows. The content
@@ -1204,7 +1232,7 @@
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
                              ClipToBounds="False"
-                             Padding="0,0,8,128">
+                             Padding="32,0,32,128">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -1279,7 +1307,7 @@
                                 the page colour arriving over the bottom.
                             -->
                             <DataTemplate DataType="vm:ArtistHeroRow">
-                                <Panel Height="260" Margin="-32,-26,-32,0" ClipToBounds="True">
+                                <Panel Height="300" Margin="-32,0,-32,0" ClipToBounds="True">
                                     <!-- No giant letter. An artist with no picture got a 92-point
                                          initial on an empty rectangle, which is a placeholder the
                                          size of the page. With nothing to show, the hero is just
@@ -1290,10 +1318,15 @@
                                             ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding HeroKey}"
                                             FallbackText=""
                                             FallbackForeground="{DynamicResource ArtworkHeroFallback}" />
+                                    <!-- A little shade at the very top as well as the foot:
+                                         the bar's controls sit up there on whatever the
+                                         photograph happens to be, and a pale one leaves them
+                                         with nothing to stand on. -->
                                     <Border>
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                                <GradientStop Color="#00000000" Offset="0" />
+                                                <GradientStop Color="#59000000" Offset="0" />
+                                                <GradientStop Color="#00000000" Offset="0.30" />
                                                 <GradientStop Color="#00000000" Offset="0.42" />
                                                 <GradientStop Color="#8C000000" Offset="0.78" />
                                                 <GradientStop Color="#FF000000" Offset="1" />
@@ -1330,15 +1363,19 @@
                                             <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
                                                 <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}" Brush="{Binding $parent[Button].Foreground}" />
                                             </Button>
-                                            <Button Classes="transport lead" VerticalAlignment="Center"
+                                            <!-- White, not the theme's foreground: these sit on a
+                                                 photograph, and in the light theme they were drawing
+                                                 near-black on it. The back arrow above has the same
+                                                 problem and is handled with the rest of the bar. -->
+                                            <Button Classes="transport lead onHero" VerticalAlignment="Center"
+                                                    ToolTip.Tip="Shuffle"
                                                     Command="{Binding $parent[Window].DataContext.ShuffleSelectedArtistCommand}">
-                                                <controls:TablerIcon Size="18" Data="{StaticResource IconShuffle}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                                <controls:TablerIcon Size="18" Data="{StaticResource IconShuffle}" Brush="White" />
                                             </Button>
-                                            <Button Classes="transport lead" VerticalAlignment="Center"
+                                            <Button Classes="transport lead onHero" VerticalAlignment="Center"
+                                                    ToolTip.Tip="Start radio"
                                                     Command="{Binding $parent[Window].DataContext.StartSelectedArtistRadioCommand}">
-                                                <controls:TablerIcon Size="18" Data="{StaticResource IconMusic}"
-                                                                     Brush="{Binding $parent[Button].Foreground}" />
+                                                <controls:TablerIcon Size="18" Data="{StaticResource IconWaveform}" Brush="White" />
                                             </Button>
                                         </StackPanel>
                                     </StackPanel>
@@ -1648,10 +1685,6 @@
                             </DataTemplate>
                         </ListBox.DataTemplates>
                     </ListBox>
-
-
-                        </Panel>
-                    </Border>
                 </Panel>
             </Grid>
             <!-- The transport is a dock, not a band across the bottom.
