@@ -47,6 +47,7 @@
             <SolidColorBrush x:Key="SurfaceRaised" Color="#3A3A3C" />
             <SolidColorBrush x:Key="SurfaceHover" Color="#48484A" />
             <SolidColorBrush x:Key="SurfaceSelected" Color="#3A3A3C" />
+            <SolidColorBrush x:Key="NavSelected" Color="#1AFFFFFF" />
             <SolidColorBrush x:Key="DetailBackground" Color="#121212" />
             <SolidColorBrush x:Key="Divider" Color="#99545458" />
 
@@ -334,7 +335,7 @@
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Padding" Value="12,9" />
-            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="CornerRadius" Value="10" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Cursor" Value="Hand" />
@@ -355,9 +356,23 @@
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
             <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
+        <!--
+            A selected destination is NOT the brand colour.
+
+            It was crimson text on a solid grey plate, which is two colours
+            arguing in a corner of the window nobody is looking at. Android says
+            why in its own nav: the one saturated colour in this app means "the
+            action", and a tab is not that. So selection is carried the way both
+            phones carry it — a faint wash of the text colour behind it, the
+            label in full strength rather than the secondary tier, and a little
+            more weight. The red goes back to meaning Play.
+        -->
         <Style Selector="Button.nav.selected /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource SurfaceSelected}" />
-            <Setter Property="TextElement.Foreground" Value="{DynamicResource Accent}" />
+            <Setter Property="Background" Value="{DynamicResource NavSelected}" />
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="Button.nav.selected">
+            <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
         <Style Selector="Button.link">

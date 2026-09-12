@@ -38,6 +38,10 @@ internal static class DesktopPalette
             Set(app, "SurfaceRaised", "#FFFFFF");
             Set(app, "SurfaceHover", "#E6E6EC");
             Set(app, "SurfaceSelected", "#DCDCE4");
+            // A faint wash of the text colour, which is what both phones use
+            // behind a selected destination. See the nav styles for why it is
+            // not the brand colour.
+            Set(app, "NavSelected", "#1A000000");
             Set(app, "Divider", "#DCDCDC");
             Set(app, "TextPrimary", "#0A0A0A");
             Set(app, "TextSecondary", "#6B6B6B");
@@ -74,6 +78,7 @@ internal static class DesktopPalette
         Set(app, "SurfaceRaised", blackout ? "#000000" : "#1C1C20");
         Set(app, "SurfaceHover", blackout ? "#151515" : "#232328");
         Set(app, "SurfaceSelected", blackout ? "#1E1E1E" : "#2A2A30");
+        Set(app, "NavSelected", blackout ? "#1FFFFFFF" : "#1AFFFFFF");
         Set(app, "Divider", blackout ? "#2A2A2A" : "#232327");
         Set(app, "TextPrimary", "#F2F2F4");
         Set(app, "TextSecondary", "#9A9AA2");
