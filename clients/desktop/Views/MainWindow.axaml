@@ -1261,17 +1261,37 @@
                                 the page colour arriving over the bottom.
                             -->
                             <DataTemplate DataType="vm:ArtistHeroRow">
-                                <Panel Height="360" Margin="-32,-84,-32,0" ClipToBounds="True">
+                                <Panel Height="440" Margin="-32,-84,-32,0" ClipToBounds="True">
                                     <!-- No giant letter. An artist with no picture got a 92-point
                                          initial on an empty rectangle, which is a placeholder the
                                          size of the page. With nothing to show, the hero is just
                                          the tone. -->
+                                    <!--
+                                        Two passes at the same picture.
+
+                                        The hero used to ask for 1400 points of artwork, which on a
+                                        retina screen is a 2800-pixel fetch and a visible wait on
+                                        every artist — the page arrived, and the thing it is built
+                                        around turned up seconds later. A small copy is requested
+                                        first and drawn underneath: it is a fraction of the bytes and
+                                        appears almost at once, so the full one sharpens over it
+                                        rather than replacing a blank rectangle.
+
+                                        900 rather than 1400 for the full pass, too. The bottom half
+                                        of this image is under a gradient and the top is behind a
+                                        name — it does not need to be the largest file the server
+                                        will produce.
+                                    -->
                                     <controls:ArtworkImage ArtistHero="True" CornerRadius="0"
                                             HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                                            DisplaySize="1400"
+                                            DisplaySize="220"
                                             ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding HeroKey}"
                                             FallbackText=""
                                             FallbackForeground="{DynamicResource ArtworkHeroFallback}" />
+                                    <controls:ArtworkImage ArtistHero="True" CornerRadius="0"
+                                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                            DisplaySize="900" DrawsFallback="False"
+                                            ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding HeroKey}" />
                                     <!-- A little shade at the very top as well as the foot:
                                          the bar's controls sit up there on whatever the
                                          photograph happens to be, and a pale one leaves them
@@ -1280,9 +1300,10 @@
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                                                 <GradientStop Color="#59000000" Offset="0" />
-                                                <GradientStop Color="#00000000" Offset="0.30" />
-                                                <GradientStop Color="#00000000" Offset="0.42" />
-                                                <GradientStop Color="#8C000000" Offset="0.78" />
+                                                <GradientStop Color="#00000000" Offset="0.26" />
+                                                <GradientStop Color="#26000000" Offset="0.48" />
+                                                <GradientStop Color="#66000000" Offset="0.70" />
+                                                <GradientStop Color="#B3000000" Offset="0.86" />
                                                 <GradientStop Color="#FF000000" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.Background>
@@ -1295,13 +1316,20 @@
                                                         Converter={x:Static ObjectConverters.IsNotNull}}">
                                         <Border.OpacityMask>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                                <!-- A long ramp rather than a short one: the page's
+                                                     colour starts arriving less than half way down and
+                                                     takes the rest of the hero to get there, so the
+                                                     photograph dissolves instead of stopping. -->
                                                 <GradientStop Color="#00000000" Offset="0" />
-                                                <GradientStop Color="#00000000" Offset="0.40" />
-                                                <GradientStop Color="#B3000000" Offset="0.82" />
+                                                <GradientStop Color="#00000000" Offset="0.28" />
+                                                <GradientStop Color="#1F000000" Offset="0.46" />
+                                                <GradientStop Color="#59000000" Offset="0.64" />
+                                                <GradientStop Color="#A6000000" Offset="0.80" />
+                                                <GradientStop Color="#E6000000" Offset="0.92" />
                                                 <!-- Opaque BEFORE the edge, so the last few points are
                                                      the page's own colour at full strength and the seam
                                                      has nothing left to reveal. -->
-                                                <GradientStop Color="#FF000000" Offset="0.96" />
+                                                <GradientStop Color="#FF000000" Offset="0.97" />
                                                 <GradientStop Color="#FF000000" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.OpacityMask>

@@ -84,7 +84,8 @@ public sealed class ArtworkImage : Control
     {
         AffectsRender<ArtworkImage>(
             FallbackTextProperty, FallbackFontSizeProperty, FallbackFontWeightProperty,
-            FallbackForegroundProperty, CornerRadiusProperty, ArtistHeroProperty);
+            FallbackForegroundProperty, CornerRadiusProperty, ArtistHeroProperty,
+            DrawsFallbackProperty);
         AffectsMeasure<ArtworkImage>(DisplaySizeProperty, StretchToFillProperty);
     }
 
@@ -103,6 +104,20 @@ public sealed class ArtworkImage : Control
     public FontWeight FallbackFontWeight { get => GetValue(FallbackFontWeightProperty); set => SetValue(FallbackFontWeightProperty, value); }
     public IBrush? FallbackForeground { get => GetValue(FallbackForegroundProperty); set => SetValue(FallbackForegroundProperty, value); }
     public bool ArtistHero { get => GetValue(ArtistHeroProperty); set => SetValue(ArtistHeroProperty, value); }
+
+    /// <summary>
+    /// Whether to paint a placeholder when there is no bitmap yet.
+    /// </summary>
+    /// <remarks>
+    /// True everywhere but the artist hero's full-resolution pass, which is
+    /// drawn OVER a small copy of the same picture. A placeholder there would
+    /// cover the very thing it is layered on top of, and the wait it exists to
+    /// fill is already being filled.
+    /// </remarks>
+    public static readonly StyledProperty<bool> DrawsFallbackProperty =
+        AvaloniaProperty.Register<ArtworkImage, bool>(nameof(DrawsFallback), true);
+
+    public bool DrawsFallback { get => GetValue(DrawsFallbackProperty); set => SetValue(DrawsFallbackProperty, value); }
     public bool StretchToFill { get => GetValue(StretchToFillProperty); set => SetValue(StretchToFillProperty, value); }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -228,7 +243,7 @@ public sealed class ArtworkImage : Control
             return;
         }
 
-        DrawFallback(context, bounds, rounded);
+        if (DrawsFallback) DrawFallback(context, bounds, rounded);
     }
 
     private void DrawFallback(DrawingContext context, Rect bounds, RoundedRect rounded)
