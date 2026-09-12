@@ -3500,18 +3500,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         var found = false;
         foreach (var key in wanted)
         {
-            var bitmap = await _artwork.LoadAsync(
-                new ArtworkRef(serverId!, key!, ArtworkSampling.RequestSize), CancellationToken.None);
-            if (bitmap is null) continue;
-            var pixels = ArtworkSampling.Rgba(bitmap);
-            if (pixels is null) continue;
-
-            var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
-            {
-                Pixels = Convert.ToBase64String(pixels),
-                Width = ArtworkSampling.SampleDim,
-                Height = ArtworkSampling.SampleDim,
-            }));
+            var tones = await SampleArtworkTonesAsync(serverId!, key);
             if (tones is null) continue;
             _mixTones[key!] = ArtworkSampling.ToColor(tones.Middle);
             found = true;
@@ -3536,40 +3525,73 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     /// </summary>
     private async Task<ArtworkTones?> SampleArtworkTonesAsync(string serverId, string? artworkKey)
     {
+        if (KnownArtworkTones(serverId, artworkKey) is { } ready) return ready;
         if (_artwork is null || artworkKey is not { Length: > 0 }) return null;
 
         var bitmap = await _artwork.LoadAsync(
             new ArtworkRef(serverId, artworkKey, ArtworkSampling.RequestSize), CancellationToken.None);
-        if (bitmap is null) return null;
+        return bitmap is null ? null : Histogram(bitmap, ToneMemo(serverId, artworkKey));
+    }
 
+    /// <summary>
+    /// What a cover has already been found to look like, keyed by server and
+    /// artwork key.
+    ///
+    /// A histogram of a given picture has one answer forever, and paying for it
+    /// again on every visit is what made a page arrive uncoloured and then
+    /// change under the reader.
+    /// </summary>
+    private readonly Dictionary<string, ArtworkTones> _artworkTones = new(StringComparer.Ordinal);
+
+    private static string ToneMemo(string serverId, string artworkKey) => $"{serverId}\u0000{artworkKey}";
+
+    /// <summary>
+    /// The tones for a cover if they can be had without waiting — and null if
+    /// they cannot, rather than a guess.
+    ///
+    /// Two ways to be instant: the answer is remembered from a previous visit,
+    /// or the picture is already decoded somewhere in the app and can be
+    /// histogrammed on the spot. The second is the common case on the way into a
+    /// detail page, because the thing that was clicked to get there was a tile
+    /// showing that very artwork.
+    /// </summary>
+    private ArtworkTones? KnownArtworkTones(string serverId, string? artworkKey)
+    {
+        if (artworkKey is not { Length: > 0 }) return null;
+
+        var memo = ToneMemo(serverId, artworkKey);
+        if (_artworkTones.TryGetValue(memo, out var remembered)) return remembered;
+
+        var held = _artwork?.PeekAnySize(
+            new ArtworkRef(serverId, artworkKey, ArtworkSampling.RequestSize));
+        return held is null ? null : Histogram(held, memo);
+    }
+
+    /// <summary>
+    /// Run the core's histogram over a decoded cover and remember the answer.
+    ///
+    /// Inline rather than on a worker: the input is 48×48, so this is arithmetic
+    /// over a couple of thousand pixels, and the whole point is that the caller
+    /// can have the colour before the next frame is drawn.
+    /// </summary>
+    private ArtworkTones? Histogram(Avalonia.Media.Imaging.Bitmap bitmap, string memo)
+    {
         var pixels = ArtworkSampling.Rgba(bitmap);
         if (pixels is null) return null;
 
-        return await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
+        var tones = _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
         {
             Pixels = Convert.ToBase64String(pixels),
             Width = ArtworkSampling.SampleDim,
             Height = ArtworkSampling.SampleDim,
-        }));
+        });
+        if (tones is not null) _artworkTones[memo] = tones;
+        return tones;
     }
 
     private async Task<IBrush?> SampleArtworkBrushAsync(string serverId, string? artworkKey)
     {
-        if (_artwork is null || artworkKey is not { Length: > 0 }) return null;
-
-        var bitmap = await _artwork.LoadAsync(
-            new ArtworkRef(serverId, artworkKey, ArtworkSampling.RequestSize), CancellationToken.None);
-        if (bitmap is null) return null;
-
-        var pixels = ArtworkSampling.Rgba(bitmap);
-        if (pixels is null) return null;
-
-        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
-        {
-            Pixels = Convert.ToBase64String(pixels),
-            Width = ArtworkSampling.SampleDim,
-            Height = ArtworkSampling.SampleDim,
-        }));
+        var tones = await SampleArtworkTonesAsync(serverId, artworkKey);
         return tones is null ? null : ArtworkSampling.Brush(tones);
     }
 
@@ -3614,6 +3636,21 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     /// otherwise.
     /// </summary>
     public IBrush BarBackground => PageBackground ?? Themed("Surface", Brushes.White);
+
+    /// <summary>
+    /// What a hero dissolves into: always something, never null.
+    ///
+    /// The hero used to fade to black and then have the page's tone laid over
+    /// the same band once the histogram finished — so on the way into an artist
+    /// you watched the fade assemble itself, and whether you saw that at all
+    /// depended on how quickly a colour arrived. Fading into whatever the page
+    /// is painted with right now removes the question: before the tone lands
+    /// that is the app's own background, after it lands it is the tone, and the
+    /// hero ends in the correct colour either way. The change between the two is
+    /// a brush transition on the layer itself, so the colour arriving is a
+    /// settling rather than a switch.
+    /// </summary>
+    public IBrush DetailFade => PageBackground ?? Themed("AppBackground", Brushes.White);
 
     /// <summary>
     /// Text colours for a page that may be painted with artwork.
@@ -3688,6 +3725,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     {
         OnPropertyChanged(nameof(PageBackground));
         OnPropertyChanged(nameof(HasPageBackground));
+        OnPropertyChanged(nameof(DetailFade));
         OnPropertyChanged(nameof(PageTextPrimary));
         OnPropertyChanged(nameof(PageTextSecondary));
         OnPropertyChanged(nameof(PageCardBackground));
@@ -3735,8 +3773,27 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
 
     private async Task RefreshDetailBackgroundAsync()
     {
+        if (DetailArtwork() is not { } source)
+        {
+            DetailBackground = null;
+            return;
+        }
+
+        // Colour the page before it is drawn, whenever that is possible at all.
+        //
+        // The tone used to be worked out after arriving — fetch a copy of the
+        // cover, histogram it, then paint — so the hero faded into black for a
+        // moment and the real fade assembled underneath the reader. Watching it
+        // form is worse than either state on its own. This runs on the way in,
+        // synchronously, off a picture the app already holds or an answer it
+        // already worked out, so the page is never seen being the wrong colour.
+        if (KnownArtworkTones(source.Server, source.Key) is { } ready)
+        {
+            DetailBackground = new ImmutableSolidColorBrush(ArtworkSampling.ToColor(ready.Middle));
+            return;
+        }
+
         DetailBackground = null;
-        if (DetailArtwork() is not { } source) return;
 
         var page = _navigation.Current;
         var tones = await SampleArtworkTonesAsync(source.Server, source.Key);
@@ -3768,21 +3825,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
             return;
         }
 
-        if (_artwork is null || track?.ArtworkKey is not { Length: > 0 } key) return;
+        if (track?.ArtworkKey is not { Length: > 0 } key) return;
 
-        var request = new ArtworkRef(track.ServerId, key, ArtworkSampling.RequestSize);
-        var bitmap = await _artwork.LoadAsync(request, CancellationToken.None);
-        if (bitmap is null) return;
-
-        var pixels = ArtworkSampling.Rgba(bitmap);
-        if (pixels is null) return;
-
-        var tones = await Task.Run(() => _core.Call<ArtworkTones>(new CoreRequest("artworkTones")
-        {
-            Pixels = Convert.ToBase64String(pixels),
-            Width = ArtworkSampling.SampleDim,
-            Height = ArtworkSampling.SampleDim,
-        }));
+        var tones = await SampleArtworkTonesAsync(track.ServerId, key);
 
         // Same rule as the cover: only ever replaced by something real, so one
         // track without usable artwork does not wash the field out.
@@ -4085,6 +4130,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(ShowArtistDetail));
         OnPropertyChanged(nameof(PageBackground));
         OnPropertyChanged(nameof(HasPageBackground));
+        OnPropertyChanged(nameof(DetailFade));
         OnPropertyChanged(nameof(PageTextPrimary));
         OnPropertyChanged(nameof(PageTextSecondary));
         OnPropertyChanged(nameof(PageCardBackground));

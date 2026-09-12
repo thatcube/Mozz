@@ -247,6 +247,16 @@
                  tinted page, which is exactly the seam it was there to remove. -->
             <Grid Grid.Column="1" Classes="contentShell"
                   Background="{Binding PageBackground}">
+                <!-- The page settles into its colour rather than snapping to it.
+                     A tone that lands a moment after the page did used to be a
+                     second, separate event; at this duration it reads as the page
+                     still arriving. Same duration as the hero's dissolve, so the
+                     two move together. -->
+                <Grid.Transitions>
+                    <Transitions>
+                        <BrushTransition Property="Background" Duration="0:0:0.45" />
+                    </Transitions>
+                </Grid.Transitions>
 
 
                 <!--
@@ -1353,44 +1363,69 @@
                                             HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                             DisplaySize="900" DrawsFallback="False"
                                             ServerId="{Binding Artist.ServerId}" ArtworkKey="{Binding HeroKey}" />
-                                    <!-- A little shade at the very top as well as the foot:
-                                         the bar's controls sit up there on whatever the
-                                         photograph happens to be, and a pale one leaves them
-                                         with nothing to stand on. -->
+                                    <!-- Shade, purely for legibility: the back arrow sits on
+                                         whatever the photograph happens to be at the top, and the
+                                         name and its three white controls on whatever it is at the
+                                         foot. A pale picture leaves both with nothing to stand on.
+                                         This is NOT the fade — it stops well short of black, and
+                                         carrying none of the dissolve is the point. -->
                                     <Border>
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                                                 <GradientStop Color="#59000000" Offset="0" />
                                                 <GradientStop Color="#00000000" Offset="0.26" />
-                                                <GradientStop Color="#26000000" Offset="0.48" />
-                                                <GradientStop Color="#66000000" Offset="0.70" />
-                                                <GradientStop Color="#B3000000" Offset="0.86" />
-                                                <GradientStop Color="#FF000000" Offset="1" />
+                                                <GradientStop Color="#00000000" Offset="0.55" />
+                                                <GradientStop Color="#2E000000" Offset="0.78" />
+                                                <GradientStop Color="#4D000000" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.Background>
                                     </Border>
-                                    <!-- The page's own tone laid over the same band, so
-                                         the image ends in the colour the rest of the page
-                                         is painted with rather than in black. -->
-                                    <Border Background="{Binding $parent[Window].DataContext.DetailBackground}"
-                                            IsVisible="{Binding $parent[Window].DataContext.DetailBackground,
-                                                        Converter={x:Static ObjectConverters.IsNotNull}}">
+                                    <!--
+                                        The dissolve, in one layer.
+
+                                        This is painted with whatever the page is painted with
+                                        RIGHT NOW — the app's own background before the artwork has
+                                        been histogrammed, the record's tone after — so the hero
+                                        always ends in exactly the colour underneath it and there is
+                                        no moment where it ends in something else. It used to fade
+                                        to black and have the tone laid over the same band once the
+                                        colour arrived, which meant the fade visibly assembled itself
+                                        a beat after the page did.
+
+                                        The brush transition is what makes the colour landing a
+                                        settling rather than a switch, and it runs slower than the
+                                        page's own entrance so it never reads as a second event.
+                                    -->
+                                    <Border Background="{Binding $parent[Window].DataContext.DetailFade}">
+                                        <Border.Transitions>
+                                            <Transitions>
+                                                <BrushTransition Property="Background" Duration="0:0:0.45" />
+                                            </Transitions>
+                                        </Border.Transitions>
                                         <Border.OpacityMask>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                                <!-- A long ramp rather than a short one: the page's
-                                                     colour starts arriving less than half way down and
-                                                     takes the rest of the hero to get there, so the
-                                                     photograph dissolves instead of stopping. -->
+                                                <!-- A long, evenly-spaced ramp. The page's colour
+                                                     starts arriving a third of the way down and takes
+                                                     the remaining two thirds to get there, with enough
+                                                     stops that no single one of them is a step you can
+                                                     find. Banding on a gradient this long is more
+                                                     visible than a short one, so the stops are close
+                                                     together through the middle where the eye is. -->
                                                 <GradientStop Color="#00000000" Offset="0" />
-                                                <GradientStop Color="#00000000" Offset="0.28" />
-                                                <GradientStop Color="#1F000000" Offset="0.46" />
-                                                <GradientStop Color="#59000000" Offset="0.64" />
-                                                <GradientStop Color="#A6000000" Offset="0.80" />
-                                                <GradientStop Color="#E6000000" Offset="0.92" />
+                                                <GradientStop Color="#00000000" Offset="0.30" />
+                                                <GradientStop Color="#0D000000" Offset="0.40" />
+                                                <GradientStop Color="#1F000000" Offset="0.50" />
+                                                <GradientStop Color="#38000000" Offset="0.59" />
+                                                <GradientStop Color="#57000000" Offset="0.67" />
+                                                <GradientStop Color="#7A000000" Offset="0.74" />
+                                                <GradientStop Color="#9E000000" Offset="0.81" />
+                                                <GradientStop Color="#C2000000" Offset="0.87" />
+                                                <GradientStop Color="#DE000000" Offset="0.92" />
+                                                <GradientStop Color="#F2000000" Offset="0.96" />
                                                 <!-- Opaque BEFORE the edge, so the last few points are
                                                      the page's own colour at full strength and the seam
                                                      has nothing left to reveal. -->
-                                                <GradientStop Color="#FF000000" Offset="0.97" />
+                                                <GradientStop Color="#FF000000" Offset="0.99" />
                                                 <GradientStop Color="#FF000000" Offset="1" />
                                             </LinearGradientBrush>
                                         </Border.OpacityMask>
