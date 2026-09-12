@@ -63,7 +63,17 @@ public sealed class ArtworkBinder<T> : IDisposable where T : class
     /// new load if there is one. A repeat bind to the identical request is a no-op,
     /// so the redundant property churn of recycling does not restart a good load.
     /// </summary>
-    public void Bind(ArtworkRef? request)
+    /// <param name="standIn">
+    /// Something true to show while the real one loads, instead of the fallback.
+    ///
+    /// The clear below is what stops a recycled tile from showing the previous
+    /// item's cover, and it must stay — but "not the previous item's art" and
+    /// "nothing at all" are not the same requirement. A caller that already holds
+    /// a picture of <i>this</i> item (the same cover at another size, say) passes
+    /// it here, and the tile shows that rather than a placeholder for a record
+    /// whose artwork the app plainly has.
+    /// </param>
+    public void Bind(ArtworkRef? request, T? standIn = null)
     {
         int generation;
         CancellationToken token;
@@ -91,9 +101,9 @@ public sealed class ArtworkBinder<T> : IDisposable where T : class
             token = _cts.Token;
         }
 
-        // Clear to the fallback while the new cover loads, so a recycled tile does
-        // not keep showing the old item's art.
-        _post(() => ApplyIfCurrent(null, generation));
+        // Clear to the fallback — or to the stand-in — while the new cover loads,
+        // so a recycled tile does not keep showing the old item's art.
+        _post(() => ApplyIfCurrent(standIn, generation));
 
         _ = LoadAsync(request.Value, generation, token);
     }

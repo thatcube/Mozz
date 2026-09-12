@@ -21,6 +21,54 @@ public class ArtworkCacheTests
 
     private static byte[]? Identity(byte[] bytes) => bytes;
 
+    /// <summary>
+    /// A picture already held at one size stands in for it at another.
+    ///
+    /// This is the gap between clicking an album in the grid and its page
+    /// drawing: the two ask for the same cover at different sizes, which are
+    /// different entries, so the page showed a placeholder and then the very
+    /// artwork that had just been clicked.
+    /// </summary>
+    [Fact]
+    public async Task PeekAnySize_ServesACopyHeldAtAnotherSize()
+    {
+        using var cache = new ArtworkCache<byte[]>(
+            fetch: (r, ct) => Task.FromResult<byte[]?>(BytesFor(r.ArtworkKey + ":" + r.Size)),
+            decode: Identity,
+            diskDirectory: null);
+
+        Assert.Null(cache.PeekAnySize(Ref("cover", 220)));
+
+        await cache.GetAsync(Ref("cover", 100));
+
+        // The 220 has never been fetched, but the 100 can stand in for it.
+        var stand_in = cache.PeekAnySize(Ref("cover", 220));
+        Assert.Equal(BytesFor("cover:100"), stand_in);
+
+        // A different picture is not a stand-in for anything.
+        Assert.Null(cache.PeekAnySize(Ref("other", 220)));
+
+        // And once the asked-for size is held, that is what comes back.
+        await cache.GetAsync(Ref("cover", 220));
+        Assert.Equal(BytesFor("cover:220"), cache.PeekAnySize(Ref("cover", 220)));
+    }
+
+    /// <summary>The largest copy stands in, being the one that scales best.</summary>
+    [Fact]
+    public async Task PeekAnySize_PrefersTheLargestCopyHeld()
+    {
+        using var cache = new ArtworkCache<byte[]>(
+            fetch: (r, ct) => Task.FromResult<byte[]?>(BytesFor(r.ArtworkKey + ":" + r.Size)),
+            decode: Identity,
+            diskDirectory: null);
+
+        await cache.GetAsync(Ref("cover", 80));
+        await cache.GetAsync(Ref("cover", 400));
+        await cache.GetAsync(Ref("cover", 160));
+
+        Assert.Equal(BytesFor("cover:400"), cache.PeekAnySize(Ref("cover", 900)));
+    }
+
     [Fact]
     public async Task MemoryHit_DoesNotFetchTwice()
     {

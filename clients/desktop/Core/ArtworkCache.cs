@@ -16,6 +16,16 @@ public readonly record struct ArtworkRef(string ServerId, string ArtworkKey, int
 {
     /// <summary>Stable string form, used to key the memory and disk caches.</summary>
     public string Key => $"{ServerId}\u0000{ArtworkKey}\u0000{Size}";
+
+    /// <summary>
+    /// The artwork itself, without the size it was asked for.
+    ///
+    /// Two requests for the same cover at different sizes are different cache
+    /// entries — they have to be, they decode to different bitmaps — but they
+    /// are the same picture, and a caller that already has one of them should
+    /// not be made to look at a placeholder while the other arrives.
+    /// </summary>
+    public string Subject => $"{ServerId}\u0000{ArtworkKey}";
 }
 
 /// <summary>
@@ -66,11 +76,16 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
     private sealed class Node
     {
         public required string Key;
+        public required string Subject;
+        public required int Size;
         public required T Value;
     }
 
     private readonly object _gate = new();
     private readonly Dictionary<string, LinkedListNode<Node>> _memory = new();
+    /// <summary>Every held size of a given picture, so any of them can stand in
+    /// for a size still being decoded.</summary>
+    private readonly Dictionary<string, HashSet<string>> _bySubject = new();
     private readonly LinkedList<Node> _recency = new();
     private readonly HashSet<string> _negative = new();
     private readonly Dictionary<string, Task<T?>> _inflight = new();
@@ -229,7 +244,7 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
                 return null;
             }
 
-            Store(key, decoded);
+            Store(request, key, decoded);
             return decoded;
         }
         catch (OperationCanceledException)
@@ -267,6 +282,39 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
         lock (_gate) _negative.Clear();
     }
 
+    /// <summary>
+    /// Any size of this picture that is already decoded, largest first, or null.
+    ///
+    /// For the moment between asking for a cover and receiving it. Clicking an
+    /// album in the grid and landing on its page asked for the same artwork at
+    /// a different size, which is a different entry — so the page drew a
+    /// placeholder and then the very picture that had just been clicked. This
+    /// hands over the copy already in memory so there is something true on
+    /// screen while the right size is prepared.
+    ///
+    /// Does not touch recency: standing in for a picture is not the same as
+    /// being asked for, and a stand-in should not outlive the real entry.
+    /// </summary>
+    public T? PeekAnySize(ArtworkRef request)
+    {
+        lock (_gate)
+        {
+            if (_memory.TryGetValue(request.Key, out var exact)) return exact.Value.Value;
+            if (!_bySubject.TryGetValue(request.Subject, out var keys)) return null;
+
+            T? best = null;
+            var bestSize = -1;
+            foreach (var key in keys)
+            {
+                if (!_memory.TryGetValue(key, out var node)) continue;
+                if (node.Value.Size <= bestSize) continue;
+                bestSize = node.Value.Size;
+                best = node.Value.Value;
+            }
+            return best;
+        }
+    }
+
     private void Touch(LinkedListNode<Node> node)
     {
         // Caller holds _gate.
@@ -274,7 +322,7 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
         _recency.AddFirst(node);
     }
 
-    private void Store(string key, T value)
+    private void Store(ArtworkRef request, string key, T value)
     {
         lock (_gate)
         {
@@ -287,9 +335,18 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
                 return;
             }
 
-            var node = new LinkedListNode<Node>(new Node { Key = key, Value = value });
+            var node = new LinkedListNode<Node>(new Node
+            {
+                Key = key,
+                Subject = request.Subject,
+                Size = request.Size,
+                Value = value,
+            });
             _recency.AddFirst(node);
             _memory[key] = node;
+            if (!_bySubject.TryGetValue(request.Subject, out var sizes))
+                _bySubject[request.Subject] = sizes = new HashSet<string>();
+            sizes.Add(key);
 
             // Evict the coldest until we are back within bound. Evicted bitmaps are
             // deliberately not disposed: one may still be an on-screen Source, and
@@ -300,6 +357,11 @@ public sealed class ArtworkCache<T> : IDisposable where T : class
                 if (tail is null) break;
                 _recency.RemoveLast();
                 _memory.Remove(tail.Value.Key);
+                if (_bySubject.TryGetValue(tail.Value.Subject, out var held))
+                {
+                    held.Remove(tail.Value.Key);
+                    if (held.Count == 0) _bySubject.Remove(tail.Value.Subject);
+                }
             }
         }
     }

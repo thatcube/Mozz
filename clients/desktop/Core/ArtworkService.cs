@@ -188,6 +188,16 @@ public sealed class ArtworkService : IDisposable
         => _directUrlCache.GetAsync(request, token);
 
     /// <summary>
+    /// A copy of this picture at whatever size is already decoded, or null.
+    ///
+    /// For the gap between asking and receiving: see <see cref="ArtworkCache{T}.PeekAnySize"/>.
+    /// </summary>
+    public Bitmap? PeekAnySize(ArtworkRef request)
+        => request.ServerId == DirectUrlNamespace
+            ? _directUrlCache.PeekAnySize(request)
+            : _cache.PeekAnySize(request);
+
+    /// <summary>
     /// Forget every remembered artwork failure, on both caches.
     ///
     /// See <see cref="ArtworkUnavailableException"/>: a failure recorded while

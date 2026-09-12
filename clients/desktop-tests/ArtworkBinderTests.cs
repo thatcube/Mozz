@@ -41,6 +41,68 @@ public class ArtworkBinderTests
         Assert.Equal(new string?[] { null }, applied);
     }
 
+    /// <summary>
+    /// A stand-in shows instead of the fallback, and still yields to the real one.
+    ///
+    /// The clear-to-fallback is what stops a recycled tile from showing the
+    /// previous item's cover, and it ran unconditionally — so a caller that
+    /// already held this very picture at another size had it wiped a frame after
+    /// handing it over, and the page drew a placeholder for artwork the app had.
+    /// </summary>
+    [Fact]
+    public async Task StandIn_ShowsWhileLoading_ThenGivesWayToTheRealCover()
+    {
+        var gate = new TaskCompletionSource<string?>();
+        var applied = new List<string?>();
+        using var binder = new ArtworkBinder<string>(
+            load: (r, ct) => gate.Task,
+            apply: v => applied.Add(v));
+
+        binder.Bind(Ref("a"), standIn: "smaller-copy");
+        Assert.Equal(new string?[] { "smaller-copy" }, applied);
+
+        gate.SetResult("cover-a");
+        Assert.True(await WaitUntil(() => applied.Count == 2));
+        Assert.Equal("cover-a", applied[^1]);
+    }
+
+    /// <summary>
+    /// With no stand-in offered, the tile still clears — the recycling guard is
+    /// the default, not the exception.
+    /// </summary>
+    [Fact]
+    public void NoStandIn_StillClearsToFallback()
+    {
+        var applied = new List<string?>();
+        using var binder = new ArtworkBinder<string>(
+            load: (r, ct) => new TaskCompletionSource<string?>().Task,
+            apply: v => applied.Add(v));
+
+        binder.Bind(Ref("a"));
+
+        Assert.Equal(new string?[] { null }, applied);
+    }
+
+    /// <summary>A stand-in belongs to its generation: a rebind past it discards it.</summary>
+    [Fact]
+    public void StandInFromASupersededBind_IsNotPainted()
+    {
+        var applied = new List<string?>();
+        var posts = new List<Action>();
+        using var binder = new ArtworkBinder<string>(
+            load: (r, ct) => new TaskCompletionSource<string?>().Task,
+            apply: v => applied.Add(v),
+            post: posts.Add);
+
+        binder.Bind(Ref("a"), standIn: "a-smaller");
+        binder.Bind(Ref("b"), standIn: "b-smaller");
+
+        foreach (var post in posts) post();
+
+        // "a-smaller" was queued before the rebind to b and must not land on b.
+        Assert.Equal(new string?[] { "b-smaller" }, applied);
+    }
+
     [Fact]
     public void RepeatBindToSameKey_DoesNotReload()
     {

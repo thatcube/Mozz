@@ -173,7 +173,14 @@ public sealed class ArtworkImage : Control
         _boundRequest = request;
         _hasBound = true;
 
-        EnsureBinder().Bind(request);
+        // Show whatever copy of this picture is already decoded while the size
+        // this control actually wants is prepared. Clicking an album in the grid
+        // and landing on its page asks for the same cover at a different size —
+        // a different cache entry — so the page drew a placeholder and then the
+        // very artwork that had just been clicked.
+        var standIn = request is { } peek ? ArtworkService.Current?.PeekAnySize(peek) : null;
+
+        EnsureBinder().Bind(request, standIn);
     }
 
     private ArtworkRef? BuildRequest()
