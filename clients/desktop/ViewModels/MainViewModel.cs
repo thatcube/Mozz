@@ -3599,6 +3599,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     public bool HasPageBackground => PageBackground is not null;
 
     /// <summary>
+    /// What the top bar sits on once the page has scrolled under it.
+    ///
+    /// The bar overlays the content rather than reserving a band above it, so
+    /// at the top of a page it is invisible and the hero runs behind it — but
+    /// once rows start passing underneath they have to be covered, or the
+    /// title and the back arrow are read against whatever text happens to be
+    /// sliding past. The page's own colour where it has one, the app's surface
+    /// otherwise.
+    /// </summary>
+    public IBrush BarBackground => PageBackground ?? Themed("Surface", Brushes.White);
+
+    /// <summary>
     /// Text colours for a page that may be painted with artwork.
     /// </summary>
     /// <remarks>
@@ -3642,6 +3654,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(PageTextPrimary));
         OnPropertyChanged(nameof(PageTextSecondary));
         OnPropertyChanged(nameof(PageCardBackground));
+        OnPropertyChanged(nameof(BarBackground));
     }
 
     /// <summary>
@@ -4005,6 +4018,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(PageTextPrimary));
         OnPropertyChanged(nameof(PageTextSecondary));
         OnPropertyChanged(nameof(PageCardBackground));
+        OnPropertyChanged(nameof(BarBackground));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
         OnPropertyChanged(nameof(ShowMixDetail));
         OnPropertyChanged(nameof(ShowGenreDetail));

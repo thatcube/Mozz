@@ -428,13 +428,19 @@ public partial class MainWindow : Window
         if (!vm.ShowDetailPage)
         {
             // A list page has no hero to compete with, so its title is simply
-            // always there.
+            // always there — and the bar needs its material from the start,
+            // because the page begins right underneath it.
             PageTitleText.Opacity = 1;
+            TopBarScrim.Opacity = 1;
             return;
         }
 
         var span = TitleRevealEnd - TitleRevealStart;
-        PageTitleText.Opacity = Math.Clamp((offsetY - TitleRevealStart) / span, 0, 1);
+        var revealed = Math.Clamp((offsetY - TitleRevealStart) / span, 0, 1);
+        PageTitleText.Opacity = revealed;
+        // The hero is meant to be seen behind the bar, so the material stays out
+        // of the way until the hero has gone.
+        TopBarScrim.Opacity = revealed;
     }
 
     /// <summary>

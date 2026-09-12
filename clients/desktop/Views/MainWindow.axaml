@@ -13,6 +13,8 @@
         Background="{DynamicResource AppBackground}"
         Title="Mozz"
         Icon="avares://Mozz.Desktop/Assets/mozz.ico"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaTitleBarHeightHint="-1"
         SizeChanged="OnWindowResized">
 
     <Design.DataContext>
@@ -90,7 +92,10 @@
 
             <!-- Sidebar -->
             <Border x:Name="SidebarPane" Grid.Column="0" Background="{DynamicResource SidebarBackground}">
-                <Grid x:Name="SidebarInterior" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="14,18,14,14">
+                <!-- 46 at the top, not 18: the window draws its own content under
+                     the system's title bar now, so the traffic lights sit over
+                     this corner and the app's name would be underneath them. -->
+                <Grid x:Name="SidebarInterior" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="14,46,14,14">
 
                     <StackPanel x:Name="SidebarHeader" Grid.Row="0" Orientation="Horizontal" Spacing="11" Margin="6,0,0,20">
                         <!-- The actual app icon, not a letter in a box. The art
@@ -239,60 +244,9 @@
                  column, rather than on the pane inside it — on the pane it
                  stopped at the inset and left a pale gutter down each side of a
                  tinted page, which is exactly the seam it was there to remove. -->
-            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="0,26,0,0" Classes="contentShell"
+            <Grid Grid.Column="1" Classes="contentShell"
                   Background="{Binding PageBackground}">
 
-                <!-- Above the content, because the artist hero now runs up
-                     underneath it: the pane is declared after this row, so
-                     without a z-index the photograph would paint straight over
-                     the back arrow. -->
-                <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*" Margin="32,0,24,20" ZIndex="5">
-                    <Button x:Name="CompactNavigationButton" Grid.Column="0" Classes="transport"
-                            Margin="0,0,12,0"
-                            IsVisible="False"
-                            Click="OnCompactNavigationButtonClicked">
-                        <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
-                                            Brush="{Binding $parent[Button].Foreground}" />
-                    </Button>
-                    <!-- On a page whose hero runs up behind this bar, the arrow
-                         has to be legible ON the photograph: a translucent plate
-                         and a white glyph, the same treatment the hero's own
-                         controls get. Without it the back button disappeared into
-                         the picture entirely and the page had no way out. -->
-                    <Button Grid.Column="1" Classes="transport"
-                            Classes.onHero="{Binding HasPageBackground}"
-                            Margin="0,0,12,0"
-                            IsVisible="{Binding CanGoBack}"
-                            Command="{Binding GoBackCommand}">
-                        <controls:TablerIcon Size="19" Data="{StaticResource IconChevronLeft}"
-                                             Brush="{Binding PageTextPrimary}" />
-                    </Button>
-                    <StackPanel Grid.Column="2" Spacing="5">
-                    <!--
-                        On a detail page this starts invisible and fades in as the
-                        hero scrolls away, the way both phones do it.
-
-                        The hero already names the page, in bigger type, eighty
-                        points below — so the bar was saying "Daily Mix 3" over a
-                        heading that said "Daily Mix 3". The album, artist and
-                        playlist pages dodged that by saying "Album", "Artist" and
-                        "Playlist" instead, which is a label rather than a title
-                        and told the reader nothing they could not see. Now every
-                        detail page names its subject, and says it once: in the
-                        hero while the hero is there, in the bar once it is not.
-                    -->
-                    <TextBlock x:Name="PageTitleText" Text="{Binding PageTitle}" Classes="pageTitle"
-                               Foreground="{Binding PageTextPrimary}">
-                        <TextBlock.Transitions>
-                            <Transitions>
-                                <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
-                            </Transitions>
-                        </TextBlock.Transitions>
-                    </TextBlock>
-                    <TextBlock Text="{Binding StatusMessage}" Classes="secondary"
-                               IsVisible="{Binding StatusMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                    </StackPanel>
-                </Grid>
 
                 <!--
                     The page arrives rather than appearing.
@@ -304,7 +258,7 @@
                     points of rise is enough — it is the same gesture the phones
                     use, and it costs one property animation.
                 -->
-                <Panel Grid.Row="1" x:Name="ContentPane" SizeChanged="OnContentResized"
+                <Panel x:Name="ContentPane" SizeChanged="OnContentResized"
                        RenderTransformOrigin="50%,0%"
                        Classes.tinted="{Binding HasPageBackground}">
                     <!-- The artist page's own tone, taken from the hero artwork,
@@ -334,7 +288,7 @@
                         every page the margin it had. The artist hero cancels this
                         padding and gets the full width back.
                     -->
-                    <Border Padding="32,0,24,0" ClipToBounds="False">
+                    <Border Padding="32,84,24,0" ClipToBounds="False">
                         <Panel>
 
                     <StackPanel IsVisible="{Binding IsLibraryEmpty}"
@@ -1232,7 +1186,7 @@
                              ScrollViewer.ScrollChanged="OnListScrolled"
                              Background="Transparent" BorderThickness="0"
                              ClipToBounds="False"
-                             Padding="32,0,32,128">
+                             Padding="32,84,32,128">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -1307,7 +1261,7 @@
                                 the page colour arriving over the bottom.
                             -->
                             <DataTemplate DataType="vm:ArtistHeroRow">
-                                <Panel Height="300" Margin="-32,0,-32,0" ClipToBounds="True">
+                                <Panel Height="360" Margin="-32,-84,-32,0" ClipToBounds="True">
                                     <!-- No giant letter. An artist with no picture got a 92-point
                                          initial on an empty rectangle, which is a placeholder the
                                          size of the page. With nothing to show, the hero is just
@@ -1686,6 +1640,81 @@
                         </ListBox.DataTemplates>
                     </ListBox>
                 </Panel>
+
+                <!--
+                    The bar is an OVERLAY on the content, not a row above it.
+
+                    As a row it reserved its own band across the top of every
+                    page, which is why a hero that is meant to fill the window
+                    had a strip of page colour above it and could never reach
+                    the top. Declared after the pane, it draws over whatever is
+                    underneath, so the photograph runs the full height and the
+                    back arrow sits ON it — which is where the reference puts it.
+
+                    Ordinary pages keep their distance from it through the
+                    padding on the wrapper below, so nothing else moved.
+                -->
+                <!-- The material under the bar, which is nothing at the top of a
+                     page and arrives as content starts to pass beneath it. Driven
+                     from the same scroll position as the title, so the two fade in
+                     together. -->
+                <Border x:Name="TopBarScrim" VerticalAlignment="Top" Height="84" Opacity="0"
+                        Background="{Binding BarBackground}">
+                    <Border.Transitions>
+                        <Transitions>
+                            <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
+                        </Transitions>
+                    </Border.Transitions>
+                </Border>
+
+                <Grid x:Name="TopBar" VerticalAlignment="Top"
+                      ColumnDefinitions="Auto,Auto,*" Margin="32,26,24,0">
+                    <Button x:Name="CompactNavigationButton" Grid.Column="0" Classes="transport"
+                            Margin="0,0,12,0"
+                            IsVisible="False"
+                            Click="OnCompactNavigationButtonClicked">
+                        <controls:TablerIcon Size="19" Data="{StaticResource IconQueue}"
+                                            Brush="{Binding $parent[Button].Foreground}" />
+                    </Button>
+                    <!-- On a page whose hero runs up behind this bar, the arrow
+                         has to be legible ON the photograph: a translucent plate
+                         and a white glyph, the same treatment the hero's own
+                         controls get. Without it the back button disappeared into
+                         the picture entirely and the page had no way out. -->
+                    <Button Grid.Column="1" Classes="transport"
+                            Classes.onHero="{Binding HasPageBackground}"
+                            Margin="0,0,12,0"
+                            IsVisible="{Binding CanGoBack}"
+                            Command="{Binding GoBackCommand}">
+                        <controls:TablerIcon Size="19" Data="{StaticResource IconChevronLeft}"
+                                             Brush="{Binding PageTextPrimary}" />
+                    </Button>
+                    <StackPanel Grid.Column="2" Spacing="5">
+                    <!--
+                        On a detail page this starts invisible and fades in as the
+                        hero scrolls away, the way both phones do it.
+
+                        The hero already names the page, in bigger type, eighty
+                        points below — so the bar was saying "Daily Mix 3" over a
+                        heading that said "Daily Mix 3". The album, artist and
+                        playlist pages dodged that by saying "Album", "Artist" and
+                        "Playlist" instead, which is a label rather than a title
+                        and told the reader nothing they could not see. Now every
+                        detail page names its subject, and says it once: in the
+                        hero while the hero is there, in the bar once it is not.
+                    -->
+                    <TextBlock x:Name="PageTitleText" Text="{Binding PageTitle}" Classes="pageTitle"
+                               Foreground="{Binding PageTextPrimary}">
+                        <TextBlock.Transitions>
+                            <Transitions>
+                                <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
+                            </Transitions>
+                        </TextBlock.Transitions>
+                    </TextBlock>
+                    <TextBlock Text="{Binding StatusMessage}" Classes="secondary"
+                               IsVisible="{Binding StatusMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </StackPanel>
+                </Grid>
             </Grid>
             <!-- The transport is a dock, not a band across the bottom.
             A full-width bar with a rule above it divides the window in two and
