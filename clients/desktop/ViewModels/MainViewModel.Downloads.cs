@@ -34,18 +34,18 @@ public sealed partial class MainViewModel
     /// <summary>Rows the Downloads pane's list binds to, newest transfer first.</summary>
     public ObservableCollection<DownloadRow> DownloadRows { get; } = new();
 
-    /// <summary>
-    /// What an empty Downloads page says.
-    ///
-    /// It is the only line on an otherwise blank page, so it says how to get a
-    /// download rather than only that there are none — which is what the
-    /// phones' empty state does and what makes the difference between a page
-    /// that looks broken and one that is merely empty.
-    /// </summary>
-    private const string EmptyDownloads =
-        "Nothing kept offline yet. Keep a song from its menu and it plays without the server.";
+    [ObservableProperty] private string _downloadStorageSummary = string.Empty;
 
-    [ObservableProperty] private string _downloadStorageSummary = EmptyDownloads;
+    /// <summary>
+    /// Whether the page has nothing to list.
+    ///
+    /// The summary line was carrying the empty state as well as the storage
+    /// total, so with no downloads the whole page was one sentence in the top
+    /// left corner of an otherwise blank window — which reads as broken rather
+    /// than as empty. The library's own empty state is centred, titled and
+    /// tells you what to do; this one now matches it.
+    /// </summary>
+    public bool HasNoDownloads => DownloadRows.Count == 0;
 
     public bool IsDownloadsSelected => Section == LibrarySection.Downloads;
 
@@ -95,8 +95,10 @@ public sealed partial class MainViewModel
                         : i.RemoteId))
                 .ToList();
 
+            // Empty says nothing at all: the page's own empty state carries that
+            // now, in the middle, rather than as a summary of no storage.
             var summary = usage.DownloadedTrackCount == 0
-                ? EmptyDownloads
+                ? string.Empty
                 : $"{usage.DownloadedTrackCount} " +
                   $"{(usage.DownloadedTrackCount == 1 ? "track" : "tracks")} · " +
                   DownloadFormatting.Bytes(usage.TotalBytes);
@@ -105,6 +107,7 @@ public sealed partial class MainViewModel
             {
                 Replace(DownloadRows, rows);
                 DownloadStorageSummary = summary;
+                OnPropertyChanged(nameof(HasNoDownloads));
             });
         }
         catch (Exception ex)

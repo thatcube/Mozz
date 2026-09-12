@@ -1085,7 +1085,22 @@
                                                      Brush="{Binding $parent[Button].Foreground}" />
                             </Button>
                         </Grid>
+                        <!-- A page with nothing on it says so in the middle, the way
+                             the library's own empty state does — not as one sentence
+                             stranded in the top left corner of a blank window. -->
+                        <StackPanel Grid.Row="1" Spacing="11" MaxWidth="430"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    IsVisible="{Binding HasNoDownloads}">
+                            <controls:TablerIcon Size="30" Data="{StaticResource IconDownload}"
+                                                 Brush="{DynamicResource TextTertiary}"
+                                                 HorizontalAlignment="Center" />
+                            <TextBlock Text="Nothing kept offline yet" Classes="sectionTitle"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Classes="secondary" TextAlignment="Center" TextWrapping="Wrap"
+                                       Text="Keep a song from its menu and it plays without the server." />
+                        </StackPanel>
                         <ListBox Grid.Row="1" Classes="plated" ItemsSource="{Binding DownloadRows}"
+                                 IsVisible="{Binding !HasNoDownloads}"
                                  Background="Transparent" BorderThickness="0"
                                  Padding="0,0,0,24">
                             <ListBox.ItemsPanel>
