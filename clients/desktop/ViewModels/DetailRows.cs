@@ -20,7 +20,20 @@ public sealed record AlbumHeroRow(Album Album, string Metadata) : DetailRow;
 /// carries the same rule to the row so the hero has something to bloom with
 /// whichever way the key arrives.
 /// </remarks>
-public sealed record ArtistHeroRow(Artist Artist, string? HeroKey) : DetailRow;
+public sealed record ArtistHeroRow(Artist Artist, string? HeroKey) : DetailRow
+{
+    /// <summary>
+    /// Whether there is a picture to lead with at all.
+    ///
+    /// Some artists have neither a photograph of their own nor an album with a
+    /// cover, and for them the hero was a 440-point block of deterministic
+    /// colour with a music note in the middle — a placeholder the size of the
+    /// page, ending in a hard edge against a page it shares no colour with,
+    /// because there was no artwork to take a tone from either. A page with no
+    /// picture should not be shaped like one.
+    /// </summary>
+    public bool HasHero => HeroKey is { Length: > 0 };
+}
 
 public sealed record PlaylistHeroRow(Playlist Playlist, string Metadata) : DetailRow;
 

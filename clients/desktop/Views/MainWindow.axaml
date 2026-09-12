@@ -338,6 +338,22 @@
                             <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
                                 <Setter Property="Background" Value="Transparent" />
                             </Style>
+                            <!-- A detail row is a hero, a heading or a shelf. None of
+                                 them is a thing you pick, and a selected one painted a
+                                 pale band the full width of the page — which on a page
+                                 tinted by its artwork is a hole straight through it. -->
+                            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected:focus /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
+                            <Style Selector="ListBoxItem:selected:focus-within /template/ ContentPresenter">
+                                <Setter Property="Background" Value="Transparent" />
+                            </Style>
                         </ListBox.Styles>
                         <ListBox.DataTemplates>
                             <DataTemplate DataType="vm:HomeMixGridRow">
@@ -1261,7 +1277,9 @@
                                 the page colour arriving over the bottom.
                             -->
                             <DataTemplate DataType="vm:ArtistHeroRow">
-                                <Panel Height="440" Margin="-32,-84,-32,0" ClipToBounds="True">
+                              <StackPanel>
+                                <Panel Height="440" Margin="-32,-84,-32,0" ClipToBounds="True"
+                                       IsVisible="{Binding HasHero}">
                                     <!-- No giant letter. An artist with no picture got a 92-point
                                          initial on an empty rectangle, which is a placeholder the
                                          size of the page. With nothing to show, the hero is just
@@ -1362,6 +1380,29 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Panel>
+
+                                <!-- And the plain header for an artist with no picture: the same name and
+                                     the same three controls, on the page's own surface. Nothing pretending
+                                     to be a photograph. -->
+                                <StackPanel IsVisible="{Binding !HasHero}" Margin="8,0,8,20" Spacing="12">
+                                    <TextBlock Text="{Binding Artist.Name}" FontSize="40" FontWeight="Bold"
+                                               Foreground="{Binding $parent[Window].DataContext.PageTextPrimary}"
+                                               TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <Button Classes="play" Command="{Binding $parent[Window].DataContext.PlaySelectedArtistCommand}">
+                                            <controls:TablerIcon Size="20" Filled="True" Data="{StaticResource IconPlay}" Brush="{Binding $parent[Button].Foreground}" />
+                                        </Button>
+                                        <Button Classes="transport lead" VerticalAlignment="Center" ToolTip.Tip="Shuffle"
+                                                Command="{Binding $parent[Window].DataContext.ShuffleSelectedArtistCommand}">
+                                            <controls:TablerIcon Size="18" Data="{StaticResource IconShuffle}" Brush="{Binding $parent[Button].Foreground}" />
+                                        </Button>
+                                        <Button Classes="transport lead" VerticalAlignment="Center" ToolTip.Tip="Start radio"
+                                                Command="{Binding $parent[Window].DataContext.StartSelectedArtistRadioCommand}">
+                                            <controls:TablerIcon Size="18" Data="{StaticResource IconWaveform}" Brush="{Binding $parent[Button].Foreground}" />
+                                        </Button>
+                                    </StackPanel>
+                                </StackPanel>
+                              </StackPanel>
                             </DataTemplate>
 
                             <DataTemplate DataType="vm:PlaylistHeroRow">

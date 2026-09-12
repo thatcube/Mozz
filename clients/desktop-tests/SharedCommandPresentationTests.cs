@@ -41,6 +41,24 @@ public sealed class SharedCommandPresentationTests
     }
 
     /// <summary>
+    /// An artist with no picture anywhere gets no picture-shaped header.
+    ///
+    /// Some artists have neither a photograph nor an album with a cover, and
+    /// the hero drew a 440-point block of deterministic colour for them — a
+    /// placeholder the size of the page, ending in a hard edge against a page
+    /// that had no artwork to take a tone from either.
+    /// </summary>
+    [Fact]
+    public void AnArtistWithNoArtworkGetsNoHero()
+    {
+        var artist = new Artist(1, "remote", "server", "Nobody", null);
+
+        Assert.False(new ArtistHeroRow(artist, null).HasHero);
+        Assert.False(new ArtistHeroRow(artist, "").HasHero);
+        Assert.True(new ArtistHeroRow(artist, "art/1").HasHero);
+    }
+
+    /// <summary>
     /// The rating strip's geometry, which must agree with the phones' to the
     /// half star: the same drag across the same five stars has to mean the same
     /// rating everywhere, or a song rated on the phone reads back differently

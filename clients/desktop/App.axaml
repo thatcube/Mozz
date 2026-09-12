@@ -908,6 +908,23 @@
         <Style Selector="Panel.tinted Border.rowPlate:pointerover">
             <Setter Property="Background" Value="#26FFFFFF" />
         </Style>
+        <!-- Hover surfaces on a tinted page are a wash of the page, not the
+             app's pale grey. A light-theme plate laid on a saturated field is a
+             hole punched in it, and the captions on top of it — which have gone
+             light to suit the page — become unreadable. -->
+        <Style Selector="Panel.tinted Button.tile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#26FFFFFF" />
+        </Style>
+        <Style Selector="Panel.tinted Button.tile:focus-visible /template/ ContentPresenter">
+            <Setter Property="Background" Value="#26FFFFFF" />
+        </Style>
+        <Style Selector="Panel.tinted ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Panel.tinted ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
         <Style Selector="Panel.tinted Border.tileSurface">
             <Setter Property="Background" Value="#1AFFFFFF" />
         </Style>
