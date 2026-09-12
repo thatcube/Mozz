@@ -519,6 +519,40 @@
         <Style Selector="Button.tile:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
         </Style>
+        <!--
+             A card's hover is the card, not a halo around it.
+
+             These tiles hold a visible plate inside a button that pads it by
+             eight, and the button's own hover paints the WHOLE button — so
+             lighting one drew a rectangle eight points larger than the card on
+             every side. It read as a second, bigger card appearing behind the
+             first, and it made the row look misaligned because the space it
+             claimed was invisible until you hovered.
+
+             So the button's plate stays out of it and the card lights instead.
+             Album and mix tiles are untouched: their artwork has no plate of
+             its own, and there the halo IS the affordance.
+        -->
+        <Style Selector="Button.tile.cardTile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile.cardTile:focus-visible /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.tile.cardTile:pointerover Border.cardSurface">
+            <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
+        </Style>
+        <Style Selector="Panel.tinted Button.tile.cardTile:pointerover Border.cardSurface">
+            <Setter Property="Background" Value="#33FFFFFF" />
+        </Style>
+        <Style Selector="Border.cardSurface">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
+        </Style>
+
         <Style Selector="Button.tile:focus-visible /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SurfaceHover}" />
         </Style>

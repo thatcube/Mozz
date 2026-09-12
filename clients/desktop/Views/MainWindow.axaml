@@ -494,7 +494,7 @@
                                                the LAST column, so the shelf stopped short of
                                                the right edge while its left was flush.
                                            -->
-                                           <Button Classes="tile" HorizontalAlignment="Stretch"
+                                           <Button Classes="tile cardTile" HorizontalAlignment="Stretch"
                                                    Margin="0,0,0,4" Padding="8"
                                                    Command="{Binding $parent[Window].DataContext.PlayHomeTrackCommand}"
                                                    CommandParameter="{Binding}"
@@ -508,7 +508,7 @@
                                                    longer than "Blood In The Wi…" was cut. The extra
                                                    eighty all lands in the title.
                                                -->
-                                               <Border Padding="8" CornerRadius="8"
+                                               <Border Classes="cardSurface" Padding="8" CornerRadius="8"
                                                        Background="{DynamicResource SurfaceRaised}">
                                                    <!-- No heart here. The card is itself a play button, so a second
                                                             target inside it is a boundary nobody can see; Like is on
@@ -1529,10 +1529,10 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Classes="tile" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
+                                            <Button Classes="tile cardTile" Command="{Binding $parent[Window].DataContext.PlayArtistTrackCommand}"
                                                     CommandParameter="{Binding Track}"
                                                     controls:TrackMenu.Track="{Binding Track}">
-                                                <Border Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
+                                                <Border Classes="cardSurface" Width="300" Margin="0,0,20,8" Padding="8" CornerRadius="8"
                                                         Background="{Binding $parent[Window].DataContext.PageCardBackground}">
                                                     <Grid ColumnDefinitions="44,*,38,64" Height="44">
                                                         <controls:ArtworkImage Grid.Column="0" Width="40" Height="40" DisplaySize="40" CornerRadius="6"
