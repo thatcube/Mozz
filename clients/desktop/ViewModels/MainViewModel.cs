@@ -1933,6 +1933,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         if (mix is null) return;
         _selectedMix = mix;
         _navigation.Push(LibraryPage.ForMix(mix.Id, mix.Title));
+        // A mix is not an observable property, so it has no change hook to take
+        // the page's colour from its cover the way the others do.
+        _ = RefreshDetailBackgroundAsync();
         await ApplyPageAsync(_navigation.Current, reload: true);
     }
 
@@ -3569,13 +3572,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     }
 
     /// <summary>
-    /// The tone the artist page fades its hero into.
+    /// The tone a detail page is painted with, and that its hero fades into.
     ///
     /// Null until the hero has been sampled, and the page falls back to its
     /// normal surface — a guess here would flash one colour and correct itself,
     /// which is worse than arriving a moment late.
     /// </summary>
-    [ObservableProperty] private IBrush? _artistBackground;
+    [ObservableProperty] private IBrush? _detailBackground;
 
     /// <summary>
     /// What the content pane is painted with.
@@ -3585,7 +3588,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     /// histogram is still running, because a guess would flash one colour and
     /// then correct itself.
     /// </summary>
-    public IBrush? PageBackground => ShowArtistDetail ? ArtistBackground : null;
+    public IBrush? PageBackground => ShowDetailPage ? DetailBackground : null;
 
     /// <summary>
     /// Whether the page is painted with artwork rather than the app's surface,
@@ -3647,7 +3650,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
             : fallback;
     }
 
-    partial void OnArtistBackgroundChanged(IBrush? value)
+    partial void OnDetailBackgroundChanged(IBrush? value)
     {
         OnPropertyChanged(nameof(PageBackground));
         OnPropertyChanged(nameof(HasPageBackground));
@@ -3669,12 +3672,39 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
               .Select(a => a.ArtworkKey)
               .FirstOrDefault(k => k is { Length: > 0 });
 
-    private async Task RefreshArtistBackgroundAsync(Artist? artist)
-    {
-        ArtistBackground = null;
-        if (artist is null) return;
+    /// <summary>
+    /// The artwork a detail page should take its colour from.
+    /// </summary>
+    /// <remarks>
+    /// Every detail page with a cover, not only the artist's. iOS paints this
+    /// tone behind BOTH of its hero styles — the artist's full-bleed
+    /// photograph and the album's centred cover — and the desktop was doing it
+    /// for the artist alone, so walking from an artist to one of their albums
+    /// went from a page the record had coloured to a plain grey one.
+    ///
+    /// A genre has no artwork of its own and stays untinted.
+    /// </remarks>
+    private (string Server, string? Key)? DetailArtwork() =>
+        _navigation.Current.Kind switch
+        {
+            LibraryPageKind.ArtistDetail when SelectedArtist is { } artist
+                => (artist.ServerId, ArtistHeroKey(artist)),
+            LibraryPageKind.AlbumDetail when SelectedAlbum is { } album
+                => (album.ServerId, album.ArtworkKey),
+            LibraryPageKind.PlaylistDetail when SelectedPlaylist is { } playlist
+                => (playlist.ServerId, playlist.ArtworkKey),
+            LibraryPageKind.MixDetail when _selectedMix is { } mix
+                => (mix.ServerId, mix.ArtworkKey),
+            _ => null,
+        };
 
-        var tones = await SampleArtworkTonesAsync(artist.ServerId, ArtistHeroKey(artist));
+    private async Task RefreshDetailBackgroundAsync()
+    {
+        DetailBackground = null;
+        if (DetailArtwork() is not { } source) return;
+
+        var page = _navigation.Current;
+        var tones = await SampleArtworkTonesAsync(source.Server, source.Key);
         if (tones is null) return;
 
         // ONE flat colour, not the player's three-stop field.
@@ -3688,7 +3718,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         var brush = new ImmutableSolidColorBrush(ArtworkSampling.ToColor(tones.Middle));
 
         // The page may have moved on while the histogram ran.
-        if (SelectedArtist == artist) ArtistBackground = brush;
+        if (ReferenceEquals(_navigation.Current, page) || Equals(_navigation.Current, page))
+            DetailBackground = brush;
     }
 
     private async Task RefreshPlayerBackgroundAsync(Track? track)
@@ -3724,7 +3755,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
             PlayerBackground = ArtworkSampling.Brush(tones);
     }
 
-    partial void OnSelectedArtistChanged(Artist? value) => _ = RefreshArtistBackgroundAsync(value);
+    partial void OnSelectedArtistChanged(Artist? value) => _ = RefreshDetailBackgroundAsync();
+
+    partial void OnSelectedAlbumChanged(Album? value) => _ = RefreshDetailBackgroundAsync();
+
+    partial void OnSelectedPlaylistChanged(Playlist? value) => _ = RefreshDetailBackgroundAsync();
 
     partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(PositionText));
 

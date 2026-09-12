@@ -1350,8 +1350,8 @@
                                     <!-- The page's own tone laid over the same band, so
                                          the image ends in the colour the rest of the page
                                          is painted with rather than in black. -->
-                                    <Border Background="{Binding $parent[Window].DataContext.ArtistBackground}"
-                                            IsVisible="{Binding $parent[Window].DataContext.ArtistBackground,
+                                    <Border Background="{Binding $parent[Window].DataContext.DetailBackground}"
+                                            IsVisible="{Binding $parent[Window].DataContext.DetailBackground,
                                                         Converter={x:Static ObjectConverters.IsNotNull}}">
                                         <Border.OpacityMask>
                                             <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
