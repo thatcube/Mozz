@@ -1263,10 +1263,17 @@
                                     <StackPanel Grid.Column="1" Spacing="11" VerticalAlignment="Center" Classes="detailHeroText">
                                         <TextBlock Text="{Binding Album.Title}" FontSize="36" FontWeight="Bold"
                                                    Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+                                        <!-- The artist is the one thing on this page you can GO to, so
+                                             it wears the accent. Grey made it read as another line of
+                                             metadata, which is exactly what it is not — and it is the
+                                             same rule the sidebar now follows from the other side: the
+                                             saturated colour means an action, so a nav destination gave
+                                             it up and a link takes it. -->
                                         <Button Classes="link" HorizontalAlignment="Left"
                                                 Command="{Binding $parent[Window].DataContext.OpenSelectedAlbumArtistCommand}">
                                             <TextBlock Text="{Binding Album.ArtistName}" FontSize="17"
-                                                       Foreground="{DynamicResource TextSecondary}" />
+                                                       FontWeight="Medium"
+                                                       Foreground="{Binding $parent[Window].DataContext.PageLinkBrush}" />
                                         </Button>
                                         <TextBlock Text="{Binding Metadata}" Classes="secondary" FontSize="13.5" />
                                         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
@@ -1609,7 +1616,8 @@
                                                    VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                             <TextBlock Text="{Binding Row.Track.Title}" Classes="primary" />
-                                            <TextBlock Text="{Binding Row.Track.ArtistName}" Classes="secondary" />
+                                            <TextBlock Text="{Binding Row.Track.ArtistName}" Classes="secondary"
+                                                       IsVisible="{Binding Row.ShowsArtist}" />
                                         </StackPanel>
                                         <Button Grid.Column="2" Classes="ghost" Width="34" Height="34"
                                                 Command="{Binding $parent[Window].DataContext.ToggleFavoriteCommand}"

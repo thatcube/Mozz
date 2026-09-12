@@ -1,3 +1,4 @@
+using Avalonia.Media;
 using Mozz.Desktop.Core;
 using Mozz.Desktop.ViewModels;
 using Xunit;
@@ -38,6 +39,52 @@ public sealed class SharedCommandPresentationTests
         Assert.Equal(1, LyricLineSelector.ActiveIndex(lines, 13));
         Assert.Null(LyricLineSelector.ActiveIndex(null, 13));
         Assert.Empty(LyricLineSelector.Rows(null, null));
+    }
+
+    /// <summary>
+    /// A link has to be readable on the page it sits on.
+    ///
+    /// A detail page takes its colour from the artwork, so a crimson record
+    /// gives a crimson page — and the accent-coloured artist link on it would
+    /// be the same crimson. The sum-of-channels distance is what decides, and
+    /// the threshold is deliberately generous: the cost of being wrong is a
+    /// line nobody can see.
+    /// </summary>
+    [Fact]
+    public void ALinkGivesUpTheAccentOnAPageTheAccentColourWouldVanishInto()
+    {
+        static int Distance(Color a, Color b) =>
+            Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
+
+        var accent = Color.FromRgb(0xD8, 0x21, 0x3F);
+
+        // A page sampled from a crimson cover: too close, the link must change.
+        Assert.True(Distance(Color.FromRgb(0xC0, 0x28, 0x3A), accent) < 150);
+        // A warm brown, a slate blue, a near-black: all far enough to keep it.
+        Assert.True(Distance(Color.FromRgb(0x7A, 0x4A, 0x2E), accent) >= 150);
+        Assert.True(Distance(Color.FromRgb(0x3A, 0x4A, 0x6E), accent) >= 150);
+        Assert.True(Distance(Color.FromRgb(0x14, 0x14, 0x16), accent) >= 150);
+    }
+
+    /// <summary>
+    /// An album row names its artist only when that is news.
+    ///
+    /// The page already says whose record it is, twice, in accent, right above
+    /// the list — so repeating it under every track says nothing. It earns its
+    /// place on a compilation, a guest spot or a split single.
+    /// </summary>
+    [Fact]
+    public void AnAlbumRowNamesItsArtistOnlyWhenItDiffers()
+    {
+        Track Song(string artist) => new(
+            1, "remote", "server", "Title", artist, "Album", null, 1, 1, 180, null, false);
+
+        Assert.False(new AlbumTrackRow(Song("Taylor Swift"), "1", false, null, "Taylor Swift").ShowsArtist);
+        // Case is not a difference worth a line of its own.
+        Assert.False(new AlbumTrackRow(Song("taylor swift"), "1", false, null, "Taylor Swift").ShowsArtist);
+        Assert.True(new AlbumTrackRow(Song("Bon Iver"), "1", false, null, "Taylor Swift").ShowsArtist);
+        // And with nothing to compare against, a named artist still shows.
+        Assert.True(new AlbumTrackRow(Song("Bon Iver"), "1", false, null, null).ShowsArtist);
     }
 
     /// <summary>

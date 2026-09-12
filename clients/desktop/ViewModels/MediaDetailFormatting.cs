@@ -6,7 +6,22 @@ public sealed record AlbumTrackRow(
     Track Track,
     string TrackNumberText,
     bool StartsDisc,
-    string? DiscTitle);
+    string? DiscTitle,
+    string? AlbumArtist = null)
+{
+    /// <summary>
+    /// Whether this track's own artist is worth saying.
+    ///
+    /// On an album page the artist is already named twice above the list, in
+    /// accent, right under the title — so repeating it under every single track
+    /// is a line of text that tells the reader nothing and pushes the title up
+    /// off its own centre line. It earns its place only when it differs from
+    /// the album's: a compilation, a guest, a split single.
+    /// </summary>
+    public bool ShowsArtist =>
+        !string.IsNullOrWhiteSpace(Track.ArtistName)
+        && !string.Equals(Track.ArtistName, AlbumArtist, StringComparison.OrdinalIgnoreCase);
+}
 
 public sealed class AlbumReleaseKindLookup(bool unknownIsSingleOrEp, IReadOnlyDictionary<int, bool> byTrackCount)
 {
@@ -28,7 +43,10 @@ public static class MediaDetailFormatting
 {
     public const int ShelfPageSize = 20;
 
-    public static IReadOnlyList<AlbumTrackRow> AlbumTrackRows(IEnumerable<Track> tracks)
+    /// <param name="albumArtist">
+    /// Whose record this is, so a row can tell whether its own artist is news.
+    /// </param>
+    public static IReadOnlyList<AlbumTrackRow> AlbumTrackRows(IEnumerable<Track> tracks, string? albumArtist = null)
     {
         var ordered = OrderAlbumTracks(tracks).ToList();
         var hasMultipleDiscs = ordered
@@ -47,7 +65,8 @@ public static class MediaDetailFormatting
                 track,
                 track.TrackNumber is > 0 ? track.TrackNumber.Value.ToString() : "—",
                 startsDisc,
-                startsDisc ? $"Disc {disc}" : null));
+                startsDisc ? $"Disc {disc}" : null,
+                albumArtist));
             previousDisc = disc;
         }
 

@@ -2072,7 +2072,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
                 GroupKey = string.IsNullOrWhiteSpace(album.GroupKey) ? null : album.GroupKey,
             };
             var tracks = await _core.CallAsync<List<Track>>(request) ?? [];
-            _detailAlbumTracks = MediaDetailFormatting.AlbumTrackRows(tracks).ToList();
+            _detailAlbumTracks = MediaDetailFormatting
+                .AlbumTrackRows(tracks, SelectedAlbum?.ArtistName)
+                .ToList();
             Replace(AlbumTrackRows, _detailAlbumTracks);
             DetailMeta = MediaDetailFormatting.AlbumMeta(album, _detailAlbumTracks.Select(r => r.Track).ToList());
 
@@ -3637,6 +3639,38 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
     /// plate left it light-on-light and unreadable. On a tinted page the cards
     /// become a wash of the page itself instead.
     /// </summary>
+    /// <summary>
+    /// The colour a link wears on a detail page.
+    ///
+    /// The accent, which is what Apple Music uses for the artist under an album
+    /// title and what this app's own rule says a thing you can act on looks
+    /// like — except when the page has taken its colour from the artwork and
+    /// that colour is close to the accent. A crimson record gives a crimson
+    /// page, and a crimson link on it cannot be read at all. In that one case
+    /// the link falls back to the page's own text colour, which is guaranteed
+    /// to be legible because everything else on the page is using it.
+    /// </summary>
+    public IBrush PageLinkBrush
+    {
+        get
+        {
+            var accent = Themed("Accent", Brushes.Red);
+            if (PageBackground is not ISolidColorBrush page) return accent;
+            if (accent is not ISolidColorBrush link) return accent;
+            return Distance(page.Color, link.Color) < LinkContrastFloor ? PageTextPrimary : accent;
+        }
+    }
+
+    /// <summary>
+    /// How far apart two colours have to be, summed across the channels, for
+    /// one to be readable on the other. Deliberately generous: the cost of
+    /// being wrong is a line nobody can see.
+    /// </summary>
+    private const int LinkContrastFloor = 150;
+
+    private static int Distance(Color a, Color b) =>
+        Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
+
     public IBrush PageCardBackground =>
         HasPageBackground
             ? new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF))
@@ -3657,6 +3691,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(PageTextPrimary));
         OnPropertyChanged(nameof(PageTextSecondary));
         OnPropertyChanged(nameof(PageCardBackground));
+        OnPropertyChanged(nameof(PageLinkBrush));
         OnPropertyChanged(nameof(BarBackground));
     }
 
@@ -4053,6 +4088,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable, ITrackMe
         OnPropertyChanged(nameof(PageTextPrimary));
         OnPropertyChanged(nameof(PageTextSecondary));
         OnPropertyChanged(nameof(PageCardBackground));
+        OnPropertyChanged(nameof(PageLinkBrush));
         OnPropertyChanged(nameof(BarBackground));
         OnPropertyChanged(nameof(ShowPlaylistDetail));
         OnPropertyChanged(nameof(ShowMixDetail));
