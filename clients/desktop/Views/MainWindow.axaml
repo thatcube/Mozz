@@ -25,6 +25,7 @@
         <core:EnumMatchConverter x:Key="EnumMatch" />
         <core:StringMatchConverter x:Key="StringMatch" />
         <core:PendingOpacityConverter x:Key="PendingOpacity" />
+        <core:ArtworkPlaceholderConverter x:Key="ArtworkPlaceholder" />
     </Window.Resources>
 
     <Window.Styles>
@@ -872,19 +873,39 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <!-- A genre has no cover to show, so it keeps a label card — but on
-                                                 the same square footprint as everything else, so the wall
-                                                 stays one rhythm instead of two. -->
-                                            <Button Classes="tile card" Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
+                                            <!-- A genre has no cover, so it gets one.
+
+                                                 It used to be a white card on a near-white page, which is
+                                                 not a card at all: what you saw was a small grey icon and a
+                                                 label adrift in a wall of nothing, with no edge to say where
+                                                 one genre stopped and the next began.
+
+                                                 Now it takes the same deterministic colour a record with no
+                                                 artwork takes, from its own name — so Jazz is always the
+                                                 same colour as Jazz — and carries the name on it in white.
+                                                 The same trick the mix covers use, and the reason is the
+                                                 same: the art cannot identify the thing, so the design has
+                                                 to. -->
+                                            <!-- Padding stated, because `tile card` zeroes it and this wall
+                                                 takes its gap from the padding like every other one. Without
+                                                 it the genres touch edge to edge. -->
+                                            <Button Classes="tile card" Padding="8"
+                                                    Width="{Binding $parent[Window].DataContext.AlbumTileWidth}" Margin="0"
                                                     Command="{Binding $parent[Window].DataContext.OpenGenreCommand}"
                                                     CommandParameter="{Binding}">
-                                                <Border Classes="tileSurface" CornerRadius="8" Padding="18"
+                                                <Border CornerRadius="8" Padding="16" ClipToBounds="True"
+                                                        Background="{Binding Name, Converter={StaticResource ArtworkPlaceholder}}"
                                                         Height="{Binding $parent[Window].DataContext.AlbumArtSize}">
-                                                    <StackPanel Spacing="8" VerticalAlignment="Center">
-                                                        <controls:TablerIcon Size="32" Data="{StaticResource IconStack}"
-                                                                             Brush="{DynamicResource TextSecondary}" />
-                                                        <TextBlock Text="{Binding Name}" Classes="primary" FontSize="17" FontWeight="SemiBold" />
-                                                    </StackPanel>
+                                                    <Panel>
+                                                        <controls:TablerIcon Size="30" Data="{StaticResource IconStack}"
+                                                                             Brush="#40FFFFFF"
+                                                                             HorizontalAlignment="Right" VerticalAlignment="Top" />
+                                                        <TextBlock Text="{Binding Name}" Foreground="White"
+                                                                   FontSize="19" FontWeight="SemiBold"
+                                                                   TextWrapping="Wrap" MaxLines="3"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   VerticalAlignment="Bottom" />
+                                                    </Panel>
                                                 </Border>
                                             </Button>
                                         </DataTemplate>
